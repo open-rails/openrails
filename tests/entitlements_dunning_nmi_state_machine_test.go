@@ -129,7 +129,6 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Clock:              clock,
 		NMIClients:         rt.NMIClients,
 		IdempotencyService: rt.IdempotencyService,
-		EventLogService:    rt.EventLogService,
 	}
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 
@@ -225,7 +224,6 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		Clock:              clock,
 		NMIClients:         rt.NMIClients,
 		IdempotencyService: rt.IdempotencyService,
-		EventLogService:    rt.EventLogService,
 	}
 
 	// Drive retries until the subscription is cancelled (monthly schedule,

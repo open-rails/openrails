@@ -35,10 +35,10 @@ type Engine struct {
 	// Decisions applies decider transitions (PS-2/PS-3 demotion, #665). May be
 	// nil for advisory-only engines.
 	Decisions DecisionApplier
-	// History is the THIRD dunning-forensics evidence source (OpenRails'
-	// own ClickHouse analytics events, incl. imported legacy history). May be
-	// nil / unconfigured: the forensics report then carries a note instead —
-	// a missing or unreachable ClickHouse is NEVER a run error.
+	// History is the THIRD dunning-forensics evidence source (Postgres:
+	// imported legacy history + failed payments, #735). May be nil /
+	// unconfigured: the forensics report then carries a note instead — an
+	// unavailable history source is NEVER a run error.
 	History HistoryEventSource
 
 	// Now is the clock (defaults to time.Now UTC).
@@ -487,17 +487,17 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	return rep, records, planned, appliedChanges, nil
 }
 
-// fetchHistory pulls the third dunning evidence source (ClickHouse analytics
-// events). It NEVER fails the run: unconfigured or unreachable degrades to a
+// fetchHistory pulls the third dunning evidence source (Postgres history,
+// #735). It NEVER fails the run: unconfigured or unreachable degrades to a
 // note carried into the forensics report.
 func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params RunParams) ([]HistoryEvent, string) {
 	if e.History == nil || !e.History.Configured() {
-		return nil, "not configured (no ClickHouse analytics source; provider + local evidence only)"
+		return nil, "not configured (no history source; provider + local evidence only)"
 	}
 	events, err := e.History.ListEvents(ctx, localRailNames(provider), params.Since, params.Until)
 	if err != nil {
 		log.WithError(err).WithField("provider", provider).
-			Warn("reconcile: analytics history source unavailable; forensics degrade to provider + local evidence")
+			Warn("reconcile: history source unavailable; forensics degrade to provider + local evidence")
 		return nil, "unavailable: " + err.Error()
 	}
 	return events, fmt.Sprintf("ok: %d events", len(events))

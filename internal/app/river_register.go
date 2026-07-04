@@ -46,7 +46,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, NMIResolver: r.CollectionResolver, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, NMIResolver: r.CollectionResolver, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
@@ -77,7 +77,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NMIClients:          r.NMIClients,
 		CCBillDataLink:      r.CCBillDataLink,
 		SolanaRPC:           r.SolanaRPC,
-		EventLogService:     r.EventLogService,
 		DeferDelete:         r.DeferredDeletes,
 		NotificationService: r.NotificationService,
 	}); err != nil {
@@ -138,20 +137,18 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:             r.DB,
-		Config:         r.Config,
-		Clock:          clock,
-		Registry:       intentRegistry,
-		MutationLogger: intents.NewAnalyticsMutationLogger(r.EventLogService),
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:             r.DB,
-		Config:         r.Config,
-		Clock:          clock,
-		Registry:       intentRegistry,
-		MutationLogger: intents.NewAnalyticsMutationLogger(r.EventLogService),
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
@@ -285,7 +282,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// #730: manual rebills arm store-scoped NMI credentials at charge time
 	// through the ONE #725 builder; boot NMIClients stay the no-store-row
 	// fallback.
-	manualRebill := intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService)
+	manualRebill := intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock)
 	manualRebill.SetNMIClientResolver(r.CollectionResolver)
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
@@ -347,7 +344,6 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		// refund) — destructive user/admin ops pass the rate ceiling before the
 		// write-ahead intent is created.
 		Store:    intents.NewStoreGated(r.DB, r.RateCeiling()),
-		Logger:   intents.NewAnalyticsMutationLogger(r.EventLogService),
 		Registry: registry,
 		Breaker:  intents.NewVolumeBreaker(r.DB), // #679: gate destructive types everywhere
 		Clock:    clock,

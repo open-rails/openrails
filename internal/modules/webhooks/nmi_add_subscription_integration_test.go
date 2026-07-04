@@ -199,7 +199,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 	entitlementSvc := entitlements.NewEntitlementService(dbi, f.clock)
 	paymentSvc := payments.NewPaymentService(dbi, f.clock)
 	subscriptionSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil, f.clock)
-	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, nil, f.clock)
+	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, f.clock)
 
 	f.svc = &NMIConvergeService{
 		DB:                           dbi,

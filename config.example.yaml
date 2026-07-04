@@ -48,14 +48,6 @@ vault:
   secret_id: ""
   k8s_role: ""
 
-clickhouse:
-  http_addr: http://localhost:8124
-  client_addr: localhost:9003
-  db: analytics
-  user: analytics_user
-  password: analytics_password
-  cluster: openrails
-
 sendgrid:
   api_key: ""
 

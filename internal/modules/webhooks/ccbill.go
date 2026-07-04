@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	identitydir "github.com/open-rails/openrails/internal/identity"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -22,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 
-	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -41,7 +39,6 @@ type CCBillWebhookService struct {
 	ProductService               *catalog.ProductService
 	PriceService                 *catalog.PriceService
 	NotificationService          *subscriptions.NotificationService
-	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *identitydir.ProfileRepo
@@ -565,8 +562,6 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
-
 	// Validate amount against expected cents from catalog price.
 	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, expectedAmountMicros, map[string]interface{}{
 		"price_id":                           price.ID.String(),
@@ -679,67 +674,6 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		}
 	}
 
-	// Log payment event to ClickHouse
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id":              transactionID,
-			"rail":                        "ccbill",
-			"event_source":                "webhook",
-			"amount":                      billedAmount,
-			"recurring_billing_option_id": data.SubscriptionTypeID,
-			// Card information for fraud monitoring and audit
-			"card_type":      data.CardType,
-			"card_last4":     data.Last4,
-			"card_exp_date":  data.ExpDate,
-			"card_bin":       data.Bin,
-			"card_sub_type":  data.CardSubType, // debit vs credit
-			"avs_response":   data.AVSResponse,
-			"cvv2_response":  data.CVV2Response,
-			"three_d_secure": data.ThreeDSecure,
-			// Billing address for fraud detection and customer lookup
-			"billing_first_name":   data.FirstName,
-			"billing_last_name":    data.LastName,
-			"billing_address":      data.Address1,
-			"billing_city":         data.City,
-			"billing_state":        data.State,
-			"billing_country":      data.Country,
-			"billing_postal_code":  data.PostalCode,
-			"billing_phone_number": data.PhoneNumber,
-			"ip_address":           data.IPAddress,
-			// Additional transaction metadata for business intelligence
-			"affiliate_system":      data.AffiliateSystem,
-			"lifetime_subscription": data.LifeTimeSubscription.Trimmed(),
-		}
-
-		// Capture billing/card info for the event
-		billingInfo := map[string]interface{}{
-			"card_type":     data.CardType,
-			"card_last4":    data.Last4,
-			"card_exp_date": data.ExpDate,
-			"first_name":    data.FirstName,
-			"last_name":     data.LastName,
-			"country":       data.Country,
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: &subscription.ID,
-			UserID:         subscription.CustomerID.String(),
-			EventType:      analytics.PaymentEventChargeSuccess,
-			Rail:           "ccbill",
-			Amount:         &billedAmount,
-			Currency:       currencyValue,
-			WebhookSource:  "webhook",
-			BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
-			Metadata:       analytics.CreateMetadataJSON(metadata),
-			Timestamp:      s.now().UTC(),
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithError(err).Error("Failed to log payment event to ClickHouse")
-		}
-	}
-
 	return nil
 }
 
@@ -773,8 +707,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	failureReason := data.FailureReason
 	priceLookupID := ccbillPriceLookupID(data.SubscriptionTypeID, data.FlexID)
 	price, priceLookupErr := s.PriceService.GetByCCBillPriceID(ctx, priceLookupID)
-	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
-	if err != nil {
+	if _, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode"); err != nil {
 		return err
 	}
 
@@ -792,35 +725,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"flex_id": formID,
 			}).Warn("Payment form mismatch in new sale failure")
-		}
-
-		// Log payment failure event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"transaction_id": transactionID,
-				"rail":           "ccbill",
-				"event_source":   "webhook",
-				"failure_code":   failureCode,
-				"failure_reason": failureReason,
-				"form_id":        formID,
-				"form_name":      formName,
-			}
-
-			paymentEventData := analytics.PaymentEventData{
-				EventID:       uuidutil.NewV7(),
-				UserID:        userID,
-				EventType:     analytics.PaymentEventChargeFailure,
-				Rail:          "ccbill",
-				Currency:      currencyValue,
-				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"initial_signup": true}),
-				WebhookSource: "webhook",
-				Metadata:      analytics.CreateMetadataJSON(metadata),
-				Timestamp:     s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log new sale failure event to ClickHouse")
-			}
 		}
 
 		// Add notification to queue for user about payment failure and send immediate email
@@ -1051,76 +955,6 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			// Don't fail the webhook - entitlement issues shouldn't block subscription updates
 		}
 
-		// Log upgrade payment event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"transaction_id":              transactionID,
-				"rail":                        "ccbill",
-				"event_source":                "webhook",
-				"event_type":                  "upgrade",
-				"amount":                      billedAmount,
-				"new_flex_id":                 data.FlexID,
-				"recurring_billing_option_id": data.SubscriptionTypeID,
-				"new_form_name":               formName,
-				"original_subscription_id":    originalSubscriptionID,
-				"new_subscription_id":         ccBillSubID,
-				"previous_price_id":           oldPriceID.String(),
-				"new_price_id":                newPrice.ID.String(),
-				// Card information for fraud monitoring and audit
-				"card_type":      data.CardType,
-				"card_last4":     data.Last4,
-				"card_exp_date":  data.ExpDate,
-				"card_bin":       data.Bin,
-				"card_sub_type":  data.CardSubType, // debit vs credit
-				"avs_response":   data.AVSResponse,
-				"cvv2_response":  data.CVV2Response,
-				"three_d_secure": data.ThreeDSecure,
-				// Billing address for fraud detection and customer lookup
-				"billing_first_name":   data.FirstName,
-				"billing_last_name":    data.LastName,
-				"billing_address":      data.Address1,
-				"billing_city":         data.City,
-				"billing_state":        data.State,
-				"billing_country":      data.Country,
-				"billing_postal_code":  data.PostalCode,
-				"billing_phone_number": data.PhoneNumber,
-				"ip_address":           data.IPAddress,
-				// Additional transaction metadata for business intelligence
-				"affiliate_system":      data.AffiliateSystem,
-				"lifetime_subscription": data.LifeTimeSubscription.Trimmed(),
-				"sca_response_status":   data.SCAResponseStatus,
-			}
-
-			// Capture billing/card info for the event
-			billingInfo := map[string]interface{}{
-				"upgrade":       true,
-				"card_type":     data.CardType,
-				"card_last4":    data.Last4,
-				"card_exp_date": data.ExpDate,
-				"first_name":    data.FirstName,
-				"last_name":     data.LastName,
-				"country":       data.Country,
-			}
-
-			paymentEventData := analytics.PaymentEventData{
-				EventID:        uuidutil.NewV7(),
-				SubscriptionID: &subscription.ID,
-				UserID:         subscription.CustomerID.String(),
-				EventType:      analytics.PaymentEventChargeSuccess,
-				Rail:           "ccbill",
-				Amount:         &billedAmount,
-				Currency:       currencyValue,
-				BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
-				WebhookSource:  "webhook",
-				Metadata:       analytics.CreateMetadataJSON(metadata),
-				Timestamp:      s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log upgrade payment event to ClickHouse")
-			}
-		}
-
 		// Add notification to queue for user about successful upgrade and send immediate email
 		if s.NotificationService != nil {
 			notification := &models.NotificationQueue{
@@ -1306,8 +1140,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 	failureCode := data.FailureCode
 	failureReason := data.FailureReason
 	originalSubscriptionID := data.OriginalSubscriptionID
-	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
-	if err != nil {
+	if _, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode"); err != nil {
 		return err
 	}
 
@@ -1315,41 +1148,6 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 		userID, err := s.resolveUserID(ctx, data.Username)
 		if err != nil {
 			return err
-		}
-
-		// Log upgrade failure event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"transaction_id":           transactionID,
-				"rail":                     "ccbill",
-				"event_source":             "webhook",
-				"failure_code":             failureCode,
-				"failure_reason":           failureReason,
-				"original_subscription_id": originalSubscriptionID,
-				"original_client_accnum":   data.OriginalClientAccnum,
-				"original_client_subacc":   data.OriginalClientSubacc,
-				"upgrade_source":           data.Source,
-				"sca_response_status":      data.SCAResponseStatus,
-				"card_sub_type":            data.CardSubType,
-				"form_name":                data.FormName,
-				"flex_id":                  data.FlexID,
-			}
-
-			paymentEventData := analytics.PaymentEventData{
-				EventID:       uuidutil.NewV7(),
-				UserID:        userID,
-				EventType:     analytics.PaymentEventChargeFailure,
-				Rail:          "ccbill",
-				Currency:      currencyValue,
-				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"upgrade_failure": true}),
-				WebhookSource: "webhook",
-				Metadata:      analytics.CreateMetadataJSON(metadata),
-				Timestamp:     s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log upgrade failure event to ClickHouse")
-			}
 		}
 
 		// Add notification to queue for user about upgrade failure and send immediate email
@@ -1416,38 +1214,10 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		}
 
 		// Update subscription billing date
-		oldRenewalDate := sub.CurrentPeriodEndsAt
 		sub.CurrentPeriodEndsAt = parsed
 
 		if err := subService.Update(ctx, sub); err != nil {
 			return fmt.Errorf("failed to update subscription billing date: %w", err)
-		}
-
-		// Log billing date change event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"rail_subscription_id": pSubscriptionID,
-				"rail":                 "ccbill",
-				"event_source":         "webhook",
-				"old_renewal_date":     oldRenewalDate,
-				"new_renewal_date":     sub.CurrentPeriodEndsAt,
-			}
-
-			uid1 := sub.CustomerID.String()
-			subscriptionEventData := analytics.SubscriptionEventData{
-				EventID:            uuidutil.NewV7(),
-				SubscriptionID:     sub.ID,
-				UserID:             uid1,
-				EventType:          analytics.PaymentEventBillingDateChanged,
-				Rail:               "ccbill",
-				RailSubscriptionID: &pSubscriptionID,
-				Metadata:           analytics.CreateMetadataJSON(metadata),
-				Timestamp:          s.now(),
-			}
-
-			if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-				log.WithError(err).Error("Failed to log billing date change event to ClickHouse")
-			}
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -1490,47 +1260,6 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
-		}
-
-		// Log customer data update event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"rail_subscription_id": pSubscriptionID,
-				"rail":                 "ccbill",
-				"event_source":         "webhook",
-				"updated_fields": []string{
-					"firstName",
-					"lastName",
-					"address1",
-					"city",
-					"state",
-					"country",
-					"postalCode",
-					"phoneNumber",
-					"email",
-					"paymentAccount",
-					"cardType",
-					"paymentType",
-					"bin",
-					"expDate",
-				},
-			}
-
-			uid2 := sub.CustomerID.String()
-			subscriptionEventData := analytics.SubscriptionEventData{
-				EventID:            uuidutil.NewV7(),
-				SubscriptionID:     sub.ID,
-				UserID:             uid2,
-				EventType:          analytics.PaymentEventCustomerDataUpdated,
-				Rail:               "ccbill",
-				RailSubscriptionID: &pSubscriptionID,
-				Metadata:           analytics.CreateMetadataJSON(metadata),
-				Timestamp:          s.now(),
-			}
-
-			if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-				log.WithError(err).Error("Failed to log customer data update event to ClickHouse")
-			}
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -1597,56 +1326,6 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		return fmt.Errorf("failed to reactivate membership: %w", err)
 	}
 
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id":       transactionID,
-			"rail_subscription_id": pSubscriptionID,
-			"rail":                 "ccbill",
-			"event_source":         "webhook",
-			"price_description":    priceStr,
-			"next_renewal_date":    nextRenewalDate,
-			"reactivation_type":    "user_initiated",
-		}
-
-		priceAmount := 0.0
-		priceCurrency := ""
-		billingCycleHours := uint32(0)
-		var productID *uuid.UUID
-		var priceID *uuid.UUID
-		if sub.Price != nil {
-			priceAmount = moneyutil.MicrosToMajorUnits(sub.Price.Amount) // #671 1f: micros, not cents
-			priceCurrency = sub.Price.Currency
-			if sub.Price.RecurringCycleHours() != nil {
-				billingCycleHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
-			}
-			productID = &sub.Price.ProductID
-			priceID = &sub.Price.ID
-		}
-
-		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:            uuidutil.NewV7(),
-			SubscriptionID:     sub.ID,
-			UserID:             sub.CustomerID.String(),
-			EventType:          analytics.PaymentEventSubscriptionReactivated,
-			Status:             string(sub.Status),
-			CancelType:         "",
-			PriceAmount:        priceAmount,
-			PriceCurrency:      priceCurrency,
-			BillingCycleHours:  billingCycleHours,
-			ProductID:          productID,
-			PriceID:            priceID,
-			Rail:               "ccbill",
-			RailSubscriptionID: &pSubscriptionID,
-			RailTransactionID:  &transactionID,
-			Metadata:           analytics.CreateMetadataJSON(metadata),
-			Timestamp:          s.now(),
-		}
-
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-			log.WithError(err).Error("Failed to log reactivation event to ClickHouse")
-		}
-	}
-
 	// Add notification to queue for user about reactivation and send immediate email
 	if s.NotificationService != nil {
 		notification := &models.NotificationQueue{
@@ -1691,8 +1370,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		return err
 	}
 	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
-	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
-	if err != nil {
+	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
 		return err
 	}
 
@@ -1855,40 +1533,6 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			return fmt.Errorf("failed to update subscription after refund: %w", err)
 		}
 
-		// Log refund event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"refund_transaction_id":   refundTransactionID,
-				"rail":                    "ccbill",
-				"event_source":            "webhook",
-				"refund_reason":           refundReason,
-				"refund_type":             "auto_detected",
-				"refund_amount":           refundAmount,
-				"subscription_terminated": shouldTerminate,
-				"rail_subscription_id":    pSubscriptionID,
-			}
-
-			// Log as payment event (negative amount for refund)
-			negativeAmount := -refundAmount
-			paymentEventData := analytics.PaymentEventData{
-				EventID:        uuidutil.NewV7(),
-				SubscriptionID: &sub.ID,
-				UserID:         sub.CustomerID.String(),
-				EventType:      analytics.PaymentEventRefund,
-				Rail:           "ccbill",
-				Amount:         &negativeAmount,
-				Currency:       currencyValue,
-				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
-				WebhookSource:  "webhook",
-				Metadata:       analytics.CreateMetadataJSON(metadata),
-				Timestamp:      s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log refund event to ClickHouse")
-			}
-		}
-
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":         sub.ID,
 			"userID":                 sub.CustomerID.String(),
@@ -1924,14 +1568,12 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	pSubscriptionID := data.SubscriptionID
 	voidAmountStr := data.Amount
 	voidTransactionID := data.TransactionID // Use TransactionID as the void transaction ID
-	voidReason := data.Reason
 	voidAmountCents, err := parseCCBillPositiveAmountCents(voidAmountStr, "void amount", "amount")
 	if err != nil {
 		return err
 	}
 	voidAmount := moneyutil.CentsToMajorUnits(voidAmountCents)
-	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
-	if err != nil {
+	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
 		return err
 	}
 	var voidedSubscriptionID *uuid.UUID
@@ -2001,40 +1643,6 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			return fmt.Errorf("unable to resolve original payment for CCBill void transaction %q", voidTransactionID)
 		}
 
-		// Log void event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"void_transaction_id":     voidTransactionID,
-				"original_transaction_id": voidTransactionID,
-				"rail":                    "ccbill",
-				"event_source":            "webhook",
-				"void_reason":             voidReason,
-				"void_amount":             voidAmount,
-				"rail_subscription_id":    pSubscriptionID,
-				"subscription_exists":     true,
-			}
-
-			// Log as payment event (negative amount for void)
-			negativeAmount := -voidAmount
-			paymentEventData := analytics.PaymentEventData{
-				EventID:        uuidutil.NewV7(),
-				SubscriptionID: &sub.ID,
-				UserID:         sub.CustomerID.String(),
-				EventType:      analytics.PaymentEventVoid,
-				Rail:           "ccbill",
-				Amount:         &negativeAmount,
-				Currency:       currencyValue,
-				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
-				WebhookSource:  "webhook",
-				Metadata:       analytics.CreateMetadataJSON(metadata),
-				Timestamp:      s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log void event to ClickHouse")
-			}
-		}
-
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":    sub.ID,
 			"userID":            sub.CustomerID.String(),
@@ -2082,8 +1690,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		return err
 	}
 	chargebackAmount := moneyutil.CentsToMajorUnits(chargebackAmountCents)
-	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
-	if err != nil {
+	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
 		return err
 	}
 	var ledgerErr error
@@ -2212,49 +1819,6 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			"chargeback_amount": chargebackAmount,
 			"dispute_id":        "unknown",
 		}).Warn("User account involved in chargeback - consider fraud review")
-
-		// Log chargeback event to ClickHouse with fraud flags
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"chargeback_transaction_id": chargebackTransactionID,
-				"original_transaction_id":   chargebackTransactionID,
-				"rail":                      "ccbill",
-				"event_source":              "webhook",
-				"chargeback_reason":         chargebackReason,
-				"chargeback_amount":         chargebackAmount,
-				// CCBill doesn't provide dispute_id or structured reason codes in their webhook format
-				// The "Reason" field is a free-text description, not a standard code
-				"rail_subscription_id":    pSubscriptionID,
-				"subscription_terminated": true,
-				"fraud_flag":              true,
-				"termination_immediate":   true,
-				// Card info for fraud analysis
-				"card_type":     data.CardType,
-				"card_last4":    data.Last4,
-				"card_exp_date": data.ExpDate,
-				"card_bin":      data.Bin,
-			}
-
-			// Log as payment event (negative amount for chargeback)
-			negativeAmount := -chargebackAmount
-			paymentEventData := analytics.PaymentEventData{
-				EventID:        uuidutil.NewV7(),
-				SubscriptionID: &sub.ID,
-				UserID:         sub.CustomerID.String(),
-				EventType:      analytics.PaymentEventChargeback,
-				Rail:           "ccbill",
-				Amount:         &negativeAmount,
-				Currency:       currencyValue,
-				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
-				WebhookSource:  "webhook",
-				Metadata:       analytics.CreateMetadataJSON(metadata),
-				Timestamp:      s.now().UTC(),
-			}
-
-			if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-				log.WithError(err).Error("Failed to log chargeback event to ClickHouse")
-			}
-		}
 
 		// Add system alert notification for chargeback (admin notification)
 		if s.NotificationService != nil {
@@ -2442,96 +2006,6 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		}
 	}
 
-	// Log renewal payment event to ClickHouse
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id":  transactionID,
-			"rail":            "ccbill",
-			"event_source":    "webhook",
-			"event_type":      "renewal",
-			"amount":          billedAmount,
-			"subscription_id": subscription.ID,
-			// Card information for fraud monitoring and audit
-			"card_type":     data.CardType,
-			"card_last4":    data.Last4,
-			"card_exp_date": data.ExpDate,
-		}
-
-		// Capture billing/card info for the event
-		billingInfo := map[string]interface{}{
-			"renewal":       true,
-			"card_type":     data.CardType,
-			"card_last4":    data.Last4,
-			"card_exp_date": data.ExpDate,
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: &subscription.ID,
-			UserID:         subscription.CustomerID.String(),
-			EventType:      analytics.PaymentEventChargeSuccess,
-			Rail:           "ccbill",
-			Amount:         &billedAmount,
-			Currency:       currencyValue,
-			BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
-			WebhookSource:  "webhook",
-			Metadata:       analytics.CreateMetadataJSON(metadata),
-			Timestamp:      s.now().UTC(),
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithError(err).Error("Failed to log renewal payment event to ClickHouse")
-		}
-	}
-
-	// Log subscription recovery (past_due -> active) for analytics.
-	if s.EventLogService != nil && prevStatus == models.StatusPastDue {
-		statusActive := string(models.StatusActive)
-		uidStr := subscription.CustomerID.String()
-		priceAmount := 0.0
-		priceCurrency := ""
-		billingCycleHours := uint32(0)
-		var productID *uuid.UUID
-		var priceID *uuid.UUID
-		if subscription.Price != nil {
-			priceAmount = moneyutil.MicrosToMajorUnits(subscription.Price.Amount) // #671 1f: micros, not cents
-			priceCurrency = subscription.Price.Currency
-			if subscription.Price.RecurringCycleHours() != nil {
-				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
-			}
-			productID = &subscription.Price.ProductID
-			priceID = &subscription.Price.ID
-		}
-		metadata := map[string]interface{}{
-			"rail_subscription_id": ccBillSubID,
-			"rail":                 "ccbill",
-			"event_source":         "webhook",
-			"from_status":          string(prevStatus),
-			"to_status":            statusActive,
-		}
-		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:            uuidutil.NewV7(),
-			SubscriptionID:     subscription.ID,
-			UserID:             uidStr,
-			EventType:          analytics.PaymentEventSubscriptionReactivated,
-			Status:             statusActive,
-			CancelType:         "",
-			PriceAmount:        priceAmount,
-			PriceCurrency:      priceCurrency,
-			BillingCycleHours:  billingCycleHours,
-			ProductID:          productID,
-			PriceID:            priceID,
-			Rail:               "ccbill",
-			RailSubscriptionID: &ccBillSubID,
-			RailTransactionID:  &transactionID,
-			Metadata:           analytics.CreateMetadataJSON(metadata),
-			Timestamp:          s.now(),
-		}
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-			log.WithError(err).Error("Failed to log subscription reactivation event to ClickHouse")
-		}
-	}
-
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID": subscription.ID,
 		"userID":         subscription.CustomerID.String(),
@@ -2640,85 +2114,6 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		return fmt.Errorf("subscription not found for logging: %s", ccBillSubID)
 	}
 
-	// Log renewal failure event to ClickHouse - standardized with NMI-backed rails
-	if s.EventLogService != nil {
-		failureCurrency := ""
-		if subscription.Price != nil {
-			if curr := strings.ToLower(strings.TrimSpace(subscription.Price.Currency)); curr != "" {
-				failureCurrency = curr
-			}
-		}
-
-		metadata := map[string]interface{}{
-			"transaction_id":       transactionID,
-			"rail":                 "ccbill",
-			"event_source":         "webhook",
-			"failure_code":         data.FailureCode,
-			"failure_reason":       data.FailureReason,
-			"rail_subscription_id": ccBillSubID,
-			"is_renewal":           true,
-			"next_retry_at":        subscription.NextRetryAt,
-			"paid_term_end":        subscription.CurrentPeriodEndsAt,
-			"grace_ends_at":        subscription.GraceEndsAt,
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: &subscription.ID,
-			UserID:         subscription.CustomerID.String(),
-			EventType:      analytics.PaymentEventChargeFailure,
-			Rail:           "ccbill",
-			Currency:       failureCurrency,
-			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"renewal_failure": true}),
-			WebhookSource:  "webhook",
-			Metadata:       analytics.CreateMetadataJSON(metadata),
-			Timestamp:      s.now().UTC(),
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithError(err).Error("Failed to log renewal failure event to ClickHouse")
-		}
-
-		statusPastDue := string(models.StatusPastDue)
-		uidStr := subscription.CustomerID.String()
-		priceAmount := 0.0
-		priceCurrency := ""
-		billingCycleHours := uint32(0)
-		var productID *uuid.UUID
-		var priceID *uuid.UUID
-		if subscription.Price != nil {
-			priceAmount = moneyutil.MicrosToMajorUnits(subscription.Price.Amount) // #671 1f: micros, not cents
-			priceCurrency = subscription.Price.Currency
-			if subscription.Price.RecurringCycleHours() != nil {
-				billingCycleHours, _ = safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
-			}
-			productID = &subscription.Price.ProductID
-			priceID = &subscription.Price.ID
-		}
-		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:            uuidutil.NewV7(),
-			SubscriptionID:     subscription.ID,
-			UserID:             uidStr,
-			EventType:          analytics.PaymentEventSubscriptionPastDue,
-			Status:             statusPastDue,
-			CancelType:         "",
-			PriceAmount:        priceAmount,
-			PriceCurrency:      priceCurrency,
-			BillingCycleHours:  billingCycleHours,
-			ProductID:          productID,
-			PriceID:            priceID,
-			Rail:               "ccbill",
-			RailSubscriptionID: &ccBillSubID,
-			RailTransactionID:  &transactionID,
-			Metadata:           analytics.CreateMetadataJSON(metadata),
-			Timestamp:          s.now(),
-		}
-
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-			log.WithError(err).Error("Failed to log subscription past_due event to ClickHouse")
-		}
-	}
-
 	if s.NotificationService != nil {
 		notification := &models.NotificationQueue{
 			ID:         uuidutil.NewV7(),
@@ -2811,46 +2206,6 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 		return fmt.Errorf("failed to cancel membership: %w", err)
 	}
 
-	// Log subscription cancellation event to ClickHouse
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"rail_subscription_id": ccBillSubID,
-			"cancel_reason":        data.Reason,
-			"cancel_source":        data.Source,
-			"cancel_type":          string(cancelType),
-			"is_failed_rebill":     data.Source == "failedRB",
-		}
-
-		uidStr := subscription.CustomerID.String()
-		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: subscription.ID,
-			UserID:         uidStr,
-			EventType:      analytics.PaymentEventSubscriptionCancelled,
-			Status:         string(models.StatusCancelled),
-			CancelType:     string(cancelType),
-			PriceAmount:    moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
-			PriceCurrency:  subscription.Price.Currency,
-			BillingCycleHours: func() uint32 {
-				if subscription.Price.RecurringCycleHours() != nil {
-					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
-					return v
-				}
-				return 0
-			}(),
-			ProductID:          &subscription.Price.ProductID,
-			PriceID:            &subscription.Price.ID,
-			Rail:               "ccbill",
-			RailSubscriptionID: &ccBillSubID,
-			Metadata:           analytics.CreateMetadataJSON(metadata),
-			Timestamp:          s.now(),
-		}
-
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-			log.WithError(err).Error("Failed to log subscription cancellation event to ClickHouse")
-		}
-	}
-
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":     subscription.ID,
 		"userID":             subscription.CustomerID.String(),
@@ -2890,46 +2245,6 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	// Use SubscriptionLifecycleService to expire membership
 	if err := s.SubscriptionLifecycleService.ExpireMembership(ctx, subscription.ID); err != nil {
 		return fmt.Errorf("failed to expire membership: %w", err)
-	}
-
-	// Log subscription expiration event to ClickHouse
-	if s.EventLogService != nil {
-		cancelType := models.CancelTypeExpired
-		metadata := map[string]interface{}{
-			"rail_subscription_id": ccBillSubID,
-			"cancel_source":        "expiration",
-			"cancel_type":          string(cancelType),
-			"is_expiration":        true,
-		}
-
-		uidStr := subscription.CustomerID.String()
-		subscriptionEventData := analytics.SubscriptionEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: subscription.ID,
-			UserID:         uidStr,
-			EventType:      analytics.PaymentEventSubscriptionExpired,
-			Status:         string(models.StatusCancelled),
-			CancelType:     string(models.CancelTypeExpired),
-			PriceAmount:    moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
-			PriceCurrency:  subscription.Price.Currency,
-			BillingCycleHours: func() uint32 {
-				if subscription.Price.RecurringCycleHours() != nil {
-					v, _ := safecast.Convert[uint32](*subscription.Price.RecurringCycleHours())
-					return v
-				}
-				return 0
-			}(),
-			ProductID:          &subscription.Price.ProductID,
-			PriceID:            &subscription.Price.ID,
-			Rail:               "ccbill",
-			RailSubscriptionID: &ccBillSubID,
-			Metadata:           analytics.CreateMetadataJSON(metadata),
-			Timestamp:          s.now(),
-		}
-
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-			log.WithError(err).Error("Failed to log subscription expiration event to ClickHouse")
-		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{

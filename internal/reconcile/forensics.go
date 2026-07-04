@@ -16,10 +16,9 @@ import (
 //     included), from the fetcher's transaction snapshot;
 //  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
 //     next_retry_at), imported from legacy by the migration;
-//  3. "history"  — OpenRails' ClickHouse analytics events
-//     (payment_events/subscription_events), which for migrated merchants
-//     include the imported legacy rebill/scheduler history — deep history the
-//     provider APIs cannot return.
+//  3. "history"  — Postgres history (#735): the imported legacy
+//     rebill/scheduler history (doujins #387) plus failed-payment rows —
+//     deep history the provider APIs cannot return.
 type DunningForensics struct {
 	Provider              Provider `json:"provider"`
 	SubscriptionsExamined int      `json:"subscriptions_examined"`
@@ -40,7 +39,7 @@ type DunningForensics struct {
 	// LastProviderAttempt is the newest provider-side charge attempt
 	// (success or decline) across the examined set.
 	LastProviderAttempt *time.Time `json:"last_provider_attempt,omitempty"`
-	// LastHistoryAttempt is the newest charge-type analytics event across the
+	// LastHistoryAttempt is the newest charge-type history event across the
 	// examined set (incl. imported legacy rebill attempts).
 	LastHistoryAttempt *time.Time `json:"last_history_attempt,omitempty"`
 	// LastDunningActionAnySource is the max of the three, with the source
@@ -50,7 +49,7 @@ type DunningForensics struct {
 	DeclineReasons             map[string]int `json:"decline_reason_histogram,omitempty"`
 	// HistorySource documents the third evidence source's availability:
 	// "ok: N events (M correlated)", "not configured", or "unavailable: ...".
-	// Unreachable ClickHouse degrades to this note, never an error.
+	// An unreachable source degrades to this note, never an error.
 	HistorySource string `json:"history_source,omitempty"`
 	// Details are per-subscription lines, capped at forensicsDetailCap.
 	Details        []DunningSubscriptionReport `json:"details,omitempty"`
@@ -79,7 +78,7 @@ type DunningSubscriptionReport struct {
 	FirstDeclineAt     *time.Time `json:"first_decline_at,omitempty"`
 	LastDeclineAt      *time.Time `json:"last_decline_at,omitempty"`
 	DeclineReasons     []string   `json:"decline_reasons,omitempty"`
-	// History (ClickHouse analytics events incl. imported legacy):
+	// History (Postgres history incl. imported legacy):
 	HistoryEvents    int        `json:"history_events,omitempty"`
 	HistoryFailures  int        `json:"history_failures,omitempty"`
 	HistorySuccesses int        `json:"history_successes,omitempty"`
@@ -125,7 +124,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		firstDeclineAt, lastDeclineAt *time.Time
 		lastAttemptAt                 *time.Time
 		reasons                       map[string]int
-		// history (ClickHouse) evidence:
+		// history (Postgres) evidence:
 		histEvents, histFailures, histSuccesses int
 		firstHistAt, lastHistAt                 *time.Time
 		lastHistAttemptAt                       *time.Time

@@ -132,7 +132,7 @@ func renderForensics(w io.Writer, d *DunningForensics) {
 	fmt.Fprintf(w, "  dunning forensics: %d examined — %d never-attempted, %d attempted+exhausted, %d in-progress, %d without remote declines\n",
 		d.SubscriptionsExamined, d.NeverAttempted, d.AttemptedExhausted, d.AttemptedInProgress, d.NoRemoteDeclines)
 	if d.HistorySource != "" {
-		fmt.Fprintf(w, "    history source (analytics events): %s\n", d.HistorySource)
+		fmt.Fprintf(w, "    history source: %s\n", d.HistorySource)
 	}
 	if d.LastLocalDunningAction != nil {
 		fmt.Fprintf(w, "    local dunning last acted: %s\n", d.LastLocalDunningAction.Format("2006-01-02 15:04:05 MST"))

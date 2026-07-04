@@ -75,7 +75,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 
 	f := &failopenFixture{dbi: dbi, pool: pool, q: q, lifecycle: lifecycle, entSvc: entitlementSvc, productID: productID, priceID: priceID, userID: userID, ent: entName}
 	t.Cleanup(func() {

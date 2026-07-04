@@ -201,7 +201,6 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		MoneyService:                 rt.MoneyService,
-		EventLogService:              rt.EventLogService,
 	}
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))
 

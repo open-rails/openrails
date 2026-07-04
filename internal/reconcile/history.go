@@ -6,18 +6,20 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/modules/analytics"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// HistoryEvent is one OpenRails analytics event used as the THIRD dunning
-// evidence source (decision 2026-06-11): alongside the provider-pulled
-// transaction timeline ("provider") and the local retry fields ("local"), the
-// ClickHouse payment/subscription events ("history") carry deep history the
-// provider APIs cannot return — including, for migrated merchants, the imported
-// legacy rebill/scheduler events (doujins #387).
+// HistoryEvent is one Postgres history row used as the THIRD dunning evidence
+// source: alongside the provider-pulled transaction timeline ("provider") and
+// the local retry fields ("local"), the imported legacy dunning history
+// (doujins #387) and failed-payment rows carry history the provider APIs
+// cannot return.
 type HistoryEvent struct {
-	// Table is the originating ClickHouse table (payment_events |
-	// subscription_events).
+	// Table is the originating Postgres table (imported_dunning_history |
+	// payments).
 	Table     string
 	EventType string
 	Rail      string
@@ -31,55 +33,86 @@ type HistoryEvent struct {
 	OccurredAt         time.Time
 }
 
-// HistoryEventSource supplies the analytics-event evidence for the dunning
-// forensics. Implementations must be read-only and FAIL SOFT: the engine
-// turns any error into a note in the report, never a run failure.
+// HistoryEventSource supplies the history evidence for the dunning forensics.
+// Implementations must be read-only and FAIL SOFT: the engine turns any error
+// into a note in the report, never a run failure.
 type HistoryEventSource interface {
-	// Configured reports whether the source can be queried at all (e.g.
-	// ClickHouse present in the config). Unconfigured sources are noted in
-	// the report and skipped.
+	// Configured reports whether the source can be queried at all.
+	// Unconfigured sources are noted in the report and skipped.
 	Configured() bool
 	// ListEvents returns the merchant's events for the given local rail
 	// names, oldest first. Zero since/until = unbounded on that side.
 	ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error)
 }
 
-// analyticsHistorySource adapts the analytics module's ClickHouse forensics
-// reader onto the engine's HistoryEventSource.
-type analyticsHistorySource struct {
-	svc *analytics.DunningHistoryService
+// historyEventLimit bounds one forensics read; deep history is the point, so
+// the cap is generous but finite.
+const historyEventLimit = 100000
+
+// PGHistorySource reads dunning history from Postgres (#735):
+// imported_dunning_history (the one-time legacy import) ∪ payments rows with
+// status='failed'. Structured so #733's subscription_status_transitions can be
+// added as another branch later. Display/forensics only — never a decision
+// input.
+type PGHistorySource struct {
+	DB *db.DB
 }
 
-// NewAnalyticsHistorySource wraps the ClickHouse dunning-history reader.
-func NewAnalyticsHistorySource(svc *analytics.DunningHistoryService) HistoryEventSource {
-	return &analyticsHistorySource{svc: svc}
+// NewPGHistorySource wraps the Postgres dunning-history reader.
+func NewPGHistorySource(d *db.DB) HistoryEventSource {
+	return &PGHistorySource{DB: d}
 }
 
-func (s *analyticsHistorySource) Configured() bool {
-	return s != nil && s.svc.Configured()
+func (s *PGHistorySource) Configured() bool {
+	return s != nil && s.DB != nil
 }
 
-func (s *analyticsHistorySource) ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error) {
-	rows, err := s.svc.ListDunningHistory(ctx, railNames, since, until, 0)
+func (s *PGHistorySource) ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error) {
+	if len(railNames) == 0 {
+		return nil, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var sincePtr, untilPtr *time.Time
+	if !since.IsZero() {
+		t := since.UTC()
+		sincePtr = &t
+	}
+	if !until.IsZero() {
+		t := until.UTC()
+		untilPtr = &t
+	}
+	rows, err := s.DB.Gen(ctx).ListDunningHistoryEvents(ctx, gen.ListDunningHistoryEventsParams{
+		MerchantID: tid.UUID(),
+		Rails:      railNames,
+		Since:      sincePtr,
+		Until:      untilPtr,
+		LimitRows:  historyEventLimit,
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]HistoryEvent, 0, len(rows))
 	for _, r := range rows {
 		ev := HistoryEvent{
-			Table:          r.Table,
+			Table:          r.SourceTable,
 			EventType:      r.EventType,
 			Rail:           r.Rail,
 			SubscriptionID: r.SubscriptionID,
 			Status:         r.Status,
-			Amount:         r.Amount,
-			OccurredAt:     r.Timestamp,
+			OccurredAt:     r.OccurredAt,
 		}
 		if r.RailSubscriptionID != nil {
 			ev.RailSubscriptionID = *r.RailSubscriptionID
 		}
 		if r.RailTransactionID != nil {
 			ev.RailTransactionID = *r.RailTransactionID
+		}
+		if r.AmountMicros != nil {
+			amount := moneyutil.MicrosToMajorUnits(*r.AmountMicros)
+			ev.Amount = &amount
 		}
 		out = append(out, ev)
 	}

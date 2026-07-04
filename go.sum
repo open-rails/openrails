@@ -265,8 +265,6 @@ github.com/onsi/gomega v1.10.1 h1:o0+MgICZLuZ7xjH7Vx6zS/zcu93/BEp1VwkIW1mEXCE=
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
 github.com/open-rails/authkit v0.78.0 h1:QCLi0CgsVxhZZlbeWXa3p0CICsjSu8hGsQnFDIF0NIg=
 github.com/open-rails/authkit v0.78.0/go.mod h1:gfpqg5Dk7aKmepkypI8nFcN8XI3Gn5OVVMNAIMZDT+Y=
-github.com/open-rails/migratekit v1.2.0 h1:5UcslJmg4k0/lav0wPKuxevPhKvfS7se8IOWqgHtpeY=
-github.com/open-rails/migratekit v1.2.0/go.mod h1:FmXhq5556xhvcDHx1wP3rNH1UBv408GHrxLw9gWXn6k=
 github.com/open-rails/migratekit v1.3.0 h1:Gf24VrBsayPESjF1gWBgVvkPhVMziQJ86LhNT/GJWus=
 github.com/open-rails/migratekit v1.3.0/go.mod h1:FmXhq5556xhvcDHx1wP3rNH1UBv408GHrxLw9gWXn6k=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
@@ -341,8 +339,6 @@ github.com/test-go/testify v1.1.4 h1:Tf9lntrKUMHiXQ07qBScBTSA0dhYQlu83hswqelv1iE
 github.com/test-go/testify v1.1.4/go.mod h1:rH7cfJo/47vWGdi4GPj16x3/t1xGOj2YxzmNQzk2ghU=
 github.com/testcontainers/testcontainers-go v0.42.0 h1:He3IhTzTZOygSXLJPMX7n44XtK+qhjat1nI9cneBbUY=
 github.com/testcontainers/testcontainers-go v0.42.0/go.mod h1:vZjdY1YmUA1qEForxOIOazfsrdyORJAbhi0bp8plN30=
-github.com/testcontainers/testcontainers-go/modules/clickhouse v0.42.0 h1:SwtkmOTGr0P2+XA2WuDYYNMv2rx7XdIZLZcqJGHB4yA=
-github.com/testcontainers/testcontainers-go/modules/clickhouse v0.42.0/go.mod h1:J3Fm+fPJvXcuS2hu3hTEDJ0NEiEDhOqB1gocXre1FVc=
 github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0 h1:GCbb1ndrF7OTDiIvxXyItaDab4qkzTFJ48LKFdM7EIo=
 github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0/go.mod h1:IRPBaI8jXdrNfD0e4Zm7Fbcgaz5shKxOQv4axiL09xs=
 github.com/testcontainers/testcontainers-go/modules/redis v0.42.0 h1:id/6LH8ZeDrtAUVSuNvZUAJ1kVpb82y1pr9yweAWsRg=

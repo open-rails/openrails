@@ -38,7 +38,7 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
+	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(-5 * 24 * time.Hour) // lapsed 5d (past PeriodGrace, within dunning window)
 	start := now.Add(-35 * 24 * time.Hour)

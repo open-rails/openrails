@@ -31,9 +31,6 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 
 ### Dynamic or cross-store queries
 
-- `internal/modules/analytics/*`: dynamic analytics filters and ClickHouse
-  queries. Keep raw; sqlc does not cover ClickHouse here, and the Postgres
-  analytics filters are dynamic by design.
 - `internal/modules/admission/policy.go`, `internal/modules/money/*`: dynamic
   policy/meter rating lookups assembled from configured measures/meters. Keep raw
   until those policy surfaces stabilize enough to move static pieces.
@@ -71,9 +68,9 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 ## Converted Or Deleted
 
 No obvious duplicated static raw query was safe to delete in this pass. The broad
-runtime raw SQL that remains is either DDL/session/lock code, dynamic analytics or
-policy SQL, ClickHouse SQL, control-plane global SQL, or package-local persistence
-with a clear ownership boundary.
+runtime raw SQL that remains is either DDL/session/lock code, dynamic policy SQL,
+control-plane global SQL, or package-local persistence with a clear ownership
+boundary.
 
 ## Covered By #628 Query Tests
 

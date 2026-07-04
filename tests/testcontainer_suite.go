@@ -42,7 +42,7 @@ import (
 // boot, in-process River workers, real minted delegated credentials, and the
 // per-test injectable clock — lives in the harness. ONE shared suite serves the
 // whole package; fresh boots remain only for construction-time divergence
-// (a Stripe rail, ClickHouse analytics).
+// (a Stripe rail).
 type TestContainerSuite struct {
 	t *testing.T
 
@@ -75,7 +75,6 @@ type TestContainerSuite struct {
 	// construction options
 	initialClock    clockwork.Clock
 	stripeSecretKey string
-	clickhouse      bool
 	persistent      bool
 }
 
@@ -100,15 +99,6 @@ func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
 func WithSuiteStripeRail(secretKey string) TestSuiteOption {
 	return func(suite *TestContainerSuite) {
 		suite.stripeSecretKey = secretKey
-	}
-}
-
-// WithSuiteClickHouse opts the suite into analytics: the shared ClickHouse
-// (dbtest.SharedClickHouse) is wired + migrated so EventLogService runs.
-// Forces a fresh (non-shared) suite boot.
-func WithSuiteClickHouse() TestSuiteOption {
-	return func(suite *TestContainerSuite) {
-		suite.clickhouse = true
 	}
 }
 
@@ -157,17 +147,6 @@ func (suite *TestContainerSuite) boot() {
 		// delegated_sub.
 		integrationharness.WithAuthenticator(&suiteDelegatedUserAuthenticator{suite: suite}),
 	}
-	if suite.clickhouse {
-		httpAddr, nativeAddr := dbtest.SharedClickHouse(suite.t)
-		opts = append(opts, integrationharness.WithClickHouse(&config.ClickHouseConfig{
-			HTTPAddr:   httpAddr,
-			ClientAddr: nativeAddr,
-			Database:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
-			Username:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_USERNAME", "test_user"),
-			Password:   dbtest.ClickHouseEnvOr("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
-		}))
-	}
-
 	// Super DSN: the legacy tests/ fixtures and direct service calls predate
 	// merchant-pinned contexts; RLS enforcement is covered by the harness's
 	// StartStandalone consumers (cross-merchant isolation + rls suites).

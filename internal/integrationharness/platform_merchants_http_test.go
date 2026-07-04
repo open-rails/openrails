@@ -60,7 +60,7 @@ func mintPlatformOperatorToken(t *testing.T, ctx context.Context, s *Surface, ro
 			core.AssignGroupRole(ctx, authcore.RootPersona, "", user.ID, authcore.SubjectKindUser, role),
 			"assign root role %s", role)
 	}
-	token, _, err := core.IssueAccessToken(ctx, user.ID, username+"@example.com", nil)
+	token, _, err := core.IssueAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err, "issue access token")
 	return token
 }

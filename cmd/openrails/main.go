@@ -89,12 +89,12 @@ func main() {
 
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Manage all database tables (Postgres and ClickHouse)",
+		Short: "Manage all database tables",
 	}
 
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
-		Short: "Apply all database migrations (Postgres and ClickHouse independently)",
+		Short: "Apply all database migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
@@ -118,21 +118,7 @@ func main() {
 		},
 	}
 
-	migrateChCmd := &cobra.Command{
-		Use:     "ch",
-		Aliases: []string{"clickhouse"},
-		Short:   "Apply all ClickHouse migrations (OpenRails analytics)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			ctx := cmd.Context()
-			if err := migrate.RunClickHouse(ctx, cfg); err != nil {
-				return fmt.Errorf("clickhouse migrations failed: %w", err)
-			}
-			return nil
-		},
-	}
-
-	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
+	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd)
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newPushCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())

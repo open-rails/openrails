@@ -25,7 +25,7 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
+	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	// The REAL production scheduler (intent-ledger backed), as wired by
 	// jobs_provider_refresh.runUnknownReconcile.
 	lc.SetDeferredDeleteScheduler(intents.NewNMIDeleteScheduler(appDB, nil, intents.OriginSystem, "unknown-resolution stale-decline cancel"))

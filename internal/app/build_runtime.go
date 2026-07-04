@@ -34,7 +34,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -50,7 +49,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
@@ -439,25 +437,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
 	}
 
-	if cfg.ClickHouse != nil {
-		if bes, err := analytics.NewEventLogService(cfg.ClickHouse, clock); err != nil {
-			log.WithError(err).Warn("EventLogService init failed; analytics disabled")
-		} else {
-			runtime.EventLogService = bes
-		}
-	}
-
-	runtime.WebhookDispatcher.EventLogService = runtime.EventLogService
-	runtime.SubscriptionLifecycleService.EventLogService = runtime.EventLogService
-
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
 	// whether the producer came from config or an embedded host's external
 	// River client (SetExternalRiverClient).
 	runtime.WebhookDispatcher.ConvergeEnqueuer = &runtimeConvergeEnqueuer{runtime: runtime}
-
-	if runtime.AdminSubscriptionService != nil {
-		runtime.AdminSubscriptionService.EventLogService = runtime.EventLogService
-	}
 
 	// #674: write-through provider intents. Producers post a durable intent and
 	// execute it inline through the SAME registry/runner the scheduled
@@ -559,27 +542,6 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	); err != nil {
 		log.WithError(err).Fatal("Postgres migrations validation failed")
 		return err
-	}
-
-	// Validate ClickHouse migrations if ClickHouse is configured
-	// ClickHouse is optional - warn if validation fails but continue running
-	if cfg.ClickHouse != nil {
-		log.Infof("Validating ClickHouse migrations for database %s at %s", cfg.ClickHouse.Database, cfg.ClickHouse.ClientAddr)
-		if err := migratekit.ValidateClickHouseMigrations(
-			context.Background(),
-			&migratekit.ClickHouseConfig{
-				ClientAddr: cfg.ClickHouse.ClientAddr,
-				Database:   cfg.ClickHouse.Database,
-				Username:   cfg.ClickHouse.Username,
-				Password:   cfg.ClickHouse.Password,
-				App:        config.MigratekitApp,
-				Cluster:    cfg.ClickHouse.Cluster,
-				PostgresDB: sqlDB,
-			},
-			clickhousemigrations.FS,
-		); err != nil {
-			log.WithError(err).Warn("ClickHouse migrations validation failed - analytics disabled")
-		}
 	}
 
 	return nil
@@ -869,7 +831,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		entitlementService,
 		notificationService,
 		purchaseService, // For creating Payment records on renewal
-		nil,             // EventLogService - set later in buildRuntime after ClickHouse init
 		clock,
 	)
 	subscriptionLifecycleService.SetConfig(cfg)
@@ -928,7 +889,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		NotificationService:          notificationService,
 		SubscriptionService:          subscriptionService,
 		PaymentService:               purchaseService,
-		EventLogService:              nil,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		ProfileRepo:                  profileRepo,
 		DeduplicationService:         deduplicationService,
@@ -963,8 +923,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		// flow. Additive to feature entitlements; nil-safe.
 		checkoutService.PurchaseService.SetMoneyService(moneyService)
 	}
-	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
-
 	checkoutSessionService := checkout.NewCheckoutSessionService(
 		database,
 		priceService,

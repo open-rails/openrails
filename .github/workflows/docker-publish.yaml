@@ -76,8 +76,6 @@ jobs:
             -e DB_PASSWORD=admin_password \
             -e DB_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
-            -e CLICKHOUSE_HTTP_ADDR= \
-            -e CLICKHOUSE_CLIENT_ADDR= \
             openrails-smoke:${GITHUB_SHA} migrate pg
 
       - name: Boot server and check readiness
@@ -95,8 +93,6 @@ jobs:
             -e DB_PASSWORD=admin_password \
             -e DB_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
-            -e CLICKHOUSE_HTTP_ADDR= \
-            -e CLICKHOUSE_CLIENT_ADDR= \
             openrails-smoke:${GITHUB_SHA} server --no-workers)"
           trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
           for i in $(seq 1 60); do

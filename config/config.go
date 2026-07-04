@@ -96,7 +96,6 @@ type Config struct {
 	DB         *DBConfig         `koanf:"db,omitempty"`
 	Redis      *RedisConfig      `koanf:"redis,omitempty"`
 	Auth       *AuthConfig       `koanf:"auth,omitempty"`
-	ClickHouse *ClickHouseConfig `koanf:"clickhouse,omitempty"`
 	Logger     *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid   *SendGridConfig   `koanf:"sendgrid,omitempty"`
 	RateLimits *RateLimitsConfig `koanf:"rate_limits,omitempty"`
@@ -324,8 +323,8 @@ func (c *DBConfig) GetConnectionString() string {
 const DefaultSchema = "openrails"
 
 // MigratekitApp is the migratekit app/tracking key written to
-// public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations,
-// in both Postgres and ClickHouse. It is the "app name" #471 standardized to
+// public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations.
+// It is the "app name" #471 standardized to
 // "openrails" (from the historical "billing"). It is deliberately independent of
 // the (configurable) schema name — the embedded engine's boot validation greps
 // for this value, so hosts must keep it in lockstep.
@@ -749,15 +748,6 @@ type SendGridConfig struct {
 	APIKey string `koanf:"api_key"`
 }
 
-type ClickHouseConfig struct {
-	HTTPAddr   string `koanf:"http_addr"`   // HTTP address for queries, e.g., http://clickhouse:8123
-	ClientAddr string `koanf:"client_addr"` // Native client address, e.g., clickhouse:9000
-	Database   string `koanf:"db"`          // ClickHouse database name (e.g., analytics)
-	Username   string `koanf:"user"`        // Optional username for authentication
-	Password   string `koanf:"password"`    // Optional password for authentication
-	Cluster    string `koanf:"cluster"`     // ClickHouse cluster name (e.g., billing)
-}
-
 // LoggerConfig holds logging configuration
 type LoggerConfig struct {
 	Level string `koanf:"level"` // debug | info | error
@@ -888,11 +878,6 @@ func Validate(cfg *Config) error {
 		if cfg.DB != nil {
 			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
 				return fmt.Errorf("default database credentials are not allowed outside development")
-			}
-		}
-		if cfg.ClickHouse != nil {
-			if strings.TrimSpace(cfg.ClickHouse.Username) == "analytics_user" || strings.TrimSpace(cfg.ClickHouse.Password) == "analytics_password" {
-				return fmt.Errorf("default ClickHouse credentials are not allowed outside development")
 			}
 		}
 		// The auth issuer is the root of trust: the verifier derives the JWKS
@@ -1480,14 +1465,6 @@ func GetDefaultBillingConfig() *Config {
 			DB:       0,
 		},
 		Auth: &AuthConfig{},
-		ClickHouse: &ClickHouseConfig{
-			HTTPAddr:   "http://localhost:8124",
-			ClientAddr: "localhost:9003",
-			Database:   "analytics",
-			Username:   "analytics_user",     // Match docker-compose CLICKHOUSE_USER
-			Password:   "analytics_password", // Match docker-compose CLICKHOUSE_PASSWORD
-			Cluster:    "openrails",          // Match docker-compose cluster name
-		},
 		Logger: &LoggerConfig{
 			Level: "info", // Default to info level (options: debug, info, warn, error, fatal, panic)
 		},
@@ -1580,9 +1557,8 @@ func topLevelKoanfKeys() (scalar, nested map[string]bool) {
 }
 
 // envKeyToConfigKey maps an env var name to its koanf config key.
-// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url,
-// CLICKHOUSE_HTTP_ADDR -> clickhouse.http_addr. Unknown names pass through
-// unchanged and are dropped at unmarshal.
+// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url. Unknown names
+// pass through unchanged and are dropped at unmarshal.
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
@@ -1720,6 +1696,11 @@ func Load(configPath string) (*Config, error) {
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
+	}
+	// HARD CUT (#735): ClickHouse is gone — metrics and dunning forensics are
+	// Postgres-backed. Stale config fails loudly, never silently ignored.
+	if k.Exists("clickhouse") || hasEnvPrefix("CLICKHOUSE_") || hasEnvPrefix("BILLING_CLICKHOUSE_") {
+		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
 	ignoredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""

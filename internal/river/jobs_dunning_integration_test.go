@@ -208,7 +208,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
 	mctx := dbtest.WithTestMerchant(ctx)
@@ -343,7 +343,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)

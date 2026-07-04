@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -92,7 +91,6 @@ type Runtime struct {
 
 	EmailService *subscriptions.EmailService
 
-	EventLogService      *analytics.EventLogService
 	EntitlementService   *entitlements.EntitlementService
 	ProductAccessService *productaccess.Service
 	MoneyService         *money.MoneyService
@@ -120,8 +118,8 @@ type Runtime struct {
 	// rail-account settings win, SolanaRPC is the boot fallback.
 	SolanaRPCResolver   *solanamodule.MerchantRPCBuilder
 	SolanaPriceProvider solanamodule.TokenPriceProvider
-	FXProvider               fx.Provider
-	FXRateRefresher          interface {
+	FXProvider          fx.Provider
+	FXRateRefresher     interface {
 		Stop()
 		LastRefresh() time.Time
 	}
@@ -225,11 +223,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.DB != nil {
 		if err := r.DB.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close db: %w", err))
-		}
-	}
-	if r.EventLogService != nil {
-		if err := r.EventLogService.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close billing event service: %w", err))
 		}
 	}
 	if r.IdempotencyService != nil {

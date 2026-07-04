@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -296,52 +295,50 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		limit = 500
 	}
 
-	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, _ *db.DB) error {
-		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		svc, err := analytics.NewEventLogService(cfg.ClickHouse)
-		if err != nil {
-			return fmt.Errorf("open clickhouse event log: %w", err)
-		}
-		defer func() { _ = svc.Close() }()
-
+	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
 		merchantID, err := merchant.Require(ctx)
 		if err != nil {
 			return err
 		}
-		filter := analytics.ProviderMutationEventFilter{
-			MerchantID:            merchantID.String(),
-			Provider:              providerFilter,
-			ProviderIntentID:      intentFilter,
+		total, err := database.Gen(ctx).CountRailMutationLogs(ctx, gen.CountRailMutationLogsParams{
+			MerchantID:            merchantID.UUID(),
+			Rail:                  providerFilter,
+			RailIntentID:          intentFilter,
 			RailMerchantAccountID: accountFilter,
 			Phase:                 phaseFilter,
-			Limit:                 limit,
-		}
-		total, err := svc.CountProviderMutationEvents(ctx, filter)
+		})
 		if err != nil {
-			return fmt.Errorf("count provider mutation events: %w", err)
+			return fmt.Errorf("count rail mutation logs: %w", err)
 		}
-		rows, err := svc.ListProviderMutationEvents(ctx, filter)
+		rows, err := database.Gen(ctx).ListRailMutationLogs(ctx, gen.ListRailMutationLogsParams{
+			MerchantID:            merchantID.UUID(),
+			Rail:                  providerFilter,
+			RailIntentID:          intentFilter,
+			RailMerchantAccountID: accountFilter,
+			Phase:                 phaseFilter,
+			LimitRows:             int64(limit),
+		})
 		if err != nil {
-			return fmt.Errorf("list provider mutation events: %w", err)
+			return fmt.Errorf("list rail mutation logs: %w", err)
 		}
 
 		if format == "json" {
 			items := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
 				item := map[string]any{
-					"id":                       row.EventID,
+					"id":                       row.ID,
 					"merchant_id":              row.MerchantID,
-					"provider":                 row.Provider,
+					"provider":                 row.Rail,
 					"rail_merchant_account_id": row.RailMerchantAccountID,
-					"provider_intent_id":       row.ProviderIntentID,
+					"provider_intent_id":       row.RailIntentID,
 					"intent_type":              row.IntentType,
 					"idempotency_key":          row.IdempotencyKey,
 					"attempt":                  row.Attempt,
 					"phase":                    row.Phase,
 					"reason":                   row.Reason,
-					"created_at":               row.Timestamp,
+					"created_at":               row.CreatedAt,
 				}
-				if row.Evidence != "" {
+				if len(row.Evidence) > 0 {
 					item["evidence"] = json.RawMessage(row.Evidence)
 				}
 				items = append(items, item)
@@ -360,12 +357,20 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 				account = row.RailMerchantAccountID.String()
 			}
 			intent := ""
-			if row.ProviderIntentID != nil {
-				intent = row.ProviderIntentID.String()
+			if row.RailIntentID != nil {
+				intent = row.RailIntentID.String()
+			}
+			intentType := ""
+			if row.IntentType != nil {
+				intentType = *row.IntentType
+			}
+			reason := ""
+			if row.Reason != nil {
+				reason = *row.Reason
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-				row.Timestamp.Format("2006-01-02 15:04"),
-				row.Provider, account, intent, row.IntentType, row.Attempt, row.Phase, row.Reason)
+				row.CreatedAt.Format("2006-01-02 15:04"),
+				row.Rail, account, intent, intentType, row.Attempt, row.Phase, reason)
 		}
 		return w.Flush()
 	})

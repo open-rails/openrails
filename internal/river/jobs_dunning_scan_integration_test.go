@@ -239,7 +239,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)

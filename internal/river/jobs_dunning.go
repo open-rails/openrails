@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -61,16 +60,15 @@ func (DunningArgs) Kind() string { return KindDunning }
 // updates the database after each attempt for idempotency.
 type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
-	DB                 *db.DB
-	Config             *config.Config
-	Rails              config.RailMerchantAccountSet
+	DB         *db.DB
+	Config     *config.Config
+	Rails      config.RailMerchantAccountSet
 	Clock      clockwork.Clock
 	NMIClients map[string]*nmi.NMIClient
 	// NMIResolver arms store-scoped NMI clients per merchant (#730). Consulted
 	// at the charge gate when the boot map has no client; the rebill handler
 	// re-resolves at charge time (no caching).
 	NMIResolver        money.NMIClientResolver
-	EventLogService    *analytics.EventLogService
 	IdempotencyService *idempotency.IdempotencyService
 	// DeferDelete schedules the rail-side delete for terminal
 	// cancellations (#344). Threaded into the per-run lifecycle so window
@@ -94,7 +92,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	handler := intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService)
+	handler := intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock)
 	handler.SetNMIClientResolver(w.NMIResolver) // #730: store-armed charge-time resolution
 	runner := &intents.Runner{
 		Store:    intents.NewStore(w.DB),
@@ -183,7 +181,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	entitlementSvc := entitlements.NewEntitlementService(w.DB, w.Clock)
 	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
 	lifecycle.SetConfig(w.Config)
 	if w.DeferDelete != nil {
 		// Terminal cancellations (window expiry, retry exhaustion) schedule

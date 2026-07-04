@@ -13,10 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 
-	"github.com/ccoveille/go-safecast/v2"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -25,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -42,7 +39,6 @@ type NMIWebhookService struct {
 	Data                         NMIWebhookEvent
 	Rail                         string
 	NMIClient                    *nmi.NMIClient
-	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
@@ -285,82 +281,6 @@ func newNMIBillingError(errorType string, message string, context map[string]int
 		Message: message,
 		Context: context,
 		Err:     err,
-	}
-}
-
-func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, uint32, *uuid.UUID, *uuid.UUID) {
-	var priceAmount float64
-	priceCurrency := ""
-	var billingHours uint32
-	var productID *uuid.UUID
-	var priceID *uuid.UUID
-
-	if sub != nil && sub.Price != nil {
-		priceAmount = moneyutil.MicrosToMajorUnits(sub.Price.Amount) // #671 1f: micros, not cents
-		priceCurrency = sub.Price.Currency
-		if sub.Price.RecurringCycleHours() != nil {
-			billingHours, _ = safecast.Convert[uint32](*sub.Price.RecurringCycleHours())
-		}
-		productID = &sub.Price.ProductID
-		priceID = &sub.Price.ID
-	}
-
-	return priceAmount, priceCurrency, billingHours, productID, priceID
-}
-
-// logSubscriptionEvent emits a subscription event with full pricing/status context.
-func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *models.Subscription, eventType analytics.PaymentEventType, railTransactionID *string, metadata map[string]interface{}, overrideStatus *models.SubscriptionStatus, overrideCancel *models.CancelType) {
-	if s.EventLogService == nil || sub == nil {
-		return
-	}
-
-	status := sub.Status
-	if overrideStatus != nil {
-		status = *overrideStatus
-	}
-
-	cancelType := ""
-	if overrideCancel != nil {
-		cancelType = string(*overrideCancel)
-	} else if sub.CancelType != nil {
-		cancelType = string(*sub.CancelType)
-	}
-
-	priceAmount, priceCurrency, billingHours, productID, priceID := priceSnapshotFromSubscription(sub)
-
-	var procSubID *string
-	if sub.RailSubscriptionID != "" {
-		procSubID = &sub.RailSubscriptionID
-	}
-
-	if metadata == nil {
-		metadata = map[string]interface{}{}
-	}
-
-	event := analytics.SubscriptionEventData{
-		EventID:            uuidutil.NewV7(),
-		SubscriptionID:     sub.ID,
-		UserID:             sub.CustomerID.String(),
-		EventType:          eventType,
-		Status:             string(status),
-		CancelType:         cancelType,
-		PriceAmount:        priceAmount,
-		PriceCurrency:      priceCurrency,
-		BillingCycleHours:  billingHours,
-		ProductID:          productID,
-		PriceID:            priceID,
-		Rail:               s.Rail,
-		RailSubscriptionID: procSubID,
-		RailTransactionID:  railTransactionID,
-		Metadata:           analytics.CreateMetadataJSON(metadata),
-		Timestamp:          s.now().UTC(),
-	}
-
-	if err := s.EventLogService.LogSubscriptionEvent(ctx, event); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"subscription_id": sub.ID,
-			"event_type":      eventType,
-		}).Error("Failed to log NMI subscription event")
 	}
 }
 
@@ -702,24 +622,9 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 	if err != nil {
 		// Fall back to basic logging if parsing fails
 		log.WithContext(ctx).WithError(err).Warn("Failed to parse chargeback batch body; logging basic event")
-		if s.EventLogService != nil {
-			chargebackEventData := analytics.ChargebackEventData{
-				EventID:   uuidutil.NewV7(),
-				EventType: analytics.PaymentEventBatchProcessed,
-				Rail:      s.Rail,
-				BatchID:   s.Data.EventID,
-				Status:    "completed",
-				Metadata:  analytics.CreateMetadataJSON(map[string]interface{}{"parse_error": err.Error()}),
-				Timestamp: s.now(),
-			}
-			if logErr := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); logErr != nil {
-				log.WithError(logErr).Error("Failed to log chargeback batch event to ClickHouse")
-			}
-		}
 		return nil
 	}
 
-	now := s.now()
 	batchID := s.Data.EventID
 	rail, err := s.normalizedRail()
 	if err != nil {
@@ -759,12 +664,6 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		}
 		cbMetadata["reason"] = reasonText
 
-		var amountPtr *float64
-		if cbAmountCents, err := parseNMIChargebackAmountCents(cb.Amount); err == nil {
-			cbAmount := moneyutil.CentsToMajorUnits(cbAmountCents)
-			amountPtr = &cbAmount
-		}
-
 		match, reconcileMeta, reconcileErr := s.reconcileNMIChargebackEntry(ctx, rail, cb)
 		if reconcileErr != nil {
 			reconcileErrors++
@@ -776,11 +675,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 		}
 
-		cbStatus := "received"
 		var (
-			subscriptionID          *uuid.UUID
-			userID                  *string
-			railTransactionID       *string
 			entryLedgerErr          error
 			chargebackTransactionID string
 		)
@@ -793,15 +688,6 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		if reconcileErr == nil && match != nil {
 			reconciledCount++
 			cbMetadata["requires_manual_review"] = false
-			subscriptionID = &match.SubscriptionID
-			if match.UserID != "" {
-				uid := match.UserID
-				userID = &uid
-			}
-			if match.PaymentTransactionID != "" {
-				txn := match.PaymentTransactionID
-				railTransactionID = &txn
-			}
 			if s.PaymentService == nil {
 				reconcileErrors++
 				cbMetadata["chargeback_payment_status"] = "failed"
@@ -906,7 +792,6 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 								cancelledCount++
 								cbMetadata["termination_status"] = "cancelled_immediate"
 							}
-							cbStatus = "completed"
 						}
 					}
 				}
@@ -947,66 +832,6 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 		}
 
-		if s.EventLogService != nil {
-			cbEventData := analytics.ChargebackEventData{
-				EventID:           uuidutil.NewV7(),
-				ChargebackID:      cb.ID.Trimmed(),
-				BatchID:           batchID,
-				SubscriptionID:    subscriptionID,
-				UserID:            userID,
-				EventType:         analytics.PaymentEventChargeback,
-				Rail:              s.Rail,
-				RailTransactionID: railTransactionID,
-				Amount:            amountPtr,
-				Currency:          "",
-				ChargebackType:    "chargeback",
-				Reason:            reasonText,
-				Status:            cbStatus,
-				Metadata:          analytics.CreateMetadataJSON(cbMetadata),
-				Timestamp:         now,
-			}
-			if err := s.EventLogService.LogChargebackEvent(ctx, cbEventData); err != nil {
-				log.WithContext(ctx).
-					WithError(err).
-					WithField("chargeback_id", cb.ID.Trimmed()).
-					Error("Failed to log individual chargeback event to ClickHouse")
-			}
-		}
-	}
-
-	if s.EventLogService != nil {
-		batchMetadata := map[string]interface{}{
-			"batch_type":         "chargeback",
-			"event_source":       s.Rail,
-			"batch_status":       "completed",
-			"chargeback_count":   chargebackCount,
-			"reconciled_count":   reconciledCount,
-			"cancelled_count":    cancelledCount,
-			"already_cancelled":  alreadyCancelled,
-			"unmatched_count":    unmatchedCount,
-			"reconcile_failures": reconcileErrors,
-		}
-		if body.Batch != nil && strings.TrimSpace(body.Batch.TotalAmount) != "" {
-			batchMetadata["total_amount"] = body.Batch.TotalAmount
-		} else if strings.TrimSpace(body.ChargebackAmount) != "" {
-			batchMetadata["total_amount"] = strings.TrimSpace(body.ChargebackAmount)
-		}
-		if body.Rail != nil {
-			batchMetadata["processor_id"] = body.Rail.ID.Trimmed()
-			batchMetadata["rail_name"] = body.Rail.Name.Trimmed()
-		}
-		chargebackEventData := analytics.ChargebackEventData{
-			EventID:   uuidutil.NewV7(),
-			EventType: analytics.PaymentEventBatchProcessed,
-			Rail:      s.Rail,
-			BatchID:   batchID,
-			Status:    "completed",
-			Metadata:  analytics.CreateMetadataJSON(batchMetadata),
-			Timestamp: now,
-		}
-		if err := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); err != nil {
-			log.WithError(err).Error("Failed to log chargeback batch event to ClickHouse")
-		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
@@ -1075,8 +900,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	}
 	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 
-	provider, err := s.normalizedRail()
-	if err != nil {
+	if _, err := s.normalizedRail(); err != nil {
 		return err
 	}
 
@@ -1174,8 +998,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	now := s.now()
-
 	if shouldTerminate && subscription != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":  subscription.ID,
@@ -1202,59 +1024,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					"subscription_id":      subscription.ID,
 					"rail_subscription_id": nmiSubID,
 				}).Info("Subscription cancelled after refund meet threshold")
-				if s.EventLogService != nil {
-					statusCancelled := models.StatusCancelled
-					cancelType := models.CancelTypeMerchant
-					meta := map[string]interface{}{
-						"event_type":           s.Data.EventType,
-						"refund_amount":        refundAmount,
-						"subscription_id":      subscription.ID.String(),
-						"rail":                 provider,
-						"status_after":         string(statusCancelled),
-						"previous_status":      string(subscription.Status),
-						"cancelled_via_refund": shouldTerminate,
-					}
-					s.logSubscriptionEvent(ctx, subscription, analytics.PaymentEventSubscriptionCancelled, nil, meta, &statusCancelled, &cancelType)
-				}
 			}
-		}
-	}
-
-	// Log refund event to ClickHouse
-	if s.EventLogService != nil && subscription != nil {
-		fallbackCurrency := ""
-		if subscription.Price != nil {
-			fallbackCurrency = subscription.Price.Currency
-		}
-		currencyValue := normalizeNMICurrencyValue(transactionCurrency(body), fallbackCurrency)
-		metadata := map[string]interface{}{
-			"transaction_id":          txnID,
-			"rail":                    s.Rail,
-			"event_source":            "webhook",
-			"refund_amount":           refundAmount,
-			"subscription_terminated": shouldTerminate,
-		}
-
-		negativeAmount := -refundAmount
-		paymentEventData := analytics.PaymentEventData{
-			EventID:        uuidutil.NewV7(),
-			SubscriptionID: &subscription.ID,
-			UserID:         subscription.CustomerID.String(),
-			EventType:      analytics.PaymentEventRefund,
-			Rail:           s.Rail,
-			Amount:         &negativeAmount,
-			Currency:       currencyValue,
-			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
-			WebhookSource:  "webhook",
-			Metadata:       analytics.CreateMetadataJSON(metadata),
-			Timestamp:      now.UTC(),
-		}
-		if txnID != "" {
-			paymentEventData.RailTransactionID = &txnID
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithContext(ctx).WithError(err).Error("Failed to log NMI refund event")
 		}
 	}
 
@@ -1357,33 +1127,6 @@ func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
 
 	txnID := body.TransactionID.Trimmed()
 
-	// Log refund failure for audit purposes
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id": txnID,
-			"rail":           s.Rail,
-			"event_source":   "webhook",
-			"failure":        true,
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:       uuidutil.NewV7(),
-			EventType:     analytics.PaymentEventRefundFailure,
-			Rail:          s.Rail,
-			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"refund_failure": true}),
-			WebhookSource: "webhook",
-			Metadata:      analytics.CreateMetadataJSON(metadata),
-			Timestamp:     s.now().UTC(),
-		}
-		if txnID != "" {
-			paymentEventData.RailTransactionID = &txnID
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithContext(ctx).WithError(err).Error("Failed to log NMI refund failure event")
-		}
-	}
-
 	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI refund failure logged")
 	return nil
 }
@@ -1400,21 +1143,9 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	}
 
 	txnID := body.TransactionID.Trimmed()
-	nmiSubID := transactionSubscriptionID(body)
 
-	provider, err := s.normalizedRail()
-	if err != nil {
+	if _, err := s.normalizedRail(); err != nil {
 		return err
-	}
-
-	// Try to find subscription
-	var subscription *models.Subscription
-	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, nmiSubID)
-		if err != nil && !db.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).WithField("rail_subscription_id", nmiSubID).
-				Warn("Failed to look up subscription for void")
-		}
 	}
 	var voidedSubscriptionID *uuid.UUID
 	if s.PaymentService != nil && txnID != "" {
@@ -1466,36 +1197,6 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		}
 	}
 
-	// Log void event to ClickHouse
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id": txnID,
-			"rail":           provider,
-			"event_source":   "webhook",
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:       uuidutil.NewV7(),
-			EventType:     analytics.PaymentEventVoid,
-			Rail:          provider,
-			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
-			WebhookSource: "webhook",
-			Metadata:      analytics.CreateMetadataJSON(metadata),
-			Timestamp:     s.now().UTC(),
-		}
-		if txnID != "" {
-			paymentEventData.RailTransactionID = &txnID
-		}
-		if subscription != nil {
-			paymentEventData.SubscriptionID = &subscription.ID
-			paymentEventData.UserID = subscription.CustomerID.String()
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithContext(ctx).WithError(err).Error("Failed to log NMI void event")
-		}
-	}
-
 	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI void processed")
 	return nil
 }
@@ -1512,33 +1213,6 @@ func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
 	}
 
 	txnID := body.TransactionID.Trimmed()
-
-	// Log void failure for audit purposes
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"transaction_id": txnID,
-			"rail":           s.Rail,
-			"event_source":   "webhook",
-			"failure":        true,
-		}
-
-		paymentEventData := analytics.PaymentEventData{
-			EventID:       uuidutil.NewV7(),
-			EventType:     analytics.PaymentEventVoidFailure,
-			Rail:          s.Rail,
-			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void_failure": true}),
-			WebhookSource: "webhook",
-			Metadata:      analytics.CreateMetadataJSON(metadata),
-			Timestamp:     s.now().UTC(),
-		}
-		if txnID != "" {
-			paymentEventData.RailTransactionID = &txnID
-		}
-
-		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {
-			log.WithContext(ctx).WithError(err).Error("Failed to log NMI void failure event")
-		}
-	}
 
 	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI void failure logged")
 	return nil

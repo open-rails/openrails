@@ -59,7 +59,7 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 	})
 
 	// Terminal dunning failure with the service in LIMITED mode.
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, nil, nil, nil, nil, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, nil, nil, nil, nil, nil)
 	lifecycle.SetConfig(limitedModeConfig())
 	lifecycle.SetDeferredDeleteScheduler(NewNMIDeleteScheduler(dbi, nil, OriginSystem, "test: dunning exhaustion"))
 	reason := "transaction_failure"

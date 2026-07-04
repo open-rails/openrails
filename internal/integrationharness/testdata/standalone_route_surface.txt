@@ -54,7 +54,6 @@ GET /v1/merchant/entitlements/{entitlement}/customers
 GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
 GET /v1/merchant/invokers/{invoker}/credits
-GET /v1/merchant/metrics
 GET /v1/merchant/payment-providers
 GET /v1/merchant/payment-providers/{provider}
 GET /v1/merchant/payments

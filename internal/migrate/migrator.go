@@ -13,17 +13,11 @@ import (
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	log "github.com/sirupsen/logrus"
-)
-
-var (
-	replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
-	replicatedMergeTreePattern          = regexp.MustCompile(`ReplicatedMergeTree\([^)]*\{replica\}'\)`)
 )
 
 // RunPostgres applies all Postgres migrations:
@@ -155,70 +149,14 @@ func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) err
 	return err
 }
 
-// RunClickHouse applies ClickHouse migrations
-func RunClickHouse(ctx context.Context, cfg *config.Config) error {
-	if cfg == nil {
-		return fmt.Errorf("missing config")
-	}
-
-	if cfg.ClickHouse == nil || cfg.ClickHouse.ClientAddr == "" {
-		log.Info("ClickHouse not configured; skipping ClickHouse migrations")
-		return nil
-	}
-
-	if cfg.DB == nil {
-		return fmt.Errorf("missing database config (required for ClickHouse migration tracking/locking)")
-	}
-
-	// ClickHouse migrations are tracked/locked via Postgres (public.migrations + advisory locks).
-	// ClickHouse migration tracking/locking rides a database/sql handle over
-	// the pgx stdlib driver.
-	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
-	if err != nil {
-		return fmt.Errorf("open db for ClickHouse migration tracking/locking: %w", err)
-	}
-	defer func() { _ = sqlDB.Close() }()
-
-	log.WithFields(log.Fields{
-		"http_addr":   cfg.ClickHouse.HTTPAddr,
-		"client_addr": cfg.ClickHouse.ClientAddr,
-		"database":    cfg.ClickHouse.Database,
-		"username":    cfg.ClickHouse.Username,
-		"cluster":     cfg.ClickHouse.Cluster,
-	}).Info("Running ClickHouse migrations")
-	if err := runClickHouseMigrations(ctx, sqlDB, cfg.ClickHouse); err != nil {
-		return fmt.Errorf("clickhouse migrations failed: %w", err)
-	}
-
-	log.Info("✓ ClickHouse migrations completed successfully")
-	return nil
-}
-
-// Run applies all migrations (Postgres and ClickHouse independently):
-// Postgres: River → Billing
-// ClickHouse: Billing analytics
+// Run applies all migrations (Postgres: River → Billing).
 func Run(ctx context.Context, cfg *config.Config) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("missing database config")
 	}
-
-	// Run Postgres migrations
-	pgErr := RunPostgres(ctx, cfg)
-
-	// Run ClickHouse migrations independently (don't stop on Postgres failure)
-	chErr := RunClickHouse(ctx, cfg)
-
-	// Report results
-	if pgErr != nil && chErr != nil {
-		return fmt.Errorf("both migrations failed: postgres=%v; clickhouse=%v", pgErr, chErr)
+	if err := RunPostgres(ctx, cfg); err != nil {
+		return err
 	}
-	if pgErr != nil {
-		return pgErr
-	}
-	if chErr != nil {
-		return chErr
-	}
-
 	log.Info("✓ All migrations completed successfully")
 	return nil
 }
@@ -253,55 +191,4 @@ func runRiverMigrations(ctx context.Context, cfg *config.Config, schema string) 
 	}
 
 	return nil
-}
-
-// runClickHouseMigrations applies ClickHouse migrations using migratekit
-func runClickHouseMigrations(ctx context.Context, sqlDB *sql.DB, cfg *config.ClickHouseConfig) error {
-	chDB := cfg.Database
-	if chDB == "" {
-		chDB = "analytics"
-	}
-
-	chCluster := cfg.Cluster
-
-	chMigrations, err := migratekit.LoadFromFS(clickhousemigrations.FS)
-	if err != nil {
-		return fmt.Errorf("clickhouse: load migrations: %w", err)
-	}
-	if chCluster == "" {
-		chMigrations = useSingleNodeClickHouseEngines(chMigrations)
-	}
-
-	m := migratekit.NewClickHouse(&migratekit.ClickHouseConfig{
-		ClientAddr: cfg.ClientAddr,
-		Database:   chDB,
-		Username:   cfg.Username,
-		Password:   cfg.Password,
-		App:        config.MigratekitApp,
-		Cluster:    chCluster,
-		PostgresDB: sqlDB,
-	})
-	// ApplyMigrations now calls Setup() automatically within the lock
-	if err := m.ApplyMigrations(ctx, chMigrations); err != nil {
-		return fmt.Errorf("clickhouse: apply migrations: %w", err)
-	}
-
-	log.Info("✓ ClickHouse migrations completed successfully")
-	return nil
-}
-
-func useSingleNodeClickHouseEngines(migrations []migratekit.Migration) []migratekit.Migration {
-	out := make([]migratekit.Migration, len(migrations))
-	for i, migration := range migrations {
-		migration.Content = replicatedReplacingMergeTreePattern.ReplaceAllStringFunc(migration.Content, func(engine string) string {
-			match := replicatedReplacingMergeTreePattern.FindStringSubmatch(engine)
-			if len(match) > 1 && match[1] != "" {
-				return "ReplacingMergeTree(" + match[1] + ")"
-			}
-			return "ReplacingMergeTree()"
-		})
-		migration.Content = replicatedMergeTreePattern.ReplaceAllString(migration.Content, "MergeTree()")
-		out[i] = migration
-	}
-	return out
 }

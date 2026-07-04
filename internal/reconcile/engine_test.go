@@ -1491,7 +1491,7 @@ func TestMaterializePS1(t *testing.T) {
 	})
 }
 
-// --- forensics: ClickHouse third evidence source -------------------------------
+// --- forensics: Postgres third evidence source ---------------------------------
 
 type fakeHistorySource struct {
 	configured bool
@@ -1566,7 +1566,7 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 		assert.Equal(t, 1, d.NeverAttempted)
 	})
 
-	t.Run("unreachable ClickHouse degrades to a note, never an error", func(t *testing.T) {
+	t.Run("unreachable history source degrades to a note, never an error", func(t *testing.T) {
 		local, snap, _ := newFixture()
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 		eng.History = &fakeHistorySource{configured: true, err: fmt.Errorf("dial tcp: connection refused")}

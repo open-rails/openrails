@@ -63,7 +63,7 @@ func setupTestServer(t *testing.T) *server.Server {
 }
 
 // setupTestSuite returns a suite for tests that need direct database access.
-// Construction-time divergence (Stripe rail, ClickHouse) boots a FRESH suite
+// Construction-time divergence (Stripe rail) boots a FRESH suite
 // bound to t; everything else — including clock control, which is a per-test
 // swap on the injectable SettableClock — pools onto the shared suite.
 func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
@@ -73,7 +73,7 @@ func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
 			opt(probe)
 		}
 	}
-	if probe.stripeSecretKey != "" || probe.clickhouse {
+	if probe.stripeSecretKey != "" {
 		return NewTestContainerSuite(t, opts...)
 	}
 	suite := getSharedTestSuite(t)

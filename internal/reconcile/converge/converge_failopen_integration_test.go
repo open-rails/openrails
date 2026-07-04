@@ -104,7 +104,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 	// Provider pull resolves renewed: paid-through advances, access continuous.
 	newEnd := time.Now().UTC().Add(20 * 24 * time.Hour).Truncate(time.Second)
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, nil)
+		lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil)
 		row, err := appDB.Gen(ctx).GetSubscriptionByID(ctx, sub)
 		require.NoError(t, err)
 		m, err := models.SubscriptionFromGen(row)

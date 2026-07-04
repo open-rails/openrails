@@ -213,8 +213,8 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 // result_evidence (internal/river/jobs_dunning.go: transaction_id for the
 // lifecycle repair, response_code for hard/soft decline classification; the
 // admin operations view also surfaces transaction_id). Everything else is
-// forensic and was already durably logged to ClickHouse before the success
-// transition, so it is safe to drop from Postgres — UNLESS the handler asks to
+// forensic and was already durably logged to rail_mutation_logs before the
+// success transition, so it is safe to drop from the intent row — UNLESS the handler asks to
 // keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
 // because pkg/service/catalog_extras.go renders their verification booleans.
 var pruneEvidenceKeys = []string{"transaction_id", "response_code"}

@@ -3,7 +3,6 @@ module github.com/open-rails/openrails
 go 1.26.4
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.46.0
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/goccy/go-yaml v1.18.0
@@ -32,6 +31,7 @@ require (
 )
 
 require (
+	github.com/ClickHouse/clickhouse-go/v2 v2.46.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-webauthn/webauthn v0.17.4 // indirect
@@ -144,7 +144,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
 	github.com/testcontainers/testcontainers-go v0.42.0
-	github.com/testcontainers/testcontainers-go/modules/clickhouse v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.42.0
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

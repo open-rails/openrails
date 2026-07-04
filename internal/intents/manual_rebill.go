@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -81,12 +80,11 @@ type ManualRebillHandler struct {
 	// nil = boot plane only (embedded hosts' model).
 	Resolver money.NMIClientResolver
 	Clock    clockwork.Clock
-	EventLog *analytics.EventLogService
 	Policy   BackoffPolicy
 }
 
-func NewManualRebillHandler(d *db.DB, cfg *config.Config, clients map[string]*nmi.NMIClient, clock clockwork.Clock, eventLog *analytics.EventLogService) *ManualRebillHandler {
-	return &ManualRebillHandler{DB: d, Config: cfg, Clients: clients, Clock: clock, EventLog: eventLog, Policy: DefaultBackoff}
+func NewManualRebillHandler(d *db.DB, cfg *config.Config, clients map[string]*nmi.NMIClient, clock clockwork.Clock) *ManualRebillHandler {
+	return &ManualRebillHandler{DB: d, Config: cfg, Clients: clients, Clock: clock, Policy: DefaultBackoff}
 }
 
 // SetNMIClientResolver arms per-merchant store resolution (#730). The resolver
@@ -302,7 +300,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebil
 		entitlements.NewEntitlementService(h.DB, h.Clock),
 		subscriptions.NewNotificationService(h.DB, nil),
 		payments.NewPaymentService(h.DB, h.Clock),
-		h.EventLog, h.Clock,
+		h.Clock,
 	)
 	lifecycle.SetConfig(h.Config)
 

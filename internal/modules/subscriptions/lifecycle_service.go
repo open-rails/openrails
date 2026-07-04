@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -36,8 +35,7 @@ type SubscriptionLifecycleService struct {
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
-	PaymentService      *payments.PaymentService   // For creating Payment records on renewal
-	EventLogService     *analytics.EventLogService // For logging events to ClickHouse
+	PaymentService      *payments.PaymentService // For creating Payment records on renewal
 
 	// deferDelete enqueues the deferred NMI delete_subscription job (#344
 	// follow-up). Optional: injected via SetDeferredDeleteScheduler in the
@@ -75,7 +73,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *payments.PaymentService, eventLogService *analytics.EventLogService, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *payments.PaymentService, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                            // Set via SetConfig if feature flags are needed
@@ -85,7 +83,6 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
-		EventLogService:     eventLogService,
 	}
 }
 
@@ -168,9 +165,6 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	}
 
 	s.dispatchNotifications(ctx, notifications)
-
-	// Log the charge success event to ClickHouse
-	s.logPaymentEvent(ctx, subscription, params.Rail, params.TransactionID, params.Amount, params.Currency)
 
 	return subscription, nil
 }
@@ -572,10 +566,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	notifications := make([]*models.NotificationQueue, 0, 1)
 	renewalApplied := false
 
-	// Variables to capture from transaction for logging/notifications.
-	var subscriptionID uuid.UUID
-	var userID string
-
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail":                      params.Rail,
 		"rail_subscription_id":      params.RailSubscriptionID,
@@ -608,10 +598,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
 			return err
 		}
-
-		// Capture values for Payment creation after transaction
-		subscriptionID = subscription.ID
-		userID = subscription.CustomerID.String()
 
 		// Check for scheduled downgrade
 		var price *models.Price
@@ -950,17 +936,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 	s.dispatchNotifications(ctx, notifications)
 
-	// Log the charge success event to ClickHouse
-	if s.EventLogService != nil {
-		sub := &models.Subscription{ID: subscriptionID, CustomerID: identity.CustomerIDFromString(userID).UUID()}
-		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Rail, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-				"event_type":      "charge_success",
-			}).Warn("failed to log renewal payment event to ClickHouse")
-		}
-	}
-
 	return nil
 }
 
@@ -1115,10 +1090,9 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *CancelMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
-	// Variables to capture from transaction for event logging
+	// Variables to capture from transaction for the completion log
 	var subscriptionID uuid.UUID
 	var userID string
-	var rail models.Rail
 
 	var procName string
 	if params.Rail != nil {
@@ -1164,10 +1138,9 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
-		// Capture values for event logging after transaction
+		// Capture values for the completion log after transaction
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
-		rail = subscription.Rail
 
 		// Cancellation policy (caller-owned): an immediate revoke truncates the
 		// paid period to now; a period-end cancel keeps paid access until the term
@@ -1259,16 +1232,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		"subscription_id": subscriptionID,
 		"user_id":         userID,
 	}).Info("Membership cancellation flow completed")
-
-	// Log the subscription cancelled event to ClickHouse
-	if s.EventLogService != nil {
-		if err := s.EventLogService.LogLifecycleCancellation(ctx, subscriptionID, userID, rail, params.CancelType, params.RevokeAccess, s.now()); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-				"event_type":      "subscription_cancelled",
-			}).Warn("failed to log subscription cancelled event to ClickHouse")
-		}
-	}
 
 	return nil
 }
@@ -1706,10 +1669,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
-	// Variables to capture from transaction for event logging
+	// Variables to capture from transaction for the deferred-delete log
 	var subscriptionID uuid.UUID
 	var userID string
-	var finalStatus models.SubscriptionStatus
 	// Set inside the tx when a terminal cancellation must also stop the
 	// remote NMI recurring subscription; the job is enqueued after commit.
 	var scheduleDeferredDelete bool
@@ -1876,9 +1838,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"next_retry_at":   subscription.NextRetryAt,
 		}).Warn("Updated subscription during failure flow")
 
-		// Capture final status for event logging
-		finalStatus = subscription.Status
-
 		// Revoke entitlements if subscription is cancelled after max retries or a
 		// terminal decline.
 		if subscription.Status == models.StatusCancelled && entSvc != nil {
@@ -1977,30 +1936,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	s.dispatchNotifications(ctx, notifications)
 
-	// Log the payment failure event to ClickHouse
-	if s.EventLogService != nil {
-		if err := s.EventLogService.LogLifecycleFailure(ctx, subscriptionID, userID, params.Rail, finalStatus, params.FailureReason, params.FailureCode, s.now()); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-				"event_type":      "charge_failure",
-			}).Warn("failed to log payment failure event to ClickHouse")
-		}
-	}
-
 	return nil
-}
-
-func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, rail models.Rail, transactionID string, amount int64, currency string) {
-	if s.EventLogService == nil || sub == nil {
-		return
-	}
-	if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, rail, transactionID, amount, currency, s.now(), nil); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"subscription_id": sub.ID,
-			"event_type":      "charge_success",
-			"rail":            rail,
-		}).Warn("failed to log payment event to ClickHouse")
-	}
 }
 
 func validateCompletedPayment(payment *models.Payment, expectedAmount int64, expectedCurrency string) error {

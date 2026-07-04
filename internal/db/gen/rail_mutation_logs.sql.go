@@ -11,6 +11,36 @@ import (
 	"github.com/google/uuid"
 )
 
+const countRailMutationLogs = `-- name: CountRailMutationLogs :one
+SELECT count(*) FROM openrails.rail_mutation_logs
+WHERE merchant_id = $1::uuid
+  AND ($2::text IS NULL OR rail = $2::text)
+  AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
+  AND ($4::uuid IS NULL OR rail_merchant_account_id = $4::uuid)
+  AND ($5::text IS NULL OR phase = $5::text)
+`
+
+type CountRailMutationLogsParams struct {
+	MerchantID            uuid.UUID
+	Rail                  *string
+	RailIntentID          *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+	Phase                 *string
+}
+
+func (q *Queries) CountRailMutationLogs(ctx context.Context, arg CountRailMutationLogsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRailMutationLogs,
+		arg.MerchantID,
+		arg.Rail,
+		arg.RailIntentID,
+		arg.RailMerchantAccountID,
+		arg.Phase,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertRailMutationLog = `-- name: InsertRailMutationLog :exec
 INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
@@ -55,4 +85,67 @@ func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutat
 		arg.Evidence,
 	)
 	return err
+}
+
+const listRailMutationLogs = `-- name: ListRailMutationLogs :many
+
+SELECT id, merchant_id, rail, rail_merchant_account_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at FROM openrails.rail_mutation_logs
+WHERE merchant_id = $1::uuid
+  AND ($2::text IS NULL OR rail = $2::text)
+  AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
+  AND ($4::uuid IS NULL OR rail_merchant_account_id = $4::uuid)
+  AND ($5::text IS NULL OR phase = $5::text)
+ORDER BY created_at DESC, id DESC
+LIMIT $6
+`
+
+type ListRailMutationLogsParams struct {
+	MerchantID            uuid.UUID
+	Rail                  *string
+	RailIntentID          *uuid.UUID
+	RailMerchantAccountID *uuid.UUID
+	Phase                 *string
+	LimitRows             int64
+}
+
+// Operator read surface (#735: replaced the ClickHouse mirror; this table is
+// the durable mutation log).
+func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutationLogsParams) ([]OpenrailsRailMutationLog, error) {
+	rows, err := q.db.Query(ctx, listRailMutationLogs,
+		arg.MerchantID,
+		arg.Rail,
+		arg.RailIntentID,
+		arg.RailMerchantAccountID,
+		arg.Phase,
+		arg.LimitRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailMutationLog
+	for rows.Next() {
+		var i OpenrailsRailMutationLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.RailMerchantAccountID,
+			&i.RailIntentID,
+			&i.IntentType,
+			&i.IdempotencyKey,
+			&i.Attempt,
+			&i.Phase,
+			&i.Reason,
+			&i.Evidence,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

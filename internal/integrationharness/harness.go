@@ -41,6 +41,7 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
@@ -62,7 +63,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -292,7 +292,6 @@ type standaloneConfig struct {
 	workers                bool
 	clock                  clockwork.Clock
 	rails                  config.RailMerchantAccountSet
-	clickhouse             *config.ClickHouseConfig
 	configuredMerchant     merchant.ID
 	authenticator          billingauth.Authenticator
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
@@ -313,13 +312,6 @@ func WithClock(clock clockwork.Clock) StandaloneOption {
 // WithRails supplies construction-time payment-rail merchant-account config.
 func WithRails(rails config.RailMerchantAccountSet) StandaloneOption {
 	return func(c *standaloneConfig) { c.rails = rails }
-}
-
-// WithClickHouse opts the surface into analytics: sets cfg.ClickHouse and runs
-// the ClickHouse migrations before boot (dbtest.SharedClickHouse supplies the
-// shared container's addresses).
-func WithClickHouse(ch *config.ClickHouseConfig) StandaloneOption {
-	return func(c *standaloneConfig) { c.clickhouse = ch }
 }
 
 // WithConfiguredMerchant pins the runtime's configured merchant (#336: no
@@ -395,11 +387,6 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
-	if sc.clickhouse != nil {
-		cfg.ClickHouse = sc.clickhouse
-		require.NoError(h.t, migrate.RunClickHouse(h.ctx, cfg), "clickhouse migrations")
-	}
-
 	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{
 		Clock:                  sc.clock,
 		Rails:                  sc.rails,
@@ -598,7 +585,7 @@ func (s *Surface) MintUserAccessToken(username string) string {
 	require.NotNil(h.t, cp, "control plane attached")
 	user, err := cp.Core().CreateUser(h.ctx, username+"@example.com", username)
 	require.NoError(h.t, err, "create user")
-	token, _, err := cp.Core().IssueAccessToken(h.ctx, user.ID, username+"@example.com", nil)
+	token, _, err := cp.Core().IssueAccessToken(h.ctx, user.ID, nil)
 	require.NoError(h.t, err, "mint user access token")
 	return token
 }
@@ -728,7 +715,7 @@ func (di *DelegatedIssuer) Mint(subject, email, username string, permissions []s
 	if username != "" {
 		attrs["username"] = username
 	}
-	token, err := authcore.MintDelegatedAccessToken(h.ctx, di.issuer.Signer(), authkit.DelegatedAccessParams{
+	token, err := mintDelegatedAccessToken(h.ctx, di.issuer.Signer(), authkit.DelegatedAccessParams{
 		Issuer:           di.issuer.URL(),
 		Audiences:        []string{"openrails"},
 		DelegatedSubject: subject,
@@ -738,6 +725,35 @@ func (di *DelegatedIssuer) Mint(subject, email, username string, permissions []s
 	})
 	require.NoError(h.t, err, "mint delegated access token")
 	return token
+}
+
+// mintDelegatedAccessToken signs a canonical delegated access token with the
+// TEST issuer's own signer. The authkit v0.78.0 restructure kept only the
+// service-key Client method public (the signer variant lives in authkit's
+// internal/authcore), so the harness mirrors the canonical claim shape here:
+// typ=delegated-access+jwt, delegated_sub/permissions/attributes, never `sub`.
+func mintDelegatedAccessToken(ctx context.Context, signer jwtkit.Signer, p authkit.DelegatedAccessParams) (string, error) {
+	ttl := p.TTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"iss":           strings.TrimSpace(p.Issuer),
+		"iat":           now.Unix(),
+		"exp":           now.Add(ttl).Unix(),
+		"delegated_sub": strings.TrimSpace(p.DelegatedSubject),
+	}
+	if len(p.Audiences) > 0 {
+		claims["aud"] = p.Audiences
+	}
+	if len(p.Permissions) > 0 {
+		claims["permissions"] = p.Permissions
+	}
+	if len(p.Attributes) > 0 {
+		claims["attributes"] = p.Attributes
+	}
+	return jwtkit.SignWithType(ctx, signer, claims, jwtkit.DelegatedAccessTokenType, true)
 }
 
 // RegisterDelegatedCaller registers an AuthKit remote_application issuer for a
@@ -776,7 +792,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	token, err := authcore.MintDelegatedAccessToken(h.ctx, issuer.Signer(), authkit.DelegatedAccessParams{
+	token, err := mintDelegatedAccessToken(h.ctx, issuer.Signer(), authkit.DelegatedAccessParams{
 		Issuer:           issuer.URL(),
 		Audiences:        []string{"openrails"},
 		DelegatedSubject: subject,

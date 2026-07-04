@@ -167,7 +167,7 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 func (fx rebillFixture) rebillRunner(client *nmi.NMIClient, cfg *config.Config) *Runner {
 	return &Runner{
 		Store:    fx.store,
-		Registry: NewRegistry(NewManualRebillHandler(fx.db, cfg, map[string]*nmi.NMIClient{"mobius": client}, nil, nil)),
+		Registry: NewRegistry(NewManualRebillHandler(fx.db, cfg, map[string]*nmi.NMIClient{"mobius": client}, nil)),
 		Config:   cfg,
 	}
 }

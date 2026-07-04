@@ -233,7 +233,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	paymentSvc := payments.NewPaymentService(dbi)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc)
 	f.subSvc = subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
 	f.svc = &StripeConvergeService{
@@ -697,7 +697,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 	productSvc := catalog.NewProductService(dbi)
 	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	paymentSvc := payments.NewPaymentService(dbi)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
 	body, err := json.Marshal(CCBillRenewalSuccessEvent{

@@ -21,7 +21,7 @@ OpenRails was built to help break the parasitic monopoly Visa + MasterCard curre
 
 ### Required Services
 
-Requires a Postgres 18+ instance to use (can be shared with your web-server). Optionally also uses Redis for rate-limiting and Clickhouse for analytics.
+Requires a Postgres 18+ instance to use (can be shared with your web-server). Optionally also uses Redis for rate-limiting.
 
 In embedded (library) mode, OpenRails obviously requires your webserver http-handlers to be written in Go (a great choice btw).
 
@@ -129,7 +129,7 @@ JWKS). Same seam, two serializations.
 ### 1. Run it
 
 ```bash
-task docker-up            # Postgres + Garnet(Redis) + ClickHouse + OpenRails, zero-config
+task docker-up            # Postgres + Garnet(Redis) + OpenRails, zero-config
 curl http://localhost:3053/health
 ```
 

@@ -88,7 +88,7 @@ func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, 
 }
 
 func storeArmedRebillRunner(fx rebillFixture, boot map[string]*nmi.NMIClient, resolver money.NMIClientResolver, cfg *config.Config) *Runner {
-	h := NewManualRebillHandler(fx.db, cfg, boot, nil, nil)
+	h := NewManualRebillHandler(fx.db, cfg, boot, nil)
 	h.SetNMIClientResolver(resolver)
 	return &Runner{Store: fx.store, Registry: NewRegistry(h), Config: cfg}
 }

@@ -487,7 +487,7 @@ func (h *pruneTestHandler) Execute(context.Context, gen.OpenrailsRailIntent) Out
 	return Succeeded(map[string]any{
 		"transaction_id": "txn-abc-123",
 		"response_code":  1,
-		"gateway_raw":    "verbose forensic blob that ClickHouse already retains",
+		"gateway_raw":    "verbose forensic blob that rail_mutation_logs already retains",
 		"auth_code":      "XYZ789",
 	})
 }

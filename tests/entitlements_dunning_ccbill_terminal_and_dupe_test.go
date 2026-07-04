@@ -169,7 +169,6 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		NotificationService:          rt.NotificationService,
-		EventLogService:              rt.EventLogService,
 	}
 	require.NoError(t, expSvc.HandleCCBillWebhook(ctx))
 
@@ -306,7 +305,6 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		NotificationService:          rt.NotificationService,
-		EventLogService:              rt.EventLogService,
 		MoneyService:                 rt.MoneyService,
 	}
 

@@ -64,121 +64,6 @@ services:
     networks:
       - local-openrails
 
-  # ClickHouse Keeper for coordination (enables ON CLUSTER DDL)
-  clickhouse-keeper:
-    image: clickhouse/clickhouse-keeper:25.8-alpine
-    restart: unless-stopped
-    cpus: 0.5
-    mem_limit: 512m
-    pids_limit: 256
-    volumes:
-      - ./config/clickhouse-keeper.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
-      - clickhouse_keeper_data:/var/lib/clickhouse
-    ports:
-      - "127.0.0.1:${CLICKHOUSE_KEEPER_HOST_PORT:-9182}:9181" # Keeper port
-    networks:
-      - local-openrails
-    healthcheck:
-      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "9181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # ClickHouse for analytics
-  clickhouse:
-    image: clickhouse/clickhouse-server:25.8-alpine
-    restart: unless-stopped
-    cpus: 2.0
-    mem_limit: 2g
-    pids_limit: 4096
-    depends_on:
-      clickhouse-keeper:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:${CLICKHOUSE_HTTP_HOST_PORT:-8124}:8123"  # HTTP interface
-      - "127.0.0.1:${CLICKHOUSE_NATIVE_HOST_PORT:-9003}:9000"  # Native client
-    volumes:
-      # Mount configs as config.d fragments so they merge with default config.xml
-      - ./config/clickhouse.yaml:/etc/clickhouse-server/config.d/local.yaml:ro
-      - ./config/clickhouse-cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_logs:/var/log/clickhouse-server
-    environment:
-      # No user/db creation via entrypoint - bootstrap script handles everything
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    networks:
-      - local-openrails
-
-  # Bootstrap DB: create roles/schema/extensions using superuser
-  # One-shot job: Bootstrap ClickHouse cluster (create user, database, permissions)
-  clickhouse-bootstrap:
-    image: clickhouse/clickhouse-server:25.8-alpine
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    restart: "no"
-    environment:
-      BOOTSTRAP_CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
-      BOOTSTRAP_CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
-    entrypoint: ["/bin/sh"]
-    command:
-      - "-c"
-      - |
-        set -eu
-        # Wait a bit extra for cluster coordination to be fully ready
-        sleep 5
-
-        # Run bootstrap SQL as the built-in 'default' admin user (has all privileges).
-        # Must pass --user default explicitly: clickhouse-client auto-reads CLICKHOUSE_USER
-        # from env, which is set to analytics_user — the user we're about to create.
-        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | sed "s/{CLICKHOUSE_PASSWORD}/$${BOOTSTRAP_CLICKHOUSE_PASSWORD}/g" | clickhouse-client --host clickhouse --user default --password "" --multiquery
-        -- Create database across cluster
-        CREATE DATABASE IF NOT EXISTS analytics ON CLUSTER openrails;
-
-        -- Create ClickHouse user with password
-        CREATE USER IF NOT EXISTS {CLICKHOUSE_USER} ON CLUSTER openrails
-          IDENTIFIED WITH plaintext_password BY '{CLICKHOUSE_PASSWORD}'
-          HOST ANY;
-        SQL_EOF
-
-        for i in 1 2 3 4 5; do
-          if clickhouse-client --host clickhouse --user default --password "" --query "SELECT count() FROM system.users WHERE name = '$${BOOTSTRAP_CLICKHOUSE_USER}'" | grep -q 1; then
-            break
-          fi
-          sleep 1
-        done
-
-        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | clickhouse-client --host clickhouse --user default --password "" --multiquery
-        -- Grant full database access WITH GRANT OPTION so user can run migrations
-        GRANT ON CLUSTER openrails ALL ON analytics.* TO {CLICKHOUSE_USER} WITH GRANT OPTION;
-
-        -- Grant CLUSTER privilege required for ON CLUSTER DDL statements
-        GRANT ON CLUSTER openrails CLUSTER ON *.* TO {CLICKHOUSE_USER};
-
-        -- Grant system table permissions for monitoring and debugging
-        GRANT ON CLUSTER openrails SELECT ON system.tables TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.columns TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.databases TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.parts TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.parts_columns TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.mutations TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.merges TO {CLICKHOUSE_USER};
-        GRANT ON CLUSTER openrails SELECT ON system.processes TO {CLICKHOUSE_USER};
-        SQL_EOF
-
-        echo "✓ ClickHouse bootstrap completed successfully"
-    networks:
-      - local-openrails
-
-  # App migrations: run embedded migrator in the OpenRails image
-  # Uses host.docker.internal so migrations run against the same DB as local development
   openrails-migrate:
     build:
       context: .
@@ -186,8 +71,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      clickhouse-bootstrap:
-        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -198,12 +81,6 @@ services:
       DB_USERNAME: "admin"
       DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
       DB_SSLMODE: "disable"
-      # ClickHouse connection over the compose network.
-      CLICKHOUSE_HTTP_ADDR: "http://clickhouse:8123"
-      CLICKHOUSE_CLIENT_ADDR: "clickhouse:9000"
-      CLICKHOUSE_DB: "analytics"
-      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
     command: ["migrate", "up"]
     restart: "no"
     networks:
@@ -223,8 +100,6 @@ services:
       openrails-migrate:
         condition: service_completed_successfully
       garnet:
-        condition: service_healthy
-      clickhouse:
         condition: service_healthy
     ports:
       # Single public API surface. Server-to-server callers authenticate with
@@ -265,12 +140,6 @@ services:
       REDIS_ADDR: "garnet:6379"
       REDIS_PASSWORD: ""
       REDIS_DB: "0"
-      # ClickHouse connection for analytics
-      CLICKHOUSE_HTTP_ADDR: "http://clickhouse:8123"
-      CLICKHOUSE_CLIENT_ADDR: "clickhouse:9000"
-      CLICKHOUSE_DB: "analytics"
-      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
     command: ["server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
@@ -320,9 +189,6 @@ volumes:
   go_mod_cache:
     external: true
     name: go_mod_cache_persistent
-  clickhouse_data:
-  clickhouse_logs:
-  clickhouse_keeper_data:
   openrails_spool:
   openrails_runtime_keys:
   issuer_postgres_data:

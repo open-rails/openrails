@@ -124,7 +124,6 @@ task docker-up
 This starts:
 - Postgres (OpenRails)
 - Garnet/Redis
-- ClickHouse (+ bootstrap)
 - OpenRails migrations + OpenRails server
 
 ## 3) Start a deterministic webhook hostname

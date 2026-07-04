@@ -237,7 +237,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 
 	recorder := &recordingDeferredDeleteScheduler{}
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(
-		rt.DB, rt.ProductService, rt.PriceService, rt.EntitlementService, nil, rt.PaymentService, nil)
+		rt.DB, rt.ProductService, rt.PriceService, rt.EntitlementService, nil, rt.PaymentService)
 	lifecycle.SetConfig(rt.Config)
 	lifecycle.SetDeferredDeleteScheduler(recorder)
 
@@ -289,7 +289,7 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 
 	recorder := &recordingDeferredDeleteScheduler{}
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(
-		rt.DB, rt.ProductService, rt.PriceService, rt.EntitlementService, nil, rt.PaymentService, nil)
+		rt.DB, rt.ProductService, rt.PriceService, rt.EntitlementService, nil, rt.PaymentService)
 	lifecycle.SetConfig(&limitedCfg)
 	lifecycle.SetDeferredDeleteScheduler(recorder)
 

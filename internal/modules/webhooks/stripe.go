@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -40,7 +39,6 @@ type StripeWebhookService struct {
 	NotificationService          *subscriptions.NotificationService
 	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
-	EventLogService              *analytics.EventLogService
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService

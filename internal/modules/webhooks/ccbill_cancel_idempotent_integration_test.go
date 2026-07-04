@@ -84,7 +84,7 @@ func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
 		},
 		DB:                           dbi,
 		SubscriptionService:          subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil),
-		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), nil, nil),
+		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), nil),
 	}
 
 	require.NoError(t, svc.handleCancel(ctx))

@@ -125,7 +125,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	productSvc := catalog.NewProductService(dbi)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, notifSvc, paymentSvc, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, notifSvc, paymentSvc)
 	lifecycle.SetClock(clock)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 

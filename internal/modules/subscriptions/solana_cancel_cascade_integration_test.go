@@ -186,7 +186,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 func newLifecycleForTest(dbi *db.DB) *SubscriptionLifecycleService {
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
-	return NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, nil, nil, nil, nil)
+	return NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, nil, nil, nil)
 }
 
 func containsSolanaSub(rows []*models.SolanaSubscription, id uuid.UUID) bool {

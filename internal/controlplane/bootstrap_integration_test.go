@@ -103,7 +103,9 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env:  "test",
+		// "dev": authkit v0.78.0 resolves signing keys fail-closed outside dev
+		// (no keys.json -> no ephemeral keys -> IssueAccessToken missing_signer).
+		Env:  "dev",
 		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
 	}
 	cp, err := New(context.Background(), cfg, pool)
@@ -243,7 +245,7 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 
-	token, _, err := cp.Core().IssueAccessToken(ctx, owner.ID, "customer-remote-app-owner@example.test", nil)
+	token, _, err := cp.Core().IssueAccessToken(ctx, owner.ID, nil)
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()

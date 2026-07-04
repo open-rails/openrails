@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -63,7 +62,6 @@ type WebhookDispatcher struct {
 	NotificationService          *subscriptions.NotificationService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
-	EventLogService              *analytics.EventLogService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *identity.ProfileRepo
 	DeduplicationService         *DeduplicationService
@@ -125,7 +123,6 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ProductService:               d.ProductService,
 		PriceService:                 d.PriceService,
 		NotificationService:          d.NotificationService,
-		EventLogService:              d.EventLogService,
 		SubscriptionService:          d.SubscriptionService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 		ProfileRepo:                  d.ProfileRepo,
@@ -168,7 +165,6 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		Data:                         payload,
 		Rail:                         event.Rail,
 		NMIClient:                    client,
-		EventLogService:              d.EventLogService,
 		SubscriptionService:          d.SubscriptionService,
 		PaymentService:               d.PaymentService,
 		MoneyService:                 d.MoneyService,
@@ -197,7 +193,6 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		NotificationService:          d.NotificationService,
 		PurchaseRegistrar:            d.PurchaseRegistrar,
 		PaymentService:               d.PaymentService,
-		EventLogService:              d.EventLogService,
 		MoneyService:                 d.MoneyService,
 		DeduplicationService:         d.DeduplicationService,
 		RailCustomerService:          d.RailCustomerService,

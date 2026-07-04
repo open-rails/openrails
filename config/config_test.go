@@ -117,12 +117,19 @@ func TestLoad_EnvMapping(t *testing.T) {
 		require.Equal(t, SecretBackendDB, cfg.SecretStoreBackend())
 	})
 
-	t.Run("maps nested multi-underscore keys (clickhouse.http_addr)", func(t *testing.T) {
-		t.Setenv("CLICKHOUSE_HTTP_ADDR", "http://ch.example:8123")
+	t.Run("maps nested multi-underscore keys (sendgrid.api_key)", func(t *testing.T) {
+		t.Setenv("SENDGRID_API_KEY", "SG.test-key")
 
 		cfg, err := Load("nonexistent-config.yaml")
 		require.NoError(t, err)
-		require.Equal(t, "http://ch.example:8123", cfg.ClickHouse.HTTPAddr)
+		require.Equal(t, "SG.test-key", cfg.SendGrid.APIKey)
+	})
+
+	t.Run("rejects stale ClickHouse env (#735)", func(t *testing.T) {
+		t.Setenv("CLICKHOUSE_HTTP_ADDR", "http://ch.example:8123")
+
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "clickhouse config was removed (#735)")
 	})
 
 	t.Run("maps CATALOG_RECONCILIATION_INTERVAL to the top-level key (#712)", func(t *testing.T) {
@@ -373,8 +380,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.ProviderWriteMode = ProviderWriteModeReadOnly
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
-		cfg.ClickHouse.Username = "prod_analytics"
-		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		cfg.Auth.Issuer = "http://auth.internal:8080"
 		assert.ErrorContains(t, Validate(cfg), "must use https outside development")
@@ -388,8 +393,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.Env = "prod"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
-		cfg.ClickHouse.Username = "prod_analytics"
-		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		assert.ErrorContains(t, Validate(cfg), "provider_write_mode is required outside development")
 	})
@@ -423,8 +426,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.ProviderWriteMode = ProviderWriteModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
-		cfg.ClickHouse.Username = "prod_analytics"
-		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		assert.NoError(t, Validate(cfg))
 	})

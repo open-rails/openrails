@@ -2,8 +2,8 @@
 
 OpenRails is merchant-aware: every billing row belongs to an explicit merchant,
 and there is no default merchant fallback. The merchant id is the isolation key
-for Postgres RLS, background jobs, API-key resource scopes, ClickHouse
-analytics, and webhook credential lookup.
+for Postgres RLS, background jobs, API-key resource scopes, and webhook
+credential lookup.
 
 ## Vocabulary
 

@@ -8,7 +8,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 )
 
 // Fetcher/prober construction is per merchant (#699): see
@@ -90,13 +89,8 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) 
 		// the river provider-refresh worker injects its own.
 		Decisions: NewDecisionApplier(d, nil),
 	}
-	if cfg != nil {
-		// Third dunning-forensics evidence source: OpenRails' own ClickHouse
-		// analytics events (incl. imported legacy history). Optional — when
-		// ClickHouse is absent the report carries a note instead.
-		if cfg.ClickHouse != nil {
-			e.History = NewAnalyticsHistorySource(analytics.NewDunningHistoryService(cfg.ClickHouse))
-		}
-	}
+	// Third dunning-forensics evidence source (#735): imported legacy history
+	// + failed payments, read from Postgres.
+	e.History = NewPGHistorySource(d)
 	return e
 }

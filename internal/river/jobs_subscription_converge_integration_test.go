@@ -214,7 +214,7 @@ func buildConvergeWorker(dbi *db.DB, stripeBaseURL string) *SubscriptionConverge
 	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	paymentSvc := payments.NewPaymentService(dbi)
 	subscriptionSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
-	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc, nil)
+	lifecycleSvc := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc)
 	return &SubscriptionConvergeWorker{
 		DB:                           dbi,
 		StripeProber:                 &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_fake", BaseURL: stripeBaseURL},

@@ -23,9 +23,9 @@ rows/statuses/balances directly. Scenarios:
 go test -tags integration -run TestUnifiedBilling ./tests/
 ```
 
-> Needs working testcontainers (Postgres+ClickHouse+Redis). On hosts where the
-> ClickHouse container handshake flakes, use the deployed-stack harness below,
-> which is the stronger proof anyway (real deployed service + its own DB).
+> Needs working testcontainers (Postgres+Redis). If containers are flaky on a
+> host, use the deployed-stack harness below, which is the stronger proof
+> anyway (real deployed service + its own DB).
 
 ## 2. Deployed-stack harness — `scripts/unified_billing_e2e.sh`
 

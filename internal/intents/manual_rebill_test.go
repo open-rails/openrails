@@ -63,7 +63,7 @@ func TestManualRebillExecuteParksBeforeProviderTraffic(t *testing.T) {
 	intent := manualRebillIntent(t, testManualRebillPayload())
 
 	t.Run("no client for provider", func(t *testing.T) {
-		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{}, nil, nil)
+		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "not configured")
@@ -72,7 +72,7 @@ func TestManualRebillExecuteParksBeforeProviderTraffic(t *testing.T) {
 	t.Run("read-only client", func(t *testing.T) {
 		client := newTestNMIClient(t, "")
 		client.ReadOnly = true
-		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": client}, nil, nil)
+		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": client}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "read-only")
@@ -80,7 +80,7 @@ func TestManualRebillExecuteParksBeforeProviderTraffic(t *testing.T) {
 }
 
 func TestManualRebillUnusablePayloadIsTerminal(t *testing.T) {
-	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, "")}, nil, nil)
+	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, "")}, nil)
 	intent := manualRebillIntent(t, testManualRebillPayload())
 	intent.Payload = []byte(`{}`)
 	out := h.Execute(context.Background(), intent)
@@ -132,7 +132,7 @@ func TestManualRebillFindSuccessfulSale(t *testing.T) {
 				fmt.Fprint(w, tc.xml)
 			}))
 			t.Cleanup(srv.Close)
-			h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil, nil)
+			h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
 
 			txnID, found, err := h.findSuccessfulSale(h.Clients["mobius"], p)
 			require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestManualRebillVerifyReadFailureStaysAmbiguous(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
-	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil, nil)
+	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
 	out := h.Verify(context.Background(), manualRebillIntent(t, testManualRebillPayload()))
 	assert.Equal(t, OutcomeAmbiguous, out.Class)
 }

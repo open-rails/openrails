@@ -291,18 +291,18 @@ cross-references, with each timeline entry tagged by source:
 2. **local** — the retry fields on the subscription row (`last_retry_at` /
    `retry_attempts` / `next_retry_at`), preserved verbatim by the legacy
    import;
-3. **history** — OpenRails' own ClickHouse analytics events
-   (`payment_events` / `subscription_events`), which for migrated merchants
-   include the imported legacy history (users_logs rebill attempts,
-   mobius_schedulers scheduler events, payment_settings gateway state). This
-   is the deep-history source: the provider query APIs will not serve
-   years-old declines, the migrated events will — it is what answers "did
-   legacy dunning run and when did it die" end to end.
+3. **history** — Postgres history (#735): failed-payment rows plus, for
+   migrated merchants, the imported legacy dunning history
+   (`imported_dunning_history`: users_logs rebill attempts and
+   mobius_schedulers scheduler events). This is the deep-history source:
+   the provider query APIs will not serve years-old declines, the imported
+   events will — it is what answers "did legacy dunning run and when did it
+   die" end to end.
 
 Aggregates report per-source and combined "last dunning action per ANY
 source", never-attempted vs attempted-and-exhausted counts, and a
-decline-reason histogram. ClickHouse unconfigured or unreachable degrades to
-a `history source: …` note in the report — never an error.
+decline-reason histogram. An unavailable history source degrades to a
+`history source: …` note in the report — never an error.
 
 ## Dunning (#359)
 

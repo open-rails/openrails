@@ -201,17 +201,6 @@ func (s *Service) requirePaymentService() (*payments.PaymentService, error) {
 	return rt.PaymentService, nil
 }
 
-func (s *Service) requireAdminMetricsConfig() (*config.Config, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
-	return rt.Config, nil
-}
-
 func (s *Service) requireWebhookRuntime() (*app.Runtime, error) {
 	rt, err := s.runtime()
 	if err != nil {

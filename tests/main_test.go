@@ -12,7 +12,7 @@ import (
 
 // TestMain runs the integration suite and then tears down the process-shared
 // infra: the package-shared suite (harness resources) and the dbtest-shared
-// Postgres/Redis/ClickHouse containers.
+// Postgres/Redis containers.
 func TestMain(m *testing.M) {
 	// pgx decodes timestamptz into time.Local, whereas the bun/database-sql era
 	// returned UTC. Pin the process zone to UTC so time.Time equality
@@ -23,6 +23,5 @@ func TestMain(m *testing.M) {
 	CleanupSharedSuite()
 	dbtest.TerminateShared()
 	dbtest.TerminateSharedRedis()
-	dbtest.TerminateSharedClickHouse()
 	os.Exit(code)
 }

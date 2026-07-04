@@ -11,7 +11,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -40,7 +39,6 @@ type AdminSubscriptionService struct {
 	PaymentService      *payments.PaymentService
 	NMIClients          map[string]*nmi.NMIClient
 	StripeService       *StripeService
-	EventLogService     *analytics.EventLogService
 	clock               clockwork.Clock
 	// No user directory enrichment; IdP subject is stored on subscription
 }
@@ -274,23 +272,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		}).Error("Failed to create notification during admin subscription operation")
 	}
 
-	s.logCancellationEvent(ctx, subscription, reason)
-
 	return nil
-}
-
-// logCancellationEvent sends a ClickHouse subscription_cancelled event for admin-initiated cancels.
-func (s *AdminSubscriptionService) logCancellationEvent(ctx context.Context, subscription *models.Subscription, reason string) {
-	if s.EventLogService == nil || subscription == nil {
-		return
-	}
-
-	if err := s.EventLogService.LogAdminSubscriptionCancellation(ctx, subscription, reason, s.now()); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"user_id":         subscription.CustomerID.String(),
-		}).Warn("Failed to log admin subscription cancellation to ClickHouse")
-	}
 }
 
 // ExtendSubscription extends a subscription period by days (admin)

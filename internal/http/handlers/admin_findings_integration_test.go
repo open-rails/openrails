@@ -175,7 +175,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		Clock:                        clock,
 		NMIClients:                   clients,
 		SubscriptionService:          subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clients, nil, clock),
-		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, nil, paySvc, nil, clock),
+		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, nil, paySvc, clock),
 		PaymentService:               paySvc,
 		EntitlementService:           entSvc,
 		ProductAccessService:         productaccess.NewService(dbi, clock),

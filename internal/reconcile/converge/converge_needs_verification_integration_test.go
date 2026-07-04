@@ -214,7 +214,7 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
+	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	sfx := uuid.NewString()[:8]
 	prod, price := uuid.New(), uuid.New()
 	start := time.Now().UTC().Add(-130 * 24 * time.Hour)

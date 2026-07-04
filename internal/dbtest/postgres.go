@@ -73,7 +73,6 @@ func RunMain(m *testing.M) {
 	code := m.Run()
 	TerminateShared()
 	TerminateSharedRedis()
-	TerminateSharedClickHouse()
 	os.Exit(code)
 }
 

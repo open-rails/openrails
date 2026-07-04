@@ -84,8 +84,8 @@ jobs:
           go-version-file: go.mod
       - name: Download modules
         run: go mod download
-      # Integration tests share one compose-backed Postgres/Garnet/ClickHouse
-      # stack and run serially. Testcontainers remain capped fallbacks for
-      # direct package runs, not the normal CI path.
+      # Integration tests share one compose-backed Postgres/Garnet stack and
+      # run serially. Testcontainers remain capped fallbacks for direct
+      # package runs, not the normal CI path.
       - name: Integration test
         run: bash scripts/test_integration.sh ./...

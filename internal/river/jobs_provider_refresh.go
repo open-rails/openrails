@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -261,7 +260,6 @@ type ProviderRefreshWorker struct {
 	NMIClients          map[string]*nmi.NMIClient
 	CCBillDataLink      *ccbill.DataLinkClient
 	SolanaRPC           *solanaint.RPCClient
-	EventLogService     *analytics.EventLogService
 	DeferDelete         subscriptions.DeferredDeleteScheduler
 	NotificationService *subscriptions.NotificationService
 
@@ -407,7 +405,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, w.EventLogService, clock)
+	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, clock)
 	if w.DeferDelete != nil {
 		// #679: a stale-decline cancel must durably queue the deferred NMI
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.

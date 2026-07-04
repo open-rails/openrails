@@ -116,7 +116,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
@@ -236,7 +236,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)

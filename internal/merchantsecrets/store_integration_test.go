@@ -30,7 +30,6 @@ func TestMain(m *testing.M) {
 	vaulttest.TerminateShared()
 	dbtest.TerminateShared()
 	dbtest.TerminateSharedRedis()
-	dbtest.TerminateSharedClickHouse()
 	os.Exit(code)
 }
 
