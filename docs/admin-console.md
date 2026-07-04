@@ -66,11 +66,12 @@ import "embed"
 var FS embed.FS
 ```
 
-Build the dist straight from the openrails module cache (no vendoring; the
-script copies the read-only source to a temp dir before `pnpm install`):
+Build the dist straight from the openrails module cache (no vendoring; invoke
+via `bash` — module-cache files are not executable — and the script copies the
+read-only source to a temp dir before `pnpm install`):
 
 ```sh
-"$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
+bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
 ```
 
 Then hand the FS to the engine:
