@@ -43,7 +43,9 @@ func TestNoLibraryEnvReads(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			if name := d.Name(); name == ".git" || name == "node_modules" || name == "vendor" {
+			// Dot-dirs cover .git plus agent worktrees under .claude/worktrees
+			// (copies of the whole repo that made this test flag itself).
+			if name := d.Name(); strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil

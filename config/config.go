@@ -272,7 +272,10 @@ func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
 const LLMProviderAnthropic = "anthropic"
 
 // LLMDefaultModel is used when llm.model is unset.
-const LLMDefaultModel = "claude-sonnet-5"
+// Cheapest-capable-first (Paul): query generation is designed to need no model
+// cleverness — /schema + corrective errors carry the intelligence. Configure a
+// bigger model only if generation quality measurably demands it.
+const LLMDefaultModel = "claude-haiku-4-5-20251001"
 
 // LLMConfig configures the #741 natural-language widget generator.
 type LLMConfig struct {

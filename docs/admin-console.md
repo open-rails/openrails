@@ -84,6 +84,8 @@ configured the generate endpoint answers 501 and `config.json` carries
 ```yaml
 llm:
   # provider: anthropic      # default (only supported value)
-  # model: claude-sonnet-5   # default
+  # model: claude-haiku-4-5-20251001   # default — cheapest capable model on purpose: the
+  # /schema examples + all-at-once corrective errors are designed so query generation needs
+  # no model cleverness; configure a bigger model only if generation quality demands it
   api_key: "..."             # SECRET — prefer env LLM_API_KEY or a mounted secret file
 ```
