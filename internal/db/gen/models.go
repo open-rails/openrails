@@ -266,6 +266,15 @@ type OpenrailsCustomerMinimumSpend struct {
 	UpdatedAt    time.Time
 }
 
+// #741 per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query(#733 body), grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
+type OpenrailsDashboardConfig struct {
+	MerchantID uuid.UUID
+	Layout     []byte
+	UpdatedAt  time.Time
+	// acting principal (user id) of the last PUT; informational.
+	UpdatedBy *string
+}
+
 type OpenrailsEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string

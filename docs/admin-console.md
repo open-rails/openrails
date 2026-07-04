@@ -61,4 +61,29 @@ NMI payment-method change), Payments (filters, detail, rail-aware refund — dis
 rails without API refunds), Catalog (products/prices CRUD + activate/deactivate,
 manifest publish with plan preview, drift view + refresh), Ops (findings queue with
 approve/ignore, repair alerts, worker health), Settings (merchant profile, payment
-providers, credit limit, trust tier). Dashboard is a placeholder until #733/#741.
+providers, credit limit, trust tier).
+
+## Dashboard (#741)
+
+The Dashboard page is a per-merchant WIDGET GRID over the #733 metrics API: every tile
+is a saved metrics query + viz (stat/line/area/bar/donut/table) + grid position,
+persisted via `GET/PUT /v1/merchant/dashboard` (one RLS-scoped row per merchant; no row
+= the seeded default template, usage widgets appearing only when the merchant has usage
+activity). Drag/resize/add/edit/remove; changes save automatically (debounced PUT).
+Reads need `merchant:metrics:read`; writes + generation need `merchant:dashboard:update`
+(owner + support roles).
+
+Widgets can be added two ways: a schema-driven manual builder (always available), and a
+natural-language prompt ("count of users who cancelled per day, for the past 7 days")
+that a server-side LLM turns into a validated query — the model only ever sees the
+metrics schema, never data, and its output must pass the same compiler validation as any
+client query (corrective errors are fed back, max 2 retries). FAIL-CLOSED: with no LLM
+configured the generate endpoint answers 501 and `config.json` carries
+`nl_widgets_enabled: false`, hiding the NL box; the dashboard is fully usable without it.
+
+```yaml
+llm:
+  # provider: anthropic      # default (only supported value)
+  # model: claude-sonnet-5   # default
+  api_key: "..."             # SECRET — prefer env LLM_API_KEY or a mounted secret file
+```

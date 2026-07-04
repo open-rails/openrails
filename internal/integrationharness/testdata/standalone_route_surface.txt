@@ -51,6 +51,7 @@ GET /v1/merchant/customers/{customer_id}
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods
 GET /v1/merchant/customers/{customer_id}/payments
+GET /v1/merchant/dashboard
 GET /v1/merchant/entitlements/{entitlement}/customers
 GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
@@ -112,6 +113,7 @@ POST /v1/merchant/customers/entitlements:batch
 POST /v1/merchant/customers/{customer_id}/entitlements
 POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
+POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
 POST /v1/merchant/metrics/query
 POST /v1/merchant/payments/{id}/refunds
@@ -133,6 +135,7 @@ PUT /v1/me/payment-methods/{id}
 PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/credit-limit
+PUT /v1/merchant/dashboard
 PUT /v1/merchant/payment-providers/{provider}
 PUT /v1/merchant/settings
 PUT /v1/merchant/subscriptions/{id}/payment-method

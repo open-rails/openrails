@@ -40,10 +40,14 @@ type Query struct {
 
 // QueryRange bounds the query window. Date-only values are UTC calendar days:
 // from = day start (inclusive), to = day end (inclusive, i.e. to+1d exclusive).
-// RFC3339 timestamps are taken verbatim as [from, to).
+// RFC3339 timestamps are taken verbatim as [from, to). Last is the relative
+// alternative ("7d", "12w", "6m", "1y" — a trailing window ending today,
+// inclusive), mutually exclusive with from/to; saved dashboard widgets (#741)
+// use it so "past 7 days" stays current on every load.
 type QueryRange struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	Last string `json:"last,omitempty"`
 }
 
 // OrderTerm orders result rows by a requested measure or dimension.

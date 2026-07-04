@@ -57,9 +57,11 @@ func Schema() SchemaDoc {
 		Caveats:  Caveats,
 		Limits:   SchemaLimits{MaxBuckets: MaxBuckets, MaxLimit: MaxLimit},
 		QueryShape: `POST body: {"measures":[...], "by":[dims incl "time"], "grain":"day|week|month|quarter|year", ` +
-			`"range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}, "filters":{dim:[values]}, ` +
+			`"range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} or {"last":"7d"}, "filters":{dim:[values]}, ` +
 			`"order":[{"measure"|"dimension":name,"dir":"asc|desc"}], "limit":N, "compare":"previous_period"}. ` +
-			`Dates are inclusive UTC days (RFC3339 accepted, [from,to)). Unknown keys/names are 400s with corrective errors. ` +
+			`Dates are inclusive UTC days (RFC3339 accepted, [from,to)); "last" is a relative trailing window ending today ` +
+			`(Nd|Nw|Nm|Ny, e.g. "7d" = past 7 days incl. today — prefer it for recurring/saved queries so they stay current). ` +
+			`Unknown keys/names are 400s with corrective errors. ` +
 			`Response: {columns, rows, grain, range, compare_rows?}; time series zero-fill every bucket.`,
 	}
 	for i := range Measures {
@@ -84,7 +86,7 @@ func Schema() SchemaDoc {
 				Measures: []string{"cancellations"},
 				By:       []string{"time"},
 				Grain:    "day",
-				Range:    &QueryRange{From: "2026-06-27", To: "2026-07-03"},
+				Range:    &QueryRange{Last: "7d"},
 			},
 		},
 		{

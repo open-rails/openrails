@@ -36,6 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -358,6 +359,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		CardAbuseGuard:         cardAbuseGuard,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
+		DashboardService:       serviceInstances.DashboardService,
 		MoneyCharger:           moneyCharger,
 		RailCustomerService:    serviceInstances.RailCustomerService,
 	}
@@ -774,6 +776,7 @@ type servicesInstances struct {
 	CheckoutSessionService *checkout.CheckoutSessionService
 	MoneyService           *money.MoneyService
 	MetricsService         *metrics.Service
+	DashboardService       *dashboard.Service
 	RailCustomerService    *payments.RailCustomerService
 }
 
@@ -788,6 +791,13 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	metricsService := metrics.NewService(database)
+	// #741 dashboard: NL widget generation is armed only when an LLM key is
+	// configured — nil LLM = the generate endpoint fail-closes with 501.
+	var dashboardLLM dashboard.LLM
+	if cfg.LLM.IsConfigured() {
+		dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), "")
+	}
+	dashboardService := dashboard.NewService(database, dashboardLLM, clock)
 	railCustomerService := payments.NewRailCustomerService(database)
 	profileRepo := identity.NewProfileRepo(database)
 
@@ -986,6 +996,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		CheckoutSessionService:       checkoutSessionService,
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
+		DashboardService:             dashboardService,
 		RailCustomerService:          railCustomerService,
 	}
 }
