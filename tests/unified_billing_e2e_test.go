@@ -86,7 +86,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		controlplane.PermMerchantAdmissionsCreate,
 	}}
 	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
-	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 
 	return &billingE2EHarness{
 		t:          t,

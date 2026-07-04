@@ -217,16 +217,30 @@ func OriginAllowed(origin string, allowedOrigins []string) bool {
 }
 
 // ResolveMerchantHTTP is the net/http analogue of ResolveMerchant. It pins the
-// engine's CONSTRUCTION-TIME merchant (`configured`) onto the request context
-// BEFORE any merchant-owned DB access, so MerchantDBConnMW pins the connection to
-// the correct merchant (issue #223/#227). An OpenRails engine is bound to a single
-// merchant at construction — there is NO default merchant (#336).
+// engine's configured merchant onto the request context BEFORE any
+// merchant-owned DB access, so MerchantDBConnMW pins the connection to the
+// correct merchant (issue #223/#227). An OpenRails engine is bound to a
+// single merchant — there is NO default merchant (#336).
 //
-// If `configured` is zero, NOTHING is pinned: downstream merchant.Require fails,
-// so a missing merchant is a hard error rather than a silent default.
-func ResolveMerchantHTTP(configured merchant.ID) HTTPMiddleware {
+// resolve is called ON EVERY REQUEST, never once at construction time
+// (#744): an embedded engine's bound merchant is set post-boot
+// (UpsertMerchantConfig binds after New — embed/provision.go), and an HTTP
+// handler built from the same Runtime may already be mounted and serving
+// requests before that bind happens. Pass a live accessor — typically the
+// Runtime's own method value, e.g. `middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant)`
+// — never a value snapshotted at handler-construction time, or mounting
+// before the bind pins every request to the zero merchant forever.
+//
+// If resolve is nil or returns zero, NOTHING is pinned: downstream
+// merchant.Require fails, so a missing merchant is a hard error rather than a
+// silent default.
+func ResolveMerchantHTTP(resolve func() merchant.ID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var configured merchant.ID
+			if resolve != nil {
+				configured = resolve()
+			}
 			if configured.IsZero() {
 				next.ServeHTTP(w, r)
 				return
@@ -235,4 +249,12 @@ func ResolveMerchantHTTP(configured merchant.ID) HTTPMiddleware {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// StaticMerchant adapts a fixed merchant.ID into the resolver ResolveMerchantHTTP
+// expects. Production code should prefer a live accessor (Runtime.ConfiguredMerchant);
+// this exists for callers with a genuinely fixed id — chiefly tests that pin one
+// merchant for the lifetime of a test server.
+func StaticMerchant(id merchant.ID) func() merchant.ID {
+	return func() merchant.ID { return id }
 }

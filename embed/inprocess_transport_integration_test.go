@@ -38,7 +38,7 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.ConfiguredMerchant = dbtest.TestMerchantID
+	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	handler := newServiceHandler(rt.emb.App().Runtime)
 

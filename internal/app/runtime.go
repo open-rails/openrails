@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,6 +42,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -50,10 +52,26 @@ type Runtime struct {
 	RedisClient *redis.Client
 	Config      *config.Config
 
-	// ConfiguredMerchant scopes this engine instance to one merchant — set by embedded
-	// hosts that run one engine per merchant. Zero in standalone, where the merchant is
-	// resolved per-credential. OpenRails is multi-merchant either way.
-	ConfiguredMerchant merchant.ID
+	// configuredMerchant scopes this engine instance to one merchant — set by
+	// embedded hosts that run one engine per merchant (zero in standalone,
+	// where the merchant is resolved per-credential). It is an atomic because
+	// UpsertMerchantConfig may bind it AFTER New (embed/provision.go) while an
+	// HTTP handler built from this Runtime may already be mounted and serving
+	// requests (#744): every reader MUST go through ConfiguredMerchant() and
+	// re-resolve live (mirroring embed/transport.go's in-process live read) —
+	// never cache the value at handler-construction time, or mount order
+	// relative to the bind silently determines which merchant a request lands
+	// on. Use SetConfiguredMerchant to write it.
+	configuredMerchant atomic.Pointer[merchant.ID]
+
+	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
+	// (#746), built once from config.Config.TrustedProxies. A nil/empty
+	// resolver trusts nothing (raw socket peer only). Every consumer that
+	// needs "the request's real client IP" — rate-limit subject keys, abuse
+	// tracking, webhook IPAddress recording, the CCBill IP allowlist —
+	// resolves through this ONE instance instead of reading
+	// RemoteAddr/X-Forwarded-For itself.
+	TrustedProxies *iputil.TrustedProxies
 
 	// Rails is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
@@ -188,6 +206,32 @@ type Runtime struct {
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
+}
+
+// ConfiguredMerchant returns the merchant this engine instance is scoped to,
+// resolved fresh on every call — NEVER cache this at handler-construction
+// time (#744: UpsertMerchantConfig can bind it after New, after a handler
+// built from this Runtime is already mounted and serving requests). Zero in
+// standalone, or before any bind.
+func (r *Runtime) ConfiguredMerchant() merchant.ID {
+	if r == nil {
+		return merchant.ID{}
+	}
+	if id := r.configuredMerchant.Load(); id != nil {
+		return *id
+	}
+	return merchant.ID{}
+}
+
+// SetConfiguredMerchant binds this engine instance to a merchant. Safe to
+// call post-boot (embed.UpsertMerchantConfig) concurrently with in-flight
+// requests calling ConfiguredMerchant() — that concurrency safety is the
+// entire point of #744's fix.
+func (r *Runtime) SetConfiguredMerchant(id merchant.ID) {
+	if r == nil {
+		return
+	}
+	r.configuredMerchant.Store(&id)
 }
 
 func (r *Runtime) FXRateHealth() (time.Time, bool) {

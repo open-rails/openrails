@@ -115,7 +115,6 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 		Redis:                  application.RedisClient,
 		Authenticator:          authenticator,
 		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
-		ConfiguredMerchant:     application.Runtime.ConfiguredMerchant,
 		ControlPlane:           embcp.Get(application),
 	})
 	if err != nil {

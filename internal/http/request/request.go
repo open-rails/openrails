@@ -20,6 +20,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -278,19 +279,23 @@ func (r *Request) GetUser() *checkout.UserIdentity {
 	return nil
 }
 
-func (r *Request) GetClientIP() string {
-	if forwarded := r.t.Header("X-Forwarded-For"); forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
+// ClientIP returns the resolved client IP for this request (#746): the raw
+// socket peer, or — when that peer is inside a configured trusted_proxies
+// CIDR — the first untrusted address found walking X-Forwarded-For
+// right-to-left. Every consumer that needs "the client's IP" (rate limiting,
+// abuse tracking, webhook IPAddress recording, the CCBill IP allowlist) MUST
+// resolve through this (or the same Runtime.TrustedProxies resolver) so proxy
+// trust is enforced identically everywhere. With no trusted_proxies
+// configured this is exactly GetRemoteIP.
+func (r *Request) ClientIP() string {
+	if r.Request == nil {
+		return ""
 	}
-
-	if realIP := r.t.Header("X-Real-IP"); realIP != "" {
-		return strings.TrimSpace(realIP)
+	var resolver *iputil.TrustedProxies
+	if r.State != nil {
+		resolver = r.State.TrustedProxies
 	}
-
-	return r.GetRemoteIP()
+	return resolver.ResolveClientIP(r.Request.RemoteAddr, r.t.Header("X-Forwarded-For"))
 }
 
 func (r *Request) GetRemoteIP() string {

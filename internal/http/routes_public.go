@@ -15,7 +15,7 @@ import (
 
 func (s *Server) registerUserRoutesAt(mux *http.ServeMux, apiPrefix string) {
 	s.handle(mux, http.MethodGet+" "+apiPrefix+"/captcha/status",
-		embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore))
+		embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()))
 	s.handle(mux, http.MethodGet+" "+apiPrefix+"/captcha/client.js",
 		embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha))
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordRoute), s.runtime, httproutes.Options{

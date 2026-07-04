@@ -251,7 +251,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	// Bind the engine to the test merchant — what embed provisioning
 	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
-	rt.Embedded().App().Runtime.ConfiguredMerchant = dbtest.TestMerchantID
+	rt.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	mux := http.NewServeMux()
 	runtime := rt.Embedded().App().Runtime
@@ -265,7 +265,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 			}}),
 		},
 	)
-	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID)))
+	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(runtime.ConfiguredMerchant)))
 	h.cleanup(srv.Close)
 
 	return &Surface{

@@ -57,7 +57,7 @@ type inprocessTransport struct {
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	// Live read: EnsureMerchant/provisioning may bind the merchant after New.
-	mid := t.rt.ConfiguredMerchant
+	mid := t.rt.ConfiguredMerchant()
 	if mid.IsZero() {
 		if v, ok := merchant.FromContext(ctx); ok {
 			mid = v // host pinned it per call via openrails.WithMerchant

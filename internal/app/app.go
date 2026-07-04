@@ -125,7 +125,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		return nil, fmt.Errorf("initialise runtime: %w", err)
 	}
 	if opts != nil {
-		runtime.ConfiguredMerchant = opts.ConfiguredMerchant
+		runtime.SetConfiguredMerchant(opts.ConfiguredMerchant)
 	}
 
 	var appCache cache.Cache

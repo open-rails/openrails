@@ -58,7 +58,7 @@ type localClient struct {
 // merchant-owned DB access. Without this every store call fails
 // merchant.Require in embedded mode.
 func (c *localClient) merchantCtx(ctx context.Context) context.Context {
-	mid := c.rt.ConfiguredMerchant
+	mid := c.rt.ConfiguredMerchant()
 	if mid.IsZero() {
 		if v, ok := merchant.FromContext(ctx); ok {
 			mid = v

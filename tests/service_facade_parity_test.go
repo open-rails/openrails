@@ -135,7 +135,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		},
 	}
 	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
-	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 
 	withServiceCredential := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -178,7 +178,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
 	httproutes.RegisterServiceRoutes(httprouter.NewMux(jwtMux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: jwtResolver})})
-	jwtRouter := middleware.ChainHTTP(jwtMux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
+	jwtRouter := middleware.ChainHTTP(jwtMux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}

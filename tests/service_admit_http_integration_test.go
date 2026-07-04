@@ -52,7 +52,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 		permissions: []string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate},
 	}
 	httproutes.RegisterServiceRoutes(httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
-	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID))
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 
 	post := func(path string, body any) *httptest.ResponseRecorder {
 		var rdr *bytes.Reader

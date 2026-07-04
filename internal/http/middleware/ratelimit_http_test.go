@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -52,7 +53,7 @@ func doHTTPPost(h http.Handler, path, ip, token string) *httptest.ResponseRecord
 // stub verifier can be supplied), the same way RateLimitHTTP wires it internally.
 func rlHTTPHandlerWithDeps(deps RateLimitDeps, captchaCfg *config.CaptchaConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		subjects := rateLimitSubjectsHTTP(r)
+		subjects := rateLimitSubjectsHTTP(r, nil)
 		decision := EvaluateRateLimit(w, r, subjects, deps)
 		applyRateLimitDecisionHTTP(w, r, next, decision, captchaCfg)
 	})
@@ -61,7 +62,7 @@ func rlHTTPHandlerWithDeps(deps RateLimitDeps, captchaCfg *config.CaptchaConfig,
 func TestRateLimitHTTPBlocksOverLimit(t *testing.T) {
 	t.Parallel()
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
-	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil))(okHTTPHandler())
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil)(okHTTPHandler())
 
 	require.Equal(t, http.StatusOK, doHTTPPost(h, "/v1/checkout", "203.0.113.70", "").Code)
 	blocked := doHTTPPost(h, "/v1/checkout", "203.0.113.70", "")
@@ -70,10 +71,62 @@ func TestRateLimitHTTPBlocksOverLimit(t *testing.T) {
 	require.Equal(t, "1", blocked.Header().Get("X-RateLimit-Limit"))
 }
 
+// #746: behind a configured trusted proxy, the rate-limit subject key is the
+// resolved client IP (from X-Forwarded-For), not the proxy's own socket
+// address — two distinct clients arriving through the SAME load balancer are
+// limited INDEPENDENTLY instead of collapsing onto one shared bucket.
+func TestRateLimitHTTPKeysByResolvedClientIPBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
+	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	resolver := iputil.ParseTrustedProxies([]string{"10.0.0.0/8"})
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), resolver)(okHTTPHandler())
+
+	doThroughProxy := func(forwardedFor string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+		req.RemoteAddr = "10.0.0.5:1234" // the trusted load balancer
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	// Client A's first request is allowed; its second trips the 1/min limit.
+	require.Equal(t, http.StatusOK, doThroughProxy("203.0.113.10").Code)
+	require.Equal(t, http.StatusTooManyRequests, doThroughProxy("203.0.113.10").Code)
+
+	// Client B, behind the SAME proxy, gets its OWN bucket — proof the key is
+	// the resolved client IP, not the shared load-balancer address.
+	require.Equal(t, http.StatusOK, doThroughProxy("203.0.113.11").Code)
+}
+
+// Without a resolver (no trusted_proxies configured), the load balancer's own
+// address is what's keyed — X-Forwarded-For has zero effect, so distinct
+// "clients" behind the same untrusted proxy collapse onto ONE bucket. This
+// pins the pre-#746 / no-config baseline so the trusted-proxy test above is a
+// meaningful contrast, not a tautology.
+func TestRateLimitHTTPCollapsesToSocketIPWithoutResolver(t *testing.T) {
+	t.Parallel()
+	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil)(okHTTPHandler())
+
+	doThroughProxy := func(forwardedFor string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+		req.RemoteAddr = "10.0.0.5:1234"
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusOK, doThroughProxy("203.0.113.10").Code)
+	// A "different" forwarded client still 429s: same socket peer, same bucket.
+	require.Equal(t, http.StatusTooManyRequests, doThroughProxy("203.0.113.11").Code)
+}
+
 func TestRateLimitHTTPRejectsOversizedContentLength(t *testing.T) {
 	t.Parallel()
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
-	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil))(okHTTPHandler())
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil)(okHTTPHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
 	req.RemoteAddr = "203.0.113.71:1234"
@@ -87,7 +140,7 @@ func TestRateLimitHTTPRejectsOversizedContentLength(t *testing.T) {
 func TestRateLimitHTTPNormalizesEmbeddedPrefix(t *testing.T) {
 	t.Parallel()
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
-	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil))(okHTTPHandler())
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil)(okHTTPHandler())
 
 	// The embedded surface serves under /billing/v1/*; the bucket classifier must
 	// strip the /billing prefix so the checkout limit still applies.
@@ -141,7 +194,7 @@ func TestRateLimitHTTPLimitsByUserAcrossIPs(t *testing.T) {
 	// request from a DIFFERENT IP but the same user is still blocked.
 	chain := ChainHTTP(okHTTPHandler(),
 		HTTPMiddleware(billingauth.Optional(auth)),
-		RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil)),
+		RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil),
 	)
 
 	require.Equal(t, http.StatusOK, doHTTPPost(chain, "/v1/checkout", "203.0.113.80", "").Code)
@@ -251,7 +304,7 @@ func TestRateLimitHTTPDoesNotLimitCaptchaStatusOrClientScript(t *testing.T) {
 	t.Parallel()
 	limits := config.RateLimitsConfig{"default": {RequestsPerMinute: 1}}
 	captchaCfg := &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "site-key", SecretKey: "secret-key"}
-	h := RateLimitHTTP(&limits, captchaCfg, nil, captcha.NewChallengeStore(nil))(okHTTPHandler())
+	h := RateLimitHTTP(&limits, captchaCfg, nil, captcha.NewChallengeStore(nil), nil)(okHTTPHandler())
 
 	for _, path := range []string{"/v1/captcha/status", "/v1/captcha/client.js"} {
 		for i := 0; i < 3; i++ {
@@ -317,7 +370,7 @@ func TestRateLimitHTTPRejectsOversizedChunkedBody(t *testing.T) {
 		require.Error(t, err)
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 	})
-	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil))(next)
+	h := RateLimitHTTP(&limits, nil, nil, captcha.NewChallengeStore(nil), nil)(next)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(strings.Repeat("a", int(BucketMaxContentLength["checkout"]+1))))
 	req.RemoteAddr = "203.0.113.61:1234"
