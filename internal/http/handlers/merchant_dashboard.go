@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -59,7 +60,9 @@ func PutMerchantDashboard(r *httprequest.Request) {
 // GenerateDashboardWidget handles POST /v1/merchant/dashboard/widgets/generate:
 // prompt → VALIDATED {query, title, viz} via the server-side LLM (#741). The
 // LLM sees only the metrics schema, never data; unconfigured deployments
-// answer 501 (fail-closed — the console hides the NL box too).
+// answer 501 (fail-closed — the console shows a pointed empty-state, #755).
+// Optional base_query (an existing widget's query, validated like any client
+// query) makes the prompt a REFINEMENT of that query instead of a fresh start.
 func GenerateDashboardWidget(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if svc == nil {
@@ -68,17 +71,33 @@ func GenerateDashboardWidget(r *httprequest.Request) {
 	}
 	if !svc.NLConfigured() {
 		r.ErrorJSON(http.StatusNotImplemented,
-			"natural-language widget generation is not configured on this deployment: set llm.api_key (env LLM_API_KEY); the manual widget builder works without it")
+			"natural-language widget generation is not configured on this deployment: set llm.api_key (env LLM_API_KEY) — see docs/admin-console.md")
 		return
 	}
 	var body struct {
-		Prompt string `json:"prompt"`
+		Prompt    string          `json:"prompt"`
+		BaseQuery json.RawMessage `json:"base_query"`
 	}
 	if err := json.NewDecoder(r.Request.Body).Decode(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
-		r.ErrorJSON(http.StatusBadRequest, `body must be {"prompt":"<what the widget should show>"}`)
+		r.ErrorJSON(http.StatusBadRequest, `body must be {"prompt":"<what the widget should show>","base_query":<optional existing query to refine>}`)
 		return
 	}
-	res, err := svc.Generate(r.Request.Context(), strings.TrimSpace(body.Prompt))
+	var base *metrics.Query
+	if len(body.BaseQuery) > 0 && string(body.BaseQuery) != "null" {
+		q, verr := metrics.DecodeQuery(bytes.NewReader(body.BaseQuery))
+		if verr == nil {
+			_, verr = metrics.Validate(q)
+		}
+		if verr != nil {
+			for i := range verr.Errors {
+				verr.Errors[i].Param = "base_query." + verr.Errors[i].Param
+			}
+			dashboardValidationError(r, verr)
+			return
+		}
+		base = q
+	}
+	res, err := svc.Generate(r.Request.Context(), strings.TrimSpace(body.Prompt), base)
 	if err != nil {
 		var invalid *dashboard.GenerateInvalidError
 		switch {

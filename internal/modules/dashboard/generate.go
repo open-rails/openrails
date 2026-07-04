@@ -46,12 +46,24 @@ type GenerateResult struct {
 // data — and its output is validated by the same compiler that gates client
 // queries; on errors, the compiler's corrective messages are fed back verbatim
 // (max 2 retries). It never executes queries.
-func (s *Service) Generate(ctx context.Context, prompt string) (*GenerateResult, error) {
+//
+// base, when non-nil, is an existing (already validated) widget query the
+// prompt refines — it rides into the user turn as "current query to modify"
+// so instructions like "make it weekly" edit rather than start over.
+func (s *Service) Generate(ctx context.Context, prompt string, base *metrics.Query) (*GenerateResult, error) {
 	if s.llm == nil {
 		return nil, ErrLLMNotConfigured
 	}
 	system := generateSystemPrompt(s.clock.Now().UTC())
-	msgs := []LLMMessage{{Role: "user", Content: prompt}}
+	userTurn := prompt
+	if base != nil {
+		baseJSON, err := json.Marshal(base)
+		if err != nil {
+			return nil, fmt.Errorf("dashboard: marshal base query: %w", err)
+		}
+		userTurn = "Current query to modify:\n" + string(baseJSON) + "\n\nInstruction: " + prompt
+	}
+	msgs := []LLMMessage{{Role: "user", Content: userTurn}}
 
 	var lastErrs []metrics.FieldError
 	for attempt := 0; attempt < generateMaxAttempts; attempt++ {
@@ -154,6 +166,7 @@ Respond with ONLY one JSON object — no prose, no code fences:
 
 Viz guidance: "stat" = a single number (no time dimension; add "compare":"previous_period" for a delta); "line"/"area"/"bar" = time series ("by" includes "time"); "donut" = share across ONE non-time dimension; "table" = ranked lists or multi-column breakdowns.
 Prefer relative ranges ({"range":{"last":"7d"}}) so saved widgets stay current; use explicit dates only when the request names them.
+When the request includes a "current query to modify", treat the instruction as an EDIT to that query: change only what the instruction asks for and keep everything else as-is.
 If the request is ambiguous, pick the closest supported query instead of asking questions.`,
 		now.Format("2006-01-02"), schemaJSON)
 }

@@ -349,6 +349,45 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 		require.Contains(t, feedback, "cancellations", "did-you-mean must be fed back")
 	})
 
+	t.Run("refine: base_query rides into the llm turn as current-query context", func(t *testing.T) {
+		weekly := `{"query":{"measures":["cancellations"],"by":["time"],"grain":"week","range":{"last":"12w"}},"title":"Cancellations per week","viz":"line"}`
+		fake := &scriptedLLM{responses: []string{weekly}}
+		svc.SetLLM(fake)
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate",
+			token, map[string]any{
+				"prompt": "make it weekly",
+				"base_query": map[string]any{
+					"measures": []string{"cancellations"},
+					"by":       []string{"time"},
+					"grain":    "day",
+					"range":    map[string]string{"last": "7d"},
+				},
+			})
+		require.Equalf(t, http.StatusOK, status, "refine: %s", string(body))
+		require.Contains(t, string(body), `"week"`)
+		require.Len(t, fake.calls, 1)
+		turn := fake.calls[0][0].Content
+		require.Contains(t, turn, "Current query to modify:")
+		require.Contains(t, turn, `"grain":"day"`, "existing query must ride in as context")
+		require.Contains(t, turn, "Instruction: make it weekly")
+	})
+
+	t.Run("invalid base_query is a 400 with compiler errors", func(t *testing.T) {
+		fake := &scriptedLLM{responses: []string{goldenWidgetJSON}}
+		svc.SetLLM(fake)
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate",
+			token, map[string]any{
+				"prompt": "make it weekly",
+				"base_query": map[string]any{
+					"measures": []string{"cancelations"},
+					"range":    map[string]string{"last": "7d"},
+				},
+			})
+		require.Equal(t, http.StatusBadRequest, status)
+		require.Contains(t, string(body), "base_query.measures[0]")
+		require.Empty(t, fake.calls, "invalid base must never reach the LLM")
+	})
+
 	t.Run("exhausted retries return the corrective errors", func(t *testing.T) {
 		invalid := `{"query":{"measures":["nope"],"range":{"last":"7d"}},"title":"x","viz":"stat"}`
 		fake := &scriptedLLM{responses: []string{invalid}}

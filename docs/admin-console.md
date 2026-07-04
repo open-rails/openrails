@@ -119,7 +119,7 @@ manifest publish with plan preview, drift view + refresh), Ops (findings queue w
 approve/ignore, repair alerts, worker health), Settings (merchant profile, payment
 providers, credit limit, trust tier).
 
-## Dashboard (#741)
+## Dashboard (#741, #755)
 
 The Dashboard page is a per-merchant WIDGET GRID over the #733 metrics API: every tile
 is a saved metrics query + viz (stat/line/area/bar/donut/table) + grid position,
@@ -129,13 +129,24 @@ activity). Drag/resize/add/edit/remove; changes save automatically (debounced PU
 Reads need `merchant:metrics:read`; writes + generation need `merchant:dashboard:update`
 (owner + support roles).
 
-Widgets can be added two ways: a schema-driven manual builder (always available), and a
-natural-language prompt ("count of users who cancelled per day, for the past 7 days")
-that a server-side LLM turns into a validated query — the model only ever sees the
-metrics schema, never data, and its output must pass the same compiler validation as any
-client query (corrective errors are fed back, max 2 retries). FAIL-CLOSED: with no LLM
-configured the generate endpoint answers 501 and `config.json` carries
-`nl_widgets_enabled: false`, hiding the NL box; the dashboard is fully usable without it.
+Widget queries are written by the LLM ONLY — by design (#755, there is no manual query
+builder). Creating a widget = a natural-language prompt ("count of users who cancelled
+per day, for the past 7 days") that a server-side LLM turns into a validated query — the
+model only ever sees the metrics schema, never data, and its output must pass the same
+compiler validation as any client query (corrective errors are fed back, max 2 retries).
+The result previews live through `/v1/merchant/metrics/query` before saving; the only
+human knobs are the title and the viz type (the LLM suggests both). Editing an existing
+widget is a REFINEMENT: the instruction ("make it weekly", "split by rail") is sent with
+the widget's current query as `base_query`, and the LLM edits it instead of starting
+over. Direct title/viz edits never touch the LLM. `GET /v1/merchant/metrics/schema`
+stays public for programmatic clients.
+
+FAIL-CLOSED, but visible: with no LLM configured the generate endpoint answers 501 and
+`config.json` carries `nl_widgets_enabled: false`; the add-widget button stays visible
+and opens a pointed empty-state naming the fix (`llm.api_key` / env `LLM_API_KEY`).
+Everything else works keyless: the seeded default template, drag/resize/delete,
+per-widget refresh, and direct title/viz edits of existing widgets — only creating or
+refining queries needs the key.
 
 ```yaml
 llm:

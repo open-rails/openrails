@@ -13,15 +13,6 @@ export function newWidgetId(): string {
   return crypto.randomUUID()
 }
 
-export const RANGE_PRESETS = [
-  { value: "7d", label: "Past 7 days" },
-  { value: "14d", label: "Past 14 days" },
-  { value: "30d", label: "Past 30 days" },
-  { value: "12w", label: "Past 12 weeks" },
-  { value: "6m", label: "Past 6 months" },
-  { value: "1y", label: "Past year" },
-] as const
-
 // formatMeasure renders one measure cell by its column unit.
 export function formatMeasure(value: MetricsCell, unit: string | undefined, currency?: string): string {
   if (value === null || value === undefined) return "—"

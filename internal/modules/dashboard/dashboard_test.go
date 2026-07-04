@@ -76,7 +76,7 @@ const goldenResponse = `{"query":{"measures":["cancellations"],"by":["time"],"gr
 func TestGenerate_HappyPathGolden(t *testing.T) {
 	llm := &fakeLLM{responses: []string{goldenResponse}}
 	svc := NewService(nil, llm, nil)
-	res, err := svc.Generate(context.Background(), "count of users who cancelled per day, for the past 7 days")
+	res, err := svc.Generate(context.Background(), "count of users who cancelled per day, for the past 7 days", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
 	require.Equal(t, []string{"time"}, res.Query.By)
@@ -91,7 +91,7 @@ func TestGenerate_RetryLoopFeedsErrorsBack(t *testing.T) {
 	invalid := `{"query":{"measures":["cancelations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations","viz":"line"}`
 	llm := &fakeLLM{responses: []string{invalid, goldenResponse}}
 	svc := NewService(nil, llm, nil)
-	res, err := svc.Generate(context.Background(), "cancelled per day past week")
+	res, err := svc.Generate(context.Background(), "cancelled per day past week", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
 	require.Len(t, llm.calls, 2)
@@ -111,7 +111,7 @@ func TestGenerate_ExhaustedRetriesReturnsErrors(t *testing.T) {
 	invalid := `{"query":{"measures":["nope"],"range":{"last":"7d"}},"title":"x","viz":"stat"}`
 	llm := &fakeLLM{responses: []string{invalid, invalid, invalid}}
 	svc := NewService(nil, llm, nil)
-	_, err := svc.Generate(context.Background(), "whatever")
+	_, err := svc.Generate(context.Background(), "whatever", nil)
 	var gerr *GenerateInvalidError
 	require.ErrorAs(t, err, &gerr)
 	require.NotEmpty(t, gerr.Errors)
@@ -120,15 +120,38 @@ func TestGenerate_ExhaustedRetriesReturnsErrors(t *testing.T) {
 
 func TestGenerate_Unconfigured(t *testing.T) {
 	svc := NewService(nil, nil, nil)
-	_, err := svc.Generate(context.Background(), "anything")
+	_, err := svc.Generate(context.Background(), "anything", nil)
 	require.ErrorIs(t, err, ErrLLMNotConfigured)
 	require.False(t, svc.NLConfigured())
+}
+
+// Refine (#755): a base query rides into the user turn as "current query to
+// modify" so the instruction edits it instead of starting over.
+func TestGenerate_BaseQueryRidesIntoUserTurn(t *testing.T) {
+	weekly := `{"query":{"measures":["cancellations"],"by":["time"],"grain":"week","range":{"last":"12w"}},"title":"Cancellations per week","viz":"line"}`
+	llm := &fakeLLM{responses: []string{weekly}}
+	svc := NewService(nil, llm, nil)
+	base := &metrics.Query{
+		Measures: []string{"cancellations"},
+		By:       []string{"time"},
+		Grain:    "day",
+		Range:    &metrics.QueryRange{Last: "7d"},
+	}
+	res, err := svc.Generate(context.Background(), "make it weekly", base)
+	require.NoError(t, err)
+	require.Equal(t, "week", res.Query.Grain)
+	require.Len(t, llm.calls, 1)
+	turn := llm.calls[0][0]
+	require.Equal(t, "user", turn.Role)
+	require.Contains(t, turn.Content, "Current query to modify:")
+	require.Contains(t, turn.Content, `"grain":"day"`, "base query JSON must ride in verbatim")
+	require.Contains(t, turn.Content, "Instruction: make it weekly")
 }
 
 func TestGenerate_StripsCodeFences(t *testing.T) {
 	llm := &fakeLLM{responses: []string{"```json\n" + goldenResponse + "\n```"}}
 	svc := NewService(nil, llm, nil)
-	res, err := svc.Generate(context.Background(), "cancellations per day")
+	res, err := svc.Generate(context.Background(), "cancellations per day", nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"cancellations"}, res.Query.Measures)
 }
