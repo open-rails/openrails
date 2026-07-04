@@ -214,6 +214,9 @@ func New(deps Dependencies) (*Server, error) {
 		s.merchants = tsvc
 		if deps.Runtime != nil {
 			deps.Runtime.Merchants = tsvc
+			// #748: live-reachability probe for /readyz (nil-safe no-op for the
+			// manifest plane / DB-backed store — only a Vault-backed store checks).
+			deps.Runtime.MerchantSecretPing = secretBackend.Ping
 			// #661: gate the provider route surface on what OpenRails can actually do.
 			deps.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
 				SolanaCanSign: secretBackend.SolanaCanSign,

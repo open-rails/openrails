@@ -35,8 +35,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// #699: workers that resolve per-merchant secrets (provider refresh, Stripe
 	// webhook reconcile) need the merchants service even on embedded hosts that
-	// never build the standalone HTTP server. No-op when already set.
-	r.EnsureMerchantsService(ctx)
+	// never build the standalone HTTP server. No-op when already set. Outside
+	// development a failure to arm is now a boot error (#748) that propagates
+	// through InitRiver -> RunWorkers, which main.go already treats as fatal.
+	if err := r.EnsureMerchantsService(ctx); err != nil {
+		return fmt.Errorf("arm merchants service: %w", err)
+	}
 
 	clock := r.Clock
 	if clock == nil {

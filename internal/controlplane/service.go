@@ -236,20 +236,36 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM) wins; else /vault/auth/keys.json;
 	// else (dev only) an ephemeral dev key.
 	//
-	// The signing key is OPTIONAL (#527/#87): when no key is discoverable (the
-	// prod no-key case — dev always gets an ephemeral one), the control plane runs
-	// as a pure VERIFIER instead of failing the boot. It verifies inbound host-app
-	// delegated tokens and serves RBAC, but cannot MINT tokens (mint paths return
-	// authkit ErrMissingSigner). This is the expected posture for a standalone
-	// deployment with no login-capable users; mounting a key (env/keys.json/vault)
-	// re-enables minting automatically. Key presence is the enablement signal — no
-	// separate knob.
-	keySource, keyErr := resolveControlPlaneKeySource(cfg)
+	// The signing key is OPTIONAL (#527/#87): a control plane with no key runs
+	// as a pure VERIFIER instead of failing the boot — it verifies inbound
+	// host-app delegated tokens and serves RBAC, but cannot MINT tokens (mint
+	// paths return authkit ErrMissingSigner). But verify-only must be a
+	// DECLARED posture, not stumbled into (#748): auth.mint_disabled=true
+	// says so explicitly and skips key discovery entirely (there is nothing to
+	// discover — minting is off by intent). Without that flag, a signing-key
+	// discovery error used to silently downgrade to verify-only with a warn,
+	// indistinguishable from an outage, with mint failures only surfacing at
+	// request time. Now a discovery error is a construction (boot) failure
+	// outside development (mirrors the #667 encryption-posture gate);
+	// development keeps the original warn-and-continue so a from-scratch dev
+	// boot with no keys.json still runs on its ephemeral dev key path (which
+	// itself never errors — see jwtkit.ResolveKeySource).
+	var keySource jwtkit.KeySource
 	verifyOnly := false
-	if keyErr != nil {
-		log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled)")
-		keySource = nil
+	if cfg.Auth.MintDisabled {
 		verifyOnly = true
+		log.Info("controlplane: auth.mint_disabled=true; running VERIFY-ONLY by declared posture (token minting disabled)")
+	} else {
+		ks, keyErr := resolveControlPlaneKeySource(cfg)
+		switch {
+		case keyErr == nil:
+			keySource = ks
+		case cfg.IsDev():
+			log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled) — development only; declare auth.mint_disabled=true to make this posture explicit outside development (#748)")
+			verifyOnly = true
+		default:
+			return nil, fmt.Errorf("controlplane: signing key discovery failed outside development (declare auth.mint_disabled=true if verify-only is intentional, #748): %w", keyErr)
+		}
 	}
 
 	options := newOptions(opts)

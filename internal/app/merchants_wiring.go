@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	log "github.com/sirupsen/logrus"
 
@@ -20,34 +21,51 @@ import (
 // MODE 1 (#723, merchant_source=manifest): the store is the runtime's
 // in-memory manifest plane — no DB/Vault store is ever constructed.
 //
-// Failure is a loud degradation, not a boot error: the pull plane falls back
-// to the boot-config rails plane only. Hosts that provision secrets still hit
-// the hard #667 encryption-posture gate on their provisioning path.
-func (r *Runtime) EnsureMerchantsService(ctx context.Context) {
+// Failure posture (#748, mirrors #667's encryption-posture gate): outside
+// development a failure to arm is a boot ERROR, not a loud degradation —
+// silently falling back to boot-config-only rails means webhooks 503 forever
+// behind a green /readyz, exactly the "degraded state that boots healthy"
+// #748 closes. Development keeps the original warn-and-continue so a
+// from-scratch dev boot with no Vault/master key still runs. Either way, the
+// armed/unarmed state (and, once armed, live backend reachability) is
+// surfaced by Runtime.Ready (#748) — never invisible after this returns.
+func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	if r == nil || r.Merchants != nil || r.DB == nil || r.Config == nil {
-		return
+		return nil
 	}
 	var store merchants.MerchantSecretStore
+	var ping func(context.Context) error
 	if r.Config.IsManifestMerchantSource() {
 		if r.ManifestSecrets == nil {
-			log.Warn("merchant_source=manifest but the manifest secret plane is missing; provider pulls arm from boot-config rails only (#723)")
-			return
+			return r.armingFailure(fmt.Errorf("merchant_source=manifest but the manifest secret plane is missing (#723)"))
 		}
 		store = r.ManifestSecrets
 	} else {
 		backend, err := merchantsecrets.Build(ctx, r.Config, r.DB.DataPool())
 		if err != nil {
-			log.WithError(err).Warn("merchant secret store unavailable; provider pulls arm from boot-config rails only (#699)")
-			return
+			return r.armingFailure(fmt.Errorf("merchant secret store unavailable (#699): %w", err))
 		}
 		store = backend.Secrets
+		ping = backend.Ping
 	}
 	svc, err := merchants.NewService(r.DB.DataPool(), store, config.ExpectedProviderEnvironment(r.Config.IsTestMode()))
 	if err != nil {
-		log.WithError(err).Warn("merchants service unavailable; provider pulls arm from boot-config rails only (#699)")
-		return
+		return r.armingFailure(fmt.Errorf("merchants service unavailable (#699): %w", err))
 	}
 	r.ArmMerchantsService(svc, store)
+	r.MerchantSecretPing = ping
+	return nil
+}
+
+// armingFailure applies the #667-style environment gate to a merchants-arming
+// failure: a boot error everywhere except development, where it warns and lets
+// the pull plane fall back to the boot-config rails plane only.
+func (r *Runtime) armingFailure(err error) error {
+	if r.Config.IsDev() {
+		log.WithError(err).Warn("merchants service failed to arm; provider pulls fall back to boot-config rails only (#699) — development only, refuses boot outside development (#748)")
+		return nil
+	}
+	return fmt.Errorf("merchants service failed to arm outside development (#748): %w", err)
 }
 
 // ArmMerchantsService installs the merchants service AND wires its store into

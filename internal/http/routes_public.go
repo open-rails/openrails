@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -64,18 +65,29 @@ func (s *Server) registerStandaloneMetaRoutes(mux *http.ServeMux) {
 	s.handle(mux, http.MethodGet+" /readyz", http.HandlerFunc(s.readyHandler))
 }
 
+// readyHandler serves /health/ready and /readyz. Dependency checks are the
+// SAME ones pkg/embedded.Embedded.Ready runs (#748, internal/app.Runtime.Ready)
+// — standalone and embedded report one shared posture, never two.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
-	services, servicesReady := s.requiredServiceHealth(r.Context())
-	authReady := s.authenticator != nil
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	var runtime *app.Runtime
+	if s != nil {
+		runtime = s.runtime
+	}
+	deps, err := runtime.Ready(ctx)
+	authReady := s != nil && s.authenticator != nil
 	verbose := r.URL.Query().Get("verbose") == "1" || strings.EqualFold(r.URL.Query().Get("verbose"), "true")
-	if !servicesReady || !authReady {
+
+	if err != nil || !authReady {
 		resp := map[string]any{
 			"status":  "not_ready",
 			"service": "billing",
 			"auth":    map[string]any{"available": authReady},
 		}
 		if verbose {
-			resp["dependencies"] = services
+			resp["dependencies"] = dependencyStatus(deps)
 		}
 		writeJSON(w, http.StatusServiceUnavailable, resp)
 		return
@@ -87,50 +99,27 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 		"auth":    map[string]any{"available": true},
 	}
 	if verbose {
-		resp["dependencies"] = services
+		resp["dependencies"] = dependencyStatus(deps)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// requiredServiceHealth pings the required dependencies (postgres, garnet) on
-// demand. /ready is the only consumer of dependency health, so these direct
-// pings replaced the background circuit-breaker manager (#666).
-func (s *Server) requiredServiceHealth(ctx context.Context) (map[string]any, bool) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	var pgPing, redisPing func(context.Context) error
-	if s != nil && s.runtime != nil {
-		if s.runtime.DB != nil {
-			if pool := s.runtime.DB.Pool(); pool != nil {
-				pgPing = pool.Ping
-			}
+// dependencyStatus renders Runtime.Ready's per-dependency detail for the
+// verbose /readyz payload (#748).
+func dependencyStatus(deps []app.ReadinessDependency) map[string]any {
+	out := make(map[string]any, len(deps))
+	for _, d := range deps {
+		if d.Available {
+			out[d.Name] = map[string]any{"available": true}
+			continue
 		}
-		if rdb := s.runtime.RedisClient; rdb != nil {
-			redisPing = func(c context.Context) error { return rdb.Ping(c).Err() }
+		entry := map[string]any{"available": false}
+		if d.Err != nil {
+			entry["last_error"] = d.Err.Error()
 		}
+		out[d.Name] = entry
 	}
-
-	services := map[string]any{}
-	allReady := true
-	for _, dep := range []struct {
-		name string
-		ping func(context.Context) error
-	}{{"postgres", pgPing}, {"garnet", redisPing}} {
-		switch {
-		case dep.ping == nil:
-			services[dep.name] = map[string]any{"available": false, "reason": "not_configured"}
-			allReady = false
-		default:
-			if err := dep.ping(ctx); err != nil {
-				services[dep.name] = map[string]any{"available": false, "last_error": err.Error()}
-				allReady = false
-			} else {
-				services[dep.name] = map[string]any{"available": true}
-			}
-		}
-	}
-	return services, allReady
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

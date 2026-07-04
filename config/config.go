@@ -785,6 +785,13 @@ type AuthConfig struct {
 	// is set (env AUTHKIT_KEYS_PATH; special-cased below). Empty uses
 	// jwtkit.DefaultAuthKeysPath ("/vault/auth").
 	KeysPath string `koanf:"keys_path,omitempty"`
+	// MintDisabled DECLARES the control plane verify-only (#748): token
+	// minting is intentionally off, so internal/controlplane.New never even
+	// attempts signing-key discovery. Without this flag, a signing-key
+	// discovery failure is a construction (boot) failure outside development
+	// — verify-only must be a declared posture, never a silent downgrade from
+	// an outage indistinguishable from intent.
+	MintDisabled bool `koanf:"mint_disabled,omitempty"`
 }
 
 // TokenConfig defines configuration for a specific Solana token.
@@ -1111,10 +1118,17 @@ func ValidateRailSet(cfg *Config, rails RailMerchantAccountSet) error {
 	if err := validateRails(cfg, rails, isDev); err != nil {
 		return fmt.Errorf("rails validation failed: %w", err)
 	}
-	return validateStripeKeyForTestMode(cfg, rails)
+	return validateStripeKeyForTestMode(cfg, rails, isDev)
 }
 
-func validateStripeKeyForTestMode(cfg *Config, rails RailMerchantAccountSet) error {
+// validateStripeKeyForTestMode enforces the two credential/test_mode
+// mismatches SYMMETRICALLY (#748): a live key can never run under
+// test_mode=true, and — outside development — a test key can never run under
+// test_mode=false. Both used to diverge: the first hard-failed, the second
+// only warned and silently cleared the key, leaving the rail off behind a
+// "healthy" boot. Development keeps the warn-and-clear for the second case so
+// a local .env with a leftover test key doesn't need to be hand-edited.
+func validateStripeKeyForTestMode(cfg *Config, rails RailMerchantAccountSet, isDev bool) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
@@ -1140,6 +1154,12 @@ func validateStripeKeyForTestMode(cfg *Config, rails RailMerchantAccountSet) err
 			return fmt.Errorf("stripe rail %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
 		}
 		if !cfg.IsTestMode() && isTestKey {
+			if !isDev {
+				// #748: mirror the live-key-under-test_mode hard guarantee above —
+				// a live deployment must never boot "healthy" with the rail silently
+				// disabled because a test key snuck into a live-mode config.
+				return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed outside development when test_mode is disabled; use a live key or set test_mode=true", strings.ToLower(strings.TrimSpace(name)))
+			}
 			log.Warnf("⚠️  Stripe test key provided for rail %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
 			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=true for sandbox testing")
 			stripeProc.Stripe.SecretKey = ""
