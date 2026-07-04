@@ -197,7 +197,11 @@ func (e *Embedded) Service() (*service.Service, error) {
 // Control-plane bootstrap + accessor moved to the OPT-IN pkg/embedded/controlplane
 // helper (#284): the embedded CORE no longer imports internal/controlplane (or,
 // through it, AuthKit). Standalone/AuthKit hosts call
-// controlplane.RunBootstrap(ctx, e.App(), opts) and controlplane.Get(e.App()).
+// controlplane.RunBootstrap(ctx, e.App(), controlplane.BootstrapOptions{...}) and
+// controlplane.Get(e.App()) — BootstrapOptions/BootstrapResult are that
+// package's own nameable, externally-constructible aliases (#747) for the
+// internal/controlplane types of the same name, so an external host builds
+// opts without reaching into (or being able to import) internal/controlplane.
 
 func (e *Embedded) RunWorkers(ctx context.Context) error {
 	if e == nil || e.app == nil || e.app.Runtime == nil {

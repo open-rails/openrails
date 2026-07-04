@@ -50,8 +50,20 @@ type BootstrapOptions struct {
 	// alone and add an admin user later.
 	InitialAdminUserID string
 
-	// MintInitialAPIKey controls whether a deployment admin API key is
-	// minted when none exists. Defaults to true.
+	// MintInitialAPIKey requests minting the merchant's first deployment admin
+	// API key. Defaults to false (the zero value) — Bootstrap never mints
+	// unless a caller explicitly asks (#747).
+	//
+	// Even when true, a key is minted ONLY if this merchant group has NEVER
+	// had one: eligibility is checked against the FULL key history (live AND
+	// revoked), not just the currently-live count. A merchant group with zero
+	// LIVE keys because an operator revoked all of them (e.g. after a
+	// suspected compromise) is NOT a first-run state, and is never
+	// auto-healed with a silently-minted replacement — including by a
+	// standalone caller that passes true on every boot as a routine "ensure a
+	// key exists" idiom. That idiom now gets exactly one mint, ever, per
+	// merchant group. A deliberate replacement key after a revocation is a
+	// separate, explicit operator action, not a Bootstrap side effect.
 	MintInitialAPIKey bool
 }
 
@@ -134,15 +146,18 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		return nil, err
 	}
 
-	// 3. Mint an initial deployment admin API key only when the merchant group has
-	//    none yet. The key is minted under the merchant group against the `owner`
-	//    role (resolves to `merchant:*`) and scoped to the merchant resource.
+	// 3. Mint an initial deployment admin API key only when explicitly
+	//    requested AND this merchant group has NEVER had one before (#747).
+	//    "Never had one" is the FULL key history (live and revoked) — a
+	//    merchant with zero LIVE keys because an operator revoked all of them
+	//    is not a first-run state, and a routine re-Bootstrap must not
+	//    auto-heal that revocation with a fresh, silently-minted replacement.
 	if opts.MintInitialAPIKey {
 		existing, lerr := core.ListAPIKeys(ctx, MerchantType, slug)
 		if lerr != nil {
 			return nil, fmt.Errorf("controlplane: list admin API keys: %w", lerr)
 		}
-		if !anyLiveAPIKey(existing) {
+		if len(existing) == 0 {
 			createdBy := strings.TrimSpace(opts.InitialAdminUserID)
 			if createdBy == "" {
 				createdBy, err = c.ensureBootstrapAPIKeyActor(ctx)
@@ -209,17 +224,6 @@ func (c *ControlPlane) EnsureMerchantAPIKeyActor(ctx context.Context, merchantSl
 		return "", fmt.Errorf("controlplane: assign api-key actor merchant owner: %w", err)
 	}
 	return createdBy, nil
-}
-
-// anyLiveAPIKey reports whether the merchant group already has at least one
-// non-revoked API key, so bootstrap does not mint a duplicate on re-run.
-func anyLiveAPIKey(toks []authkit.APIKey) bool {
-	for _, t := range toks {
-		if t.RevokedAt == nil {
-			return true
-		}
-	}
-	return false
 }
 
 // recordMerchantGroupBySlug writes the merchant permission-group's internal id onto

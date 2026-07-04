@@ -63,9 +63,11 @@ type ControlPlane struct {
 }
 
 type options struct {
-	hosted bool
-	email  authcore.EmailSender
-	sms    authcore.SMSSender
+	hosted         bool
+	email          authcore.EmailSender
+	sms            authcore.SMSSender
+	frontend       authcore.FrontendConfig
+	trustedProxies []string
 }
 
 // Option configures the control plane for embedding hosts.
@@ -99,6 +101,34 @@ func WithSMSSender(sender authcore.SMSSender) Option {
 	}
 }
 
+// WithFrontend overrides authcore.Config.Frontend — the host-owned frontend
+// routes AuthKit uses to build absolute emailed links (verification, password
+// reset, ...). #743: without this, Frontend.BaseURL pins to the control
+// plane's own token issuer, which for a hosted product is an API host that
+// serves no pages — emailed verify/reset links 404. Hosted products MUST set
+// this to their product frontend's origin. Absent (zero value), New keeps the
+// pre-#743 default (BaseURL: issuer); every path left blank on a supplied
+// override still falls back to authcore's own per-field defaults
+// (VerifyPath->"/verify", PasswordResetPath->"/reset", etc).
+func WithFrontend(fc authcore.FrontendConfig) Option {
+	return func(o *options) {
+		o.frontend = fc
+	}
+}
+
+// WithTrustedProxies configures the reverse-proxy/LB CIDRs AuthKit's HTTP
+// server trusts when deriving the client IP (CF-Connecting-IP / X-Forwarded-For)
+// for its per-client registration/login rate limiter (#743). Without this,
+// authhttp keys the limiter off the immediate TCP peer — behind any load
+// balancer that is the LB's own address, so the whole product shares ONE
+// registration bucket. Empty (the default) keeps authhttp's safe
+// direct-RemoteAddr behavior.
+func WithTrustedProxies(cidrs []string) Option {
+	return func(o *options) {
+		o.trustedProxies = cidrs
+	}
+}
+
 func newOptions(opts []Option) options {
 	var out options
 	for _, opt := range opts {
@@ -129,6 +159,20 @@ func registrationVerification(locked bool) authcore.RegistrationVerificationPoli
 		return authcore.RegistrationVerificationNone
 	}
 	return authcore.RegistrationVerificationRequired
+}
+
+// resolveFrontendConfig resolves authcore.Config.Frontend (#743): an explicit
+// host override (WithFrontend) wins outright — a host that supplies ANY
+// FrontendConfig owns the whole struct, and authcore itself defaults every
+// field the host leaves blank (BaseURL->issuer, VerifyPath->"/verify",
+// PasswordResetPath->"/reset", ...). Absent an override, New keeps the
+// pre-#743 default of pinning BaseURL at the control-plane issuer, made
+// explicit here rather than relying on authcore's own BaseURL-empty fallback.
+func resolveFrontendConfig(issuer string, override authcore.FrontendConfig) authcore.FrontendConfig {
+	if override != (authcore.FrontendConfig{}) {
+		return override
+	}
+	return authcore.FrontendConfig{BaseURL: issuer}
 }
 
 // resolveControlPlaneKeySource builds the JWT signing KeySource for the
@@ -221,7 +265,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 			IssuedAudiences:   []string{"openrails"},
 			ExpectedAudiences: []string{"openrails"},
 		},
-		Frontend:    authcore.FrontendConfig{BaseURL: issuer},
+		Frontend:    resolveFrontendConfig(issuer, options.frontend),
 		APIKeys:     authcore.APIKeysConfig{Prefix: APIKeyPrefix},
 		Environment: strings.TrimSpace(cfg.Env),
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
@@ -263,7 +307,14 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
 	}
-	authSvc, err := authhttp.NewServer(authClient)
+	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
+	// registration/login rate limiter keys on the real client behind a load
+	// balancer instead of the LB's own peer address.
+	var authHTTPOpts []authhttp.Option
+	if len(options.trustedProxies) > 0 {
+		authHTTPOpts = append(authHTTPOpts, authhttp.WithTrustedProxies(options.trustedProxies...))
+	}
+	authSvc, err := authhttp.NewServer(authClient, authHTTPOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}

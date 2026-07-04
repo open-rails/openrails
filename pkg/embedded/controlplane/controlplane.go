@@ -25,6 +25,77 @@ import (
 )
 
 // AttachOptions configures the embedded AuthKit control-plane seam.
+//
+// # Field-by-field forwarding audit (#743)
+//
+// AttachOptions is the ONLY seam an embedding host has onto the AuthKit dials
+// OpenRails' control plane wires (authcore.Config + authhttp.NewServer's
+// functional options). Below is every dial on both surfaces and whether
+// AttachOptions forwards it, so the next missing forward is a deliberate
+// decision recorded here, not a silent gap rediscovered by a 404 in
+// production (#743's Frontend-links finding was exactly that).
+//
+// authcore.Config (the AuthKit engine):
+//   - Token (Issuer/Audiences/durations/SessionMaxPerUser): NOT forwarded.
+//     Issuer comes from cfg.Auth.Issuer (already host-configurable at the
+//     config layer); the "openrails" audience is an OpenRails product
+//     constant, not a per-host dial (#750 tracks exporting it as a named
+//     constant instead of a literal). Token durations/session caps have no
+//     AttachOptions knob yet — an open gap, not yet requested by a host.
+//   - Frontend: FORWARDED (this issue) via AttachOptions.Frontend.
+//   - Registration: NOT a raw forward. OpenRails computes it from
+//     HostedPosture (open+required vs closed+none) — this is product policy
+//     (#738), not a pass-through dial; a host cannot pick a THIRD policy.
+//   - Keys: NOT forwarded. Signing-key resolution is OpenRails' own
+//     responsibility (resolveControlPlaneKeySource: cfg.Auth.* inline
+//     material, else vault keys.json, else dev-ephemeral) — a host has no
+//     business injecting a KeySource or flipping VerifyOnly.
+//   - Identity (OAuth/OIDC providers): NOT forwarded. No AttachOptions
+//     provider list exists; hosted external-login is a future issue, not a
+//     silently-defaulted feature.
+//   - APIKeys.Prefix: NOT forwarded — the "openrails" API-key brand prefix
+//     (APIKeyPrefix) is an OpenRails product decision, not host-configurable.
+//   - APIKeys.MaxTTL: NOT forwarded — no cap today; open gap, not a decision.
+//   - TwoFactor / Passkeys: NOT forwarded — neither feature area is wired
+//     into the control plane's mounted routes for embedded hosts yet.
+//   - RBAC: NOT forwarded — OpenRails' own Groups() permission-group catalog
+//     IS the product's authorization schema (#567); a host cannot override
+//     its own persona/permission model.
+//   - Environment: forwarded, but via cfg.Env at the config layer (already a
+//     top-level host-set value), not a separate AttachOptions field.
+//   - Schema / SolanaNetwork: NOT AttachOptions concerns — Schema follows
+//     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork derives from
+//     Environment (authcore's own default), never overridden today.
+//
+// authcore.Option (engine-construction functional options):
+//   - WithEmailSender / WithSMSSender: FORWARDED via AttachOptions.EmailSender
+//     / SMSSender (#738).
+//   - WithEphemeralStore / embedded.WithRedis: NOT forwarded — DISCOVERED GAP,
+//     not fixed here (out of #743's scope): the control-plane engine built by
+//     internal/controlplane.New never wires Redis/an ephemeral store at all.
+//     authhttp's own construction-time validate() hard-fails when
+//     Environment is not dev-like and no Redis was supplied — so today ANY
+//     hosted attach with a production-like Environment string and no Redis
+//     wired some other way will fail to boot. Flagged for a follow-up issue,
+//     not silently absorbed into this one.
+//   - WithEntitlements / WithClickHouse: NOT forwarded — unrelated feature
+//     areas OpenRails' control plane does not use.
+//
+// authhttp.Option (HTTP-layer construction options, authhttp.NewServer):
+//   - WithTrustedProxies: FORWARDED (this issue) via AttachOptions.TrustedProxies.
+//   - WithClientIPFunc: NOT forwarded — superseded by WithTrustedProxies (the
+//     "normal knob", per its own doc); exposing a raw ClientIPFunc would let a
+//     host inject arbitrary, unaudited client-IP logic. Advanced/test-only by
+//     authhttp's own doc.
+//   - WithRateLimiter / WithoutRateLimiter: NOT forwarded — BLOCKED on authkit
+//     #242 (a merge-style per-bucket override API). The raw options are a
+//     full-policy-replacement footgun ("ADVANCED/TEST ONLY" per authhttp's own
+//     doc); forwarding them today would let a host disable rate limiting
+//     entirely instead of tuning one bucket. Tracked, not implemented.
+//   - WithRedis: NOT forwarded — see the WithEphemeralStore gap above; the
+//     HTTP layer reuses whatever the engine wired (nothing, today).
+//   - WithLanguageConfig: NOT forwarded — i18n is not wired into
+//     AttachOptions; no host has asked for it yet.
 type AttachOptions struct {
 	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
 	// Leave false for private standalone-compatible embedded hosts.
@@ -42,6 +113,29 @@ type AttachOptions struct {
 	// the mounted self-service verify/reset routes.
 	EmailSender authcore.EmailSender
 	SMSSender   authcore.SMSSender
+
+	// Frontend overrides AuthKit's Frontend config — the host-owned frontend
+	// routes used to build absolute emailed links (verification, password
+	// reset, ...). #743: left zero, BaseURL pins at the control-plane's own
+	// issuer, which for a hosted product is an API host that serves no pages
+	// — emailed verify/reset links 404 (the reported bug). Hosted products
+	// MUST set at least Frontend.BaseURL to their product frontend's origin;
+	// VerifyPath/PasswordResetPath/etc default per authcore's own rules
+	// (VerifyPath->"/verify", PasswordResetPath->"/reset", ...) when left
+	// blank. The type is authkit/embedded's own exported FrontendConfig — no
+	// OpenRails-owned wrapper needed, matching EmailSender/SMSSender above.
+	Frontend authcore.FrontendConfig
+
+	// TrustedProxies lists the CIDRs of reverse proxies/load balancers in
+	// front of this deployment. When set, AuthKit's HTTP server derives the
+	// client IP for its per-client registration/login rate limiter from
+	// forwarded headers ONLY when the immediate peer is one of these CIDRs
+	// (#743); otherwise (the default, empty) it uses the direct TCP peer,
+	// which behind any LB collapses every client into one shared bucket.
+	// Coordinate with #746's engine-wide trusted-proxy resolver: this is
+	// deliberately a standalone AttachOptions field, not a shared config key,
+	// until that unification lands.
+	TrustedProxies []string
 }
 
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
@@ -94,6 +188,12 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.SMSSender != nil {
 		cpOpts = append(cpOpts, controlplane.WithSMSSender(opts.SMSSender))
 	}
+	if opts.Frontend != (authcore.FrontendConfig{}) {
+		cpOpts = append(cpOpts, controlplane.WithFrontend(opts.Frontend))
+	}
+	if len(opts.TrustedProxies) > 0 {
+		cpOpts = append(cpOpts, controlplane.WithTrustedProxies(opts.TrustedProxies))
+	}
 	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
 	if err != nil {
 		if ownedPool {
@@ -110,25 +210,38 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	return nil
 }
 
+// BootstrapOptions is the nameable, externally-constructible alias for
+// controlplane.BootstrapOptions (#747, the embed/provision.go alias pattern):
+// internal/controlplane cannot be imported outside this module, so before this
+// alias existed RunBootstrap took a parameter no external host could construct
+// — the ONLY caller was this repo's own test harness.
+type BootstrapOptions = controlplane.BootstrapOptions
+
+// BootstrapResult is the nameable alias for controlplane.BootstrapResult; see
+// BootstrapOptions.
+type BootstrapResult = controlplane.BootstrapResult
+
 // RunBootstrap idempotently bootstraps the OpenRails-owned AuthKit control plane
 // (#224): ensures the bootstrap authority, OpenRails operator role, the
-// openrails.* permission catalog, and an initial operator API key.
-// Calling it without an attached control plane is a wiring error (#469: the
-// standalone always attaches one first).
+// openrails.* permission catalog, and — only when opts.MintInitialAPIKey is
+// true — an initial operator API key. Calling it without an attached control
+// plane is a wiring error (#469: the standalone always attaches one first).
+//
+// #747: opts is forwarded VERBATIM — RunBootstrap used to force
+// MintInitialAPIKey to true regardless of what the caller passed, so "defaults
+// to true" actually meant "always true". A caller that wants a key must now
+// ask for one explicitly, every time, and even then Bootstrap mints only when
+// this merchant group has never had a key before (see BootstrapOptions'
+// MintInitialAPIKey doc) — an operator who revokes every key after a
+// suspected compromise is never silently re-issued a fresh one on the next
+// routine boot.
 //
 // Call it AFTER migrations have run (so openrails.merchants and profiles.* exist) and
 // at startup. Safe to re-run. This was App.RunControlPlaneBootstrap before #284.
-func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOptions) (*controlplane.BootstrapResult, error) {
+func RunBootstrap(ctx context.Context, a *app.App, opts BootstrapOptions) (*BootstrapResult, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane bootstrap: no control plane attached (call Attach first)")
 	}
-	if !opts.MintInitialAPIKey {
-		opts.MintInitialAPIKey = true
-	}
-	res, err := cp.Bootstrap(ctx, opts)
-	if err != nil {
-		return res, err
-	}
-	return res, nil
+	return cp.Bootstrap(ctx, opts)
 }

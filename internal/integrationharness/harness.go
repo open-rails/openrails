@@ -417,7 +417,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	// scoped to the merchant — the production provisioning path (cmd/openrails
 	// run-server does the same at boot). MintInitialAPIKey returns the
 	// one-time secret we hand to the client.
-	res, err := embcp.RunBootstrap(h.ctx, app, controlplane.BootstrapOptions{
+	res, err := embcp.RunBootstrap(h.ctx, app, embcp.BootstrapOptions{
 		BootstrapMerchantSlug: dbtest.TestMerchantSlug,
 		MintInitialAPIKey:     true,
 	})
