@@ -18,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Dependencies struct {
@@ -42,7 +42,6 @@ type Dependencies struct {
 	// explicitly mapped principal for /v1/me/* + /v1/merchant/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	ConfiguredMerchant     merchant.ID
 }
 
 type Server struct {
@@ -65,10 +64,6 @@ type Server struct {
 	// control-plane DB) and permission-group provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
-
-	// configuredMerchant scopes legacy single-merchant installs. Zero in standalone,
-	// where the merchant is resolved per-credential.
-	configuredMerchant merchant.ID
 
 	// browserCORSOriginSource is the standalone browser CORS origin source.
 	// Production leaves this nil and reads AuthKit remote_application state via
@@ -175,7 +170,6 @@ func New(deps Dependencies) (*Server, error) {
 		rdb:                    deps.Redis,
 		authenticator:          deps.Authenticator,
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
-		configuredMerchant:     deps.ConfiguredMerchant,
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 	}
@@ -386,6 +380,15 @@ func New(deps Dependencies) (*Server, error) {
 	return s, nil
 }
 
+// trustedProxies returns the #746 client-IP resolver, nil-safe against a
+// Server built without New() (some unit tests construct &Server{} directly).
+func (s *Server) trustedProxies() *iputil.TrustedProxies {
+	if s == nil || s.runtime == nil {
+		return nil
+	}
+	return s.runtime.TrustedProxies
+}
+
 // wrapPublicHandler applies the global middleware chain — the neutral analogue
 // (and successor, #670) of the old gin engine's global middleware, same order.
 func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
@@ -400,13 +403,14 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		middleware.CORSFromSourceHTTP(s.browserCORSOrigins),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		// Resolve the merchant / billing namespace before authorization and before any
-		// merchant-owned DB access (issue #223). Pins the construction-time configured
-		// merchant resolved once at boot (#336); zero when none is configured, in
-		// which case merchant-owned operations hard-fail (there is no default merchant).
-		middleware.ResolveMerchantHTTP(s.configuredMerchant),
+		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime
+		// (#744), never a value snapshotted here at construction time; zero when none
+		// is configured, in which case merchant-owned operations hard-fail (there is
+		// no default merchant).
+		middleware.ResolveMerchantHTTP(s.runtime.ConfiguredMerchant),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
-		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore),
+		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies()),
 	)
 }
 

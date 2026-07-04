@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -131,4 +132,72 @@ func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 
 	// River path: an unverified Prepared must enqueue with SignatureValid nil.
 	require.Nil(t, prepared.QueueArgs("64.38.212.5").SignatureValid)
+}
+
+// newCCBillWebhookRequestBehindProxy builds a webhook request that physically
+// arrived through remoteAddr (the direct socket peer — e.g. a load balancer),
+// carrying forwardedFor as the X-Forwarded-For header. trustedProxies configures
+// the #746 resolver Runtime.TrustedProxies uses to decide whether to honor it.
+func newCCBillWebhookRequestBehindProxy(t *testing.T, remoteAddr, forwardedFor string, trustedProxies []string) (*httprequest.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	body := `{"eventType":"NewSaleSuccess","clientAccnum":"900000","clientSubacc":"0000","transactionId":"1"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill?eventType=NewSaleSuccess", strings.NewReader(body))
+	req.RemoteAddr = remoteAddr
+	if forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+	}
+	req.SetPathValue("provider", "ccbill")
+	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
+	rt := &app.Runtime{
+		Config:         &config.Config{TestMode: false, TrustedProxies: trustedProxies},
+		TrustedProxies: iputil.ParseTrustedProxies(trustedProxies),
+	}
+	return httprequest.NewHTTP(w, req, rt), w
+}
+
+// #746: a CCBill webhook that physically arrives through a configured trusted
+// reverse proxy (RemoteAddr = the proxy/load balancer, X-Forwarded-For =
+// CCBill's real source IP) passes the IP allowlist — the resolved client IP,
+// not the proxy's own socket address, is what's evaluated. Exercises the full
+// Webhook() dispatch path, not just the allowlist helper in isolation.
+func TestCCBillWebhookAllowsRequestBehindTrustedProxy(t *testing.T) {
+	stubCCBillLiveProbe(t, false, nil)
+
+	r, w := newCCBillWebhookRequestBehindProxy(t, "10.0.0.5:443", "64.38.212.5", []string{"10.0.0.0/8"})
+
+	Webhook(r)
+
+	// Reaches enqueue (which 500s here only because no River producer is
+	// wired in this test runtime) instead of 403ing at the IP allowlist —
+	// proof the resolved client IP (from XFF, since the proxy is trusted) was
+	// evaluated, not the load balancer's own address.
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}
+
+// #746: without trusted_proxies configured, a spoofed X-Forwarded-For
+// claiming to be a CCBill IP has ZERO effect — the socket peer (the actual
+// sender) is what's evaluated, and an off-allowlist sender correctly 403s.
+func TestCCBillWebhookRejectsSpoofedForwardedForWithoutTrustedProxies(t *testing.T) {
+	stubCCBillLiveProbe(t, false, nil)
+
+	r, w := newCCBillWebhookRequestBehindProxy(t, "203.0.113.9:443", "64.38.212.5", nil)
+
+	Webhook(r)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
+// #746: the same spoof attempt against a proxy that IS in trusted_proxies but
+// where the attacker IS the direct peer (no proxy involved at all) still
+// 403s — trusting a CIDR range never means trusting an arbitrary claimed
+// X-Forwarded-For from an untrusted direct connection outside that range.
+func TestCCBillWebhookIPAllowedIgnoresForwardedForFromUntrustedPeer(t *testing.T) {
+	stubCCBillLiveProbe(t, false, nil)
+
+	r, w := newCCBillWebhookRequestBehindProxy(t, "203.0.113.9:443", "64.38.212.5", []string{"10.0.0.0/8"})
+
+	Webhook(r)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }

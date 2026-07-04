@@ -63,6 +63,13 @@ rate_limits:
   default:
     requests_per_minute: 300
 
+# CIDRs whose X-Forwarded-For is trusted (#746). Empty (default) trusts
+# NOTHING — rate limiting, abuse tracking, webhook IPAddress recording, and the
+# CCBill IP allowlist all use the raw socket peer. Set this to your load
+# balancer's/reverse proxy's address range when deploying behind one.
+# trusted_proxies:
+#   - 10.0.0.0/8
+
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha
   site_key: ""

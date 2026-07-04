@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MountOptions configures the combined embedded surface (MountHandler).
@@ -51,9 +50,6 @@ func MountHandler(e *Embedded, opts MountOptions) (http.Handler, error) {
 	asm := embedhttp.FromApp(e.App())
 	asm.Authenticator = opts.Authenticator
 	asm.Gate = opts.Gate
-	if a := e.App(); a != nil && a.Runtime != nil {
-		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
-	}
 	userRouteSets := routeSetsWithoutCustomer(active)
 	user := http.NotFoundHandler()
 	if len(userRouteSets) > 0 {
@@ -100,17 +96,13 @@ func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, provider
 	if authn == nil {
 		return nil, fmt.Errorf("embedded billing: self surface requires MountOptions.DelegatedAuthenticator")
 	}
-	var configured merchant.ID
-	if a.Runtime != nil {
-		configured = a.Runtime.ConfiguredMerchant
-	}
-	return newSelfHandler(a.Runtime, authn, configured, providerRouteOverride), nil
+	return newSelfHandler(a.Runtime, authn, providerRouteOverride), nil
 }
 
 // newSelfHandler delegates to the neutral assembly; kept as the unit-testable
 // seam (no live app graph required).
-func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
-	return embedhttp.NewSelfHandler(rt, authn, configured, providerRouteOverride)
+func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
+	return embedhttp.NewSelfHandler(rt, authn, providerRouteOverride)
 }
 
 func providerRoutesFromMountOptions(opt *ProviderRoutes) *routesurface.ProviderRoutes {

@@ -51,6 +51,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
@@ -316,11 +317,14 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}())
 
 	runtime := &Runtime{
-		DB:                   database,
-		RedisClient:          redisClient,
-		Config:               cfg,
-		Rails:                railSet,
-		Clock:                clock,
+		DB:          database,
+		RedisClient: redisClient,
+		Config:      cfg,
+		Rails:       railSet,
+		Clock:       clock,
+		// #746: one proxy-aware client-IP resolver, built once from config;
+		// empty cfg.TrustedProxies yields a resolver that trusts nothing.
+		TrustedProxies:       iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
 		CCBillClient:         ccbillClient,
 		CCBillRESTClient:     ccbillRESTClient,

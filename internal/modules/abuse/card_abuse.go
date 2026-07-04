@@ -117,10 +117,11 @@ func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, win
 }
 
 // RecordChargeFailure records one failed/declined card attempt for the given
-// captcha subjects (use middleware.RateLimitSubjectKeysHTTP(r): ["ip:x","user:y"]) and
-// escalates each subject's captcha/block state, then advances the site-wide
-// attack-mode counter. Best-effort: errors are logged, never propagated, so
-// abuse tracking can't break the (already failed) charge response.
+// captcha subjects (use middleware.SubjectKeysFromContext(ctx): ["ip:x","user:y"],
+// the SAME resolved-client-IP subjects RateLimitHTTP pinned for this request —
+// #746) and escalates each subject's captcha/block state, then advances the
+// site-wide attack-mode counter. Best-effort: errors are logged, never
+// propagated, so abuse tracking can't break the (already failed) charge response.
 func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, subjectKeys []string) {
 	if !g.enabled() {
 		return

@@ -521,5 +521,5 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 	boundID, err := reader.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
 	require.NoError(t, err)
 	require.Equal(t, id, boundID, "the empty upsert binds to the same merchant")
-	require.Equal(t, boundID, reader.Embedded().App().Runtime.ConfiguredMerchant)
+	require.Equal(t, boundID, reader.Embedded().App().Runtime.ConfiguredMerchant())
 }

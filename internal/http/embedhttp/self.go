@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NewSelfHandler assembles the embedded browser-direct SELF-SERVICE surface
@@ -27,7 +27,7 @@ import (
 // CORS, body limit, merchant resolution, rate-limit + captcha), keeping it
 // behaviorally consistent with the base embedded handler. Host-supplied
 // delegated authenticators own their own browser-origin policy.
-func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
+func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) http.Handler {
 	mux := http.NewServeMux()
 	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
 	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
@@ -40,8 +40,10 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var rdb *redis.Client
+	var resolver *iputil.TrustedProxies
 	if rt != nil {
 		rdb = rt.RedisClient
+		resolver = rt.TrustedProxies
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
 			captchaCfg = rt.Config.Captcha
@@ -52,8 +54,11 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveMerchantHTTP(configured),
-		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb)),
+		// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
+		// here at construction time, so a mount that races UpsertMerchantConfig's
+		// post-boot bind still resolves correctly on every request.
+		middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
+		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver),
 	)
 }
 
@@ -65,7 +70,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 		return *override
 	}
 	if rt != nil {
-		if len(rt.Rails) > 0 || !rt.ConfiguredMerchant.IsZero() {
+		if len(rt.Rails) > 0 || !rt.ConfiguredMerchant().IsZero() {
 			if caps := rt.RouteCapabilities; caps != nil {
 				return routesurface.ProviderRoutesFromRailsWithCapabilities(rt.Rails, *caps)
 			}

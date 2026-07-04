@@ -104,7 +104,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 	}
 	httproutes.RegisterServiceRoutes(httprouter.NewMux(admitMux, "/v1/merchant", suite.App.Runtime), suite.App.Runtime,
 		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})})
-	admitSrv := httptest.NewServer(middleware.ChainHTTP(admitMux, middleware.ResolveMerchantHTTP(dbtest.TestMerchantID)))
+	admitSrv := httptest.NewServer(middleware.ChainHTTP(admitMux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID))))
 	t.Cleanup(admitSrv.Close)
 
 	type admitResp struct {

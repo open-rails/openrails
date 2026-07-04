@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -313,7 +313,13 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 // Identity for the user-scoped subject is read from the request context
 // (billingauth.FromContext), so mount billingauth.Optional BEFORE this so an
 // authenticated caller is limited per-user, not only per-IP.
-func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, rdb *redis.Client, challengeStore *captcha.ChallengeStore) HTTPMiddleware {
+//
+// resolver is the #746 proxy-aware client-IP resolver: the IP-scoped subject
+// key is the resolved client, not the raw socket peer, so a deployment behind
+// a configured trusted proxy still limits per real client instead of
+// collapsing every request onto the load balancer's one address. A nil/empty
+// resolver falls back to the socket peer (equivalent to no proxy trust).
+func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, rdb *redis.Client, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
 	if limits == nil {
 		return func(next http.Handler) http.Handler { return next }
 	}
@@ -330,7 +336,7 @@ func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaCo
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subjects := rateLimitSubjectsHTTP(r)
+			subjects := rateLimitSubjectsHTTP(r, resolver)
 			decision := EvaluateRateLimit(w, r, subjects, deps)
 			applyRateLimitDecisionHTTP(w, r, next, decision, captchaCfg)
 		})
@@ -390,13 +396,15 @@ func captchaSiteKey(cfg *config.CaptchaConfig) string {
 }
 
 // rateLimitSubjectsHTTP derives the ip:/user: subjects from a plain request,
-// reading identity from the request context (billingauth).
-func rateLimitSubjectsHTTP(r *http.Request) []RateLimitSubject {
+// reading identity from the request context (billingauth) and the client IP
+// via resolver (#746: a nil/empty resolver trusts nothing, i.e. the socket peer).
+func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []RateLimitSubject {
 	if r == nil {
 		return nil
 	}
 	subjects := make([]RateLimitSubject, 0, 2)
-	if clientIP := strings.TrimSpace(httpClientIP(r)); clientIP != "" {
+	resolved := resolver.ResolveClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	if clientIP := strings.TrimSpace(resolved); clientIP != "" {
 		subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeIP, Value: clientIP, Key: RateLimitScopeIP + ":" + clientIP})
 	}
 	if uc, ok := billingauth.FromContext(r.Context()); ok {
@@ -410,18 +418,10 @@ func rateLimitSubjectsHTTP(r *http.Request) []RateLimitSubject {
 // RateLimitSubjectKeysHTTP is the gin-free analogue of RateLimitSubjectKeys (issue
 // #282): it derives the same ip:/user: subject keys from a plain *http.Request. The
 // embedded captcha-status handler uses it to report whether a subject is currently
-// challenged.
-func RateLimitSubjectKeysHTTP(r *http.Request) []string {
-	return SubjectKeys(rateLimitSubjectsHTTP(r))
-}
-
-// httpClientIP extracts the socket peer IP from a plain request (no forwarded
-// header trust), matching the gin ClientIP used by rate-limit subjects.
-func httpClientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
+// challenged; resolver MUST be the same one RateLimitHTTP was built with, or the
+// keys diverge.
+func RateLimitSubjectKeysHTTP(r *http.Request, resolver *iputil.TrustedProxies) []string {
+	return SubjectKeys(rateLimitSubjectsHTTP(r, resolver))
 }
 
 // SubjectKeys returns the non-empty Key of each subject.

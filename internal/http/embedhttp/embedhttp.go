@@ -27,8 +27,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
@@ -74,7 +74,6 @@ type Assembler struct {
 	// gate on its permissions — the gin-free counterpart of the self surface's
 	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	ConfiguredMerchant     merchant.ID
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -107,9 +106,6 @@ func FromApp(a *app.App) *Assembler {
 			AdminPermissionChecker:    checker,
 			ServiceCredentialResolver: resolver,
 		})
-	}
-	if a.Runtime != nil {
-		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
 	}
 	return asm
 }
@@ -191,25 +187,33 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
 	}
 
-	// Resolve the configured merchant SLUG → internal merchant.ID once at
-	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
-	// unknown slug is a configuration error. EMBEDDED boot (embed.New) ensures
-	// the bound merchant row before this runs, so it never trips here; a
+	// Merchant resolution (#223/#336) pins Runtime.ConfiguredMerchant() onto
+	// the request context before any merchant-owned DB access. It is resolved
+	// PER REQUEST, not cached here at handler-construction time (#744): an
+	// embedded host's UpsertMerchantConfig call can bind the merchant AFTER
+	// this handler is already mounted and serving traffic, and
+	// Runtime.ConfiguredMerchant() always reflects the latest bind. Zero
+	// (unbound) is a legal boot state — merchant-owned operations then hard-fail
+	// downstream instead of silently defaulting.
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
+	var resolver *iputil.TrustedProxies
 	if s.Cfg != nil {
 		rateLimits = s.Cfg.RateLimits
 		captchaCfg = s.Cfg.Captcha
+	}
+	if s.Runtime != nil {
+		resolver = s.Runtime.TrustedProxies
 	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveMerchantHTTP(s.ConfiguredMerchant),
+		middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
 		// OpenRails-native rate-limiting + captcha for embedded hosts.
-		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore),
+		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver),
 	)
 }
 
@@ -250,10 +254,14 @@ func (s *Assembler) captchaStatusHandler(w http.ResponseWriter, r *http.Request)
 		cfg = s.Cfg.Captcha
 	}
 	var store *captcha.ChallengeStore
+	var resolver *iputil.TrustedProxies
 	if s != nil {
 		store = s.CaptchaStore
+		if s.Runtime != nil {
+			resolver = s.Runtime.TrustedProxies
+		}
 	}
-	CaptchaStatusHandler(cfg, store)(w, r)
+	CaptchaStatusHandler(cfg, store, resolver)(w, r)
 }
 
 // captchaClientScriptHandler is the gin-free captcha client-script endpoint.
@@ -266,8 +274,11 @@ func (s *Assembler) captchaClientScriptHandler(w http.ResponseWriter, r *http.Re
 }
 
 // CaptchaStatusHandler is the captcha discovery endpoint shared by the embedded
-// and standalone surfaces (#670: one implementation, two mounts).
-func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeStore) http.HandlerFunc {
+// and standalone surfaces (#670: one implementation, two mounts). resolver
+// must be the SAME trusted-proxy resolver RateLimitHTTP enforces with (#746),
+// or the subject key checked here can diverge from the one actually
+// challenged.
+func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeStore, resolver *iputil.TrustedProxies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"enabled":           cfg.IsEnabled(),
@@ -279,7 +290,7 @@ func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeSto
 			resp["provider"] = cfg.EffectiveProvider()
 		}
 		if cfg.IsEnabled() && store != nil {
-			for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r) {
+			for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r, resolver) {
 				challenged, err := store.IsChallenged(r.Context(), subjectKey)
 				if err != nil {
 					continue

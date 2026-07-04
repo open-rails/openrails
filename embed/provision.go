@@ -90,8 +90,8 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: upsert merchant config: %w", err)
 	}
-	if a.Runtime.ConfiguredMerchant.IsZero() {
-		a.Runtime.ConfiguredMerchant = tn.ID
+	if a.Runtime.ConfiguredMerchant().IsZero() {
+		a.Runtime.SetConfiguredMerchant(tn.ID)
 	}
 	// MODE 1: arm the runtime consumers (checkout/vault/webhooks/pulls) over the
 	// freshly seeded in-memory plane right away — no standalone server or worker

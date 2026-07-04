@@ -47,12 +47,11 @@ func StandaloneServer(e *Embedded) (*server.Server, error) {
 		return nil, fmt.Errorf("control plane verifier unavailable")
 	}
 	return server.New(server.Dependencies{
-		Config:             a.Config,
-		Cache:              a.Cache,
-		Runtime:            a.Runtime,
-		Redis:              a.RedisClient,
-		Authenticator:      authenticator,
-		ConfiguredMerchant: a.Runtime.ConfiguredMerchant,
-		ControlPlane:       embcp.Get(a),
+		Config:        a.Config,
+		Cache:         a.Cache,
+		Runtime:       a.Runtime,
+		Redis:         a.RedisClient,
+		Authenticator: authenticator,
+		ControlPlane:  embcp.Get(a),
 	})
 }

@@ -66,7 +66,7 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 
 func Webhook(r *httprequest.Request) {
 	provider := webhookutil.CanonicalRail(r.Param("provider"))
-	clientIP := r.GetRemoteIP()
+	clientIP := r.ClientIP()
 	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
 	if r.State == nil || r.State.Config == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
@@ -148,7 +148,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		return
 	}
 	if provider == subscriptions.RailCCBill {
-		clientIP := r.GetRemoteIP()
+		clientIP := r.ClientIP()
 		if !ccbillWebhookIPAllowed(r, clientIP) {
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return
@@ -228,7 +228,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		EventID:        prepared.EventID,
 		EventType:      prepared.EventType,
 		Payload:        prepared.Body,
-		IPAddress:      r.GetRemoteIP(),
+		IPAddress:      r.ClientIP(),
 		Signature:      prepared.Signature,
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
@@ -421,7 +421,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		EventID:               prepared.EventID,
 		EventType:             prepared.EventType,
 		Payload:               prepared.Body,
-		IPAddress:             r.GetRemoteIP(),
+		IPAddress:             r.ClientIP(),
 		Signature:             prepared.Signature,
 		SigningSecret:         signingKey,
 		SignatureValid:        &signatureVerified,

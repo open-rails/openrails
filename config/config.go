@@ -184,6 +184,16 @@ type Config struct {
 	// defaults to 1h; "0" disables the loop; malformed values refuse to boot.
 	// Env: CATALOG_RECONCILIATION_INTERVAL.
 	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval,omitempty"`
+
+	// TrustedProxies lists CIDRs (e.g. "10.0.0.0/8") whose X-Forwarded-For is
+	// trusted (#746: one proxy-aware client-IP resolver for rate limiting,
+	// abuse tracking, webhook IPAddress recording, and the CCBill IP
+	// allowlist). Empty (the default) trusts NOTHING — every client-IP
+	// resolution uses the raw socket peer, so a spoofed X-Forwarded-For has
+	// zero effect. Set this to your load balancer's/reverse proxy's address
+	// range when deploying behind one. Env: TRUSTED_PROXIES (YAML list or a
+	// JSON array string, e.g. TRUSTED_PROXIES='["10.0.0.0/8"]').
+	TrustedProxies []string `koanf:"trusted_proxies,omitempty"`
 }
 
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop
@@ -1057,6 +1067,24 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("merchant_source config validation failed: %w", err)
 	}
 
+	if err := validateTrustedProxies(cfg.TrustedProxies); err != nil {
+		return fmt.Errorf("trusted_proxies config validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateTrustedProxies rejects a malformed trusted_proxies CIDR at boot —
+// same posture as every other config typo in this file: a bad entry must
+// never silently no-op into a partially-trusting (or fully-untrusting)
+// resolver (#746). Self-contained: no other config region reads this list.
+func validateTrustedProxies(cidrs []string) error {
+	for _, raw := range cidrs {
+		trimmed := strings.TrimSpace(raw)
+		if _, _, err := net.ParseCIDR(trimmed); err != nil {
+			return fmt.Errorf("invalid CIDR %q (expected e.g. \"10.0.0.0/8\"): %w", raw, err)
+		}
+	}
 	return nil
 }
 
