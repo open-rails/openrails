@@ -10,16 +10,20 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// #740 admin console serving: config gate, SPA fallback, config.json bootstrap.
+// #740/#754 admin console serving. The #754 mount rule: /admin exists ONLY
+// when assets are present AND admin_console.enabled; enabled without assets
+// refuses boot. Assets are a tiny fstest fixture — never a real npm build.
 
 func getRaw(t *testing.T, url string) (int, string, http.Header) {
 	t.Helper()
@@ -33,11 +37,20 @@ func getRaw(t *testing.T, url string) (int, string, http.Header) {
 	return resp.StatusCode, string(body), resp.Header
 }
 
+const fixtureIndexHTML = `<!doctype html><html><head><title>fixture-console</title></head><body>fixture</body></html>`
+
+func fixtureConsoleAssets() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html":            &fstest.MapFile{Data: []byte(fixtureIndexHTML)},
+		"assets/app-fixture.js": &fstest.MapFile{Data: []byte(`console.log("fixture")`)},
+	}
+}
+
 func TestAdminConsoleServing(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 
-	t.Run("gate off by default", func(t *testing.T) {
+	t.Run("no assets, disabled: silently absent", func(t *testing.T) {
 		surface := h.StartStandalone("usd")
 		status, _, _ := getRaw(t, surface.BaseURL+"/admin/")
 		require.Equal(t, http.StatusNotFound, status, "admin console must be absent when disabled")
@@ -45,10 +58,45 @@ func TestAdminConsoleServing(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, status)
 	})
 
-	t.Run("gate on", func(t *testing.T) {
-		surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
-			cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
-		}))
+	t.Run("assets, disabled: not mounted", func(t *testing.T) {
+		surface := h.StartStandalone("usd", WithConsoleAssets(fixtureConsoleAssets()))
+		status, _, _ := getRaw(t, surface.BaseURL+"/admin/")
+		require.Equal(t, http.StatusNotFound, status, "assets without the config gate must not mount /admin")
+		status, _, _ = getRaw(t, surface.BaseURL+"/admin/config.json")
+		require.Equal(t, http.StatusNotFound, status)
+	})
+
+	t.Run("no assets, enabled: loud boot error", func(t *testing.T) {
+		// The boot error surfaces from serverboot.NewServer, so this drives it
+		// directly with the same config shape the harness boots.
+		_, appDSN := dbtest.SharedRLSPostgres(t)
+		cfg := &config.Config{
+			Env:               "dev",
+			TestMode:          config.CredentialPostureSandbox,
+			MerchantSource:    config.MerchantSourceAPI,
+			ProviderWriteMode: config.ProviderWriteModeFull,
+			Host:              "127.0.0.1",
+			Port:              0,
+			DB:                &config.DBConfig{URL: appDSN},
+			Auth:              &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
+			AdminConsole:      &config.AdminConsoleConfig{Enabled: true},
+		}
+		if h.Redis != nil {
+			cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
+		}
+		_, err := serverboot.NewServer(cfg, &serverboot.Options{})
+		require.Error(t, err, "admin_console.enabled without assets must refuse boot")
+		require.Contains(t, err.Error(), "no console assets")
+		require.Contains(t, err.Error(), "build-admin-console.sh", "boot error must name the build step")
+		require.Contains(t, err.Error(), "console_assets", "boot error must name the build tag")
+	})
+
+	t.Run("assets, enabled: serves", func(t *testing.T) {
+		surface := h.StartStandalone("usd",
+			WithConsoleAssets(fixtureConsoleAssets()),
+			WithConfig(func(cfg *config.Config) {
+				cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
+			}))
 
 		// config.json bootstrap carries the standalone defaults.
 		status, body, hdr := getRaw(t, surface.BaseURL+"/admin/config.json")
@@ -62,13 +110,20 @@ func TestAdminConsoleServing(t *testing.T) {
 		require.Equal(t, "/auth", boot.AuthBaseURL)
 		require.Equal(t, "/v1", boot.APIBaseURL)
 
-		// Index serves (committed dist), and SPA fallback covers client routes.
+		// Index serves the supplied assets, SPA fallback covers client routes.
 		status, index, hdr := getRaw(t, surface.BaseURL+"/admin/")
 		require.Equal(t, http.StatusOK, status)
 		require.Contains(t, hdr.Get("Content-Type"), "text/html")
+		require.Contains(t, index, "fixture-console")
 		status, fallback, _ := getRaw(t, surface.BaseURL+"/admin/customers/some-client-route")
 		require.Equal(t, http.StatusOK, status)
 		require.Equal(t, index, fallback, "SPA fallback must serve index.html")
+
+		// Static files under assets/ serve immutable-cacheable.
+		status, js, hdr := getRaw(t, surface.BaseURL+"/admin/assets/app-fixture.js")
+		require.Equal(t, http.StatusOK, status)
+		require.Contains(t, js, "fixture")
+		require.Contains(t, hdr.Get("Cache-Control"), "immutable")
 
 		// Bare /admin redirects into the SPA root.
 		req, err := http.NewRequest(http.MethodGet, surface.BaseURL+"/admin", nil)
@@ -82,13 +137,15 @@ func TestAdminConsoleServing(t *testing.T) {
 	})
 
 	t.Run("custom bases", func(t *testing.T) {
-		surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
-			cfg.AdminConsole = &config.AdminConsoleConfig{
-				Enabled:     true,
-				AuthBaseURL: "https://auth.example.test/auth",
-				APIBaseURL:  "/billing/v1",
-			}
-		}))
+		surface := h.StartStandalone("usd",
+			WithConsoleAssets(fixtureConsoleAssets()),
+			WithConfig(func(cfg *config.Config) {
+				cfg.AdminConsole = &config.AdminConsoleConfig{
+					Enabled:     true,
+					AuthBaseURL: "https://auth.example.test/auth",
+					APIBaseURL:  "/billing/v1",
+				}
+			}))
 		status, body, _ := getRaw(t, surface.BaseURL+"/admin/config.json")
 		require.Equal(t, http.StatusOK, status)
 		require.Contains(t, body, `"auth_base_url":"https://auth.example.test/auth"`)
@@ -143,8 +200,8 @@ func TestAdminCustomersSearch(t *testing.T) {
 	require.NoError(t, err)
 
 	type listResp struct {
-		Object  string `json:"object"`
-		Data    []struct {
+		Object string `json:"object"`
+		Data   []struct {
 			ID      string  `json:"id"`
 			Subject *string `json:"subject"`
 			Email   *string `json:"email"`

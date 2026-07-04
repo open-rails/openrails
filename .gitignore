@@ -27,10 +27,8 @@ go.work.sum
 .gobuildcache
 .gopath
 
-# Build artifacts
+# Build artifacts (dist/ also covers admin-console builds — never committed, #754)
 dist/
-# web/dist is the COMMITTED admin-console build (go:embed for module consumers, #740)
-!web/dist/
 build/
 bin/
 /openrails

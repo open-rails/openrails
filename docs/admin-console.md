@@ -1,9 +1,25 @@
-# Merchant admin console (#740)
+# Merchant admin console (#740/#754)
 
-A React SPA (web/admin) served by the openrails binary at `/admin/`, driving the
-existing `/v1/merchant/*` API. Off by default.
+A React SPA (`web/admin`) served at `/admin/`, driving the existing
+`/v1/merchant/*` API. Off by default.
 
-## Enabling
+**The engine ships no frontend bytes.** `go:embed` cannot cross module
+boundaries, so whoever builds the binary owns the embed and hands the engine an
+`fs.FS` (#754). Build output (`dist`) is never committed anywhere; Node is a
+build-time dependency only, and only for builds that opt into the console.
+
+## Mount rule
+
+`/admin` routes exist ONLY when console assets are present AND
+`admin_console.enabled` is set:
+
+| assets | `admin_console.enabled` | result |
+|--------|-------------------------|--------|
+| yes    | true                    | console served at `/admin/` |
+| yes    | false                   | not mounted (`/admin/*` 404s) |
+| no     | false                   | silently absent (`/admin/*` 404s) |
+| no     | true                    | **loud boot error** naming the build step |
+| forgot to build dist before a `go:embed` build | — | **loud compile error** (`pattern all:dist: no matching files found`) |
 
 ```yaml
 admin_console:
@@ -13,8 +29,58 @@ admin_console:
 ```
 
 Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_AUTH_BASE_URL`, `ADMIN_CONSOLE_API_BASE_URL`.
+The SPA bootstraps from `GET /admin/config.json`
+(`{auth_base_url, api_base_url, nl_widgets_enabled}`).
 
-The SPA bootstraps from `GET /admin/config.json` (`{auth_base_url, api_base_url}`).
+## Build flow A: the standalone openrails binary
+
+Assets live behind the `console_assets` build tag in the binary-boundary
+package `cmd/openrails/consoleassets` — plain `go build ./...` stays Node-free
+forever.
+
+```sh
+task admin-build            # scripts/build-admin-console.sh -> cmd/openrails/consoleassets/dist (gitignored)
+task build-console-binary   # admin-build + go build -tags console_assets
+```
+
+The Dockerfile is multi-stage: a Node stage builds the SPA, the Go stage embeds
+it with the tag — the published image always carries the console (still
+config-gated at runtime).
+
+## Build flow B: embedded hosts (the doujins shape)
+
+The host repo owns a tiny embed package over a **gitignored** dist its build
+pipeline produces:
+
+```go
+// internal/consoleassets/assets.go
+package consoleassets
+
+import "embed"
+
+//go:embed all:dist
+var FS embed.FS
+```
+
+Build the dist from the openrails module cache (no vendoring, no checkout):
+
+```sh
+"$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
+```
+
+(The script copies `web/admin` out of the read-only module cache to a temp dir
+before `npm ci`.) Then hand the FS to the engine:
+
+```go
+sub, _ := fs.Sub(consoleassets.FS, "dist")
+rt, err := embed.New(ctx, opts, embed.WithAdminConsole(sub))
+```
+
+- **Opt-out = do nothing**: skip the option and zero frontend bytes are linked
+  (`go list -deps ./embed` shows no assets package).
+- **Forgot to build** = loud `go:embed` compile error in the HOST repo.
+- Hosts that mount `adminconsole.Handler` on their own mux directly pass the
+  same `fs.FS` as its second argument (gate on `adminconsole.Present`).
 
 ## Auth
 
@@ -35,22 +101,12 @@ login page. Action permissions are enforced by the API's merchant permission cat
 permission" toast. Embedded hosts that mount `/v1/merchant/*` for host principals only
 (no user bearers) should keep the console disabled or wire a user authenticator (#739).
 
-## Rebuilding the SPA
+## Local UI dev
 
-`web/dist` is the **committed** Vite build output — openrails is imported as a Go module
-by embedded hosts and `go:embed` only ships committed files. After changing `web/admin`:
-
-```sh
-task admin-build   # npm ci + vite build -> web/dist
-git add web/dist
-```
-
-`web/admin` is a separate marker Go module so its `node_modules` never enters
-`go build ./...`. If `web/dist` holds only the placeholder index, the console serves
-503 with a "run task admin-build" message (and logs at boot).
-
-Local UI dev: `cd web/admin && npm run dev` (proxies `/v1`, `/auth`,
-`/admin/config.json` to `localhost:3053`).
+`cd web/admin && npm run dev` (proxies `/v1`, `/auth`, `/admin/config.json` to
+`localhost:3053`). `web/admin/node_modules` is fenced from `go build ./...` by
+the root go.mod `ignore` directive (no nested go.mod — that would prune
+`web/admin` from the module zip hosts build from).
 
 ## Pages
 

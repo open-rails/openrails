@@ -53,5 +53,6 @@ func StandaloneServer(e *Embedded) (*server.Server, error) {
 		Redis:         a.RedisClient,
 		Authenticator: authenticator,
 		ControlPlane:  embcp.Get(a),
+		ConsoleAssets: e.consoleAssets,
 	})
 }

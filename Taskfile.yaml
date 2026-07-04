@@ -24,11 +24,16 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
 
   admin-build:
-    desc: Rebuild the merchant admin console SPA (web/admin -> web/dist). web/dist is COMMITTED (go:embed for module consumers) — commit it after running.
-    dir: web/admin
+    desc: Build the admin console SPA into cmd/openrails/consoleassets/dist (gitignored, #754). Embed it with `task build-console-binary`.
     cmds:
-      - npm ci
-      - npm run build
+      - ./scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+
+  build-console-binary:
+    desc: Build the standalone binary WITH the admin console embedded (admin-build + `go build -tags console_assets`)
+    deps: [admin-build]
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -tags console_assets -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
 
   run:
     desc: Build and run the application server

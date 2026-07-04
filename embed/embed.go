@@ -13,6 +13,7 @@ package embed
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"github.com/open-rails/openrails"
@@ -31,6 +32,18 @@ type Options struct {
 	// context does not kill long-running workers; cancellation is Close's job.
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
+}
+
+// Option adjusts Options before the runtime is built (New's variadic tail).
+type Option func(*Options)
+
+// WithAdminConsole supplies the HOST-BUILT admin console SPA (#754): an fs.FS
+// rooted at index.html, typically a 3-line `//go:embed all:dist` package in the
+// host repo over a gitignored dist produced by openrails'
+// scripts/build-admin-console.sh. Not passing this links ZERO frontend bytes;
+// enabling admin_console without it is a boot error on the standalone surface.
+func WithAdminConsole(assets fs.FS) Option {
+	return func(o *Options) { o.ConsoleAssets = assets }
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -92,8 +105,14 @@ type Runtime struct {
 }
 
 // New builds the embedded runtime: the gin-free app graph (pkg/embedded.New),
-// then the service facade the Client adapts.
-func New(ctx context.Context, opts Options) (*Runtime, error) {
+// then the service facade the Client adapts. The variadic tail applies
+// functional options (e.g. WithAdminConsole) on top of opts.
+func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error) {
+	for _, opt := range options {
+		if opt != nil {
+			opt(&opts)
+		}
+	}
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}

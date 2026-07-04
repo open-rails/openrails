@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
@@ -42,6 +43,11 @@ type Dependencies struct {
 	// explicitly mapped principal for /v1/me/* + /v1/merchant/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
+	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
+	// /admin mounts only when this is present AND admin_console.enabled;
+	// enabled without assets is a boot error.
+	ConsoleAssets fs.FS
 }
 
 type Server struct {
@@ -58,6 +64,8 @@ type Server struct {
 	controlPlane           *controlplane.ControlPlane
 	delegatedResolver      middleware.DelegatedResolver
 	captchaStore           *captcha.ChallengeStore
+	// consoleAssets is the host/binary-supplied admin console build (#754).
+	consoleAssets fs.FS
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
@@ -172,6 +180,7 @@ func New(deps Dependencies) (*Server, error) {
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
+		consoleAssets:          deps.ConsoleAssets,
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -353,8 +362,11 @@ func New(deps Dependencies) (*Server, error) {
 	// /auth — never AuthKit DefaultAPI.
 	s.registerControlPlaneAuthRoutes(mux)
 
-	// Merchant admin console SPA (#740), config-gated (default off).
-	s.registerAdminConsoleRoutes(mux)
+	// Merchant admin console SPA (#740/#754): mounted only when assets are
+	// present AND admin_console.enabled; enabled without assets refuses boot.
+	if err := s.registerAdminConsoleRoutes(mux); err != nil {
+		return nil, err
+	}
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
 	// the SAME public surface (issue #222 browser tier). Always mounted (#469);

@@ -35,6 +35,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -295,6 +296,7 @@ type standaloneConfig struct {
 	configuredMerchant     merchant.ID
 	authenticator          billingauth.Authenticator
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
+	consoleAssets          fs.FS
 	configMutators         []func(*config.Config)
 }
 
@@ -312,6 +314,12 @@ func WithConfig(mutate func(*config.Config)) StandaloneOption {
 // for the River client before returning — for tests that exercise async jobs.
 func WithWorkers() StandaloneOption {
 	return func(c *standaloneConfig) { c.workers = true }
+}
+
+// WithConsoleAssets supplies a built admin console fs.FS (#754). Tests pass a
+// tiny fstest fixture — never a real npm build (integration stays Node-free).
+func WithConsoleAssets(assets fs.FS) StandaloneOption {
+	return func(c *standaloneConfig) { c.consoleAssets = assets }
 }
 
 // WithClock injects the runtime clock at construction. Pass a *SettableClock to
@@ -407,6 +415,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		ConfiguredMerchant:     sc.configuredMerchant,
 		Authenticator:          sc.authenticator,
 		DelegatedAuthenticator: sc.delegatedAuthenticator,
+		ConsoleAssets:          sc.consoleAssets,
 	})
 	require.NoError(h.t, err, "serverboot.NewServer (real standalone)")
 	app := assembled.App

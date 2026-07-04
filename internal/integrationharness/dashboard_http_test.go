@@ -262,9 +262,11 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 	h := New(t, ctx)
 
 	t.Run("unconfigured fails closed", func(t *testing.T) {
-		surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
-			cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
-		}))
+		surface := h.StartStandalone("usd",
+			WithConsoleAssets(fixtureConsoleAssets()), // #754: enabled console requires assets
+			WithConfig(func(cfg *config.Config) {
+				cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
+			}))
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-off-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantDashboardUpdate})
 
@@ -282,10 +284,12 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 	// One config-armed surface for the fake-LLM flows: config.json advertises
 	// the feature; the deterministic stub replaces the real Anthropic client
 	// before any generate call (no network ever).
-	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
-		cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
-		cfg.LLM = &config.LLMConfig{APIKey: "test-key-never-used"}
-	}))
+	surface := h.StartStandalone("usd",
+		WithConsoleAssets(fixtureConsoleAssets()), // #754: enabled console requires assets
+		WithConfig(func(cfg *config.Config) {
+			cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
+			cfg.LLM = &config.LLMConfig{APIKey: "test-key-never-used"}
+		}))
 	token := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-on-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantDashboardUpdate})
 	svc := surface.App().Runtime.DashboardService
