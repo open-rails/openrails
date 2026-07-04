@@ -39,6 +39,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -356,6 +357,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
 		CardAbuseGuard:         cardAbuseGuard,
 		MoneyService:           serviceInstances.MoneyService,
+		MetricsService:         serviceInstances.MetricsService,
 		MoneyCharger:           moneyCharger,
 		RailCustomerService:    serviceInstances.RailCustomerService,
 	}
@@ -771,6 +773,7 @@ type servicesInstances struct {
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
 	MoneyService           *money.MoneyService
+	MetricsService         *metrics.Service
 	RailCustomerService    *payments.RailCustomerService
 }
 
@@ -784,6 +787,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
+	metricsService := metrics.NewService(database)
 	railCustomerService := payments.NewRailCustomerService(database)
 	profileRepo := identity.NewProfileRepo(database)
 
@@ -981,6 +985,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,
 		MoneyService:                 moneyService,
+		MetricsService:               metricsService,
 		RailCustomerService:          railCustomerService,
 	}
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -94,6 +95,8 @@ type Runtime struct {
 	EntitlementService   *entitlements.EntitlementService
 	ProductAccessService *productaccess.Service
 	MoneyService         *money.MoneyService
+	// MetricsService is the #733 merchant analytics query engine.
+	MetricsService *metrics.Service
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
 	AdmissionPolicyCache *admission.PolicyCache

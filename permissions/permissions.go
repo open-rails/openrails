@@ -23,6 +23,9 @@ const (
 	MerchantAdmissionsCreate       = "merchant:admissions:create"
 	MerchantUsageRead              = "merchant:usage:read"
 	MerchantRepairAlertsRead       = "merchant:repair-alerts:read"
+	// MerchantMetricsRead gates the #733 analytics query surface
+	// (/merchant/metrics/query + /schema).
+	MerchantMetricsRead = "merchant:metrics:read"
 	// MerchantFindingsResolve gates POST /merchant/findings/{id}/resolve
 	// (#692): approving a finding executes its recommendation (cancel/refund/
 	// revoke/grant), so it is a distinct write grant; reads share
