@@ -32,6 +32,12 @@ type Options struct {
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
 	// value derived from configured provider accounts.
 	ProviderRoutes *routesurface.ProviderRoutes
+
+	// APIKeys is the #757 merchant self-serve API-key manager (mint/list/revoke
+	// through AuthKit core). Implemented by *controlplane.ControlPlane. Nil
+	// (an embedded host without a control plane) keeps the /api-keys routes
+	// mounted but answering 501.
+	APIKeys httphandlers.MerchantAPIKeyManager
 }
 
 type GateOptions struct {
@@ -316,7 +322,9 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			if principal.UserContext.UserID != "" {
 				r.SetUserContext(principal.UserContext)
 			}
-			r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
+			// The full gate-resolved principal (existing consumers only check
+			// presence; #757 api-key handlers read Permissions for no-escalation).
+			r.Set(httphandlers.MerchantRoutePrincipalContextKey, principal)
 			next(r)
 		}
 	}
@@ -340,7 +348,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: hp.MerchantID}, nil
+		return billingauth.Principal{MerchantID: hp.MerchantID, Permissions: resolved.Permissions}, nil
 	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
@@ -359,7 +367,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: resolved.MerchantID}, nil
+		return billingauth.Principal{MerchantID: resolved.MerchantID, Permissions: resolved.Permissions}, nil
 	}
 	if g.DelegatedResolver != nil && req != nil {
 		if token := bearerToken(req.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
@@ -381,6 +389,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 						Username:      resolved.Username,
 						Merchant:      resolved.Merchant,
 					},
+					Permissions: resolved.Permissions,
 				}, nil
 			}
 		}
@@ -406,6 +415,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				Username:      resolved.Username,
 				Merchant:      resolved.Merchant,
 			},
+			Permissions: resolved.Permissions,
 		}, nil
 	}
 	if g.Authenticator == nil {
@@ -625,6 +635,17 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	rr.Handle(http.MethodGet, "/dashboard", h(httphandlers.GetMerchantDashboard), metricsRead...)
 	rr.Handle(http.MethodPut, "/dashboard", h(httphandlers.PutMerchantDashboard), dashboardWrite...)
 	rr.Handle(http.MethodPost, "/dashboard/widgets/generate", h(httphandlers.GenerateDashboardWidget), dashboardWrite...)
+
+	// #757 merchant self-serve API keys: mint/list/revoke scoped credentials
+	// through AuthKit core. Gated on merchant:credentials:manage — the SAME
+	// string AuthKit's own mint authorization checks; only the merchant owner
+	// (merchant:*) holds it in the fixed #567 catalog. No MerchantDBConnMW:
+	// these handlers touch only the control plane, never the runtime DB.
+	credentialsManage := opts.merchantActionPermissionMW(controlplane.PermMerchantCredentialsManage)
+	apiKeys := rr.Group("/api-keys")
+	apiKeys.Handle(http.MethodPost, "", h(httphandlers.MerchantCreateAPIKey(opts.APIKeys)), credentialsManage)
+	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
+	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 	// #689: worker-health dashboard — same operator repair surface/permission.

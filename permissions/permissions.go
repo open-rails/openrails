@@ -39,6 +39,13 @@ const (
 	// DeclaredBilling book import writes subscriptions/payments/payment methods
 	// wholesale — owner/automation authority, not a support-role grant.
 	MerchantBillingImport = "merchant:billing:import"
+	// MerchantCredentialsManage gates the merchant self-serve API-key surface
+	// (#757: /v1/merchant/api-keys mint/list/revoke). Deliberately the SAME
+	// string as AuthKit's per-persona credential-management capability
+	// (`<persona>:credentials:manage`), so the OpenRails route gate and AuthKit
+	// core's own mint authorization agree exactly. In the fixed merchant role
+	// catalog (#567) only the owner (merchant:*) holds it.
+	MerchantCredentialsManage = "merchant:credentials:manage"
 )
 
 // Platform-operator (root) permissions (#721). AuthKit's #111 rename made

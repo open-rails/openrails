@@ -16,6 +16,12 @@ type Gate interface {
 type Principal struct {
 	MerchantID  merchant.ID
 	UserContext UserContext
+	// Permissions is the credential's resolved grant set for NON-USER principals
+	// (API keys, service JWTs, host/delegated principals) — consumers that need
+	// no-escalation checks (#757 api-key minting) read it. Empty for user
+	// sessions: those carry UserContext.UserID and are checked against live
+	// AuthKit group state instead.
+	Permissions []string
 }
 
 // GateError maps authorization failures to stable HTTP responses.

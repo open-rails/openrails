@@ -45,6 +45,7 @@ import {
 import type { PaymentProviderConfig } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { ApiKeysTab } from "./api-keys"
 
 export function SettingsPage() {
   return (
@@ -52,6 +53,7 @@ export function SettingsPage() {
       <TabsList>
         <TabsTrigger value="merchant">Merchant</TabsTrigger>
         <TabsTrigger value="providers">Payment providers</TabsTrigger>
+        <TabsTrigger value="api-keys">API keys</TabsTrigger>
         <TabsTrigger value="customer-controls">Customer controls</TabsTrigger>
       </TabsList>
       <TabsContent value="merchant">
@@ -59,6 +61,9 @@ export function SettingsPage() {
       </TabsContent>
       <TabsContent value="providers">
         <ProvidersTab />
+      </TabsContent>
+      <TabsContent value="api-keys">
+        <ApiKeysTab />
       </TabsContent>
       <TabsContent value="customer-controls">
         <CustomerControlsTab />

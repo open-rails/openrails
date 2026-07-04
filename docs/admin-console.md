@@ -117,7 +117,44 @@ NMI payment-method change), Payments (filters, detail, rail-aware refund — dis
 rails without API refunds), Catalog (products/prices CRUD + activate/deactivate,
 manifest publish with plan preview, drift view + refresh), Ops (findings queue with
 approve/ignore, repair alerts, worker health), Settings (merchant profile, payment
-providers, credit limit, trust tier).
+providers, API keys, credit limit, trust tier).
+
+## API keys (#757)
+
+Settings → **API keys** mints scoped, revocable Bearer credentials for agents and
+integrations — the easy alternative to session JWTs for programmatic callers
+(LLM agents querying `/v1/merchant/metrics/*`, server-side billing automation).
+Everything goes through AuthKit core; OpenRails never stores the secret (hash only).
+
+- **Mint** — `POST /v1/merchant/api-keys` `{name, role}` → `201` with the full key
+  in `secret`, returned EXACTLY ONCE (the console shows a copy-once modal). `role`
+  must be one of the fixed merchant catalog roles (#567):
+  - `viewer` — read-only (metrics query/schema, payments, subscriptions, catalog,
+    settings reads). **The role to mint for LLM agents** — it can answer any
+    analytics question and cannot refund, cancel, or mutate anything.
+  - `support` — viewer reads plus customer operations (refunds, subscription
+    changes, entitlement grants). No settings/catalog/provider/credential writes.
+  - `owner` — `merchant:*`, full control. Explicit choice only; never the default.
+- **List** — `GET /v1/merchant/api-keys` → metadata only (`id`, `name`, `role`,
+  `prefix`, `created_at`, `last_used_at`, `revoked_at`); never secret material.
+  `prefix` is the non-secret token head (`openrails_st_<key_id>`) for matching a
+  stored credential.
+- **Revoke** — `DELETE /v1/merchant/api-keys/{id}`; takes effect immediately, keys
+  stay listed with `revoked_at` for audit. Revocation is the only recovery from a
+  lost or leaked secret.
+
+The three routes are gated on `merchant:credentials:manage` — held only by the
+merchant **owner** in the fixed catalog (deliberately the same permission string
+AuthKit's own mint authorization checks). No-escalation holds on every path: a
+caller can only mint roles whose permissions its own credential already covers.
+Keys are per-merchant: merchant A's keys are invisible to (and irrevocable by) B.
+
+Use a key as a normal Bearer token against the same `/v1/merchant/*` surface:
+
+```sh
+curl -H "Authorization: Bearer openrails_st_..." \
+  https://billing.example.com/v1/merchant/metrics/schema
+```
 
 ## Dashboard (#741, #755)
 
