@@ -6,6 +6,7 @@ package serverboot
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -50,6 +51,10 @@ type Options struct {
 	// read from (#723). Empty uses the conventional
 	// bootstrap.DefaultMerchantConfigManifestPath when that file exists.
 	MerchantManifestPath string
+
+	// ConsoleAssets is the built admin console SPA (#754); nil = absent.
+	// admin_console.enabled without assets is a boot error.
+	ConsoleAssets fs.FS
 
 	ConfiguredMerchant merchant.ID
 	Rails              config.RailMerchantAccountSet
@@ -116,6 +121,7 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 		Authenticator:          authenticator,
 		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
 		ControlPlane:           embcp.Get(application),
+		ConsoleAssets:          optsValue(opts, func(o *Options) fs.FS { return o.ConsoleAssets }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create billing server: %w", err)

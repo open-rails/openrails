@@ -142,8 +142,10 @@ type Config struct {
 	Encryption         *EncryptionConfig `koanf:"encryption,omitempty"`
 	Vault              *VaultConfig      `koanf:"vault,omitempty"`
 
-	// AdminConsole gates the embedded merchant admin console SPA served at
-	// /admin/ (#740). Default OFF. Env: ADMIN_CONSOLE_ENABLED,
+	// AdminConsole gates the merchant admin console SPA served at /admin/
+	// (#740). Default OFF. Enabling it requires console assets in the binary
+	// (#754: `-tags console_assets` / embed.WithAdminConsole) — enabled
+	// without assets refuses boot. Env: ADMIN_CONSOLE_ENABLED,
 	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
 	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
 
@@ -299,9 +301,10 @@ type VaultConfig struct {
 }
 
 // AdminConsoleConfig configures the merchant admin console SPA (#740).
-// Disabled by default; when enabled the standalone server serves the embedded
-// web/admin build at /admin/ plus a /admin/config.json bootstrap document the
-// SPA reads to find its auth issuer and API base.
+// Disabled by default; when enabled the server serves the caller-supplied
+// console build (#754) at /admin/ plus a /admin/config.json bootstrap document
+// the SPA reads to find its auth issuer and API base. Enabled without assets
+// is a boot error.
 type AdminConsoleConfig struct {
 	Enabled bool `koanf:"enabled,omitempty"`
 	// AuthBaseURL is the base under which the AuthKit authhttp surface lives.

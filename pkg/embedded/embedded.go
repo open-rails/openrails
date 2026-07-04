@@ -3,6 +3,7 @@ package embedded
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -63,10 +64,18 @@ type Options struct {
 	// (refresh/probes/unknown-resolution) armed per merchant from the store,
 	// with this boot plane as fallback. Store credentials win on conflict.
 	PaymentProviders []PaymentProvider
+	// ConsoleAssets is the HOST-BUILT admin console SPA (#754: go:embed cannot
+	// cross module boundaries, so whoever builds the binary owns the embed and
+	// hands the engine an fs.FS rooted at index.html). nil = no frontend bytes;
+	// admin_console.enabled without assets refuses to build the standalone
+	// surface. Hosts using embed.New pass embed.WithAdminConsole instead.
+	ConsoleAssets fs.FS
 }
 
 type Embedded struct {
 	app *app.App
+	// consoleAssets is Options.ConsoleAssets, consumed by StandaloneServer.
+	consoleAssets fs.FS
 	// activeRouteSets records the resolved route groups of the most recently
 	// mounted HTTP surface (#623), for ActiveRouteSets() and capability
 	// discovery. Written at mount time (boot), read while serving.
@@ -99,7 +108,7 @@ func New(opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 
-	return &Embedded{app: application}, nil
+	return &Embedded{app: application, consoleAssets: opts.ConsoleAssets}, nil
 }
 
 // applyEmbeddedDefaults enforces the posture embedded construction must

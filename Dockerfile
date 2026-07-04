@@ -1,4 +1,15 @@
-# Stage 1: build
+# Stage 1: admin console SPA (#754 — dist is never committed; the image build
+# owns the embed). Node is a BUILD-time dependency only.
+FROM node:22-alpine AS console
+
+WORKDIR /web/admin
+COPY web/admin/package.json web/admin/package-lock.json ./
+RUN npm ci
+COPY web/admin/ ./
+RUN npm run build -- --outDir /out --emptyOutDir
+
+
+# Stage 2: build
 FROM golang:1.26.4-alpine AS builder
 
 # Install build dependencies
@@ -26,15 +37,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Copy source code
 COPY . .
+# The console build lands at the binary-boundary embed package; the tagged
+# build below links it (a console-less image would just drop the tag).
+COPY --from=console /out ./cmd/openrails/consoleassets/dist
 
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p bin && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/openrails ./cmd/openrails
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -tags console_assets -o bin/openrails ./cmd/openrails
 
 
-# Stage 2: production
+# Stage 3: production
 FROM alpine:3.19
 
 # Install runtime dependencies (include wget for healthcheck)

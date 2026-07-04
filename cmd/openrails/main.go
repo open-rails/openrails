@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/cmd/openrails/consoleassets"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/migrate"
@@ -130,7 +131,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	startWorkers := !noWorkers
 	config.LogStartupStatus(cfg)
 
-	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
+	// ConsoleAssets is nil unless this binary was built with
+	// `-tags console_assets` (#754: `task build-console-binary` / Dockerfile).
+	embeddedApp, err := embedded.New(embedded.Options{Config: cfg, ConsoleAssets: consoleassets.FS()})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}

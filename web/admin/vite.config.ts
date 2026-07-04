@@ -3,8 +3,9 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
-// Served by the Go binary at /admin/ (go:embed of ../dist — committed; see
-// `task admin-build`).
+// Served by the Go binary at /admin/. Build via scripts/build-admin-console.sh
+// (in-repo: `task admin-build`), which overrides --outDir; dist is NEVER
+// committed (#754) — whoever builds the binary go:embeds it.
 export default defineConfig({
   base: "/admin/",
   plugins: [react(), tailwindcss()],
@@ -14,7 +15,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../dist",
+    outDir: "dist",
     emptyOutDir: true,
   },
   server: {

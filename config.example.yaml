@@ -77,6 +77,9 @@ captcha:
 
 
 # Merchant admin console SPA served at /admin/ (#740). Off by default.
+# Enabling requires console assets in the binary (#754): build with
+# `task build-console-binary` (= admin-build + `go build -tags console_assets`)
+# or, embedded, pass embed.WithAdminConsole. Enabled without assets = boot error.
 admin_console:
   enabled: false
   # auth_base_url: /auth   # AuthKit authhttp base; embedded hosts set their host issuer base
