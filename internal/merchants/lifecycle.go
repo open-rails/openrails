@@ -77,6 +77,17 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 	return &Service{pool: pool, secrets: secrets, providerEnvironment: env}, nil
 }
 
+// NewDirectoryService builds a directory-only Service: merchant provisioning +
+// lookup over openrails.merchants, with no secret store and no provider-account
+// environment (scoped credential lookups are unavailable). It is the lifecycle
+// slice the control-plane provisioning seam needs (#738).
+func NewDirectoryService(pool *db.Pool) (*Service, error) {
+	if pool == nil {
+		return nil, errors.New("merchants: pgx pool is required")
+	}
+	return &Service{pool: pool}, nil
+}
+
 // NewSecretManagementService builds a secret-management-only Service. It is for
 // runtimes/tests that only need credential list/write/delete/validate behavior;
 // lifecycle methods such as Provision still require NewService with a DB pool.

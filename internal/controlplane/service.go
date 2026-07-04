@@ -62,6 +62,8 @@ type ControlPlane struct {
 
 type options struct {
 	hosted bool
+	email  authcore.EmailSender
+	sms    authcore.SMSSender
 }
 
 // Option configures the control plane for embedding hosts.
@@ -73,6 +75,25 @@ type Option func(*options)
 func WithHostedPosture() Option {
 	return func(o *options) {
 		o.hosted = true
+	}
+}
+
+// WithEmailSender wires a host-owned verification email sender into the AuthKit
+// engine (#738). Hosted posture keeps registration verification Required, and
+// authkit refuses construction when that policy has no configured sender — so a
+// hosted host must supply at least one of email/SMS. Self-hosted posture never
+// needs one (closed registration verifies nothing).
+func WithEmailSender(sender authcore.EmailSender) Option {
+	return func(o *options) {
+		o.email = sender
+	}
+}
+
+// WithSMSSender wires a host-owned verification SMS sender (#738); see
+// WithEmailSender.
+func WithSMSSender(sender authcore.SMSSender) Option {
+	return func(o *options) {
+		o.sms = sender
 	}
 }
 
@@ -215,16 +236,28 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// Verification set EXPLICITLY: authkit v0.76.0 defaults unset to
 		// "required" (its doc says "none" — code wins), which refuses boot with
 		// no sender. Locked registration has nothing to verify → none; hosted
-		// keeps required and must configure an email/SMS sender.
+		// keeps required and must configure an email/SMS sender
+		// (WithEmailSender/WithSMSSender, #738).
 		Registration: authcore.RegistrationConfig{
 			NativeUserMode: registrationMode(lockedRegistration),
 			Verification:   registrationVerification(lockedRegistration),
 		},
 	}
 
+	// Host-owned verification senders (#738) are engine dependencies, wired as
+	// authkit functional options. authkit enforces the required-policy/sender
+	// pairing itself at HTTP-server construction below — no downgrade here.
+	var coreOpts []authcore.Option
+	if options.email != nil {
+		coreOpts = append(coreOpts, authcore.WithEmailSender(options.email))
+	}
+	if options.sms != nil {
+		coreOpts = append(coreOpts, authcore.WithSMSSender(options.sms))
+	}
+
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
-	authClient, err := authcore.New(coreCfg, pool)
+	authClient, err := authcore.New(coreCfg, pool, coreOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
 	}

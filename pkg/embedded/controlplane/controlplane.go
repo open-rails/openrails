@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -28,6 +29,19 @@ type AttachOptions struct {
 	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
 	// Leave false for private standalone-compatible embedded hosts.
 	HostedPosture bool
+
+	// EmailSender / SMSSender are host-owned verification senders threaded into
+	// the AuthKit engine (#738). The types (and the VerificationMessage payload a
+	// sender receives) are the github.com/open-rails/authkit/embedded aliases, so
+	// an external host implements them without reaching into authkit internals.
+	//
+	// Hosted posture keeps registration verification Required, and authkit fails
+	// construction loudly when that policy has no sender — so HostedPosture
+	// requires at least one of these. Self-hosted posture ignores them for
+	// registration (closed, nothing to verify); a supplied sender still powers
+	// the mounted self-service verify/reset routes.
+	EmailSender authcore.EmailSender
+	SMSSender   authcore.SMSSender
 }
 
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
@@ -73,6 +87,12 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	var cpOpts []controlplane.Option
 	if opts.HostedPosture {
 		cpOpts = append(cpOpts, controlplane.WithHostedPosture())
+	}
+	if opts.EmailSender != nil {
+		cpOpts = append(cpOpts, controlplane.WithEmailSender(opts.EmailSender))
+	}
+	if opts.SMSSender != nil {
+		cpOpts = append(cpOpts, controlplane.WithSMSSender(opts.SMSSender))
 	}
 	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
 	if err != nil {
