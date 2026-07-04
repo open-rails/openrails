@@ -52,6 +52,13 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 // against a terminal row is money truth and must leave a durable payment row
 // (money truth ≠ lifecycle truth).
 func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) (SubscriptionConvergence, error) {
+	return convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback)
+}
+
+// convergeSubscriptionFromSnapshotLookback is the lookback-parameterized core:
+// live planes cap backfill at #634's 3y; the declared import (#737) unbounds it
+// (a legacy book's charges are all in scope by declaration).
+func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration) (SubscriptionConvergence, error) {
 	out := SubscriptionConvergence{}
 	if database == nil || lc == nil || sub == nil || snap == nil {
 		return out, fmt.Errorf("converge subscription: db, lifecycle, subscription and snapshot are required")
@@ -69,7 +76,7 @@ func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *
 	d.Backfill = snapshotChargesFor(sub, snap)
 	out.Decision = d
 
-	backfilled, _, err := applyDecisionSideEffects(ctx, database.Gen(ctx), sub, d, now, defaultBackfillLookback)
+	backfilled, _, err := applyDecisionSideEffects(ctx, database.Gen(ctx), sub, d, now, lookback)
 	if err != nil {
 		return out, err
 	}
