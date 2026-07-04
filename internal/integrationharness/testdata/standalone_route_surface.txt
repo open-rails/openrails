@@ -46,6 +46,7 @@ GET /v1/merchant/catalog/products/by-key/{key}
 GET /v1/merchant/catalog/products/{id}
 GET /v1/merchant/credit-limit
 GET /v1/merchant/credits/balance
+GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods

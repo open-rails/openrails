@@ -103,6 +103,11 @@ type Config struct {
 	Encryption *EncryptionConfig `koanf:"encryption,omitempty"`
 	Vault      *VaultConfig      `koanf:"vault,omitempty"`
 
+	// AdminConsole gates the embedded merchant admin console SPA served at
+	// /admin/ (#740). Default OFF. Env: ADMIN_CONSOLE_ENABLED,
+	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
+	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
+
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
 	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
 	// It is declared intent, never auto-detected and never auto-fallback — the data
@@ -235,6 +240,24 @@ type VaultConfig struct {
 	SecretID string `koanf:"secret_id,omitempty"`
 	K8sRole  string `koanf:"k8s_role,omitempty"`
 }
+
+// AdminConsoleConfig configures the merchant admin console SPA (#740).
+// Disabled by default; when enabled the standalone server serves the embedded
+// web/admin build at /admin/ plus a /admin/config.json bootstrap document the
+// SPA reads to find its auth issuer and API base.
+type AdminConsoleConfig struct {
+	Enabled bool `koanf:"enabled,omitempty"`
+	// AuthBaseURL is the base under which the AuthKit authhttp surface lives.
+	// Empty defaults to "/auth" (the standalone control plane mount). Embedded
+	// hosts set their host AuthKit base (may be absolute, another origin).
+	AuthBaseURL string `koanf:"auth_base_url,omitempty"`
+	// APIBaseURL is the base of the merchant API. Empty defaults to "/v1"
+	// (standalone). Embedded hosts typically use "/billing/v1".
+	APIBaseURL string `koanf:"api_base_url,omitempty"`
+}
+
+// IsEnabled reports whether the admin console SPA should be served.
+func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
 
 // DBConfig holds database configuration.
 // If URL is provided, it takes precedence. Otherwise, a PostgreSQL connection

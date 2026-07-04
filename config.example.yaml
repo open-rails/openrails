@@ -68,3 +68,9 @@ captcha:
   site_key: ""
   secret_key: ""
 
+
+# Merchant admin console SPA served at /admin/ (#740). Off by default.
+admin_console:
+  enabled: false
+  # auth_base_url: /auth   # AuthKit authhttp base; embedded hosts set their host issuer base
+  # api_base_url: /v1      # merchant API base; embedded hosts typically /billing/v1

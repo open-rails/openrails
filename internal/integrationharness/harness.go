@@ -295,6 +295,17 @@ type standaloneConfig struct {
 	configuredMerchant     merchant.ID
 	authenticator          billingauth.Authenticator
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
+	configMutators         []func(*config.Config)
+}
+
+// WithConfig mutates the harness-built standalone config before boot (e.g.
+// enabling the #740 admin console gate). Applied in registration order.
+func WithConfig(mutate func(*config.Config)) StandaloneOption {
+	return func(c *standaloneConfig) {
+		if mutate != nil {
+			c.configMutators = append(c.configMutators, mutate)
+		}
+	}
 }
 
 // WithWorkers boots the in-process River workers (Runtime.RunWorkers) and waits
@@ -386,6 +397,9 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	}
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
+	}
+	for _, mutate := range sc.configMutators {
+		mutate(cfg)
 	}
 	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{
 		Clock:                  sc.clock,
