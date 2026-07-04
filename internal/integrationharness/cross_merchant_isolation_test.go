@@ -267,7 +267,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		user, err := core.CreateUser(ctx, email, username)
 		require.NoError(t, err, "create user")
 		require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, roleForPerms(perms)), "assign merchant role")
-		token, _, err := core.IssueAccessToken(ctx, user.ID, nil)
+		token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 		require.NoError(t, err, "issue access token")
 		return token
 	}
@@ -399,7 +399,7 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	// #567: assign the merchant `owner` role directly in the merchant group (no
 	// separate group membership step).
 	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner), "assign merchant admin role")
-	token, _, err := core.IssueAccessToken(ctx, user.ID, nil)
+	token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err, "issue merchant admin user access token")
 
 	// #721: the platform directory is mounted on the standalone surface but

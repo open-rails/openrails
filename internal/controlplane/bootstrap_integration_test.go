@@ -315,7 +315,7 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 
-	token, _, err := cp.Core().IssueAccessToken(ctx, owner.ID, nil)
+	token, _, err := cp.Core().MintAccessToken(ctx, owner.ID, nil)
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
