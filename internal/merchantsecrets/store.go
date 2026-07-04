@@ -33,6 +33,11 @@ type Store struct {
 	// key is supported. SecretWrite: provider-secret writes / config-push are possible.
 	SolanaCanSign bool
 	SecretWrite   bool
+	// VaultAuth is the #751 auth-health probe for the Vault client backing
+	// this store: nil when Vault isn't enabled, non-nil (call .AuthState())
+	// otherwise. NOT wired into any readiness surface by this package — #748
+	// is expected to consume it from a future Embedded.Ready.
+	VaultAuth *vault.Supervisor
 }
 
 // deriveRouteGates computes the advisory route-gating signals. localKeys: the
@@ -72,13 +77,14 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 	// token may actually do. The connection may serve KV, Transit, both, or (with a
 	// transit-only policy) only signing.
 	var (
-		vclient *vaultapi.Client
-		transit solanaint.TransitClient
-		caps    vault.Capabilities
+		vclient   *vaultapi.Client
+		transit   solanaint.TransitClient
+		caps      vault.Capabilities
+		vaultAuth *vault.Supervisor
 	)
 	if cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled {
 		vc := cfg.Vault
-		client, err := vault.Login(ctx, vault.Config{
+		client, sup, err := vault.Login(ctx, vault.Config{
 			Address:    vc.Address,
 			AuthMethod: vc.AuthMethod,
 			Token:      vc.Token,
@@ -89,6 +95,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		if err != nil {
 			return nil, fmt.Errorf("vault login: %w", err)
 		}
+		vaultAuth = sup
 		caps, err = vault.SelfCapabilities(ctx, client, vaultKVMount)
 		if err != nil {
 			// Only fatal when secrets are declared to live in Vault: the KV store
@@ -117,7 +124,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		}
 		store := merchants.NewVaultSecretStore(
 			vaultKVMount,
-			vault.NewKVv2Adapter(vclient, vaultKVMount),
+			vault.NewKVv2Adapter(vclient, vaultKVMount).WithReauthTrigger(vaultAuth),
 			merchants.NewDBMerchantSlugResolver(pool),
 		)
 		return &Store{
@@ -126,6 +133,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			Capabilities:  caps,
 			SolanaCanSign: solanaCanSign,
 			SecretWrite:   secretWrite,
+			VaultAuth:     vaultAuth,
 		}, nil
 	}
 
@@ -139,6 +147,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		Capabilities:  caps,
 		SolanaCanSign: solanaCanSign,
 		SecretWrite:   secretWrite,
+		VaultAuth:     vaultAuth,
 	}, nil
 }
 
@@ -221,12 +230,20 @@ func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.Man
 // BuildTransit opens the Vault Transit signing client when Vault is enabled
 // (nil otherwise). Standalone of the KV store — MODE 1 uses it for Solana
 // vault_transit signers with no KV backend at all.
+//
+// The #751 re-auth Supervisor still runs in the background here (Login
+// starts it unconditionally) — the transit client's token stays fresh across
+// re-logins the same as the KV path's — but its AuthState() handle is
+// discarded because this exported function's signature is depended on
+// outside this package (internal/bootstrap, pkg/embedded); a future readiness
+// wiring (#748) that wants transit-only auth health will need a small
+// signature change here, noted in the tracker for that follow-up.
 func BuildTransit(ctx context.Context, cfg *config.Config) (solanaint.TransitClient, error) {
 	if cfg == nil || cfg.Vault == nil || !cfg.Vault.Enabled {
 		return nil, nil
 	}
 	vc := cfg.Vault
-	client, err := vault.Login(ctx, vault.Config{
+	client, _, err := vault.Login(ctx, vault.Config{
 		Address:    vc.Address,
 		AuthMethod: vc.AuthMethod,
 		Token:      vc.Token,

@@ -308,13 +308,19 @@ func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T)
 
 	cfg := vaultBackedConfig("production", d.Addr, d.RootToken)
 
-	// Unreachable at boot ⇒ Build fails loudly (vault declared means vault required).
+	// Unreachable at boot ⇒ Build fails loudly (vault declared means vault
+	// required). #751: token-mode Login itself now does a self-lookup (to
+	// learn renewability/TTL for the re-auth Supervisor), so an unreachable
+	// Vault can fail as early as "vault login" instead of the later
+	// capability probe — either is the same loud, no-degrade boot failure.
 	d.Pause(t)
 	bootCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	_, err := Build(bootCtx, cfg, pool)
 	cancel()
 	require.Error(t, err, "boot with unreachable Vault must fail loudly, never degrade")
-	require.Contains(t, err.Error(), "vault capability probe")
+	require.True(t,
+		strings.Contains(err.Error(), "vault capability probe") || strings.Contains(err.Error(), "vault login"),
+		"unexpected boot error shape: %v", err)
 	d.Unpause(t)
 
 	// Healthy boot; seed nameA through the store (it lands in the read cache too).
