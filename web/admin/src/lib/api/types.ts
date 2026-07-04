@@ -322,6 +322,25 @@ export interface PaymentProviderConfig {
   updated_at: string
 }
 
+// --- API keys (#757) ---
+
+export interface MerchantAPIKey {
+  id: string
+  name: string
+  role: string
+  // Non-secret leading token part ("openrails_st_<key_id>") for matching a
+  // stored credential. The secret itself is shown once, at mint time only.
+  prefix: string
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  revoked_at?: string
+}
+
+export interface MintedAPIKey extends MerchantAPIKey {
+  secret: string
+}
+
 // --- Auth (AuthKit authhttp) ---
 
 export interface AuthCapabilities {

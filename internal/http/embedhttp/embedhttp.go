@@ -23,6 +23,7 @@ import (
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
+	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -63,7 +64,11 @@ type Assembler struct {
 	// *controlplane.ControlPlane satisfies it.
 	AdminChecker              authpolicy.AdminPermissionChecker
 	ServiceCredentialResolver httproutes.ServiceCredentialResolver
-	CaptchaStore              *captcha.ChallengeStore
+	// APIKeys is the #757 merchant self-serve API-key manager (the attached
+	// control plane). nil for hosts without a control plane — the /api-keys
+	// routes then answer 501.
+	APIKeys      httphandlers.MerchantAPIKeyManager
+	CaptchaStore *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
 	RDB           *redis.Client
@@ -93,11 +98,16 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(httproutes.ServiceCredentialResolver); ok {
 		resolver = c
 	}
+	var apiKeys httphandlers.MerchantAPIKeyManager
+	if c, ok := a.ControlPlane.(httphandlers.MerchantAPIKeyManager); ok {
+		apiKeys = c
+	}
 	asm := &Assembler{
 		Cfg:                       a.Config,
 		Runtime:                   a.Runtime,
 		AdminChecker:              checker,
 		ServiceCredentialResolver: resolver,
+		APIKeys:                   apiKeys,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
 	}
@@ -160,7 +170,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
-			Gate: s.Gate,
+			Gate:    s.Gate,
+			APIKeys: s.APIKeys,
 		}
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted
 		// via embgin.SelfHandler (issuer→owner), not the base handler.

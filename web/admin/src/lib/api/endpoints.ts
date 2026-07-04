@@ -11,7 +11,9 @@ import type {
   CustomerSummary,
   Finding,
   FindingsListResponse,
+  MerchantAPIKey,
   MerchantSettings,
+  MintedAPIKey,
   PaymentMethodResponse,
   PaymentObject,
   PaymentProviderConfig,
@@ -248,6 +250,16 @@ export const deletePaymentProvider = (rail: string, environment?: string) =>
     method: "DELETE",
     query: environment ? { environment } : undefined,
   })
+
+// --- API keys (#757) ---
+
+export const listApiKeys = () => api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys")
+
+export const createApiKey = (name: string, role: string) =>
+  api<MintedAPIKey>("/merchant/api-keys", { method: "POST", body: { name, role } })
+
+export const revokeApiKey = (id: string) =>
+  api<{ revoked: boolean; id: string }>(`/merchant/api-keys/${id}`, { method: "DELETE" })
 
 export const getCreditLimit = (customerId: string, currency: string) =>
   api<{ currency: string; credit_limit_amount: number }>("/merchant/credit-limit", {

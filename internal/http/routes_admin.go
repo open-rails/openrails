@@ -17,6 +17,8 @@ func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix st
 			DelegatedResolver:         s.controlPlane,
 			DelegatedAuthenticator:    s.delegatedAuthenticator,
 		}),
+		// #757 self-serve API keys (mint/list/revoke via AuthKit core).
+		APIKeys: s.controlPlane,
 	}
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone
 	// mounts every merchant route set here: human admin/support, settings/catalog,

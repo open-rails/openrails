@@ -1,5 +1,6 @@
 DELETE /v1/customers/{customer_id}/payment-methods/{id}
 DELETE /v1/me/payment-methods/{id}
+DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/payment-providers/{provider}
@@ -38,6 +39,7 @@ GET /v1/me/subscriptions
 GET /v1/me/subscriptions/{id}
 GET /v1/me/transactions
 GET /v1/me/usage
+GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/{id}
@@ -101,6 +103,7 @@ POST /v1/me/subscriptions/{id}/solana-tier-change/confirm
 POST /v1/merchant/admissions
 POST /v1/merchant/admissions/{id}/capture
 POST /v1/merchant/admissions/{id}/release
+POST /v1/merchant/api-keys
 POST /v1/merchant/catalog/drift/refresh
 POST /v1/merchant/catalog/prices
 POST /v1/merchant/catalog/prices/{id}/activate
