@@ -28,7 +28,7 @@ import (
 // merchantsServiceForTest builds the production merchants.Service over the
 // shared test DB with the production DB-backed secret store (real
 // openrails.merchant_secrets rows), in the test-environment posture the live
-// tests run under (TEST_MODE=true).
+// tests run under (TEST_MODE=sandbox).
 func merchantsServiceForTest(t *testing.T, dbi *db.DB) *merchants.Service {
 	t.Helper()
 	store, err := merchants.NewDBSecretStore(dbi.DataPool())
@@ -97,7 +97,7 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	require.Equal(t, stripeKey, creds.SecretKey, "LoadStripeCredentials must resolve the seeded scoped secret")
 
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestMode: true},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccount, Stripe: &config.StripeRailConfig{SecretKey: creds.SecretKey}},
 		},

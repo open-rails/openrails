@@ -28,7 +28,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	t.Cleanup(pool.Close)
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, "b6b6b6b6-0000-4000-8000-000000000042")
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

@@ -56,7 +56,7 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	seed("ccbill", ccbillAccount)
 	putSecret("ccbill", ccbillAccount, "salt", "ccbill-sandbox-salt-681")
 
-	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: true}}
+	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}}
 	svc.SetMerchantSecretStore(store)
 	svc.SetRailMerchantAccountSecretResolver(msvc)
 

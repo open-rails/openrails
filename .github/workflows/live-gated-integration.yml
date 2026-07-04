@@ -94,7 +94,7 @@ jobs:
       - name: Live rail invoice collection tests
         env:
           OPENRAILS_LIVE_RAIL_TESTS: "1"
-          TEST_MODE: "true"
+          TEST_MODE: "sandbox"
           OPENRAILS_TEST_STRIPE_SECRET_KEY: ${{ secrets.OPENRAILS_TEST_STRIPE_SECRET_KEY }}
           NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
         run: |

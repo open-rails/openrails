@@ -42,7 +42,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("91%04d-0000", nano%10_000)
 	securityKey := fmt.Sprintf("sec-key-%d", nano)
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
 		Options: embedded.Options{Config: cfg}, // deliberately NO PaymentProviders
 	})
@@ -179,7 +179,7 @@ func (f *pullFakeNMI) sawKey(key string) bool {
 func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string, m embed.MerchantConfig) merchant.ID {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
 	require.NoError(t, err)
 	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
@@ -233,7 +233,7 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 	fake := newPullFakeNMI(t)
 	var out bytes.Buffer
 	require.NoError(t, embedded.PullProvider(ctx, embedded.PullProviderOptions{
-		Config:           &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}},
+		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantSlug:     slug,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
@@ -277,7 +277,7 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()
 	err := embedded.PullProvider(ctx, embedded.PullProviderOptions{
-		Config:           &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}},
+		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantSlug:     slug,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),

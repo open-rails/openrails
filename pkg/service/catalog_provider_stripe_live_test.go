@@ -32,13 +32,13 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 	defer cancel()
 
 	stripeSvc := &catalog.StripeCatalogService{
-		Config: &config.Config{Env: "dev", TestMode: true},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}
 	svc := &Service{rt: &app.Runtime{
-		Config: &config.Config{Env: "dev", TestMode: true},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},

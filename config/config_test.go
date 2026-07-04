@@ -63,12 +63,12 @@ func TestLoad_EnvMapping(t *testing.T) {
 		}
 	})
 
-	t.Run("maps TEST_MODE to the top-level test_mode bool (#355)", func(t *testing.T) {
-		t.Setenv("TEST_MODE", "true")
+	t.Run("maps TEST_MODE to the top-level test_mode posture (#355/#745)", func(t *testing.T) {
+		t.Setenv("TEST_MODE", "sandbox")
 
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
-		assert.True(t, cfg.TestMode)
+		assert.Equal(t, CredentialPostureSandbox, cfg.TestMode)
 		assert.True(t, cfg.IsTestMode())
 	})
 
@@ -85,16 +85,16 @@ func TestLoad_EnvMapping(t *testing.T) {
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
 		assert.True(t, cfg.IsDev(), "default env is development")
-		assert.True(t, cfg.TestMode, "unset test_mode defaults to sandbox in dev — a local boot can never silently use live credentials")
+		assert.Equal(t, CredentialPostureSandbox, cfg.TestMode, "unset test_mode defaults to sandbox in dev — a local boot can never silently use live credentials")
 		assert.True(t, cfg.IsTestMode())
 	})
 
-	t.Run("explicit test_mode=false runs live in development (#355)", func(t *testing.T) {
-		t.Setenv("TEST_MODE", "false")
+	t.Run("explicit test_mode=live runs live in development (#355/#745)", func(t *testing.T) {
+		t.Setenv("TEST_MODE", "live")
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
 		assert.True(t, cfg.IsDev())
-		assert.False(t, cfg.TestMode, "explicit false is honored over the dev sandbox default")
+		assert.Equal(t, CredentialPostureLive, cfg.TestMode, "explicit live is honored over the dev sandbox default")
 		assert.False(t, cfg.IsTestMode())
 	})
 
@@ -297,16 +297,16 @@ func TestIsTestMode(t *testing.T) {
 		assert.False(t, (&Config{}).IsTestMode())
 	})
 
-	t.Run("test_mode=true is sandbox", func(t *testing.T) {
-		assert.True(t, (&Config{TestMode: true}).IsTestMode())
+	t.Run("test_mode=sandbox is sandbox", func(t *testing.T) {
+		assert.True(t, (&Config{TestMode: CredentialPostureSandbox}).IsTestMode())
 	})
 
 	t.Run("orthogonal to provider_write_mode", func(t *testing.T) {
 		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsTestMode())
 		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeLimited}).IsTestMode())
 		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly}).IsTestMode())
-		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}).IsTestMode())
-		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: true}).IsTestMode())
+		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}).IsTestMode())
+		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: CredentialPostureSandbox}).IsTestMode())
 	})
 }
 
@@ -364,14 +364,14 @@ func TestRequiresRLS(t *testing.T) {
 }
 
 func TestProductionTestModeValidation(t *testing.T) {
-	t.Run("prod env rejects test_mode=true", func(t *testing.T) {
+	t.Run("prod env rejects test_mode=sandbox", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.ProviderWriteMode = ProviderWriteModeFull
-		cfg.TestMode = true
+		cfg.TestMode = CredentialPostureSandbox
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsDev(), "env=prod should not be dev")
-		assert.ErrorContains(t, Validate(cfg), "test_mode=true is not allowed outside development")
+		assert.ErrorContains(t, Validate(cfg), "test_mode=sandbox is not allowed outside development")
 	})
 
 	t.Run("prod env rejects a plaintext-http auth issuer", func(t *testing.T) {
@@ -398,22 +398,24 @@ func TestProductionTestModeValidation(t *testing.T) {
 	})
 
 	t.Run("a zero-value struct is live + readonly behavior (Load applies the dev sandbox default separately)", func(t *testing.T) {
-		// This builds the struct directly, bypassing Load(), so the zero-value
-		// TestMode is live. The dev sandbox-by-default behavior is applied by
-		// Load() and covered in TestLoad_EnvMapping (#355). Unset
-		// provider_write_mode FAIL-CLOSES to readonly (Paul 2026-07-02).
+		// This builds the struct directly, bypassing Load(), so TestMode is
+		// left unset (""), which IsTestMode() reads as live. The dev
+		// sandbox-by-default behavior is applied by Load() and covered in
+		// TestLoad_EnvMapping (#355/#745). Unset provider_write_mode
+		// FAIL-CLOSES to readonly (Paul 2026-07-02).
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
 		assembleDBURL(cfg)
-		assert.False(t, cfg.IsTestMode(), "zero-value test_mode is live; the dev sandbox default is a Load() concern")
+		assert.Equal(t, CredentialPosture(""), cfg.TestMode, "zero-value test_mode is unset; the dev sandbox default is a Load() concern")
+		assert.False(t, cfg.IsTestMode(), "unset test_mode reads as live")
 		assert.True(t, cfg.IsProviderReadOnly(), "unset provider_write_mode fail-closes to readonly")
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("dev env accepts test_mode=true (sandbox)", func(t *testing.T) {
+	t.Run("dev env accepts test_mode=sandbox", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
-		cfg.TestMode = true
+		cfg.TestMode = CredentialPostureSandbox
 		assembleDBURL(cfg)
 		assert.True(t, cfg.IsDev(), "env=dev should be dev")
 		assert.True(t, cfg.IsTestMode())
@@ -429,14 +431,61 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assembleDBURL(cfg)
 		assert.NoError(t, Validate(cfg))
 	})
+
+	t.Run("garbage test_mode value is rejected regardless of env", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "dev"
+		cfg.TestMode = CredentialPosture("yes")
+		assembleDBURL(cfg)
+		assert.ErrorContains(t, Validate(cfg), `invalid test_mode "yes"`)
+	})
+}
+
+// #742: RateLimitHTTP(nil, ...) is a full passthrough — Validate refuses a nil
+// rate_limits map outside development unless the host explicitly disabled it.
+func TestValidateRateLimitsRequiredOutsideDev(t *testing.T) {
+	t.Run("prod env rejects nil rate_limits", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.ProviderWriteMode = ProviderWriteModeFull
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.RateLimits = nil
+		assembleDBURL(cfg)
+		assert.ErrorContains(t, Validate(cfg), "rate_limits is required outside development")
+	})
+
+	t.Run("prod env accepts an explicit rate_limits_disabled opt-out", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.ProviderWriteMode = ProviderWriteModeFull
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.RateLimits = nil
+		cfg.RateLimitsDisabled = true
+		assembleDBURL(cfg)
+		assert.NoError(t, Validate(cfg))
+	})
+
+	t.Run("dev env tolerates nil rate_limits", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "dev"
+		cfg.RateLimits = nil
+		assembleDBURL(cfg)
+		assert.NoError(t, Validate(cfg))
+	})
 }
 
 // stripeTestModeConfig builds a minimal Config plus in-memory RailMerchantAccountSet with a
 // single Stripe rail carrying the given secret key and test_mode setting.
 func stripeTestModeConfig(secretKey string, testMode bool) (*Config, RailMerchantAccountSet) {
+	posture := CredentialPostureLive
+	if testMode {
+		posture = CredentialPostureSandbox
+	}
 	return &Config{
 			ProviderWriteMode: ProviderWriteModeFull,
-			TestMode:          testMode,
+			TestMode:          posture,
 		}, RailMerchantAccountSet{
 			"stripe": {
 				Rail:   models.RailStripe,
@@ -508,7 +557,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	})
 
 	t.Run("validates every stripe rail", func(t *testing.T) {
-		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
+		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
 		rails := RailMerchantAccountSet{
 			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
 			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
@@ -578,14 +627,14 @@ func TestCatalogTargetSelectors(t *testing.T) {
 // guard: an account whose declared environment contradicts test_mode is rejected;
 // a matching or unset (derived) environment passes.
 func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
-	// test_mode=true (sandbox) rejects a live-declared account.
-	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: true}, RailMerchantAccountSet{
+	// test_mode=sandbox rejects a live-declared account.
+	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
 	})
 	require.ErrorContains(t, err, "requires environment=test")
 
-	// test_mode=false (production) rejects a test-declared account.
-	cfgLive := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: false}
+	// test_mode=live (production) rejects a test-declared account.
+	cfgLive := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
 	require.ErrorContains(t, ValidateRailSet(cfgLive, RailMerchantAccountSet{
 		"stripe": {Rail: models.RailStripe, Environment: "test", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}), "requires environment=live")
@@ -607,7 +656,7 @@ func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg.TestMode = true
+	cfg.TestMode = CredentialPostureSandbox
 	rails := RailMerchantAccountSet{
 		"stripe": {Rail: "stripe", Stripe: &StripeRailConfig{SecretKey: "sk_live_abc123"}},
 	}
@@ -859,7 +908,7 @@ func TestOperatingModes(t *testing.T) {
 	require.True(t, ro.IsProviderReadOnly())
 
 	// mode is pure behavior: test_mode does not change the behavior gates
-	roSandbox := &Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: true}
+	roSandbox := &Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: CredentialPostureSandbox}
 	require.True(t, roSandbox.IsLimitedMode())
 	require.True(t, roSandbox.IsProviderReadOnly())
 

@@ -66,7 +66,7 @@ func TestNonReadOnlyAllowsWrites(t *testing.T) {
 	srv, hits := newCountingServer(t)
 	for _, cfg := range []*config.Config{
 		nil, // nil = tests/full (documented Client contract)
-		{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: true}, // sandbox creds, full behavior
+		{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}, // sandbox creds, full behavior
 		{ProviderWriteMode: config.ProviderWriteModeFull},
 		{ProviderWriteMode: config.ProviderWriteModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
 	} {

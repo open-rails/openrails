@@ -235,9 +235,13 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 }
 
 func checkoutRailConfig(testMode bool) *config.Config {
+	posture := config.CredentialPostureLive
+	if testMode {
+		posture = config.CredentialPostureSandbox
+	}
 	return &config.Config{
 		ProviderWriteMode: config.ProviderWriteModeFull,
-		TestMode:          testMode,
+		TestMode:          posture,
 	}
 }
 

@@ -34,7 +34,7 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	t.Cleanup(pool.Close)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

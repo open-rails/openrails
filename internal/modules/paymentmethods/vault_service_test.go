@@ -288,9 +288,13 @@ func (r vaultPerMerchantProviderSecretResolver) ActiveRailMerchantAccountScope(_
 }
 
 func vaultTestConfig(testMode bool) *config.Config {
+	posture := config.CredentialPostureLive
+	if testMode {
+		posture = config.CredentialPostureSandbox
+	}
 	return &config.Config{
 		ProviderWriteMode: config.ProviderWriteModeFull,
-		TestMode:          testMode,
+		TestMode:          posture,
 	}
 }
 

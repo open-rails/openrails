@@ -84,7 +84,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	// declared full: unset now fails CLOSED to readonly, and this test's whole
 	// point is a real test-mode invoice write.
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestMode: true, ProviderWriteMode: config.ProviderWriteModeFull},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: config.RailMerchantAccountSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccountID, Stripe: &config.StripeRailConfig{SecretKey: storeCreds.SecretKey}},
 		},
@@ -185,7 +185,7 @@ func requireLiveRailTest(t *testing.T) {
 		t.Skipf("%s=1 is required for live rail invoice tests", liveRailOptIn)
 	}
 	if !isTruthy(os.Getenv("TEST_MODE")) && !isTruthy(os.Getenv("OPENRAILS_TEST_MODE")) {
-		t.Fatalf("TEST_MODE=true is required for live rail invoice tests")
+		t.Fatalf("TEST_MODE=sandbox is required for live rail invoice tests")
 	}
 }
 
@@ -201,7 +201,7 @@ func cleanupInvoiceRows(t *testing.T, pool *pgxpool.Pool, ctx context.Context, p
 
 func isTruthy(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "on":
+	case "1", "true", "yes", "on", "sandbox":
 		return true
 	default:
 		return false

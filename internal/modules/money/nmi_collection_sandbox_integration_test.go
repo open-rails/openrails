@@ -48,7 +48,8 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	cleanupInvoiceRows(t, pool, ctx, payer)
 
 	// The REAL NMI client, pointed at the REAL sandbox Direct Post endpoint (no URL
-	// override). test_mode=true mirrors the TEST_MODE=true sandbox configuration.
+	// override). The nmi.NewClient testMode=true mirrors the TEST_MODE=sandbox
+	// configuration.
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{
 		SecurityKey:   securityKey,
 		WebhookSecret: strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET")),

@@ -398,7 +398,7 @@ what backfills those missed provider events from the durable watermark.
   system-initiated touches a provider; everything user/admin-asked works.
   `readonly`: zero provider writes, wire-enforced on all three rails (NMI
   direct-post, Stripe transport, Solana transaction submission).
-- `test_mode = true|false` — credential sandbox enforcement, orthogonal to
+- `test_mode = sandbox|live` — credential sandbox enforcement, orthogonal to
   provider_write_mode: sandbox routing + Stripe live-key refusal + the NMI boot probe (one
   auth on the non-issued test card; a decline proves production credentials
   and refuses the boot) + Solana devnet. Probe verdicts cache for 12h in
