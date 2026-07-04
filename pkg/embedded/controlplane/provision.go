@@ -20,8 +20,13 @@ type ProvisionMerchantRequest struct {
 	// Slug is the merchant slug (merchant.ValidateSlug rules). Required.
 	Slug string
 	// OwnerUserID is an optional AuthKit user uuid seeded as the merchant
-	// permission-group's owner (auto-holds `merchant:*`, #567). When the
-	// merchant already exists, the owner role is (re)assigned idempotently.
+	// permission-group's owner (auto-holds `merchant:*`, #567) — ONLY when this
+	// call creates the group. A pre-existing merchant's roles are never touched
+	// (a registration wrapper can safely pass any authenticated user with a
+	// user-chosen slug and branch on Created; a slug squatter cannot be granted
+	// ownership of someone else's merchant). Re-runs stay idempotent: the
+	// creating call already seeded the owner. Later owner changes go through
+	// Core().AssignGroupRole explicitly.
 	OwnerUserID string
 }
 
@@ -88,11 +93,6 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		groupCreated = true
 	case err != nil:
 		return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
-	case owner != "":
-		// Group pre-existed: ensure the owner holds the owner role (idempotent).
-		if aerr := core.AssignGroupRole(ctx, controlplane.MerchantType, slug, owner, authcore.SubjectKindUser, controlplane.MerchantRoleOwner); aerr != nil {
-			return nil, fmt.Errorf("control plane provision: assign merchant owner: %w", aerr)
-		}
 	}
 
 	// Create/link the directory row (permission_group_id) via the merchants
