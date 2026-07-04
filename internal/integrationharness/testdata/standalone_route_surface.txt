@@ -84,6 +84,7 @@ POST /v1/customers/{customer_id}/billing-portal
 POST /v1/customers/{customer_id}/checkout
 POST /v1/customers/{customer_id}/checkout/{id}/confirm
 POST /v1/customers/{customer_id}/payment-methods
+POST /v1/import/billing
 POST /v1/me/billing-portal
 POST /v1/me/checkout
 POST /v1/me/checkout/{id}/confirm

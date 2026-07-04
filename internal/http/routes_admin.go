@@ -25,6 +25,9 @@ func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix st
 	httproutes.RegisterCatalogRoutes(router.NewMuxRecorded(mux, prefix+"/catalog", s.runtime, s.recordRoute), s.runtime, opts)
 	httproutes.RegisterPaymentProviderRoutes(router.NewMuxRecorded(mux, prefix+"/payment-providers", s.runtime, s.recordRoute), s.runtime, opts)
 	httproutes.RegisterServiceRoutes(router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute), s.runtime, opts)
+	// #737: DeclaredBilling import (POST <api>/import/billing), merchant from
+	// the authenticated credential like every other merchant-scoped route.
+	httproutes.RegisterImportRoutes(router.NewMuxRecorded(mux, apiPrefix+"/import", s.runtime, s.recordRoute), s.runtime, opts)
 }
 
 func (s *Server) registerMerchantActionRoutes(mux *http.ServeMux) {

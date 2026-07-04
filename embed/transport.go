@@ -30,10 +30,10 @@ const inprocessBaseURL = "http://openrails.invalid"
 // (i.e. anything network-shaped) is rejected 401 by the real middleware.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := http.NewServeMux()
-	httproutes.RegisterServiceRoutes(
-		router.NewMux(mux, "/v1/merchant", rt), rt,
-		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})},
-	)
+	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})}
+	httproutes.RegisterServiceRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
+	// #737: DeclaredBilling import, same gate (host principal holds merchant:*).
+	httproutes.RegisterImportRoutes(router.NewMux(mux, "/v1/import", rt), rt, opts)
 	return mux
 }
 

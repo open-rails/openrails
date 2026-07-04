@@ -247,6 +247,16 @@ func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	registerCatalogActionRoutes(rr, rt, opts, dbMW...)
 }
 
+// RegisterImportRoutes mounts the #737 DeclaredBilling import door
+// (POST <prefix>/billing). Gated on the distinct owner-level
+// merchant:billing:import grant (a bulk book import rewrites
+// subscriptions/payments/payment methods wholesale). No MerchantDBConnMW:
+// the import seam pins its own merchant-scoped RLS connection.
+func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	write := opts.merchantActionPermissionMW(controlplane.PermMerchantBillingImport)
+	rr.Handle(http.MethodPost, "/billing", h(httphandlers.ImportDeclaredBilling), write)
+}
+
 func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {

@@ -166,6 +166,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted
 		// via embgin.SelfHandler (issuer→owner), not the base handler.
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
+		// #737: DeclaredBilling import — same route the standalone surface serves.
+		httproutes.RegisterImportRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/import", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetCatalog] {
 		adminOpts := httproutes.Options{
