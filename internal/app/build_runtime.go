@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -296,6 +297,23 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// Set emailService on the NotificationService that was created in createServices
 	serviceInstances.NotificationService.SetEmailService(emailService)
 
+	// #736 alerting: rule templates → #733 metrics queries, edge-triggered
+	// evaluator, multi-channel delivery. The email channel reuses the same
+	// SendGrid seam (nil emailService = email fails soft to a note). The
+	// dashboard deep link in alert payloads is prefixed by the configured
+	// frontend base URL when present.
+	var alertEmailSender alerting.EmailSender
+	if emailService != nil {
+		alertEmailSender = emailService
+	}
+	alertService := alerting.NewService(alerting.Deps{
+		DB:               database,
+		Metrics:          serviceInstances.MetricsService,
+		Email:            alertEmailSender,
+		Clock:            clock,
+		DashboardBaseURL: alertingDashboardBaseURL(cfg),
+	})
+
 	// Card-abuse guard (#371): escalates repeated card-charge failures to
 	// captcha/block and detects site-wide card-testing attacks. Requires Redis
 	// for its windowed counters; nil (safe no-op) otherwise.
@@ -364,6 +382,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
 		DashboardService:       serviceInstances.DashboardService,
+		AlertService:           alertService,
 		MoneyCharger:           moneyCharger,
 		RailCustomerService:    serviceInstances.RailCustomerService,
 	}
@@ -782,6 +801,21 @@ type servicesInstances struct {
 	MetricsService         *metrics.Service
 	DashboardService       *dashboard.Service
 	RailCustomerService    *payments.RailCustomerService
+}
+
+// alertingDashboardBaseURL builds the absolute base the #736 alert dashboard
+// deep links hang off. Prefers the deployment's own APIURL (so emailed/webhook
+// links are clickable); appends the /admin console mount when that SPA is
+// enabled. Empty => the link is a console-relative path.
+func alertingDashboardBaseURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	base := strings.TrimRight(cfg.APIURL, "/")
+	if cfg.AdminConsole.IsEnabled() {
+		return base + "/admin"
+	}
+	return base
 }
 
 func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerchantAccountSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {

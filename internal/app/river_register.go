@@ -271,6 +271,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add solana reconcile worker: %w", err)
 	}
+	// Metric threshold alerting evaluator (#736): selects merchants with enabled
+	// alert rules (indexed) and evaluates each rule under merchant context,
+	// edge-triggering threshold crossings and emitting due digests.
+	if err := addTrackedWorker(r, workers, &riverjobs.AlertEvalWorker{
+		DB:     r.DB,
+		Alerts: r.AlertService,
+		Clock:  clock,
+	}); err != nil {
+		return fmt.Errorf("add alert eval worker: %w", err)
+	}
 	// Worker health checker (#689): evaluates per-kind health rows written by the
 	// WorkerHealthMiddleware and raises repair alerts for never-succeeded /
 	// failing / stale kinds. Registered last so every kind above is already noted.
@@ -667,6 +677,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
+	))
+
+	// Every 15 minutes: metric threshold alerting evaluation (#736). Slow
+	// cadence — the metrics it watches (chargeback rate, dunning, depletion) move
+	// on hours, not seconds; the monthly digest is cadence-gated inside the rule.
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.AlertEvalArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Every 5 minutes: worker health check (#689). RunOnStart=true so health rows
