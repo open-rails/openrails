@@ -6,9 +6,9 @@ import (
 )
 
 // Ready is the embedded engine's REAL, supported readiness probe (#748) —
-// what the HTTPHandlerOptions doc above used to point hosts at under the name
-// IsBillingReady, which never existed. Call this from the host's own
-// /readyz/health-check handler.
+// billing health endpoints are not exposed in embedded mode, so a host that
+// wants billing readiness calls this (not the never-existent IsBillingReady)
+// from its own /readyz/health-check handler.
 //
 // It delegates to the internal/app.Runtime checks shared with the standalone
 // surface's /readyz, so both report the SAME posture: Postgres, Redis (only

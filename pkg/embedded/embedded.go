@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -95,9 +94,9 @@ func New(opts Options) (*Embedded, error) {
 	}
 
 	// Build the application graph only; HTTP surfaces (StandaloneHandler /
-	// NewHTTPHandler / MountHandler) are constructed from this App on demand.
-	// (#711: the bootstrap.Options relay layer is gone — this calls the app
-	// composition root directly.)
+	// MountHandler) are constructed from this App on demand. (#711: the
+	// bootstrap.Options relay layer is gone — this calls the app composition
+	// root directly.)
 	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,
@@ -164,17 +163,6 @@ func (e *Embedded) App() *app.App {
 	return e.app
 }
 
-// HTTPHandlerOptions controls which billing HTTP route groups are included in the returned handler.
-//
-// A zero RouteSets slice uses EmbeddedDefaultRouteSets.
-//
-// Note: billing health endpoints are not exposed in embedded mode.
-// If a host wants billing readiness, call (*Embedded).Ready (#748) and include it in the host's /readyz.
-type HTTPHandlerOptions struct {
-	RouteSets      []RouteSet
-	ProviderRoutes *ProviderRoutes
-}
-
 // ProviderRoutes selects provider-specific public routes for an embedded mount.
 // Leave nil to derive from configured provider accounts when possible.
 type ProviderRoutes struct {
@@ -195,30 +183,10 @@ func (p ProviderRoutes) internal() routesurface.ProviderRoutes {
 	}
 }
 
-// NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
-//
-// Embedded routes live under `/billing/v1/*`.
-func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
-	if e == nil || e.app == nil {
-		return nil
-	}
-	active := e.MountRouteSets(opts.RouteSets)
-	var providerRoutes *routesurface.ProviderRoutes
-	if opts.ProviderRoutes != nil {
-		v := opts.ProviderRoutes.internal()
-		providerRoutes = &v
-	}
-	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
-		RouteSets:          active,
-		AdvertiseRouteSets: active,
-		ProviderRoutes:     providerRoutes,
-	})
-}
-
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface (NewHTTPHandler / MountHandler), recorded at mount time; nil before
-// any mount. Returns a copy. The typical host mounts once, so this reflects its
-// live surface.
+// surface (MountHandler), recorded at mount time; nil before any mount.
+// Returns a copy. The typical host mounts once, so this reflects its live
+// surface.
 func (e *Embedded) ActiveRouteSets() []RouteSet {
 	if e == nil {
 		return nil

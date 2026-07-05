@@ -665,19 +665,27 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	findings.Handle(http.MethodPost, "/:id/resolve", h(httphandlers.AdminResolveFinding), findingsResolve...)
 }
 
-// RegisterWebhookRoutes mounts the legacy configured-merchant webhook surface.
-// Standalone and embedded defaults do not call this; hosts should prefer
-// RegisterMerchantWebhookRoutes.
+// RegisterWebhookRoutes mounts the CANONICAL standalone webhook surface (#650):
+// POST /webhooks/:provider (NMI/CCBill; the merchant is derived from the
+// payload's account identity, not the path) and /webhooks/:provider/:account_id
+// (direct Stripe). This is the live production entry point for inbound
+// NMI/CCBill webhooks — standalone mounts it. Embedded hosts use
+// RegisterMerchantWebhookRoutes instead, since they pin one merchant in context
+// and have no payload-derived merchant to resolve.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider/:account_id", h(httphandlers.Webhook))
 	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
 
-// RegisterMerchantWebhookRoutes mounts the CANONICAL merchant-scoped webhook surface
-// (POST /merchants/:merchant/webhooks/:provider, issue #529) — the active inbound
-// webhook surface for every deployment. One handler (httphandlers.MerchantWebhook,
-// Stripe + NMI-backed rails + CCBill) is shared by both the standalone gin server and the
-// embedded mux, so the two cannot drift.
+// RegisterMerchantWebhookRoutes mounts the merchant-scoped webhook surface
+// (POST /merchants/:merchant/webhooks/:provider, issue #529): the merchant is
+// resolved from the URL slug, then THAT merchant's signing secret verifies the
+// payload. Embedded hosts mount this as their only webhook surface (a pinned
+// merchant needs no payload-derived resolution); standalone also mounts it
+// alongside RegisterWebhookRoutes as a transition alias for integrations
+// already using this URL shape. One handler (httphandlers.MerchantWebhook,
+// Stripe + NMI-backed rails + CCBill) is shared by both the standalone gin
+// server and the embedded mux, so the two cannot drift.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
 	// #641: per-account endpoint — account_id in the path selects which account the

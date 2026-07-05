@@ -74,8 +74,9 @@ type Server struct {
 	merchants *merchants.Service
 
 	// browserCORSOriginSource is the standalone browser CORS origin source.
-	// Production leaves this nil and reads AuthKit remote_application state via
-	// controlPlane; tests can override it without a live database.
+	// OpenRails ships no default: AuthKit no longer owns remote-application
+	// origins, so unset means no browser CORS. A host that wants browser CORS
+	// wires an OpenRails-owned source here.
 	browserCORSOriginSource middleware.CORSOriginSource
 
 	// publicHandler is the single "full surface" HTTP handler: health + user +
@@ -430,10 +431,7 @@ func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
 	if s != nil && s.browserCORSOriginSource != nil {
 		return s.browserCORSOriginSource(ctx)
 	}
-	if s == nil || s.controlPlane == nil {
-		return nil, controlplane.ErrDelegatedNotConfigured
-	}
-	return s.controlPlane.BrowserCORSOrigins(ctx)
+	return nil, nil
 }
 
 // Handler returns the full public HTTP surface: health + user + self/customer
