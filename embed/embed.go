@@ -46,13 +46,6 @@ func WithAdminConsole(assets fs.FS) Option {
 	return func(o *Options) { o.ConsoleAssets = assets }
 }
 
-// HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
-// pkg/embedded.HTTPHandlerOptions; zero value uses EmbeddedDefaultRouteSets.
-type HandlerOptions = embedded.HTTPHandlerOptions
-
-// ProviderRoutes selects provider-specific public routes for HandlerOptions.
-type ProviderRoutes = embedded.ProviderRoutes
-
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet = embedded.RouteSet
 
@@ -202,18 +195,9 @@ func (r *Runtime) Service() *service.Service { return r.svc }
 // (control plane attach, river client injection, embedded.MountHandler).
 func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
-// Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
-// passthrough to pkg/embedded.NewHTTPHandler (which records the active route sets
-// for ActiveRouteSets / capability discovery). The service-credential-authenticated
-// /billing/v1/merchant/* surface is opt-in via embedded.RouteSetMerchantAPI; an
-// embedded host normally uses Client() instead.
-func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
-	return r.emb.NewHTTPHandler(opts)
-}
-
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface (Handler or embedded.MountHandler); nil before any mount. It is the
-// in-process twin of GET /v1/capabilities — same source.
+// surface (embedded.MountHandler); nil before any mount. It is the in-process
+// twin of GET /v1/capabilities — same source.
 func (r *Runtime) ActiveRouteSets() []RouteSet {
 	if r == nil {
 		return nil

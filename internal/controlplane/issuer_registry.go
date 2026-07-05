@@ -36,18 +36,6 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 	return c.loadRemoteApplications(ctx)
 }
 
-// BrowserCORSOrigins returns the default browser Origin allow-list for standalone
-// CORS. AuthKit no longer owns remote-application origins, so the control plane
-// has no AuthKit-derived browser allow-list; hosts that want browser CORS should
-// wire an OpenRails-owned source at the server layer.
-func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error) {
-	_ = ctx
-	if c == nil || c.delegatedVerifier == nil {
-		return nil, ErrDelegatedNotConfigured
-	}
-	return nil, nil
-}
-
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
 // act on (#567). The chain is group-based, never identity: validated `iss` ->
 // AuthKit remote_application -> its controlling permission-group id (the merchant

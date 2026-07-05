@@ -209,9 +209,11 @@ func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, 
 	return u.ID, nil
 }
 
-// EnsureMerchantAPIKeyActor returns the genesis actor used for operator CLI
-// API-key mints and ensures it is allowed to mint the requested merchant role.
-func (c *ControlPlane) EnsureMerchantAPIKeyActor(ctx context.Context, merchantSlug string) (string, error) {
+// ensureMerchantAPIKeyActor returns the genesis actor used as the CreatedBy
+// fallback when MintMerchantAPIKey (#757) is called with no resolvable
+// AuthKit user (operator CLI, admin API key, in-process host, delegated
+// token), and ensures that actor holds the requested merchant role.
+func (c *ControlPlane) ensureMerchantAPIKeyActor(ctx context.Context, merchantSlug string) (string, error) {
 	merchantSlug = strings.ToLower(strings.TrimSpace(merchantSlug))
 	if merchantSlug == "" {
 		return "", errors.New("controlplane: merchant slug is required")

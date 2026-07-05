@@ -70,15 +70,16 @@ func MountHandler(e *Embedded, opts MountOptions) (http.Handler, error) {
 // embedded host (issues #339/#467), authenticated by a host-supplied
 // billingauth.DelegatedAuthenticator.
 //
-// Routes are served at the CANONICAL embedded paths, alongside the
-// NewHTTPHandler surface:
+// Routes are served at the CANONICAL embedded paths, alongside the rest of
+// the embedded billing surface:
 //
 //	/billing/v1/me/*                      (self-service)
 //	/billing/v1/customers/:customer_id/*  (customer treasury)
 //
-// so a host that mounts NewHTTPHandler under /billing without prefix stripping
-// can route this subtree to this handler and everything else to the base
-// handler. Most hosts should use MountHandler, which does that routing itself.
+// so a host that mounts the base embedded surface under /billing without
+// prefix stripping can route this subtree to this handler and everything else
+// to the base handler. Most hosts should use MountHandler, which does that
+// routing itself.
 // Errors when the app graph is not initialized or no identity source can be
 // derived — the surface is never mounted without authentication.
 func SelfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator) (http.Handler, error) {

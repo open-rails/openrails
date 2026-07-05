@@ -113,7 +113,7 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 	}
 	actorUserID = strings.TrimSpace(actorUserID)
 	if actorUserID == "" {
-		actorUserID, err = c.EnsureMerchantAPIKeyActor(ctx, slug)
+		actorUserID, err = c.ensureMerchantAPIKeyActor(ctx, slug)
 		if err != nil {
 			return MerchantAPIKey{}, "", err
 		}
