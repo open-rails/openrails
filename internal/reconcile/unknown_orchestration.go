@@ -90,7 +90,8 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		prober := probers[provider]
 		railArg := rail
 		rows, err := q.ListUnknownSubscriptions(ctx, gen.ListUnknownSubscriptionsParams{
-			MerchantID: merchantID.UUID(), Rail: &railArg, MaxRows: int32(opts.MaxPerRail),
+			MerchantID: merchantID.UUID(), Rail: &railArg,
+			MaxRows: int32(opts.MaxPerRail), // #nosec G115 -- withDefaults() clamps to 500 when <=0; only caller is the internal River worker, no HTTP path sets this
 		})
 		if err != nil {
 			return res, fmt.Errorf("reconcile unknown: list %s cohort: %w", rail, err)

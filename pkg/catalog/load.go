@@ -67,7 +67,7 @@ var stablecoinCurrencies = map[string]struct{}{
 // manifests (bad version, duplicate slugs, duplicate prices by financial terms,
 // provider-eligibility violations). It never touches the database or any chain.
 func Load(path string) (*Manifest, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is caller-supplied (CLI/operator invocation), same trust boundary as os.ReadFile itself
 	if err != nil {
 		return nil, fmt.Errorf("read catalog manifest: %w", err)
 	}

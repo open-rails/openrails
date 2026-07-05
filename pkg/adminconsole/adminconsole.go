@@ -86,6 +86,9 @@ func Handler(cfg Config, assets fs.FS) http.Handler {
 					// Vite emits content-hashed filenames under assets/.
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 				}
+				// #nosec G703 -- fs.ValidPath (stdlib-recommended fs.FS traversal
+				// guard) already rejected "..", empty, and rooted elements above;
+				// gosec's default taint sanitizer list doesn't know this stdlib func.
 				http.ServeFileFS(w, r, assets, rel)
 				return
 			}
