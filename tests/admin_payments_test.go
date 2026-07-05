@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -600,7 +602,11 @@ func TestAdminRefundPayment(t *testing.T) {
 		assert.Contains(t, message, "charge/payment_intent")
 	})
 
-	t.Run("returns 400 for CCBill payments with helpful message", func(t *testing.T) {
+	t.Run("returns 400 for CCBill payments without a linked subscription", func(t *testing.T) {
+		// #696: CCBill refunds ride the DataLink intent path keyed off the linked
+		// subscription's CCBill subscription id. Without that link the API path
+		// can't resolve its refund coordinates — the 400 must say why and direct
+		// the operator to the manual fallback.
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:  userID,
 			PriceID: priceID,
@@ -616,7 +622,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req.Header.Set("X-Idempotency-Key", "refund-ccbill-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for CCBill")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for a CCBill payment with no subscription link")
 
 		var response map[string]interface{}
 		err := json.Unmarshal(w.Body.Bytes(), &response)
@@ -625,14 +631,16 @@ func TestAdminRefundPayment(t *testing.T) {
 		errorObj := response["error"].(map[string]interface{})
 		message := errorObj["message"].(string)
 		assert.Contains(t, message, "CCBill", "Error should mention CCBill")
-		assert.Contains(t, message, "admin portal", "Error should direct to admin portal")
+		assert.Contains(t, message, "no linked subscription", "Error should explain the subscription-link requirement")
+		assert.Contains(t, message, "admin portal", "Error should direct to the manual fallback")
 	})
 }
 
 // TestAdminRefundReachesAnyUserInMerchant confirms a merchant admin holding
 // payments:write can drive a refund against ANY user's payment within its
-// merchant — the operator is merchant-scoped, not user-scoped. (CCBill returns a
-// rail error, which proves the request reached the handler, not an auth gate.)
+// merchant — the operator is merchant-scoped, not user-scoped. (The unlinked
+// CCBill payments draw the no-subscription-link rail 400, which proves the
+// request reached the handler, not an auth gate.)
 func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := adminPaymentsWriter(t, suite)
@@ -753,4 +761,138 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	w = refundReq("ledger-key-2")
 	assert.Equal(t, http.StatusConflict, w.Code, "identical refund content must conflict: %s", w.Body.String())
 	assert.EqualValues(t, 1, refundCalls.Load(), "the gateway never sees a duplicate refund")
+}
+
+// seedCCBillRefundablePayment: an active CCBill subscription (carrying the
+// CCBill subscription id) + a completed charge linked to it — the shape the
+// #696 refund path resolves its DataLink coordinates from.
+func seedCCBillRefundablePayment(suite *TestContainerSuite, priceID uuid.UUID) (payment *models.Payment, psid, txnID string) {
+	userID := uuid.New().String()
+	psid = "ccsub-" + uuid.NewString()[:8]
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailCCBill,
+		RailSubID: psid,
+	})
+	txnID = "cctxn-" + uuid.NewString()[:8]
+	payment = suite.CreateTestPaymentWithOptions(PaymentOptions{
+		UserID:         userID,
+		PriceID:        priceID,
+		SubscriptionID: &sub.ID,
+		Rail:           models.RailCCBill,
+		TransactionID:  txnID,
+		Amount:         10_000_000, // $10 in micros
+	})
+	return payment, psid, txnID
+}
+
+func ccbillAdminRefundReq(t *testing.T, admin http.Handler, paymentID uuid.UUID, idempotencyKey string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", paymentID.String()),
+		strings.NewReader(`{"amount": 5000000}`)) // $5 in micros
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+	req.Header.Set("X-Idempotency-Key", idempotencyKey)
+	admin.ServeHTTP(w, req)
+	return w
+}
+
+// TestAdminRefundCCBillThroughIntentLedger drives the post-#696 CCBill refund
+// contract: a CCBill payment WITH a linked subscription refunds through the
+// durable ccbill_refund intent against the DataLink SMS choke point
+// (voidOrRefundTransaction keyed off the CCBill subscription id, narrowed to
+// the original transaction id), with the same content-addressed
+// effectively-once semantics as the NMI ledger path.
+func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsWriter(t, suite)
+	products := suite.SeedProducts()
+	payment, psid, txnID := seedCCBillRefundablePayment(suite, products[0].Prices[0].ID)
+
+	// Fake DataLink SMS endpoint approving the refund; records the wire form so
+	// subscription/transaction/amount are pinned.
+	var refundCalls atomic.Int64
+	var refundForm atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		if r.PostForm.Get("action") == "voidOrRefundTransaction" {
+			refundCalls.Add(1)
+			refundForm.Store(r.PostForm)
+			fmt.Fprint(w, `<results>1</results>`)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	prevClient := suite.App.Runtime.CCBillDataLink
+	suite.App.Runtime.CCBillDataLink = &ccbill.DataLinkClient{
+		BaseURL: srv.URL, ClientAccNum: "900100", ClientSubAcc: "0000",
+		Username: "u", Password: "p", HTTPClient: srv.Client(),
+	}
+	t.Cleanup(func() { suite.App.Runtime.CCBillDataLink = prevClient })
+
+	w := ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-1")
+	require.Equal(t, http.StatusCreated, w.Code, "synchronous ledger execution completes inline: %s", w.Body.String())
+	require.EqualValues(t, 1, refundCalls.Load())
+	form := refundForm.Load().(url.Values)
+	assert.Equal(t, psid, form.Get("subscriptionId"), "refund keys off the CCBill subscription id")
+	assert.Equal(t, txnID, form.Get("transactionId"), "the original transaction id narrows the refund")
+	// #671: 5,000,000 micros crosses the CCBill wire as decimal dollars.
+	assert.Equal(t, "5.00", form.Get("amount"), "provider must see the exact decimal amount")
+
+	var intentStatus string
+	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'ccbill_refund' AND payment_id = $1",
+		payment.ID).Scan(&intentStatus))
+	assert.Equal(t, "succeeded", intentStatus)
+
+	// The finalized refund lands on the payments ledger against the original.
+	// CCBill answers no refund id, so the recorded ref composes
+	// subscription+transaction (ccbillRefundProviderRef).
+	var refundAmount int64
+	var refundStatus, refundTxn string
+	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+		"SELECT amount, status, transaction_id FROM openrails.payments WHERE refunded_payment_id = $1",
+		payment.ID).Scan(&refundAmount, &refundStatus, &refundTxn))
+	assert.EqualValues(t, -5_000_000, refundAmount)
+	assert.Equal(t, "completed", refundStatus)
+	assert.Equal(t, "ccbill_refund:"+psid+":"+txnID, refundTxn)
+
+	// Admin-key replay returns the recorded refund without a second send.
+	w = ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-1")
+	assert.Equal(t, http.StatusCreated, w.Code, "admin-key replay returns the recorded refund: %s", w.Body.String())
+	assert.EqualValues(t, 1, refundCalls.Load(), "replay never re-refunds")
+
+	// The SAME refund content under a DIFFERENT admin key conflicts on the
+	// content-addressed intent identity — no second money movement.
+	w = ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-2")
+	assert.Equal(t, http.StatusConflict, w.Code, "identical refund content must conflict: %s", w.Body.String())
+	assert.EqualValues(t, 1, refundCalls.Load(), "CCBill never sees a duplicate refund")
+}
+
+// TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured pins the pending
+// semantics: with no DataLink client armed the inline attempt parks, the
+// admin gets 202 with the pending reservation, and the durable intent stays
+// on the ledger for the scheduled executor (queue-always #679).
+func TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsWriter(t, suite)
+	products := suite.SeedProducts()
+	payment, _, _ := seedCCBillRefundablePayment(suite, products[0].Prices[0].ID)
+
+	prevClient := suite.App.Runtime.CCBillDataLink
+	suite.App.Runtime.CCBillDataLink = nil
+	t.Cleanup(func() { suite.App.Runtime.CCBillDataLink = prevClient })
+
+	w := ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-queued-key-1")
+	require.Equal(t, http.StatusAccepted, w.Code, "parked intent reports 202 with the pending reservation: %s", w.Body.String())
+
+	var intentStatus string
+	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'ccbill_refund' AND payment_id = $1",
+		payment.ID).Scan(&intentStatus))
+	assert.Equal(t, "pending", intentStatus, "the durable intent waits for the scheduled executor")
 }

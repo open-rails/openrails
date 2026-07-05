@@ -241,12 +241,13 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	var ccbillSubscriptionID, ccbillTransactionID string
 	switch {
 	case payment.Rail == models.RailCCBill:
-		// #696: refund through OUR admin via the DataLink SMS choke point instead
-		// of routing the operator to CCBill's portal. The refund action keys off
-		// the CCBill subscriptionId (carried on the subscription row) + the
-		// payment's transaction id; the provider mutation rides the intent ledger.
+		// #696: refund through OUR admin via the DataLink SMS choke point. The
+		// refund action keys off the CCBill subscriptionId (carried on the
+		// subscription row) + the payment's transaction id; the provider mutation
+		// rides the intent ledger. (API refunds also require CCBill's
+		// account-level refund feature; a -7 denial surfaces from the executor.)
 		if payment.SubscriptionID == nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: ccbill payment has no linked subscription")
+			return nil, ccbillManualRefundError("CCBill refunds are keyed off the linked subscription's CCBill subscription id, and this payment has no linked subscription")
 		}
 		sub, err := subscriptions.NewSubscriptionRepo(txDB).GetByID(ctx, *payment.SubscriptionID)
 		if err != nil {
@@ -254,7 +255,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		}
 		subID, txnID, err := ccbillRefundTarget(payment, sub)
 		if err != nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
+			return nil, ccbillManualRefundError(err.Error())
 		}
 		ccbillSubscriptionID = subID
 		ccbillTransactionID = txnID
@@ -286,6 +287,14 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	}
 	prepared.reservation = reservation
 	return prepared, nil
+}
+
+// ccbillManualRefundError: this specific payment can't resolve its CCBill
+// refund coordinates, so the API path is out — direct the operator to the
+// manual fallback instead of a dead end.
+func ccbillManualRefundError(why string) error {
+	return adminRefundHTTPError(http.StatusBadRequest,
+		"payment cannot be refunded via the API: "+why+" — refund it manually in the CCBill admin portal")
 }
 
 // ccbillRefundTarget derives the CCBill refund coordinates from a CCBill payment

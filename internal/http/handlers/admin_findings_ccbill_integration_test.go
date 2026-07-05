@@ -21,10 +21,11 @@ import (
 )
 
 // fakeCCBillSMS scripts DataLink's subscriptionManagement.cgi for the admin
-// cancel drain: view answers "rebilling", cancel answers success.
+// cancel + refund drain: view answers "rebilling", cancel/refund answer success.
 type fakeCCBillSMS struct {
 	viewCalls   atomic.Int64
 	cancelCalls atomic.Int64
+	refundCalls atomic.Int64
 	status      atomic.Value // string
 }
 
@@ -41,6 +42,9 @@ func newFakeCCBillSMS(t *testing.T) (*fakeCCBillSMS, *ccbill.DataLinkClient) {
 		case "cancelSubscription":
 			f.cancelCalls.Add(1)
 			f.status.Store("1")
+			fmt.Fprint(w, `<results>1</results>`)
+		case "voidOrRefundTransaction":
+			f.refundCalls.Add(1)
 			fmt.Fprint(w, `<results>1</results>`)
 		default:
 			w.WriteHeader(http.StatusBadRequest)
@@ -68,8 +72,9 @@ func (fx *findingsFixture) seedActiveCCBillSubscription(psid string) uuid.UUID {
 // #696 admin path: approving a cancel_and_refund on a CCBill subscription
 // executes the local cancel and queues the durable ccbill_cancel intent
 // (admin-origin); the executor drains it through the fake DataLink server. The
-// refund leg stays not-supported with a clear manual-portal error that leaves
-// the finding OPEN with the completed cancel documented.
+// refund leg (#696 follow-up) now rides the same intent ledger — it queues a
+// ccbill_refund intent instead of bouncing to the manual admin portal — and
+// the executor drains that too against the fake DataLink server.
 func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	fx := newFindingsFixture(t)
 	psid := "ccsub-" + uuid.NewString()[:8]
@@ -107,10 +112,13 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	// Drain through the choke point against the fake DataLink server.
 	fake, client := newFakeCCBillSMS(t)
 	runner := &intents.Runner{
-		Store:    intents.NewStore(fx.dbi),
-		Registry: intents.NewRegistry(intents.NewCCBillCancelHandler(fx.dbi, client, nil)),
-		Config:   fx.rt.Config,
-		Breaker:  intents.NewVolumeBreaker(fx.dbi),
+		Store: intents.NewStore(fx.dbi),
+		Registry: intents.NewRegistry(
+			intents.NewCCBillCancelHandler(fx.dbi, client, nil),
+			intents.NewCCBillRefundHandler(fx.dbi, client, nil),
+		),
+		Config:  fx.rt.Config,
+		Breaker: intents.NewVolumeBreaker(fx.dbi),
 	}
 	_, err := runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
@@ -119,12 +127,13 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	assert.Equal(t, intents.StatusSucceeded, intentStatus)
 	assert.EqualValues(t, 1, fake.cancelCalls.Load())
 
-	// --- refund leg: not supported for ccbill, clear manual-portal error ---
+	// --- refund leg: rides the ccbill_refund intent ledger (queue-always #679) ---
 	payID := uuid.New()
+	txnID := "cctxn-" + uuid.NewString()[:8]
 	fx.exec(`INSERT INTO openrails.payments
 	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id)
 	        VALUES ($1, $2, 'ccbill', $3, 10000000, 10000000, 'usd', 'completed', $4, $5, $6)`,
-		payID, fx.price, "cctxn-"+uuid.NewString()[:8], subID, fx.customer, fx.merchant)
+		payID, fx.price, txnID, subID, fx.customer, fx.merchant)
 	refundFinding := fx.seedFinding("consistency.duplicate.ownership", "cc-refund-"+uuid.NewString()[:8], "critical",
 		"refund the duplicate ccbill charge", &recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,
@@ -132,12 +141,45 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 		})
 	rec = fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+refundFinding.String()+"/resolve",
 		map[string]any{"outcome": "approve", "notes": "dup charge"}, refundFinding.String())
-	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	assert.Contains(t, rec.Body.String(), "CCBill admin portal", "error names the manual path")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resolved))
+	assert.Equal(t, "noop_already_cancelled", resolved.Execution["cancel"])
+	assert.Equal(t, "queued", resolved.Execution["refund"], "the runtime's intent registry has no CCBill DataLink client wired -> parks, queued not inline (mirrors cancel_intent)")
+	assert.Equal(t, "fixed", resolved.Finding.Status)
+
+	var refundIntentID uuid.UUID
+	var refundIntentStatus, refundOrigin string
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
+		`SELECT id, status, origin FROM openrails.rail_intents
+		 WHERE merchant_id = $1 AND intent_type = $2 AND payment_id = $3`,
+		fx.merchant, intents.TypeCCBillRefund, payID).Scan(&refundIntentID, &refundIntentStatus, &refundOrigin))
+	assert.Equal(t, intents.StatusPending, refundIntentStatus, "remote refund rides the ledger (queue-always #679)")
+	assert.Equal(t, string(intents.OriginAdmin), refundOrigin)
+
+	// The inline attempt during resolve already parked this intent 5m out
+	// (ParkRetryInterval) since the runtime's registry has no client wired;
+	// force it due so the test's runner (real client) drains it now.
+	fx.exec(`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, refundIntentID)
+
+	// Drain the refund through the same choke point against the fake DataLink server.
+	_, err = runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
+		`SELECT status FROM openrails.rail_intents WHERE id = $1`, refundIntentID).Scan(&refundIntentStatus))
+	assert.Equal(t, intents.StatusSucceeded, refundIntentStatus)
+	assert.EqualValues(t, 1, fake.refundCalls.Load())
+
+	var refundAmount int64
+	var refundStatus, refundTxn string
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
+		`SELECT amount, status, transaction_id FROM openrails.payments WHERE refunded_payment_id = $1`, payID).
+		Scan(&refundAmount, &refundStatus, &refundTxn))
+	assert.EqualValues(t, -10000000, refundAmount)
+	assert.Equal(t, "completed", refundStatus)
+	// CCBill has no discrete provider refund id; the recorded ref composes the
+	// subscription + original transaction (ccbillRefundProviderRef).
+	assert.Equal(t, "ccbill_refund:"+psid+":"+txnID, refundTxn)
 
 	row := fx.findingRow(refundFinding)
-	assert.Equal(t, "requires_review", row.Status, "unsupported refund leaves the finding OPEN")
-	require.NotNil(t, row.OperatorNotes)
-	assert.Contains(t, *row.OperatorNotes, "CCBill admin portal")
-	assert.Contains(t, *row.OperatorNotes, `"cancel":"noop_already_cancelled"`, "compensation state documented")
+	assert.Equal(t, "fixed", row.Status)
 }
