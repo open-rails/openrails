@@ -50,7 +50,7 @@ func SecretFiles() (map[string]string, error) {
 		if e.IsDir() || strings.HasPrefix(name, "..") || !secretFileNameShape.MatchString(name) {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(dir, name))
+		raw, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- dir is operator-mounted (VAULT_SECRETS_PATH/default), name comes from os.ReadDir on that same dir, filtered to the env-var name shape above
 		if err != nil {
 			return nil, fmt.Errorf("read secret file %s: %w", name, err)
 		}

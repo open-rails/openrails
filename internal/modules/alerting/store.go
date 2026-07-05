@@ -209,7 +209,7 @@ func (s *store) createNotification(ctx context.Context, n Notification) (Notific
 
 func (s *store) listNotifications(ctx context.Context, unreadOnly bool, limit int) ([]Notification, error) {
 	rows, err := s.db.Gen(ctx).ListMerchantNotifications(ctx, gen.ListMerchantNotificationsParams{
-		UnreadOnly: unreadOnly, RowLimit: int32(limit),
+		UnreadOnly: unreadOnly, RowLimit: int32(limit), // #nosec G115 -- only caller passes the hardcoded notificationListLimit const (100); no HTTP param feeds limit
 	})
 	if err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func (s *store) unreadCount(ctx context.Context) (int64, error) {
 // countPaymentMethodsExpiring implements templateEvalDeps for the digest.
 func (s *store) countPaymentMethodsExpiring(ctx context.Context, now time.Time, daysAhead int) (int64, error) {
 	return s.db.Gen(ctx).CountPaymentMethodsExpiringWithin(ctx, gen.CountPaymentMethodsExpiringWithinParams{
-		Now: now, DaysAhead: int32(daysAhead),
+		Now: now, DaysAhead: int32(daysAhead), // #nosec G115 -- days_ahead is validated to [1,120] by paramReader.integer before a rule can persist (templates.go)
 	})
 }
 

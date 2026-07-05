@@ -147,7 +147,7 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is a boot-time CLI/config value, not request input
 	if os.IsNotExist(err) {
 		if explicit {
 			return fmt.Errorf("merchant manifest %s: %w (merchant_source=manifest declared this file as truth, #723)", path, err)

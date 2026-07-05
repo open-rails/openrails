@@ -154,7 +154,7 @@ func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error
 			return nil, fmt.Errorf("catalog manifest file or manifest bytes are required")
 		}
 		var err error
-		raw, err = os.ReadFile(path)
+		raw, err = os.ReadFile(path) // #nosec G304 -- path is opts.File, an operator CLI flag, not request input
 		if err != nil {
 			return nil, fmt.Errorf("read catalog manifest: %w", err)
 		}
