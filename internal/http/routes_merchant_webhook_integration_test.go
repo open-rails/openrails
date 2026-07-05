@@ -43,9 +43,9 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	svc, err := merchants.NewService(db.WrapPool(pool, ""), secrets, "test")
 	require.NoError(t, err)
 
-	acme, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	acme, _, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
-	evil, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "evil", PermissionGroupID: "group-evil"})
+	evil, _, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: "evil", PermissionGroupID: "group-evil"})
 	require.NoError(t, err)
 	seedRailMerchantAccount(t, pool, acme.ID.String(), "stripe", "acct_acme")
 	seedRailMerchantAccount(t, pool, evil.ID.String(), "stripe", "acct_evil")

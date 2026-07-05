@@ -16,7 +16,7 @@ import (
 func TestLoadNMIWebhookSigningSecretForAccount(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	// Two NMI accounts on one merchant (mobius primary, paykings secondary).
@@ -54,7 +54,7 @@ func TestLoadNMIWebhookSigningSecretForAccount(t *testing.T) {
 func TestLoadStripeCredentialsForAccount(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_new")

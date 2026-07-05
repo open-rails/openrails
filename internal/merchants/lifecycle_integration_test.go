@@ -202,7 +202,7 @@ func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merc
 func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
 	require.NoError(t, err)
 
 	const accountID = "archived-nmi-account"
@@ -225,7 +225,7 @@ func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *test
 func TestArchivedRailMerchantAccountDrainState(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
 	require.NoError(t, err)
 
 	const accountID = "draining-nmi-account"
@@ -258,28 +258,30 @@ func TestProvision_Idempotent(t *testing.T) {
 	// #500: provisioning a merchant namespace requires the caller to provide the
 	// durable AuthKit permission group id. The lifecycle service does not mint it.
 	req := ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"}
-	first, err := svc.Provision(ctx, req)
+	first, created, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
+	require.True(t, created, "first provision inserts the row")
 	require.Equal(t, "acme", first.Slug)
 	require.Equal(t, "group-acme", first.PermissionGroupID, "explicit permission-group link recorded (never auto-minted)")
 
-	// Re-provision: same merchant id, no duplicate row (idempotent).
-	second, err := svc.Provision(ctx, req)
+	// Re-provision: same merchant id, no duplicate row (idempotent), created=false.
+	second, created, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
+	require.False(t, created, "re-provision must not report a fresh insert")
 	require.Equal(t, first.ID, second.ID)
 
 	var count int
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchants WHERE slug='acme'`).Scan(&count))
 	require.Equal(t, 1, count, "provision must not create a duplicate merchant row")
 
-	_, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
+	_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
 	require.ErrorIs(t, err, ErrPermissionGroupRequired, "control-plane provisioning must not create an ownerless merchant")
 }
 
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	// Seed a merchant-owned row + a secret so the purge has something to remove.
@@ -323,7 +325,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
@@ -347,7 +349,7 @@ func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
 	// Resolve by slug.

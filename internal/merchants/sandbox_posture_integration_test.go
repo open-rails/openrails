@@ -25,7 +25,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	svc, err := NewService(dbp, store, "test")
 	require.NoError(t, err)
 
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "sandbox-681", PermissionGroupID: "group-sandbox-681"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "sandbox-681", PermissionGroupID: "group-sandbox-681"})
 	require.NoError(t, err)
 
 	// Stripe: test-env account + real secret rows.
@@ -75,7 +75,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 
 	// Posture isolation: a merchant with ONLY live rows resolves nothing under
 	// test posture (no silent cross-environment bleed).
-	liveOnly, err := svc.Provision(ctx, ProvisionRequest{Slug: "live-only-681", PermissionGroupID: "group-live-only-681"})
+	liveOnly, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "live-only-681", PermissionGroupID: "group-live-only-681"})
 	require.NoError(t, err)
 	seedRailMerchantAccount(t, svc, liveOnly.ID, "stripe", "live", "acct_liveonly681")
 	liveSecretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_liveonly681", "secret_key")

@@ -307,8 +307,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		},
 		Token: authcore.TokenConfig{
 			Issuer:            issuer,
-			IssuedAudiences:   []string{"openrails"},
-			ExpectedAudiences: []string{"openrails"},
+			IssuedAudiences:   []string{billingauth.TokenAudience},
+			ExpectedAudiences: []string{billingauth.TokenAudience},
 		},
 		Frontend:    resolveFrontendConfig(issuer, options.frontend),
 		APIKeys:     authcore.APIKeysConfig{Prefix: APIKeyPrefix},
@@ -384,7 +384,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		verify.WithAPIKeyPrefix(APIKeyPrefix),
 		verify.WithSSRFGuard(),
 	)
-	if err := userVerifier.AddIssuer(issuer, []string{"openrails"}, verify.IssuerOptions{
+	if err := userVerifier.AddIssuer(issuer, []string{billingauth.TokenAudience}, verify.IssuerOptions{
 		RawKeys: authClient.PublicKeysByKID(),
 		IsLocal: true,
 	}); err != nil {
@@ -419,7 +419,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		delegatedVerifier:  delegatedVerifier,
 		userVerifier:       userVerifier,
 		issuer:             issuer,
-		delegatedAudiences: []string{"openrails"},
+		delegatedAudiences: []string{billingauth.TokenAudience},
 	}
 
 	// Load AuthKit's ACTIVE remote_applications into the multi-issuer verifier

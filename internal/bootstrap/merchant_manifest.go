@@ -697,7 +697,7 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, err
 	}
-	tn, err := svc.Provision(ctx, merchants.ProvisionRequest{
+	tn, _, err := svc.Provision(ctx, merchants.ProvisionRequest{
 		Slug:              slug,
 		PermissionGroupID: groupID,
 	})
