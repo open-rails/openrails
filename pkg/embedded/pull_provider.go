@@ -391,10 +391,11 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 			return nil, fmt.Errorf("pull-provider: merchant manifest %s: %w", path, err)
 		}
 	}
-	transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+	transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("pull-provider: %w", err)
 	}
+	transit := transitStore.SolanaTransit
 	plane := merchants.NewManifestSecretStore()
 	seeder := plane.Seeder()
 	for slug, mt := range manifest.Merchants {

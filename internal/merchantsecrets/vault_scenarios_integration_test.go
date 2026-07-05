@@ -299,6 +299,37 @@ func TestVaultCapabilityGating_RealPolicies(t *testing.T) {
 	})
 }
 
+// --- #751 follow-up: BuildTransit threads the Supervisor onto its Store --------
+
+// TestBuildTransit_ThreadsVaultAuthForTransitOnlyConnections proves the #751
+// gap closed: a transit-only Vault connection (no KV access at all — the MODE
+// 1 vault_transit-signer shape) now gets the SAME re-auth supervision + Ping
+// liveness signal the KV path already had, instead of silently discarding the
+// Supervisor vault.Login handed back.
+func TestBuildTransit_ThreadsVaultAuthForTransitOnlyConnections(t *testing.T) {
+	ctx := context.Background()
+	addr, _ := vaulttest.Addr(t)
+	toToken := vaulttest.TokenWithPolicy(t, "or-ms-buildtransit-only", vaulttest.PolicyTransitOnly)
+
+	cfg := &config.Config{
+		Env:   "production",
+		Vault: &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
+	}
+	store, err := BuildTransit(ctx, cfg)
+	require.NoError(t, err)
+	require.NotNil(t, store.SolanaTransit, "transit client must still be served")
+	require.NotNil(t, store.VaultAuth, "the Supervisor must no longer be discarded (#751 gap)")
+	require.NoError(t, store.Ping(ctx), "Ping must fold in auth-health + reachability like the KV path")
+
+	// Vault disabled: BuildTransit's old (nil, nil) contract at the field level —
+	// a non-nil Store whose fields are all zero, so Ping stays a safe no-op.
+	disabled, err := BuildTransit(ctx, &config.Config{Env: "production"})
+	require.NoError(t, err)
+	require.Nil(t, disabled.SolanaTransit)
+	require.Nil(t, disabled.VaultAuth)
+	require.NoError(t, disabled.Ping(ctx))
+}
+
 // --- Outage semantics: pause/unpause a dedicated container ----------------------
 
 func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T) {

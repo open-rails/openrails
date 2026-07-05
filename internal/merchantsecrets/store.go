@@ -245,35 +245,37 @@ func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.Man
 	if store == nil {
 		return nil, fmt.Errorf("build manifest secret plane: store is required")
 	}
-	transit, err := BuildTransit(ctx, cfg)
+	transitStore, err := BuildTransit(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &Store{
 		Secrets:       store,
-		SolanaTransit: transit,
+		SolanaTransit: transitStore.SolanaTransit,
 		SolanaCanSign: true,
 		SecretWrite:   true,
+		VaultAuth:     transitStore.VaultAuth,
+		vclient:       transitStore.vclient,
 	}, nil
 }
 
 // BuildTransit opens the Vault Transit signing client when Vault is enabled
-// (nil otherwise). Standalone of the KV store — MODE 1 uses it for Solana
-// vault_transit signers with no KV backend at all.
+// (a zero-value *Store, SolanaTransit nil, otherwise). Standalone of the KV
+// store — MODE 1 uses it for Solana vault_transit signers with no KV backend
+// at all.
 //
-// The #751 re-auth Supervisor still runs in the background here (Login
-// starts it unconditionally) — the transit client's token stays fresh across
-// re-logins the same as the KV path's — but its AuthState() handle is
-// discarded because this exported function's signature is depended on
-// outside this package (internal/bootstrap, pkg/embedded); a future readiness
-// wiring (#748) that wants transit-only auth health will need a small
-// signature change here, noted in the tracker for that follow-up.
-func BuildTransit(ctx context.Context, cfg *config.Config) (solanaint.TransitClient, error) {
+// Threaded like the KV path in Build (#751 follow-up): the Supervisor from
+// vault.Login is kept on the returned Store (VaultAuth) and vclient is kept
+// too, so Store.Ping folds in auth-health + reachability for transit-only
+// connections exactly as it does for the KV path — callers that only need the
+// transit client read Store.SolanaTransit; callers that also want liveness
+// call Store.Ping.
+func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 	if cfg == nil || cfg.Vault == nil || !cfg.Vault.Enabled {
-		return nil, nil
+		return &Store{}, nil
 	}
 	vc := cfg.Vault
-	client, _, err := vault.Login(ctx, vault.Config{
+	client, sup, err := vault.Login(ctx, vault.Config{
 		Address:    vc.Address,
 		AuthMethod: vc.AuthMethod,
 		Token:      vc.Token,
@@ -284,7 +286,11 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (solanaint.TransitCli
 	if err != nil {
 		return nil, fmt.Errorf("vault login: %w", err)
 	}
-	return vault.NewTransitAdapter(client, vaultTransitMount), nil
+	return &Store{
+		SolanaTransit: vault.NewTransitAdapter(client, vaultTransitMount),
+		VaultAuth:     sup,
+		vclient:       client,
+	}, nil
 }
 
 // enforceEncryptionPosture is the #667 boot gate on the DB-backed (fallback)
