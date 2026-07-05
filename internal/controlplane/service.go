@@ -223,6 +223,14 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		if err != nil {
 			return nil, fmt.Errorf("controlplane: load JWT keys from ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM: %w", err)
 		}
+		// #752: inline PEM is frozen for the process lifetime by construction —
+		// unlike keys_path (FILE-watched, hot-rotates), there is no way to rotate
+		// or emergency-revoke this key without a restart. Development is exempt
+		// (short-lived, disposable processes); every other environment gets a
+		// loud, one-time-per-boot heads-up naming the tradeoff.
+		if !cfg.IsDev() {
+			log.Warnf("controlplane: signing keys loaded from inline PEM (ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM) outside development — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
+		}
 		return ks, nil
 	}
 	keysPath := strings.TrimSpace(cfg.Auth.KeysPath)
