@@ -1,6 +1,7 @@
 import { LogOutIcon, MoonIcon, SunIcon, UserIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
+import { NotificationBell } from "@/components/notification-bell"
 import { useTheme } from "@/components/theme-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ export function SiteHeader({ title }: { title: string }) {
       <Separator orientation="vertical" className="mr-2 h-4" />
       <h1 className="text-sm font-medium">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
+        <NotificationBell />
         <Button
           variant="ghost"
           size="icon"

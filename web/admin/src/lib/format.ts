@@ -44,3 +44,21 @@ export function formatUnix(seconds?: number): string {
 export function shortId(id: string, n = 8): string {
   return id.length > n ? `${id.slice(0, n)}…` : id
 }
+
+// timeAgo renders a compact relative time ("3m", "2h", "5d") for feeds like the
+// notification bell; falls back to a short date past a week.
+export function timeAgo(iso?: string | null): string {
+  if (!iso) return ""
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ""
+  const secs = Math.round((Date.now() - then) / 1000)
+  if (secs < 45) return "just now"
+  if (secs < 90) return "1m"
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d`
+  return new Date(then).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}

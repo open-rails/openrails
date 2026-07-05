@@ -45,6 +45,7 @@ import {
 import type { PaymentProviderConfig } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { AlertsTab } from "./alerts"
 import { ApiKeysTab } from "./api-keys"
 
 export function SettingsPage() {
@@ -52,12 +53,16 @@ export function SettingsPage() {
     <Tabs defaultValue="merchant" className="flex flex-col gap-4">
       <TabsList>
         <TabsTrigger value="merchant">Merchant</TabsTrigger>
+        <TabsTrigger value="alerts">Alerts</TabsTrigger>
         <TabsTrigger value="providers">Payment providers</TabsTrigger>
         <TabsTrigger value="api-keys">API keys</TabsTrigger>
         <TabsTrigger value="customer-controls">Customer controls</TabsTrigger>
       </TabsList>
       <TabsContent value="merchant">
         <MerchantSettingsTab />
+      </TabsContent>
+      <TabsContent value="alerts">
+        <AlertsTab />
       </TabsContent>
       <TabsContent value="providers">
         <ProvidersTab />
