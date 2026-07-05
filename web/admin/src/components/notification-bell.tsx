@@ -46,7 +46,7 @@ export function NotificationBell() {
     const tick = async () => {
       try {
         const res = await getUnreadCount()
-        if (!cancelled) setCount(res.count ?? 0)
+        if (!cancelled) setCount(res.unread ?? 0)
       } catch {
         /* ignore poll errors */
       }
