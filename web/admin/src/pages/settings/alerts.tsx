@@ -47,18 +47,20 @@ import {
   deleteWebhook,
   getMerchantSettings,
   listAlertRules,
+  listAlertTemplates,
   listWebhooks,
   putMerchantSettings,
   testAlertRule,
-  testWebhook,
   updateAlertRule,
   type AlertRuleRequest,
 } from "@/lib/api/endpoints"
 import type {
-  AlertChannels,
+  AlertChannelRef,
+  AlertDeliveryResult,
   AlertRule,
   AlertSeverity,
   AlertTemplate,
+  AlertTemplateInfo,
   MerchantSettings,
   MerchantWebhook,
   WebhookFormat,
@@ -66,142 +68,70 @@ import type {
 import { cn } from "@/lib/utils"
 import { toastApiError } from "@/lib/toast"
 
-// --- Template registry (v1 set, per the #736 contract) --------------------
-// Each template maps to a #733 registry query the evaluator runs on the slow
-// tick. Params here are the merchant-tunable knobs with the pinned defaults;
-// their numeric SEMANTICS are owned by the engine (Agent A) — the UI only
-// presents labelled fields and round-trips the values.
+// --- Template copy (v1 set) -------------------------------------------------
+// The param SCHEMA is fetched from GET /merchant/alerts/templates (the create/
+// edit dialog renders its fields from that, never a hardcoded shape). These
+// are just nicer plain-language label/description overrides for the known v1
+// keys — the engine's own copy (display_name/description) is the fallback for
+// any template this map doesn't recognize.
 
-type ParamKind = "number" | "duration"
-
-interface ParamSpec {
-  key: string
-  label: string
-  help?: string
-  kind: ParamKind
-  default: string
-  suffix?: string
-  step?: string
-  min?: string
-}
-
-interface TemplateDef {
-  key: AlertTemplate
-  label: string
-  description: string
-  defaultSeverity: AlertSeverity
-  cadenceNote?: string
-  params: ParamSpec[]
-}
-
-const TEMPLATES: TemplateDef[] = [
-  {
-    key: "chargeback_rate",
-    label: "Chargeback ratio per merchant account",
+const TEMPLATE_COPY: Record<string, { label: string; description: string }> = {
+  chargeback_rate_by_rail_account: {
+    label: "Chargeback ratio per rail account",
     description:
       "Warns before card-network monitoring thresholds. Fires per rail account when its " +
       "chargeback ratio approaches the network limit (VAMP ≈ 0.9%) — the alert that gets a " +
       "high-risk merchant fined.",
-    defaultSeverity: "critical",
-    params: [
-      {
-        key: "threshold",
-        label: "Warn at fraction of the network limit",
-        help: "0.7 = warn at 70% of VAMP (≈ 0.9%), i.e. once chargebacks reach ~0.63%.",
-        kind: "number",
-        default: "0.7",
-        step: "0.05",
-        min: "0",
-      },
-      {
-        key: "window",
-        label: "Measurement window",
-        help: "Trailing window the chargeback ratio is measured over (e.g. 30d).",
-        kind: "duration",
-        default: "30d",
-      },
-    ],
   },
-  {
-    key: "dunning_spike",
+  dunning_spike: {
     label: "Dunning spike",
     description:
       "Fires when the number of subscriptions in dunning (past_due) jumps versus its trailing " +
       "baseline — an early signal that a rail is suddenly declining hard.",
-    defaultSeverity: "critical",
-    params: [
-      {
-        key: "multiplier",
-        label: "Spike multiplier",
-        help: "Fire when the in-dunning count exceeds this multiple of the baseline (2 = doubled).",
-        kind: "number",
-        default: "2",
-        step: "0.5",
-        min: "1",
-      },
-      {
-        key: "window",
-        label: "Baseline window",
-        help: "Trailing window used to compute the baseline (e.g. 7d).",
-        kind: "duration",
-        default: "7d",
-      },
-    ],
   },
-  {
-    key: "payers_at_depletion_risk",
+  payers_at_depletion_risk: {
     label: "Payers approaching credit depletion",
     description:
       "Fires when a batch of prepaid payers are about to run out of credits — the top-up revenue " +
       "moment, and a churn-risk signal for usage-billing platforms.",
-    defaultSeverity: "warning",
-    params: [
-      {
-        key: "min_count",
-        label: "Minimum payers at risk",
-        help: "Only alert when at least this many payers are at risk.",
-        kind: "number",
-        default: "10",
-        min: "1",
-      },
-      {
-        key: "runway_days",
-        label: "Runway",
-        suffix: "days",
-        help: "Count payers whose balance runs out within this many days at their recent burn rate.",
-        kind: "number",
-        default: "7",
-        min: "1",
-      },
-    ],
   },
-  {
-    key: "payment_methods_expiring",
+  payment_methods_expiring: {
     label: "Payment methods expiring (monthly digest)",
     description:
       "A monthly heads-up of cards expiring soon so you can prompt updates before involuntary " +
       "churn hits.",
-    defaultSeverity: "warning",
-    cadenceNote: "Sent monthly.",
-    params: [
-      {
-        key: "days_ahead",
-        label: "Look-ahead",
-        suffix: "days",
-        help: "Include payment methods expiring within this many days.",
-        kind: "number",
-        default: "30",
-        min: "1",
-      },
-    ],
   },
-]
-
-function templateDef(key: AlertTemplate): TemplateDef {
-  return TEMPLATES.find((t) => t.key === key) ?? TEMPLATES[0]
 }
 
-// --- Channel wire adapters (localized reconciliation seam) -----------------
+function templateLabel(t: AlertTemplateInfo): string {
+  return TEMPLATE_COPY[t.key]?.label ?? t.display_name
+}
+
+function templateDescription(t: AlertTemplateInfo): string {
+  return TEMPLATE_COPY[t.key]?.description ?? t.description
+}
+
+function templateByKey(templates: AlertTemplateInfo[], key: string): AlertTemplateInfo | undefined {
+  return templates.find((t) => t.key === key)
+}
+
+// humanizeParam turns a snake_case param name into a label (the schema only
+// carries name/description, not a display label).
+function humanizeParam(name: string): string {
+  return name
+    .split("_")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ")
+}
+
+// runway_days is fixed by the #733 engine (only 7 is accepted) — render it
+// read-only/informational rather than let the operator pick a value the
+// server will reject.
+function isFixedParam(templateKey: string, paramName: string): boolean {
+  return templateKey === "payers_at_depletion_risk" && paramName === "runway_days"
+}
+
+// --- Channel wire adapter (array is the ONE true shape) ---------------------
 
 interface ChannelSelection {
   in_app: boolean
@@ -209,46 +139,49 @@ interface ChannelSelection {
   webhookIds: string[]
 }
 
-function channelsFromWire(raw: unknown): ChannelSelection {
-  if (Array.isArray(raw)) {
-    const sel: ChannelSelection = { in_app: false, email: false, webhookIds: [] }
-    for (const c of raw) {
-      if (c === "in_app") sel.in_app = true
-      else if (c === "email") sel.email = true
-      else if (typeof c === "string" && c.startsWith("webhook:")) sel.webhookIds.push(c.slice(8))
-      else if (c && typeof c === "object") {
-        const o = c as Record<string, unknown>
-        if (o.type === "in_app") sel.in_app = true
-        else if (o.type === "email") sel.email = true
-        else if (o.type === "webhook" && typeof o.webhook_id === "string")
-          sel.webhookIds.push(o.webhook_id)
-      }
-    }
-    return sel
+function channelsFromWire(channels: AlertChannelRef[] | undefined): ChannelSelection {
+  const sel: ChannelSelection = { in_app: false, email: false, webhookIds: [] }
+  for (const c of channels ?? []) {
+    if (c.type === "in_app") sel.in_app = true
+    else if (c.type === "email") sel.email = true
+    else if (c.type === "webhook" && c.webhook_id) sel.webhookIds.push(c.webhook_id)
   }
-  const o = (raw ?? {}) as Partial<AlertChannels>
-  return {
-    in_app: o.in_app ?? true,
-    email: o.email ?? false,
-    webhookIds: Array.isArray(o.webhook_ids) ? o.webhook_ids : [],
-  }
+  return sel
 }
 
 // in_app is always on; email/webhooks are the operator's choice.
-function channelsToWire(sel: ChannelSelection): AlertChannels {
-  return { in_app: true, email: sel.email, webhook_ids: sel.webhookIds }
+function channelsToWire(sel: ChannelSelection): AlertChannelRef[] {
+  const out: AlertChannelRef[] = [{ type: "in_app" }]
+  if (sel.email) out.push({ type: "email" })
+  for (const id of sel.webhookIds) out.push({ type: "webhook", webhook_id: id })
+  return out
+}
+
+// summarizeDeliveryResults turns a test-fire response into one toast line.
+function summarizeDeliveryResults(results: AlertDeliveryResult[]): string {
+  if (results.length === 0) return "Test alert sent (rule has no channels)"
+  const failed = results.filter((r) => !r.ok)
+  if (failed.length === 0) {
+    return `Test alert delivered to all ${results.length} channel${results.length > 1 ? "s" : ""}`
+  }
+  const detail = failed.map((f) => f.detail || f.channel).join("; ")
+  return `Test alert: ${results.length - failed.length}/${results.length} channels succeeded (${detail})`
 }
 
 // --- Page ------------------------------------------------------------------
 
 export function AlertsTab() {
   const settings = useApiData(() => getMerchantSettings(), [])
+  const templates = useApiData(() => listAlertTemplates(), [])
   const rules = useApiData(() => listAlertRules(), [])
   const webhooks = useApiData(() => listWebhooks(), [])
 
   React.useEffect(() => {
     if (settings.error) toastApiError(settings.error, "Load settings")
   }, [settings.error])
+  React.useEffect(() => {
+    if (templates.error) toastApiError(templates.error, "Load alert templates")
+  }, [templates.error])
   React.useEffect(() => {
     if (rules.error) toastApiError(rules.error, "Load alert rules")
   }, [rules.error])
@@ -258,6 +191,7 @@ export function AlertsTab() {
 
   const alertEmail = settings.data?.alert_email ?? ""
   const hooks = webhooks.data?.data ?? []
+  const templateList = templates.data?.data ?? []
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
@@ -270,6 +204,8 @@ export function AlertsTab() {
       <RulesSection
         rules={rules.data?.data ?? []}
         loading={rules.loading}
+        templates={templateList}
+        templatesLoading={templates.loading}
         webhooks={hooks}
         alertEmail={alertEmail}
         onChanged={rules.reload}
@@ -364,7 +300,7 @@ function SeverityBadge({ severity }: { severity: AlertSeverity }) {
   )
 }
 
-function ChannelSummary({ channels }: { channels: AlertChannels }) {
+function ChannelSummary({ channels }: { channels: AlertChannelRef[] }) {
   const sel = channelsFromWire(channels)
   return (
     <span className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
@@ -389,16 +325,22 @@ function ChannelSummary({ channels }: { channels: AlertChannels }) {
 function RulesSection({
   rules,
   loading,
+  templates,
+  templatesLoading,
   webhooks,
   alertEmail,
   onChanged,
 }: {
   rules: AlertRule[]
   loading: boolean
+  templates: AlertTemplateInfo[]
+  templatesLoading: boolean
   webhooks: MerchantWebhook[]
   alertEmail: string
   onChanged: () => void
 }) {
+  const canCreate = templates.length > 0
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
@@ -409,9 +351,15 @@ function RulesSection({
             moment a threshold is crossed — before a rail fines you or churn spikes.
           </p>
         </div>
-        <RuleDialog webhooks={webhooks} alertEmail={alertEmail} onDone={onChanged} />
+        {canCreate ? (
+          <RuleDialog templates={templates} webhooks={webhooks} alertEmail={alertEmail} onDone={onChanged} />
+        ) : (
+          <Button size="sm" disabled>
+            <PlusIcon className="size-4" /> {templatesLoading ? "Loading…" : "New rule"}
+          </Button>
+        )}
       </div>
-      {loading ? (
+      {loading || templatesLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : rules.length === 0 ? (
         <Card className="border-dashed">
@@ -425,7 +373,15 @@ function RulesSection({
                 threshold is crossed. Start from a template.
               </p>
             </div>
-            <RuleDialog webhooks={webhooks} alertEmail={alertEmail} onDone={onChanged} cta />
+            {canCreate && (
+              <RuleDialog
+                templates={templates}
+                webhooks={webhooks}
+                alertEmail={alertEmail}
+                onDone={onChanged}
+                cta
+              />
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -446,6 +402,7 @@ function RulesSection({
                 <RuleRow
                   key={r.id}
                   rule={r}
+                  templates={templates}
                   webhooks={webhooks}
                   alertEmail={alertEmail}
                   onChanged={onChanged}
@@ -461,18 +418,21 @@ function RulesSection({
 
 function RuleRow({
   rule,
+  templates,
   webhooks,
   alertEmail,
   onChanged,
 }: {
   rule: AlertRule
+  templates: AlertTemplateInfo[]
   webhooks: MerchantWebhook[]
   alertEmail: string
   onChanged: () => void
 }) {
   const [busy, setBusy] = React.useState(false)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
-  const def = templateDef(rule.template)
+  const def = templateByKey(templates, rule.template)
+  const label = rule.name || (def ? templateLabel(def) : rule.template)
   const firing = ruleIsFiring(rule)
 
   const run = async (fn: () => Promise<unknown>, action: string, ok: string) => {
@@ -488,12 +448,24 @@ function RuleRow({
     }
   }
 
+  const runTest = async () => {
+    setBusy(true)
+    try {
+      const { results } = await testAlertRule(rule.id)
+      toast.success(summarizeDeliveryResults(results))
+    } catch (err) {
+      toastApiError(err, "Send test alert")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <TableRow className={rule.enabled ? undefined : "opacity-60"}>
       <TableCell>
-        <span className="font-medium">{def.label}</span>
-        {def.cadenceNote && (
-          <span className="block text-xs text-muted-foreground">{def.cadenceNote}</span>
+        <span className="font-medium">{label}</span>
+        {def?.digest && (
+          <span className="block text-xs text-muted-foreground">Digest — periodic, not threshold-triggered</span>
         )}
       </TableCell>
       <TableCell>
@@ -527,16 +499,12 @@ function RuleRow({
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => run(() => testAlertRule(rule.id), "Send test alert", "Test alert sent")}
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={runTest}>
             <SendIcon className="size-3.5" /> Test
           </Button>
           <RuleDialog
             rule={rule}
+            templates={templates}
             webhooks={webhooks}
             alertEmail={alertEmail}
             onDone={onChanged}
@@ -558,7 +526,7 @@ function RuleRow({
           <TypedConfirmDialog
             open={confirmOpen}
             onOpenChange={setConfirmOpen}
-            title={`Delete "${def.label}"?`}
+            title={`Delete "${label}"?`}
             description="This alert rule will stop evaluating and its firing state is discarded. This cannot be undone."
             confirmationWord="DELETE"
             actionLabel="Delete rule"
@@ -574,6 +542,7 @@ function RuleRow({
 
 function RuleDialog({
   rule,
+  templates,
   webhooks,
   alertEmail,
   onDone,
@@ -581,6 +550,7 @@ function RuleDialog({
   cta,
 }: {
   rule?: AlertRule
+  templates: AlertTemplateInfo[]
   webhooks: MerchantWebhook[]
   alertEmail: string
   onDone: () => void
@@ -589,10 +559,8 @@ function RuleDialog({
 }) {
   const editing = !!rule
   const [open, setOpen] = React.useState(false)
-  const [template, setTemplate] = React.useState<AlertTemplate>(rule?.template ?? "chargeback_rate")
-  const [severity, setSeverity] = React.useState<AlertSeverity>(
-    rule?.severity ?? templateDef(template).defaultSeverity,
-  )
+  const [template, setTemplate] = React.useState<AlertTemplate>(rule?.template ?? templates[0]?.key ?? "")
+  const [severity, setSeverity] = React.useState<AlertSeverity>(rule?.severity ?? "warning")
   const [params, setParams] = React.useState<Record<string, string>>({})
   const [channels, setChannels] = React.useState<ChannelSelection>({
     in_app: true,
@@ -602,16 +570,18 @@ function RuleDialog({
   const [enabled, setEnabled] = React.useState(rule?.enabled ?? true)
   const [busy, setBusy] = React.useState(false)
 
-  const def = templateDef(template)
+  const def = templateByKey(templates, template)
 
   // (Re)initialize form state whenever the dialog opens or the template changes.
   const initFor = React.useCallback(
     (tpl: AlertTemplate, r?: AlertRule) => {
-      const d = templateDef(tpl)
+      const d = templateByKey(templates, tpl)
       const p: Record<string, string> = {}
-      for (const spec of d.params) {
-        const existing = r?.params?.[spec.key]
-        p[spec.key] = existing === undefined || existing === null ? spec.default : String(existing)
+      for (const spec of d?.params ?? []) {
+        const existing = r?.params?.[spec.name]
+        if (existing !== undefined && existing !== null) p[spec.name] = String(existing)
+        else if (spec.default !== undefined) p[spec.name] = String(spec.default)
+        else p[spec.name] = ""
       }
       setParams(p)
       if (r) {
@@ -619,12 +589,13 @@ function RuleDialog({
         setChannels(channelsFromWire(r.channels))
         setEnabled(r.enabled)
       } else {
-        setSeverity(d.defaultSeverity)
-        setChannels({ in_app: true, email: d.defaultSeverity === "critical", webhookIds: [] })
+        const sev = d?.default_severity ?? "warning"
+        setSeverity(sev)
+        setChannels({ in_app: true, email: sev === "critical", webhookIds: [] })
         setEnabled(true)
       }
     },
-    [],
+    [templates],
   )
 
   const handleOpen = (next: boolean) => {
@@ -641,11 +612,15 @@ function RuleDialog({
     initFor(tpl, undefined)
   }
 
+  const missingRequired = (def?.params ?? []).some((spec) => spec.required && !params[spec.name]?.trim())
+
   const submit = async () => {
+    if (!def) return
     const p: Record<string, unknown> = {}
     for (const spec of def.params) {
-      const raw = (params[spec.key] ?? spec.default).trim()
-      p[spec.key] = spec.kind === "number" ? Number(raw) : raw
+      const raw = (params[spec.name] ?? "").trim()
+      if (raw === "") continue // omit — the server fills the default or requires it
+      p[spec.name] = spec.type === "window" ? raw : Number(raw)
     }
     const body: AlertRuleRequest = {
       template,
@@ -681,8 +656,8 @@ function RuleDialog({
         <DialogHeader>
           <DialogTitle>{editing ? "Edit alert rule" : "New alert rule"}</DialogTitle>
           <DialogDescription>
-            {editing
-              ? def.description
+            {editing && def
+              ? templateDescription(def)
               : "Pick what to watch, set the threshold, and choose how you want to be told."}
           </DialogDescription>
         </DialogHeader>
@@ -692,7 +667,7 @@ function RuleDialog({
             <div className="grid gap-2">
               <Label>Template</Label>
               <div className="grid gap-2">
-                {TEMPLATES.map((t) => (
+                {templates.map((t) => (
                   <button
                     key={t.key}
                     type="button"
@@ -703,8 +678,8 @@ function RuleDialog({
                       template === t.key ? "border-primary bg-primary/5" : "hover:bg-muted/50",
                     )}
                   >
-                    <p className="text-sm font-medium">{t.label}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{t.description}</p>
+                    <p className="text-sm font-medium">{templateLabel(t)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{templateDescription(t)}</p>
                   </button>
                 ))}
               </div>
@@ -712,23 +687,26 @@ function RuleDialog({
           )}
 
           <div className="grid gap-3">
-            {def.params.map((spec) => (
-              <div key={spec.key} className="grid gap-1.5">
-                <Label htmlFor={`p-${spec.key}`}>
-                  {spec.label}
-                  {spec.suffix ? ` (${spec.suffix})` : ""}
-                </Label>
-                <Input
-                  id={`p-${spec.key}`}
-                  type={spec.kind === "number" ? "number" : "text"}
-                  step={spec.step}
-                  min={spec.min}
-                  value={params[spec.key] ?? ""}
-                  onChange={(e) => setParams((prev) => ({ ...prev, [spec.key]: e.target.value }))}
-                />
-                {spec.help && <p className="text-xs text-muted-foreground">{spec.help}</p>}
-              </div>
-            ))}
+            {(def?.params ?? []).map((spec) => {
+              const readOnly = isFixedParam(template, spec.name)
+              return (
+                <div key={spec.name} className="grid gap-1.5">
+                  <Label htmlFor={`p-${spec.name}`}>{humanizeParam(spec.name)}</Label>
+                  <Input
+                    id={`p-${spec.name}`}
+                    type={spec.type === "window" ? "text" : "number"}
+                    step={spec.type === "integer" ? 1 : spec.type === "number" ? "any" : undefined}
+                    min={spec.min}
+                    max={spec.max}
+                    placeholder={spec.type === "window" ? "e.g. 30d, 12w" : undefined}
+                    disabled={readOnly}
+                    value={params[spec.name] ?? ""}
+                    onChange={(e) => setParams((prev) => ({ ...prev, [spec.name]: e.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">{spec.description}</p>
+                </div>
+              )
+            })}
           </div>
 
           <div className="grid gap-1.5">
@@ -826,7 +804,7 @@ function RuleDialog({
         </div>
 
         <DialogFooter>
-          <Button disabled={busy} onClick={submit}>
+          <Button disabled={busy || !def || missingRequired} onClick={submit}>
             {busy ? "Saving…" : editing ? "Save changes" : "Create rule"}
           </Button>
         </DialogFooter>
@@ -859,7 +837,9 @@ function WebhooksSection({
           <h2 className="text-sm font-medium">Webhooks</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Deliver alerts to a chat channel or your own receiver. Paste a Discord or Slack channel
-            webhook URL — no bot needed — or point “generic” at your own endpoint.
+            webhook URL — no bot needed — or point “generic” at your own endpoint. There is no
+            standalone test for a webhook — add it to a rule&apos;s channels and use that rule&apos;s
+            Test button.
           </p>
         </div>
         <WebhookDialog onDone={onChanged} />
@@ -894,7 +874,6 @@ function WebhooksSection({
 }
 
 function WebhookRow({ webhook, onChanged }: { webhook: MerchantWebhook; onChanged: () => void }) {
-  const [busy, setBusy] = React.useState(false)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   return (
     <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
@@ -909,27 +888,8 @@ function WebhookRow({ webhook, onChanged }: { webhook: MerchantWebhook; onChange
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await testWebhook(webhook.id)
-                toast.success("Test payload sent")
-              } catch (err) {
-                toastApiError(err, "Send test payload")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            <SendIcon className="size-3.5" /> Test
-          </Button>
-          <Button
-            variant="ghost"
             size="icon"
             aria-label="Delete webhook"
-            disabled={busy}
             onClick={() => setConfirmOpen(true)}
           >
             <Trash2Icon className="size-4 text-muted-foreground" />

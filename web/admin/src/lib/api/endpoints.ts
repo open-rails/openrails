@@ -3,9 +3,12 @@
 import { api, type ItemsEnvelope, type ListEnvelope } from "./client"
 import type {
   AdminSubscription,
+  AlertChannelRef,
+  AlertDeliveryResult,
   AlertRule,
   AlertSeverity,
   AlertTemplate,
+  AlertTemplateInfo,
   CatalogDriftEvent,
   CatalogDriftReport,
   CatalogPrice,
@@ -283,13 +286,20 @@ export const getTrustLevel = (customerId: string, currency: string) =>
     query: { customer_id: customerId, currency },
   })
 
+// --- Alerting: rule templates (#736) ---
+
+// listAlertTemplates fetches the in-code template registry (key, param schema,
+// defaults) the create/edit dialog renders its fields from.
+export const listAlertTemplates = () =>
+  api<{ data: AlertTemplateInfo[] }>("/merchant/alerts/templates")
+
 // --- Alerting: rules (#736) ---
 
 export interface AlertRuleRequest {
   template: AlertTemplate
   params: Record<string, unknown>
   severity: AlertSeverity
-  channels: unknown // AlertChannels wire shape (see channelsToWire)
+  channels: AlertChannelRef[]
   enabled: boolean
 }
 
@@ -302,11 +312,15 @@ export const updateAlertRule = (id: string, body: Partial<AlertRuleRequest>) =>
   api<AlertRule>(`/merchant/alerts/rules/${id}`, { method: "PATCH", body })
 
 export const deleteAlertRule = (id: string) =>
-  api<{ message: string }>(`/merchant/alerts/rules/${id}`, { method: "DELETE" })
+  api<{ deleted: boolean; id: string }>(`/merchant/alerts/rules/${id}`, { method: "DELETE" })
 
-// testAlertRule fires one test delivery through the rule's channels.
+// testAlertRule fires one test delivery through the rule's real channels —
+// the ONLY test-fire surface (there is no per-webhook test endpoint).
 export const testAlertRule = (id: string) =>
-  api<{ message?: string }>(`/merchant/alerts/rules/${id}/test`, { method: "POST", body: {} })
+  api<{ results: AlertDeliveryResult[] }>(`/merchant/alerts/rules/${id}/test`, {
+    method: "POST",
+    body: {},
+  })
 
 // --- Alerting: webhooks (#736) ---
 
@@ -323,25 +337,19 @@ export const createWebhook = (body: WebhookRequest) =>
   api<MerchantWebhook>("/merchant/webhooks", { method: "POST", body })
 
 export const deleteWebhook = (id: string) =>
-  api<{ message: string }>(`/merchant/webhooks/${id}`, { method: "DELETE" })
-
-// testWebhook posts a sample payload to one webhook so the operator can verify
-// their Discord/Slack/custom receiver before wiring it to a rule.
-// RECONCILE: not in the pinned HTTP list (which only pins the per-RULE test
-// path); the per-webhook TEST button needs this endpoint from Agent A. If the
-// engine names it differently, adjust this path.
-export const testWebhook = (id: string) =>
-  api<{ message?: string }>(`/merchant/webhooks/${id}/test`, { method: "POST", body: {} })
+  api<{ deleted: boolean; id: string }>(`/merchant/webhooks/${id}`, { method: "DELETE" })
 
 // --- Alerting: notifications (in_app store / header bell, #736) ---
 
 export const listNotifications = (unread?: boolean) =>
-  api<ListEnvelope<MerchantNotification>>("/merchant/notifications", {
+  api<{ data: MerchantNotification[] | null }>("/merchant/notifications", {
     query: unread !== undefined ? { unread } : undefined,
   })
 
 export const markNotificationRead = (id: string) =>
-  api<{ message?: string }>(`/merchant/notifications/${id}/read`, { method: "POST", body: {} })
+  api<{ read: boolean; id: string }>(`/merchant/notifications/${id}/read`, {
+    method: "POST",
+    body: {},
+  })
 
-export const getUnreadCount = () =>
-  api<{ count: number }>("/merchant/notifications/unread-count")
+export const getUnreadCount = () => api<{ unread: number }>("/merchant/notifications/unread-count")

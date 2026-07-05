@@ -303,9 +303,9 @@ export interface MerchantSettings {
   collection_threshold?: number
   monthly_floor?: number
   billing_period_boundary?: string
-  // Destination for operator alert emails (#736). Unset ⇒ the email channel is
-  // inactive (fail-soft to in_app + webhooks). RECONCILE: if Agent A nests this
-  // under profile, move the read/write in pages/settings/alerts.tsx.
+  // Destination for operator alert emails (#736), top-level per the as-built
+  // engine (service_admission.go). Unset ⇒ the email channel is inactive
+  // (fail-soft to in_app + webhooks).
   alert_email?: string
 }
 
@@ -378,35 +378,60 @@ export interface Me {
 // --- Alerting (#736) ---
 
 export type AlertSeverity = "warning" | "critical"
-export type AlertTemplate =
-  | "chargeback_rate"
-  | "dunning_spike"
-  | "payers_at_depletion_risk"
-  | "payment_methods_expiring"
+// Template keys come from GET /merchant/alerts/templates (AlertTemplateInfo.key)
+// — the v1 set is chargeback_rate_by_rail_account | dunning_spike |
+// payers_at_depletion_risk | payment_methods_expiring — treated as an opaque
+// server-driven string rather than a hardcoded union.
+export type AlertTemplate = string
 export type WebhookFormat = "generic" | "discord" | "slack"
+export type AlertChannelType = "in_app" | "email" | "webhook"
 
-// AlertChannels is the wire shape for a rule's channel set. in_app is always
-// on; email is fail-soft (inactive when merchant alert_email is unset);
-// webhook_ids reference merchant_webhooks rows.
-// RECONCILE (Agent A as-built): if the engine serializes channels as a typed
-// array instead of this object, adjust channelsFromWire/channelsToWire in
-// pages/settings/alerts.tsx — the rest of the UI is shape-agnostic.
-export interface AlertChannels {
-  in_app: boolean
-  email: boolean
-  webhook_ids: string[]
+// AlertChannelRef is one entry in a rule's ordered channel array — the ONE wire
+// shape (engine as-built): [{"type":"in_app"},{"type":"email"},
+// {"type":"webhook","webhook_id":"<uuid>"}].
+export interface AlertChannelRef {
+  type: AlertChannelType
+  webhook_id?: string
+}
+
+export type AlertParamType = "number" | "integer" | "window"
+
+// AlertParamSpec documents one template parameter; the create/edit dialog
+// renders its fields from this instead of a hardcoded shape.
+export interface AlertParamSpec {
+  name: string
+  type: AlertParamType
+  required: boolean
+  default?: number | string
+  min?: number
+  max?: number
+  description: string
+}
+
+// AlertTemplateInfo is the schema view of a template — GET /merchant/alerts/templates.
+export interface AlertTemplateInfo {
+  key: string
+  display_name: string
+  description: string
+  default_severity: AlertSeverity
+  digest: boolean
+  metric: string
+  params: AlertParamSpec[]
 }
 
 export interface AlertRule {
   id: string
+  name: string
   template: AlertTemplate
   params: Record<string, unknown>
   severity: AlertSeverity
-  channels: AlertChannels
+  channels: AlertChannelRef[]
   enabled: boolean
   // Edge-trigger state: set while the rule is currently firing.
   fired_at?: string | null
   cleared_at?: string | null
+  last_evaluated_at?: string | null
+  last_value?: number | null
   created_at: string
   updated_at?: string
 }
@@ -421,6 +446,13 @@ export interface MerchantWebhook {
   updated_at?: string
 }
 
+export interface AlertDeliveryResult {
+  channel: string
+  ok: boolean
+  detail?: string
+  attempts?: number
+}
+
 // MerchantNotification is the in_app store — MERCHANT-operator-facing (distinct
 // from the customer notification_queue). Surfaced as the header bell.
 export interface MerchantNotification {
@@ -429,6 +461,7 @@ export interface MerchantNotification {
   title: string
   body: string
   link?: string | null
+  rule_id?: string | null
   created_at: string
   read_at?: string | null
 }
