@@ -378,7 +378,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		if !explicit {
 			path = boot.DefaultMerchantConfigManifestPath
 		}
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
 		if os.IsNotExist(err) && !explicit {
 			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; pulls arm from boot-config rails only (#723)")
 			return nil, nil
@@ -537,11 +537,11 @@ func writePullProviderLog(logDir string, run reconcile.RunRecord, res *reconcile
 	if strings.TrimSpace(logDir) == "" {
 		logDir = "."
 	}
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return "", fmt.Errorf("create pull-provider log dir: %w", err)
 	}
 	path := filepath.Join(logDir, fmt.Sprintf("pull-provider-%s.log", run.ID))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- logDir is an operator CLI flag, not request input
 	if err != nil {
 		return "", fmt.Errorf("open pull-provider log: %w", err)
 	}

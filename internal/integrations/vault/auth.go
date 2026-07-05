@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -139,7 +139,7 @@ func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.
 		// re-login (#751) pick up a rotated service-account token instead of
 		// replaying whatever was on disk at process boot.
 		jwtPath := firstNonEmpty(cfg.K8sJWTPath, defaultK8sJWTPath)
-		jwt, err := os.ReadFile(jwtPath)
+		jwt, err := os.ReadFile(jwtPath) // #nosec G304 -- jwtPath is operator config or the fixed k8s service-account token convention path
 		if err != nil {
 			return nil, fmt.Errorf("vault: read k8s service-account token: %w", err)
 		}
@@ -373,7 +373,7 @@ func (s *Supervisor) reauthWithBackoff(ctx context.Context) (*vaultapi.Secret, b
 		log.WithError(err).WithField("attempt", attempt).
 			Error("vault: RE-AUTHENTICATION FAILED — merchant secret / signing operations are degraded until this clears; retrying with backoff")
 
-		wait := backoff/2 + time.Duration(rand.Int63n(int64(backoff/2)+1))
+		wait := backoff/2 + time.Duration(rand.Int64N(int64(backoff/2)+1)) // #nosec G404 -- retry backoff jitter timing, not security-sensitive
 		select {
 		case <-ctx.Done():
 			return nil, false
