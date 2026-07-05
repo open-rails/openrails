@@ -1,9 +1,11 @@
 DELETE /v1/customers/{customer_id}/payment-methods/{id}
 DELETE /v1/me/payment-methods/{id}
+DELETE /v1/merchant/alerts/rules/{id}
 DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/payment-providers/{provider}
+DELETE /v1/merchant/webhooks/{id}
 DELETE /v1/platform/merchants/{id}
 GET /health/live
 GET /health/ready
@@ -39,6 +41,8 @@ GET /v1/me/subscriptions
 GET /v1/me/subscriptions/{id}
 GET /v1/me/transactions
 GET /v1/me/usage
+GET /v1/merchant/alerts/rules
+GET /v1/merchant/alerts/templates
 GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
@@ -59,6 +63,8 @@ GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
 GET /v1/merchant/invokers/{invoker}/credits
 GET /v1/merchant/metrics/schema
+GET /v1/merchant/notifications
+GET /v1/merchant/notifications/unread-count
 GET /v1/merchant/payment-providers
 GET /v1/merchant/payment-providers/{provider}
 GET /v1/merchant/payments
@@ -69,6 +75,7 @@ GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
 GET /v1/merchant/trust-level
 GET /v1/merchant/users/{user_id}/product-access
+GET /v1/merchant/webhooks
 GET /v1/merchant/worker-health
 GET /v1/platform/merchants
 GET /v1/platform/merchants/{id}
@@ -77,6 +84,7 @@ GET /v1/products
 GET /v1/solana/config
 GET /v1/solana/tokens
 GET /{$}
+PATCH /v1/merchant/alerts/rules/{id}
 PATCH /v1/merchant/catalog/prices/{id}
 PATCH /v1/merchant/catalog/products/{id}
 POST /v1/checkout
@@ -103,6 +111,8 @@ POST /v1/me/subscriptions/{id}/solana-tier-change/confirm
 POST /v1/merchant/admissions
 POST /v1/merchant/admissions/{id}/capture
 POST /v1/merchant/admissions/{id}/release
+POST /v1/merchant/alerts/rules
+POST /v1/merchant/alerts/rules/{id}/test
 POST /v1/merchant/api-keys
 POST /v1/merchant/catalog/drift/refresh
 POST /v1/merchant/catalog/prices
@@ -121,12 +131,14 @@ POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
 POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
+POST /v1/merchant/notifications/{id}/read
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/resume
 POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
 POST /v1/merchant/wasted-spend
+POST /v1/merchant/webhooks
 POST /v1/merchants/{merchant}/webhooks/{provider}
 POST /v1/merchants/{merchant}/webhooks/{provider}/{account_id}
 POST /v1/platform/merchants/{id}/restore

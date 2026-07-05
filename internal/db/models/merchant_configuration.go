@@ -14,6 +14,10 @@ type MerchantConfiguration struct {
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers. Missing or empty windows use the service default.
 	DelegatedInvokerWastedSpendWindows []BudgetWindowPolicy `json:"delegated_invoker_wasted_spend_windows,omitempty"`
+
+	// AlertEmail is the merchant-operator address the #736 alerting engine sends
+	// critical alerts to. Unset ⇒ the email channel is inactive (fail-soft skip).
+	AlertEmail string `json:"alert_email,omitempty"`
 }
 
 // MerchantProfileConfiguration is merchant-owned public/communication metadata.

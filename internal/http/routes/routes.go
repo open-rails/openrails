@@ -651,6 +651,30 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
 	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 
+	// #736 metric threshold alerting: rule/webhook CRUD + test-fire (settings-
+	// write gated for mutations) and the notification bell (metrics-read). Reads
+	// share metrics-read (an alert is a saved view over a metric); mutations are
+	// settings-write. NB: /merchant/webhooks (outbound alert sinks) is distinct
+	// from the /merchants/{m}/webhooks/{provider} inbound provider ingestion.
+	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
+	alerts := rr.Group("/alerts")
+	alerts.Handle(http.MethodGet, "/templates", h(httphandlers.AlertRuleTemplates), metricsRead...)
+	alerts.Handle(http.MethodGet, "/rules", h(httphandlers.ListAlertRules), metricsRead...)
+	alerts.Handle(http.MethodPost, "/rules", h(httphandlers.CreateAlertRule), settingsWrite...)
+	alerts.Handle(http.MethodPatch, "/rules/:id", h(httphandlers.UpdateAlertRule), settingsWrite...)
+	alerts.Handle(http.MethodDelete, "/rules/:id", h(httphandlers.DeleteAlertRule), settingsWrite...)
+	alerts.Handle(http.MethodPost, "/rules/:id/test", h(httphandlers.TestFireAlertRule), settingsWrite...)
+
+	webhooks := rr.Group("/webhooks")
+	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), metricsRead...)
+	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), settingsWrite...)
+	webhooks.Handle(http.MethodDelete, "/:id", h(httphandlers.DeleteMerchantWebhook), settingsWrite...)
+
+	notifications := rr.Group("/notifications")
+	notifications.Handle(http.MethodGet, "", h(httphandlers.ListMerchantNotifications), metricsRead...)
+	notifications.Handle(http.MethodGet, "/unread-count", h(httphandlers.MerchantNotificationsUnreadCount), metricsRead...)
+	notifications.Handle(http.MethodPost, "/:id/read", h(httphandlers.MarkMerchantNotificationRead), settingsWrite...)
+
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 	// #689: worker-health dashboard — same operator repair surface/permission.
 	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetAdminWorkerHealth), repairRead...)

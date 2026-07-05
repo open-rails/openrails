@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -119,6 +120,9 @@ type Runtime struct {
 	// DashboardService is the #741 configurable dashboard (saved widgets +
 	// NL widget generation; nil-LLM = generation fail-closed).
 	DashboardService *dashboard.Service
+	// AlertService is the #736 metric-threshold alerting engine (rules,
+	// webhooks, notifications, the evaluator).
+	AlertService *alerting.Service
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
 	AdmissionPolicyCache *admission.PolicyCache

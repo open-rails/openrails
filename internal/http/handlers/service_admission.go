@@ -341,6 +341,7 @@ type serviceMerchantSettingsRequest struct {
 	InvoiceCollectionThreshold        *int64                                `json:"collection_threshold,omitempty"`
 	InvoiceMonthlyFloor               *int64                                `json:"monthly_floor,omitempty"`
 	InvoiceBillingBoundary            string                                `json:"billing_period_boundary,omitempty"`
+	AlertEmail                        *string                               `json:"alert_email,omitempty"`
 	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
 	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
@@ -375,6 +376,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor:               cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
+		AlertEmail:                        cfg.AlertEmail,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -407,6 +409,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		InvoiceCollectionThreshold:         req.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor:                req.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
+		AlertEmail:                         req.AlertEmail,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")

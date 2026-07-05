@@ -309,6 +309,9 @@ type MerchantConfiguration struct {
 	InvoiceMonthlyFloor                *int64
 	InvoiceBillingBoundary             string
 	DelegatedInvokerWastedSpendWindows []abuse.WastedWindow
+	// AlertEmail is the merchant-operator alert destination (#736). A nil pointer
+	// preserves the stored value; a non-nil pointer sets it (empty string clears).
+	AlertEmail *string
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -320,11 +323,13 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 	if err != nil {
 		return MerchantConfiguration{}, false, err
 	}
+	alertEmail := cfg.AlertEmail
 	out := MerchantConfiguration{
 		Profile:                            &cfg.Profile,
 		InvoiceCollectionThreshold:         cfg.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor:                cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
+		AlertEmail:                         &alertEmail,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -373,6 +378,9 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 			return fmt.Errorf("invalid billing_period_boundary %q", in.InvoiceBillingBoundary)
 		}
 		cfg.InvoiceBillingBoundary = in.InvoiceBillingBoundary
+	}
+	if in.AlertEmail != nil {
+		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
 	}
 	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {

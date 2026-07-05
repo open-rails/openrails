@@ -122,6 +122,27 @@ type OpenrailsAdmissionDenialsHourly struct {
 	UpdatedAt    time.Time
 }
 
+// #736 per-merchant metric threshold rules. template + params compile to a #733 metrics query the evaluator runs on a slow tick; fired_at/cleared_at are edge-triggered state (fire once on crossing, clear on recrossing).
+type OpenrailsAlertRule struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
+	Template   string
+	Params     []byte
+	Severity   string
+	// ordered channel refs: [{"type":"in_app"}|{"type":"email"}|{"type":"webhook","webhook_id":"<uuid>"}].
+	Channels []byte
+	Enabled  bool
+	// set when the current active alert opened (NULL = not firing); the evaluator never re-fires while non-NULL.
+	FiredAt         *time.Time
+	ClearedAt       *time.Time
+	LastEvaluatedAt *time.Time
+	LastValue       *float64
+	LastDetail      []byte
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type OpenrailsCatalogCreditBalance struct {
 	MerchantID   uuid.UUID
 	Key          string
@@ -522,12 +543,38 @@ type OpenrailsMerchantExport struct {
 	CompletedAt *time.Time
 }
 
+// #736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).
+type OpenrailsMerchantNotification struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Severity   string
+	Title      string
+	Body       string
+	Link       string
+	RuleID     *uuid.UUID
+	Data       []byte
+	CreatedAt  time.Time
+	ReadAt     *time.Time
+}
+
 // DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
 type OpenrailsMerchantSecret struct {
 	MerchantID uuid.UUID
 	Name       string
 	Value      string
 	Version    int32
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// #736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
+type OpenrailsMerchantWebhook struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
+	Url        string
+	Format     string
+	Enabled    bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
