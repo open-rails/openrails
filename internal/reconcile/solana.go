@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -1185,6 +1186,32 @@ func assetName(mint string) string {
 	return mint
 }
 
+// u64ToI64 converts a uint64 balance/amount to int64, refusing values above
+// math.MaxInt64 rather than silently wrapping to negative. Real Solana
+// balances never approach this (total SOL supply and any sane SPL mint sit
+// many orders of magnitude below it), so a rejection here means the data is
+// bogus — safer to treat the transfer as unusable than trust a wrapped delta.
+func u64ToI64(u uint64) (int64, bool) {
+	if u > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(u), true
+}
+
+// i64Delta converts a pre/post uint64 pair to int64 in one call, propagating
+// failure if either side overflows.
+func i64Delta(post, pre uint64) (int64, int64, bool) {
+	p, ok := u64ToI64(post)
+	if !ok {
+		return 0, 0, false
+	}
+	q, ok := u64ToI64(pre)
+	if !ok {
+		return 0, 0, false
+	}
+	return p, q, true
+}
+
 // walletTransferMoney extracts the ONE asset a transaction moved into the
 // wallet from the balance metas (the transfer IS the money truth — never the
 // memo). ok=false with a note when nothing moved in, several assets did, or
@@ -1217,11 +1244,19 @@ func walletTransferMoney(meta *solrpc.TransactionMeta, tx *solanago.Transaction,
 	post := readTokenBalances(meta.PostTokenBalances)
 	deltas := map[string]int64{}
 	for idx, p := range post {
-		deltas[p.mint] += int64(p.amount) - int64(pre[idx].amount)
+		postAmt, preAmt, ok := i64Delta(p.amount, pre[idx].amount)
+		if !ok {
+			return walletTransfer{}, false, "token amount exceeds representable range"
+		}
+		deltas[p.mint] += postAmt - preAmt
 	}
 	for idx, p := range pre {
 		if _, ok := post[idx]; !ok {
-			deltas[p.mint] -= int64(p.amount) // account emptied/closed
+			amt, ok := u64ToI64(p.amount)
+			if !ok {
+				return walletTransfer{}, false, "token amount exceeds representable range"
+			}
+			deltas[p.mint] -= amt // account emptied/closed
 		}
 	}
 
@@ -1239,7 +1274,11 @@ func walletTransferMoney(meta *solrpc.TransactionMeta, tx *solanago.Transaction,
 				continue
 			}
 			if i < len(meta.PreBalances) && i < len(meta.PostBalances) {
-				if delta := int64(meta.PostBalances[i]) - int64(meta.PreBalances[i]); delta > 0 {
+				postLamports, preLamports, ok := i64Delta(meta.PostBalances[i], meta.PreBalances[i])
+				if !ok {
+					return walletTransfer{}, false, "lamport balance exceeds representable range"
+				}
+				if delta := postLamports - preLamports; delta > 0 {
 					received = append(received, walletTransfer{Mint: "", BaseUnits: uint64(delta)})
 				}
 			}
@@ -1308,5 +1347,5 @@ func solanaFiatCents(mint string, baseUnits uint64) (int64, bool) {
 	if _, ok := microUSDMints[mint]; !ok || baseUnits%10_000 != 0 {
 		return 0, false
 	}
-	return int64(baseUnits / 10_000), true
+	return int64(baseUnits / 10_000), true // #nosec G115 -- uint64/10_000 always fits int64 (max ~1.8e15 < MaxInt64)
 }

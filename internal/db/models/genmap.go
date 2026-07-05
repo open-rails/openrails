@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,12 +69,22 @@ func DerefUUID(u *uuid.UUID) uuid.UUID {
 	return *u
 }
 
-// IntPtrTo32 converts a models *int to a generated *int32.
+// IntPtrTo32 converts a models *int to a generated *int32, clamping instead
+// of wrapping if a caller ever hands it a value outside int32's range (none
+// of today's callers — retry counts, duration hours — can, but the helper is
+// shared and should never truncate silently).
 func IntPtrTo32(v *int) *int32 {
 	if v == nil {
 		return nil
 	}
-	i := int32(*v)
+	n := *v
+	switch {
+	case n > math.MaxInt32:
+		n = math.MaxInt32
+	case n < math.MinInt32:
+		n = math.MinInt32
+	}
+	i := int32(n)
 	return &i
 }
 

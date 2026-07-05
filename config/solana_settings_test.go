@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,15 @@ func TestParseSolanaAccountSettings(t *testing.T) {
 		require.True(t, s.IsZero())
 		require.ErrorContains(t, ValidateSolanaAccountSettings(in), "unknown key(s) rpc_provder")
 	})
+}
+
+func TestSettingIntOverflow(t *testing.T) {
+	n, err := settingInt("k", uint64(42))
+	require.NoError(t, err)
+	require.Equal(t, 42, n)
+
+	_, err = settingInt("k", uint64(math.MaxInt64)+1)
+	require.ErrorContains(t, err, "exceeds platform int range")
 }
 
 func TestSolanaAccountSettingsApplyTo(t *testing.T) {

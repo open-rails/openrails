@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -834,6 +835,14 @@ func TestWalletTransferMoney(t *testing.T) {
 	// No meta: unusable.
 	_, ok, _ = walletTransferMoney(nil, nil, wallet)
 	require.False(t, ok)
+
+	// A token balance beyond int64 range is refused, never wrapped into a
+	// bogus negative/small delta.
+	_, ok, note = walletTransferMoney(&solrpc.TransactionMeta{
+		PostTokenBalances: []solrpc.TokenBalance{tb(1, wallet, usdcMint, math.MaxInt64+1)},
+	}, nil, wallet)
+	require.False(t, ok)
+	require.Contains(t, note, "exceeds representable range")
 }
 
 // TestDiffSolanaDiscoveryRouting pins the #714 finding routes: clean+priced
