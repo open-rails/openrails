@@ -272,7 +272,7 @@ export const setCreditLimit = (customerId: string, currency: string, amount: num
     body: { customer_id: customerId, currency, credit_limit_amount: amount },
   })
 
-export const getTrustTier = (customerId: string, currency: string) =>
-  api<{ currency: string; trust_tier: string }>("/merchant/trust-tier", {
+export const getTrustLevel = (customerId: string, currency: string) =>
+  api<{ currency: string; trust_level: string }>("/merchant/trust-level", {
     query: { customer_id: customerId, currency },
   })

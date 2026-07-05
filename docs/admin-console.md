@@ -117,7 +117,7 @@ NMI payment-method change), Payments (filters, detail, rail-aware refund — dis
 rails without API refunds), Catalog (products/prices CRUD + activate/deactivate,
 manifest publish with plan preview, drift view + refresh), Ops (findings queue with
 approve/ignore, repair alerts, worker health), Settings (merchant profile, payment
-providers, API keys, credit limit, trust tier).
+providers, API keys, credit limit, trust level).
 
 ## API keys (#757)
 

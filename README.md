@@ -159,7 +159,7 @@ curl -X POST https://openrails.example/v1/merchant/admissions/{id}/capture \
 
 API keys carry explicit `merchant:*` permissions and are bound to your merchant —
 a key can never act on another merchant's data. The `/v1/merchant/*` surface
-covers admission (`/admissions`), trust-tier policies, merchant settings,
+covers admission (`/admissions`), trust-level policies, merchant settings,
 credit windows, usage rollups, and the issuer registry used in the next step.
 
 ### 3. Frontend integration (delegated tokens)

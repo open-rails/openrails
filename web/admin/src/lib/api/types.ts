@@ -125,7 +125,7 @@ export interface CreditBalance {
 
 export interface CustomerBillingProfile {
   customer_id: string
-  trust_tier?: string
+  trust_level?: string
   subscriptions: RawSubscription[]
   entitlements: RawEntitlement[]
   payments: RawPayment[]

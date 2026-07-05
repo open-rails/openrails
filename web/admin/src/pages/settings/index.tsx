@@ -36,7 +36,7 @@ import {
   deletePaymentProvider,
   getCreditLimit,
   getMerchantSettings,
-  getTrustTier,
+  getTrustLevel,
   listPaymentProviders,
   putMerchantSettings,
   putPaymentProvider,
@@ -334,7 +334,7 @@ function ProviderDialog({ onDone }: { onDone: () => void }) {
 function CustomerControlsTab() {
   const [customerID, setCustomerID] = React.useState("")
   const [currency, setCurrency] = React.useState("usd")
-  const [result, setResult] = React.useState<{ creditLimit: number; trustTier: string }>()
+  const [result, setResult] = React.useState<{ creditLimit: number; trustLevel: string }>()
   const [newLimit, setNewLimit] = React.useState("")
   const [busy, setBusy] = React.useState(false)
 
@@ -343,9 +343,9 @@ function CustomerControlsTab() {
     try {
       const [cl, tt] = await Promise.all([
         getCreditLimit(customerID.trim(), currency.trim()),
-        getTrustTier(customerID.trim(), currency.trim()),
+        getTrustLevel(customerID.trim(), currency.trim()),
       ])
-      setResult({ creditLimit: cl.credit_limit_amount, trustTier: tt.trust_tier })
+      setResult({ creditLimit: cl.credit_limit_amount, trustLevel: tt.trust_level })
     } catch (err) {
       toastApiError(err, "Lookup customer controls")
       setResult(undefined)
@@ -357,9 +357,9 @@ function CustomerControlsTab() {
   return (
     <Card className="max-w-xl">
       <CardHeader>
-        <CardTitle className="text-sm">Credit limit & trust tier</CardTitle>
+        <CardTitle className="text-sm">Credit limit & trust level</CardTitle>
         <CardDescription>
-          Per-customer, per-currency: the arrears credit limit is writable; the trust tier
+          Per-customer, per-currency: the arrears credit limit is writable; the trust level
           is graduated by spend history (read-only here).
         </CardDescription>
       </CardHeader>
@@ -374,7 +374,7 @@ function CustomerControlsTab() {
         {result && (
           <div className="grid gap-3 rounded-md border p-3 text-sm">
             <p>
-              Trust tier: <Badge variant="secondary">{result.trustTier || "default"}</Badge>
+              Trust level: <Badge variant="secondary">{result.trustLevel || "default"}</Badge>
             </p>
             <p>
               Credit limit:{" "}

@@ -14,22 +14,23 @@ import (
 )
 
 // SpendgatePolicyLoader builds a spendgate.Policy (the cap config the Redis admit
-// gate enforces) for one (payer, tier, request) from the Postgres payer_spend_limits +
-// invoker_spend_limits. Every window's limit is expressed in the REQUEST currency
-// (FX-converted when a window is denominated in another currency), so the gate
-// runs in a single currency per admit. #513: this read replaces the per-request
-// Postgres budget reservation; nothing on the hot path locks Postgres.
+// gate enforces) for one (payer, trustLevel, request) from the Postgres
+// payer_spend_limits + invoker_spend_limits. Every window's limit is expressed
+// in the REQUEST currency (FX-converted when a window is denominated in another
+// currency), so the gate runs in a single currency per admit. #513: this read
+// replaces the per-request Postgres budget reservation; nothing on the hot path
+// locks Postgres.
 type SpendgatePolicyLoader struct {
-	tiers   *PayerSpendLimitStore
-	budgets *InvokerSpendLimitStore
-	fx      fx.Provider
-	cache   *PolicyCache // optional; nil reads config from Postgres every load
+	trustLevels *PayerSpendLimitStore
+	budgets     *InvokerSpendLimitStore
+	fx          fx.Provider
+	cache       *PolicyCache // optional; nil reads config from Postgres every load
 }
 
 // NewSpendgatePolicyLoader wires the loader. budgetScopes may be nil (then only
-// the trust-tier policy's payer-scope windows are loaded).
-func NewSpendgatePolicyLoader(tiers *PayerSpendLimitStore, budgetScopes *InvokerSpendLimitStore, fxp fx.Provider) *SpendgatePolicyLoader {
-	return &SpendgatePolicyLoader{tiers: tiers, budgets: budgetScopes, fx: fxp}
+// the trust-level policy's payer-scope windows are loaded).
+func NewSpendgatePolicyLoader(trustLevels *PayerSpendLimitStore, budgetScopes *InvokerSpendLimitStore, fxp fx.Provider) *SpendgatePolicyLoader {
+	return &SpendgatePolicyLoader{trustLevels: trustLevels, budgets: budgetScopes, fx: fxp}
 }
 
 // WithCache attaches the process-local policy-config cache (nil disables it; the
@@ -39,14 +40,15 @@ func (l *SpendgatePolicyLoader) WithCache(c *PolicyCache) *SpendgatePolicyLoader
 	return l
 }
 
-// Load resolves the scoped windows for (payer, tier) in requestCurrency. req
-// supplies the principals so the invoker_tier scope (whose policy key IS the tier)
-// resolves to a per-invoker window that applies only at the matching tier.
+// Load resolves the scoped windows for (payer, trustLevel) in requestCurrency.
+// req supplies the principals so the invoker_tier scope (whose policy key IS the
+// trust level) resolves to a per-invoker window that applies only at the
+// matching trust level.
 //
 // hasDelegatedGrant reports whether any invoker/role-scoped window matched the
 // request — the caller uses it to deny a delegated invoker that has no explicit
 // spend grant (the pre-existing "delegated_spend_not_allowed" guarantee).
-func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.CustomerID, tier, requestCurrency string, req spendgate.Request) (pol spendgate.Policy, hasDelegatedGrant bool, err error) {
+func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.CustomerID, trustLevel, requestCurrency string, req spendgate.Request) (pol spendgate.Policy, hasDelegatedGrant bool, err error) {
 	var scopes []spendgate.ScopedWindows
 
 	// Cache key needs the merchant so a payer uuid can't alias across merchants.
@@ -57,10 +59,11 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 	mid := tid.UUID().String()
 	payerID := payer.UUID().String()
 
-	// Tier policy → payer-scope velocity windows (the payer's own cap at this tier).
-	// Read-mostly config, served from the long-TTL policy cache when warm.
-	tp, err := l.cache.PayerSpendLimits(mid, payerID, tier, func() (PayerSpendLimits, error) {
-		return l.tiers.GetPayerSpendLimits(ctx, payer, tier)
+	// Trust-level policy → payer-scope velocity windows (the payer's own cap at
+	// this trust level). Read-mostly config, served from the long-TTL policy
+	// cache when warm.
+	tp, err := l.cache.PayerSpendLimits(mid, payerID, trustLevel, func() (PayerSpendLimits, error) {
+		return l.trustLevels.GetPayerSpendLimits(ctx, payer, trustLevel)
 	})
 	if err != nil {
 		return spendgate.Policy{}, false, err
@@ -72,7 +75,7 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 	if len(pw) > 0 {
 		scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopePayer, Windows: pw})
 	}
-	productLimits, err := l.tiers.GetProductUsageLimitWindows(ctx, payer, req.Measure)
+	productLimits, err := l.trustLevels.GetProductUsageLimitWindows(ctx, payer, req.Measure)
 	if err != nil {
 		return spendgate.Policy{}, false, err
 	}
@@ -88,8 +91,8 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 		// Invoker spend limits gate delegated GRANTS (hasDelegatedGrant) — a freshly
 		// added grant must take effect immediately, so these are read LIVE, never
 		// cached: a stale-absent grant would wrongly deny a just-granted invoker for the
-		// whole cache TTL (#517). Only the per-tier payer CAPS above are cached (benign
-		// when stale: a missing upper-bound briefly admits a little more, never denies).
+		// whole cache TTL (#517). Only the per-trust-level payer CAPS above are cached
+		// (benign when stale: a missing upper-bound briefly admits a little more, never denies).
 		policies, lerr := l.budgets.LoadAll(ctx, payer)
 		if lerr != nil {
 			return spendgate.Policy{}, false, lerr
@@ -123,18 +126,18 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 						hasDelegatedGrant = true
 					}
 				}
-			case budgets.ScopeInvokerTier:
-				// Per-invoker cap selected by tier: applies only at the matching tier.
-				if strings.TrimSpace(p.ScopeKey) != strings.TrimSpace(tier) || strings.TrimSpace(req.Invoker) == "" {
+			case budgets.ScopeInvokerTrustLevel:
+				// Per-invoker cap selected by trust level: applies only at the matching level.
+				if strings.TrimSpace(p.ScopeKey) != strings.TrimSpace(trustLevel) || strings.TrimSpace(req.Invoker) == "" {
 					continue
 				}
 				w, cerr := l.convert(ctx, spendgate.ScopeInvoker, bw, requestCurrency)
 				if cerr != nil {
 					return spendgate.Policy{}, false, cerr
 				}
-				// Prefix the key so a tier-selected bucket can't alias a plain invoker window.
+				// Prefix the key so a trust-level-selected bucket can't alias a plain invoker window.
 				for i := range w {
-					w[i].Key = "it:" + tier + ":" + w[i].Key
+					w[i].Key = "it:" + trustLevel + ":" + w[i].Key
 				}
 				if len(w) > 0 {
 					scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopeInvoker, ScopeID: req.Invoker, Windows: w})

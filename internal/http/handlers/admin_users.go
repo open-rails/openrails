@@ -25,7 +25,7 @@ type adminUserPath struct {
 // per-section endpoints.
 type adminUserBillingProfile struct {
 	CustomerID     string                       `json:"customer_id"`
-	TrustTier      string                       `json:"trust_tier,omitempty"`
+	TrustLevel     string                       `json:"trust_level,omitempty"`
 	Subscriptions  []models.Subscription        `json:"subscriptions"`
 	Entitlements   []models.Entitlement         `json:"entitlements"`
 	Payments       []*models.Payment            `json:"payments"`
@@ -100,8 +100,8 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 			if currency == "" {
 				currency = money.DefaultCurrency
 			}
-			if tier, err := r.State.MoneyService.GetTier(ctx, payer, currency); err == nil {
-				profile.TrustTier = tier
+			if trustLevel, err := r.State.MoneyService.GetTrustLevel(ctx, payer, currency); err == nil {
+				profile.TrustLevel = trustLevel
 			}
 			balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, payer)
 			if err != nil {

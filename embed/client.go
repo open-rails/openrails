@@ -168,15 +168,12 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 // admitInputFromSDK maps one SDK admit request onto the service-facade input —
 // the embedded analogue of handlers.admitInputFromRequest.
 func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) billingservice.AdmitInput {
-	tier := strings.TrimSpace(req.TrustTier)
-	if tier == "" {
-		tier = strings.TrimSpace(req.Tier)
-	}
+	trustLevel := strings.TrimSpace(req.TrustLevel)
 	in := billingservice.AdmitInput{
 		CustomerID:      payer,
 		Invoker:         strings.TrimSpace(req.Invoker),
 		InvokerType:     req.InvokerType,
-		Tier:            tier,
+		TrustLevel:      trustLevel,
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,

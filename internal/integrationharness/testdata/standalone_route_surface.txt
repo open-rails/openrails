@@ -67,7 +67,7 @@ GET /v1/merchant/repair-alerts
 GET /v1/merchant/settings
 GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
-GET /v1/merchant/trust-tier
+GET /v1/merchant/trust-level
 GET /v1/merchant/users/{user_id}/product-access
 GET /v1/merchant/worker-health
 GET /v1/platform/merchants

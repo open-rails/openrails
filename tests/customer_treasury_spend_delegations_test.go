@@ -42,7 +42,7 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 
 	invokerKey := uuid.NewString()
 	roleKey := uuid.NewString()
-	tierKey := "tier_1"
+	trustLevelKey := "trust_1"
 
 	firstDoc := map[string]any{"delegations": []map[string]any{
 		{
@@ -61,7 +61,7 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 		},
 		{
 			"scope":     "invoker_tier",
-			"scope_key": tierKey,
+			"scope_key": trustLevelKey,
 			"windows": []map[string]any{
 				{"key": "month", "window_seconds": 2592000, "limit": 15000, "currency": "USD"},
 			},

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPolicyCache_TierHitMissTTL(t *testing.T) {
+func TestPolicyCache_TrustLevelHitMissTTL(t *testing.T) {
 	c := NewPolicyCache(10 * time.Minute)
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	c.SetClock(func() time.Time { return now })
@@ -23,30 +23,30 @@ func TestPolicyCache_TierHitMissTTL(t *testing.T) {
 	}
 
 	// miss → load.
-	pol, err := c.PayerSpendLimits("m", "cust", "tier_1", load("USD"))
+	pol, err := c.PayerSpendLimits("m", "cust", "trust_1", load("USD"))
 	require.NoError(t, err)
 	require.Equal(t, "USD", pol.PolicyCurrency)
 	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
 
 	// hit within TTL → cached (loader not called).
-	pol, err = c.PayerSpendLimits("m", "cust", "tier_1", load("EUR"))
+	pol, err = c.PayerSpendLimits("m", "cust", "trust_1", load("EUR"))
 	require.NoError(t, err)
 	require.Equal(t, "USD", pol.PolicyCurrency)
 	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
 
-	// different tier → separate key (miss).
-	_, err = c.PayerSpendLimits("m", "cust", "tier_2", load("USD"))
+	// different trust level → separate key (miss).
+	_, err = c.PayerSpendLimits("m", "cust", "trust_2", load("USD"))
 	require.NoError(t, err)
 	require.Equal(t, int32(2), atomic.LoadInt32(&calls))
 
-	// different merchant, same payer+tier → separate key (miss).
-	_, err = c.PayerSpendLimits("m2", "cust", "tier_1", load("USD"))
+	// different merchant, same payer+trust level → separate key (miss).
+	_, err = c.PayerSpendLimits("m2", "cust", "trust_1", load("USD"))
 	require.NoError(t, err)
 	require.Equal(t, int32(3), atomic.LoadInt32(&calls))
 
 	// advance past the 10-min TTL → reload.
 	now = now.Add(11 * time.Minute)
-	_, err = c.PayerSpendLimits("m", "cust", "tier_1", load("USD"))
+	_, err = c.PayerSpendLimits("m", "cust", "trust_1", load("USD"))
 	require.NoError(t, err)
 	require.Equal(t, int32(4), atomic.LoadInt32(&calls))
 }

@@ -84,12 +84,9 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, out[6].Status)
 }
 
-func TestAdmitInputFromRequest_UsesTrustTierWithTierFallback(t *testing.T) {
+func TestAdmitInputFromRequest_UsesTrustLevel(t *testing.T) {
 	payer := billingidentity.CustomerID(uuid.New())
 
-	got := admitInputFromRequest(serviceAdmitRequest{TrustTier: "trusted", Tier: "legacy"}, payer)
-	require.Equal(t, "trusted", got.Tier)
-
-	got = admitInputFromRequest(serviceAdmitRequest{Tier: "legacy"}, payer)
-	require.Equal(t, "legacy", got.Tier)
+	got := admitInputFromRequest(serviceAdmitRequest{TrustLevel: "trusted"}, payer)
+	require.Equal(t, "trusted", got.TrustLevel)
 }

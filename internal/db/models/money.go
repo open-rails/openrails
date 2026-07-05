@@ -65,10 +65,10 @@ type MoneyAccount struct {
 	LastAlertAt       *time.Time `json:"last_alert_at,omitempty"`
 	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
-	Tier *string `json:"tier,omitempty"`
-	// TierSource is "auto" (schedule-driven graduation, #476) or "admin" (an
+	TrustLevel *string `json:"trust_level,omitempty"`
+	// TrustLevelSource is "auto" (schedule-driven graduation, #476) or "admin" (an
 	// explicit override that auto-graduation must not overwrite).
-	TierSource string `json:"tier_source,omitempty"`
+	TrustLevelSource string `json:"trust_level_source,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

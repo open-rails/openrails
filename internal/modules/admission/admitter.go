@@ -2,13 +2,13 @@
 // affordability + delegated spend-cap gate and the delegated wasted-spend cutoff.
 //
 // #513 hard cut: admission is ONE atomic Redis decision (internal/modules/admission/spendgate).
-// The admitter resolves the payer trust tier, enforces the delegated wasted-spend
+// The admitter resolves the payer trust level, enforces the delegated wasted-spend
 // cutoff, loads the cached cap windows, reads the O(1) ledger balance, and runs
 // the single spendgate EVAL that checks affordability + every window and places
 // the in-flight hold. No Postgres locks, no per-request budget reservation rows.
 //
-// Delegated metering is PER-INVOKER (#563): a role/tier grant only selects WHICH
-// invokers a window applies to — it is never a pool shared across them. The
+// Delegated metering is PER-INVOKER (#563): a role/trust-level grant only selects
+// WHICH invokers a window applies to — it is never a pool shared across them. The
 // Invoker string and role UUIDs are host-owned, opaque, stable keys; OpenRails
 // never materializes a row for a delegated invoker. Only the payer scope is
 // aggregate across the whole account.
@@ -27,9 +27,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// DefaultTier is assigned to actors with no explicit tier — the new-account low
-// default (#300): start at the lowest tier until graduated.
-const DefaultTier = "free"
+// DefaultTrustLevel is assigned to actors with no explicit trust level — the
+// new-account low default (#300): start at the lowest level until graduated.
+const DefaultTrustLevel = "free"
 
 // DenyFailureRateLimited is the delegated-invoker wasted-spend cutoff deny code.
 const DenyFailureRateLimited = "failure_rate_limited"
@@ -87,7 +87,7 @@ type AdmitRequest struct {
 	CustomerID  identity.CustomerID // the merchant subject
 	Invoker     string              // canonical invoker: user:<id> / apiKey:<key_id> / <issuer>:<sub>
 	InvokerType string              // "payer" for direct payer credential; empty/other = delegated
-	Tier        string              // optional payer trust tier; empty resolves from OpenRails money state
+	TrustLevel  string              // optional payer trust level; empty resolves from OpenRails money state
 	Resource    string              // caller-supplied resource string for host-side attribution only
 	Roles       []uuid.UUID         // immutable role UUIDs the invoker holds (#473)
 
@@ -110,8 +110,9 @@ type AdmitDecision struct {
 	HeldAmount      int64
 }
 
-// Admit resolves the tier, enforces the delegated wasted-spend cutoff, then runs
-// the single spendgate EVAL (affordability + spend-cap windows + hold placement).
+// Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
+// then runs the single spendgate EVAL (affordability + spend-cap windows + hold
+// placement).
 func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, error) {
 	tid, err := merchant.Require(ctx) // #336: no default merchant
 	if err != nil {
@@ -124,14 +125,14 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: true}, nil
 	}
 
-	// Tier resolution: explicit > graduated (#298) > lowest default (#300).
-	tier := req.Tier
-	if tier == "" {
-		if t, terr := a.money.GetTier(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
-			tier = t
+	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
+	trustLevel := req.TrustLevel
+	if trustLevel == "" {
+		if t, terr := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
+			trustLevel = t
 		}
-		if tier == "" {
-			tier = DefaultTier
+		if trustLevel == "" {
+			trustLevel = DefaultTrustLevel
 		}
 	}
 
@@ -153,10 +154,10 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
-	sgReq := spendgate.Request{Invoker: req.Invoker, Tier: tier, Roles: roleStrings(req.Roles), Measure: req.Resource}
+	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
 
 	// Cached cap windows (FX-normalized to the request currency).
-	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, tier, req.Currency, sgReq)
+	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq)
 	if err != nil {
 		return AdmitDecision{}, err
 	}

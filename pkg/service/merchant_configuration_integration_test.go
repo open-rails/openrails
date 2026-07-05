@@ -178,7 +178,7 @@ func TestMerchantConfiguration_ConfiguredDelegatedInvokerWindowDenies(t *testing
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:configured", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payer, Invoker: "user:configured", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-configured",
 	})
@@ -205,7 +205,7 @@ func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.
 	require.EqualValues(t, 1_200_000, res.PolicyRecordedAmount)
 
 	admit, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:fx-cutoff", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payer, Invoker: "user:fx-cutoff", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-fx-cutoff",
 	})
@@ -229,7 +229,7 @@ func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:default", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payer, Invoker: "user:default", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-default",
 	})
@@ -249,7 +249,7 @@ func TestMerchantConfiguration_EmptyConfigFallsBackToDefault(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:empty-config", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payer, Invoker: "user:empty-config", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-empty-config",
 	})
@@ -310,7 +310,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	require.NoError(t, err)
 
 	resA, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerA, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payerA, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-a",
 	})
@@ -318,7 +318,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	require.False(t, resA.Allowed, "payer A's invoker is over the merchant-wide $1 policy")
 
 	resB, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "allowed-payer-b",
 	})
@@ -331,7 +331,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	})
 	require.NoError(t, err)
 	resB, err = svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-b",
 	})
@@ -343,8 +343,8 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
-		Tier: "free",
-		BadSpendWindows: []billingservice.TierBudgetWindowInput{
+		TrustLevel: "free",
+		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{
 			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 1_000_000},
 		},
 	}))
@@ -392,8 +392,8 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
-		Tier: "free",
-		BadSpendWindows: []billingservice.TierBudgetWindowInput{
+		TrustLevel: "free",
+		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{
 			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 10_000_000},
 		},
 	}))
@@ -411,7 +411,7 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "API-key:payer-owned", InvokerType: string(identity.InvokerTypePayer),
-		Tier: "free", Resource: "r",
+		TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "direct-admit",
 	})

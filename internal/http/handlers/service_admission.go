@@ -21,11 +21,9 @@ const maxAdmitBatchItems = 1000
 type serviceAdmitRequest struct {
 	CustomerID string `json:"customer_id"`
 	// Invoker is the end-user attribution/abuse label (#491).
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type"`
-	TrustTier   string `json:"trust_tier"`
-	// Tier is a deprecated alias for TrustTier, kept while current clients migrate.
-	Tier            string `json:"tier"`
+	Invoker         string `json:"invoker"`
+	InvokerType     string `json:"invoker_type"`
+	TrustLevel      string `json:"trust_level"`
 	Resource        string `json:"resource"`
 	Currency        string `json:"currency"`
 	EstimatedAmount int64  `json:"estimated_amount"`
@@ -43,7 +41,7 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		CustomerID:      payer,
 		Invoker:         strings.TrimSpace(req.Invoker),
 		InvokerType:     req.InvokerType,
-		Tier:            trustTier(req.TrustTier, req.Tier),
+		TrustLevel:      strings.TrimSpace(req.TrustLevel),
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
@@ -55,13 +53,6 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		in.ExpiresAtUnix = *req.ExpiresAt
 	}
 	return in
-}
-
-func trustTier(primary, alias string) string {
-	if v := strings.TrimSpace(primary); v != "" {
-		return v
-	}
-	return strings.TrimSpace(alias)
 }
 
 // admitVerdictStatus maps an admission result onto the per-item HTTP-equivalent
@@ -167,12 +158,12 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
-// ServiceGetTier returns the payer's current trust tier (#477): the value
+// ServiceGetTrustLevel returns the payer's current trust level (#477): the value
 // OpenRails auto-maintains from cumulative paid spend against the persisted
-// trust-tier schedule (#476). customer_id is a query param; the merchant is
-// pinned from the API key. Empty trust_tier means the payer has never graduated
+// trust-level schedule (#476). customer_id is a query param; the merchant is
+// pinned from the API key. Empty trust_level means the payer has never graduated
 // (caller treats it as the lowest/default). Operator API key, credits:read.
-func ServiceGetTier(r *httprequest.Request) {
+func ServiceGetTrustLevel(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
@@ -194,12 +185,12 @@ func ServiceGetTier(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tier, err := svc.GetTier(r.Request.Context(), *payer, currency)
+	trustLevel, err := svc.GetTrustLevel(r.Request.Context(), *payer, currency)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "tier lookup failed")
+		r.ErrorJSON(http.StatusInternalServerError, "trust level lookup failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"currency": currency, "trust_tier": tier})
+	r.SuccessJSON(map[string]any{"currency": currency, "trust_level": trustLevel})
 }
 
 type serviceReportWastedSpendRequest struct {
@@ -215,7 +206,7 @@ type serviceReportWastedSpendRequest struct {
 
 // ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
 // invokers accrue toward their flat cutoff; direct payer credentials use
-// trust-tier grace and then normal ledger charging. Operator API key,
+// trust-level grace and then normal ledger charging. Operator API key,
 // credits:write.
 func ServiceReportWastedSpend(r *httprequest.Request) {
 	var req serviceReportWastedSpendRequest
@@ -350,14 +341,14 @@ type serviceMerchantSettingsRequest struct {
 	InvoiceCollectionThreshold        *int64                                `json:"collection_threshold,omitempty"`
 	InvoiceMonthlyFloor               *int64                                `json:"monthly_floor,omitempty"`
 	InvoiceBillingBoundary            string                                `json:"billing_period_boundary,omitempty"`
-	TierSchedules                     []serviceMerchantTierSchedule         `json:"tier_schedules,omitempty"`
-	TierSpendLimits                   []billingservice.PayerSpendLimitInput `json:"tier_spend_limits,omitempty"`
+	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
+	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 }
 
-type serviceMerchantTierSchedule struct {
-	Currency string                            `json:"currency"`
-	Schedule []billingservice.TierScheduleRung `json:"schedule"`
+type serviceMerchantTrustLevelSchedule struct {
+	Currency string                                  `json:"currency"`
+	Schedule []billingservice.TrustLevelScheduleRung `json:"schedule"`
 }
 
 type serviceMerchantProfileConfiguration struct {
@@ -389,7 +380,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 }
 
 // ServiceSetMerchantSettings installs the merchant-owned admission policy in
-// one document: profile, trust-tier schedules, trust-tier spend policies, and
+// one document: profile, trust-level schedules, trust-level spend policies, and
 // delegated-invoker wasted-spend limits.
 func ServiceSetMerchantSettings(r *httprequest.Request) {
 	var req serviceMerchantSettingsRequest
@@ -422,7 +413,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		return
 	}
 
-	for _, schedule := range req.TierSchedules {
+	for _, schedule := range req.TrustLevelSchedules {
 		currency, ok := serviceRequiredCurrency(r, schedule.Currency)
 		if !ok {
 			return
@@ -431,14 +422,14 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := svc.SetTierSchedule(r.Request.Context(), billingidentity.CustomerID{}, currency, schedule.Schedule); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set tier schedule failed")
+		if err := svc.SetTrustLevelSchedule(r.Request.Context(), billingidentity.CustomerID{}, currency, schedule.Schedule); err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "set trust level schedule failed")
 			return
 		}
 	}
-	for _, policy := range req.TierSpendLimits {
+	for _, policy := range req.TrustLevelSpendLimits {
 		if err := svc.SetPayerSpendLimits(r.Request.Context(), billingidentity.CustomerID{}, policy); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set trust-tier policy failed")
+			r.ErrorJSON(http.StatusInternalServerError, "set trust-level policy failed")
 			return
 		}
 	}

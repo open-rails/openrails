@@ -19,9 +19,9 @@
 //     true the window up to actual (only the balance, caller-side, trues up).
 //     Release (failure) frees the estimate from the windows. Caps therefore run
 //     slightly conservative and self-heal at each window reset.
-//   - Delegated scopes are PER-INVOKER. A role or tier selects which invokers a
-//     window applies to; it never creates a shared pool across those invokers.
-//     Only payer scope is aggregate across the whole payer account.
+//   - Delegated scopes are PER-INVOKER. A role or trust level selects which
+//     invokers a window applies to; it never creates a shared pool across those
+//     invokers. Only payer scope is aggregate across the whole payer account.
 //
 // Policy is read-mostly config (cached in memory, invalidated on policy_version
 // bump); the Lua scripts + client live in gate.go.
@@ -37,10 +37,10 @@ import (
 type Scope string
 
 const (
-	ScopePayer   Scope = "payer"   // the customer overall
-	ScopeInvoker Scope = "invoker" // a specific API key / principal
-	ScopeRole    Scope = "role"    // per-invoker cap selected by a role the invoker holds
-	ScopeTier    Scope = "tier"    // the payer's trust tier
+	ScopePayer      Scope = "payer"       // the customer overall
+	ScopeInvoker    Scope = "invoker"     // a specific API key / principal
+	ScopeRole       Scope = "role"        // per-invoker cap selected by a role the invoker holds
+	ScopeTrustLevel Scope = "trust_level" // the payer's trust level
 )
 
 // Window is one {scope, duration, limit} cap. Limit and all reserved amounts are
@@ -56,7 +56,7 @@ type Window struct {
 }
 
 // ScopedWindows is the cap config for one concrete scope identity (e.g. invoker
-// "svc:abc", or tier "gold"). ScopeID is "" for the payer-wide scope.
+// "svc:abc", or trust level "gold"). ScopeID is "" for the payer-wide scope.
 type ScopedWindows struct {
 	Scope   Scope    `json:"scope"`
 	ScopeID string   `json:"scope_id"`
@@ -72,10 +72,10 @@ type Policy struct {
 
 // Request names the principals a request runs under, for scope matching.
 type Request struct {
-	Invoker string
-	Roles   []string
-	Tier    string
-	Measure string
+	Invoker    string
+	Roles      []string
+	TrustLevel string
+	Measure    string
 }
 
 // resolvedWindow binds a Window to the concrete scope identity it was configured
@@ -88,10 +88,11 @@ type resolvedWindow struct {
 
 // EffectiveWindows returns every window that applies to req under collect-all
 // semantics: all payer-scope windows, invoker-scope windows whose ScopeID matches
-// req.Invoker, role-scope windows for any of req.Roles, and tier-scope windows for
-// req.Tier. Role windows include req.Invoker in their Redis identity, so a role
-// budget is independently metered for each concrete delegated invoker holding the
-// role. The gate DENIES if ANY returned window is over its limit.
+// req.Invoker, role-scope windows for any of req.Roles, and trust-level-scope
+// windows for req.TrustLevel. Role windows include req.Invoker in their Redis
+// identity, so a role budget is independently metered for each concrete
+// delegated invoker holding the role. The gate DENIES if ANY returned window is
+// over its limit.
 func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	roles := make(map[string]bool, len(req.Roles))
 	for _, r := range req.Roles {
@@ -107,8 +108,8 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 			match = req.Invoker != "" && sw.ScopeID == req.Invoker
 		case ScopeRole:
 			match = req.Invoker != "" && roles[sw.ScopeID]
-		case ScopeTier:
-			match = req.Tier != "" && sw.ScopeID == req.Tier
+		case ScopeTrustLevel:
+			match = req.TrustLevel != "" && sw.ScopeID == req.TrustLevel
 		}
 		if !match {
 			continue

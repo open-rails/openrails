@@ -21,8 +21,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// PayerSpendLimitStore loads + stores per-payer, per-tier admission policies
-// (openrails.payer_spend_limits). Account money state stays in money_accounts.
+// PayerSpendLimitStore loads + stores per-payer, per-trust-level admission
+// policies (openrails.payer_spend_limits). Account money state stays in
+// money_accounts.
 type PayerSpendLimitStore struct {
 	db *db.DB
 }
@@ -31,12 +32,12 @@ func NewPayerSpendLimitStore(database *db.DB) *PayerSpendLimitStore {
 	return &PayerSpendLimitStore{db: database}
 }
 
-// PayerSpendLimits is a tier's enforceable money policy.
+// PayerSpendLimits is a trust level's enforceable money policy.
 type PayerSpendLimits struct {
 	BudgetWindows  []budgets.BudgetWindow
 	PolicyCurrency string
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this tier; direct-payer overage is charged at report time.
+	// windows for this trust level; direct-payer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
 }
 
@@ -45,11 +46,11 @@ type catalogUsageLimitWindow struct {
 	Amount int64  `json:"amount"`
 }
 
-// UpsertPayerSpendLimitsFull sets the full trust-tier money policy.
-// A ZERO payer writes the TENANT-WIDE DEFAULT policy for the trust tier (#477):
-// the platform capacity ladder declared once, applied to every payer at that tier
-// (selected by GetPayerSpendLimits when the payer has no own override).
-func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, payer identity.CustomerID, tier string, policy models.TierMoneyPolicy) error {
+// UpsertPayerSpendLimitsFull sets the full trust-level money policy.
+// A ZERO payer writes the TENANT-WIDE DEFAULT policy for the trust level (#477):
+// the platform capacity ladder declared once, applied to every payer at that
+// trust level (selected by GetPayerSpendLimits when the payer has no own override).
+func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, payer identity.CustomerID, trustLevel string, policy models.TrustLevelMoneyPolicy) error {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -59,14 +60,14 @@ func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, p
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		policyJSON, err := json.Marshal(policy)
 		if err != nil {
-			return fmt.Errorf("admission: encode trust-tier policy: %w", err)
+			return fmt.Errorf("admission: encode trust-level policy: %w", err)
 		}
 		// Merchant-wide default (#477): no subject row to materialize, NULL subject.
 		if payer.IsZero() {
 			return s.db.Gen(ctx).UpsertPayerSpendLimitDefault(ctx, gen.UpsertPayerSpendLimitDefaultParams{
 				ID:            uuidutil.NewV7(),
 				MerchantID:    tenantID,
-				Tier:          tier,
+				Tier:          trustLevel,
 				Policy:        policyJSON,
 				PolicyVersion: 1,
 				CreatedAt:     now,
@@ -83,7 +84,7 @@ func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, p
 			ID:            uuidutil.NewV7(),
 			MerchantID:    tenantID,
 			CustomerID:    &subjectID,
-			Tier:          tier,
+			Tier:          trustLevel,
 			Policy:        policyJSON,
 			PolicyVersion: 1,
 			CreatedAt:     now,
@@ -92,15 +93,15 @@ func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, p
 	})
 }
 
-// GetPayerSpendLimits returns the enforceable money policy for (payer, tier). A
-// missing row yields an empty policy.
-func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, tier string) (PayerSpendLimits, error) {
+// GetPayerSpendLimits returns the enforceable money policy for (payer, trustLevel).
+// A missing row yields an empty policy.
+func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, trustLevel string) (PayerSpendLimits, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return PayerSpendLimits{}, err
 	}
 	tenantID := tid.UUID()
-	row := new(models.TierPolicy)
+	row := new(models.TrustLevelPolicy)
 	found := false
 	// GetPayerSpendLimits resolves the payer's own override else the merchant-wide default
 	// (NULL subject, #477). The query's subject predicate is `= $2 OR IS NULL`, so
@@ -108,7 +109,7 @@ func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer id
 	subjectID := payer.UUID()
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		genRow, e := s.db.Gen(ctx).GetPayerSpendLimits(ctx, gen.GetPayerSpendLimitsParams{
-			MerchantID: tenantID, CustomerID: &subjectID, Tier: tier,
+			MerchantID: tenantID, CustomerID: &subjectID, Tier: trustLevel,
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
@@ -118,7 +119,7 @@ func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer id
 		}
 		if len(genRow.Policy) > 0 {
 			if uerr := json.Unmarshal(genRow.Policy, &row.Policy); uerr != nil {
-				return fmt.Errorf("admission: decode trust-tier policy: %w", uerr)
+				return fmt.Errorf("admission: decode trust-level policy: %w", uerr)
 			}
 		}
 		found = true

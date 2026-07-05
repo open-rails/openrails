@@ -14,26 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTierSchedule_AutoGraduationByCumulativeSpend is the #476 acceptance test:
-// set a per-subject schedule ONCE, then deposits crossing thresholds auto-raise
-// the tier with NO host GraduateTier call; the legacy host crank no-ops; an
-// admin override sticks across deposits; and a second merchant is isolated.
-func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
+// TestTrustLevelSchedule_AutoGraduationByCumulativeSpend is the #476 acceptance
+// test: set a per-subject schedule ONCE, then deposits crossing thresholds
+// auto-raise the trust level with NO host GraduateTrustLevel call; the legacy
+// host crank no-ops; an admin override sticks across deposits; and a second
+// merchant is isolated.
+func TestTrustLevelSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			"DELETE FROM openrails.tier_schedules WHERE customer_id = $1", payer.UUID())
 	})
 
-	schedule := []money.TierThreshold{
-		{Tier: "free", MinPaidAmount: 0},
-		{Tier: "tier1", MinPaidAmount: 5_000},
-		{Tier: "tier2", MinPaidAmount: 50_000},
+	schedule := []money.TrustLevelThreshold{
+		{TrustLevel: "free", MinPaidAmount: 0},
+		{TrustLevel: "trust1", MinPaidAmount: 5_000},
+		{TrustLevel: "trust2", MinPaidAmount: 50_000},
 	}
-	require.NoError(t, svc.SetTierSchedule(ctx, payer, cur, schedule))
+	require.NoError(t, svc.SetTrustLevelSchedule(ctx, payer, cur, schedule))
 
 	// Round-trips.
-	got, err := svc.GetTierSchedule(ctx, payer, cur)
+	got, err := svc.GetTrustLevelSchedule(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, schedule, got)
 
@@ -41,41 +42,41 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: cur, Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
-	tier := func() string {
-		tr, e := svc.GetTier(ctx, payer, cur)
+	trustLevel := func() string {
+		tr, e := svc.GetTrustLevel(ctx, payer, cur)
 		require.NoError(t, e)
 		return tr
 	}
 
-	// First deposit crosses the tier1 threshold — auto-graduates with NO host call.
+	// First deposit crosses the trust1 threshold — auto-graduates with NO host call.
 	dep(6_000) // cumulative 6,000
-	require.Equal(t, "tier1", tier(), "deposit auto-raises tier to tier1")
+	require.Equal(t, "trust1", trustLevel(), "deposit auto-raises trust level to trust1")
 
-	// Crossing the tier2 threshold auto-raises again.
+	// Crossing the trust2 threshold auto-raises again.
 	dep(50_000) // cumulative 56,000
-	require.Equal(t, "tier2", tier(), "deposit auto-raises tier to tier2")
+	require.Equal(t, "trust2", trustLevel(), "deposit auto-raises trust level to trust2")
 
-	// A different currency has its own ladder and tier state.
-	eurSchedule := []money.TierThreshold{{Tier: "eur1", MinPaidAmount: 1_000}}
-	require.NoError(t, svc.SetTierSchedule(ctx, payer, "EUR", eurSchedule))
+	// A different currency has its own ladder and trust-level state.
+	eurSchedule := []money.TrustLevelThreshold{{TrustLevel: "eur1", MinPaidAmount: 1_000}}
+	require.NoError(t, svc.SetTrustLevelSchedule(ctx, payer, "EUR", eurSchedule))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: "EUR", Amount: 2_000, Source: "pay-eur"})
 	require.NoError(t, err)
-	eurTier, err := svc.GetTier(ctx, payer, "EUR")
+	eurTrustLevel, err := svc.GetTrustLevel(ctx, payer, "EUR")
 	require.NoError(t, err)
-	require.Equal(t, "eur1", eurTier, "EUR deposits graduate the EUR schedule")
-	require.Equal(t, "tier2", tier(), "EUR deposits do not rewrite the USD tier")
+	require.Equal(t, "eur1", eurTrustLevel, "EUR deposits graduate the EUR schedule")
+	require.Equal(t, "trust2", trustLevel(), "EUR deposits do not rewrite the USD trust level")
 
 	// Admin override sticks — and survives further deposits (auto-graduation must
 	// not overwrite it).
-	require.NoError(t, svc.SetTierOverride(ctx, payer, cur, "vip"))
-	require.Equal(t, "vip", tier())
-	dep(1_000_000) // huge deposit; would otherwise re-derive tier2
-	require.Equal(t, "vip", tier(), "admin override wins over the schedule")
+	require.NoError(t, svc.SetTrustLevelOverride(ctx, payer, cur, "vip"))
+	require.Equal(t, "vip", trustLevel())
+	dep(1_000_000) // huge deposit; would otherwise re-derive trust2
+	require.Equal(t, "vip", trustLevel(), "admin override wins over the schedule")
 }
 
-// TestTierSchedule_MultiMerchantIsolation confirms a merchant-wide default schedule
-// in one merchant does not affect a payer in another merchant.
-func TestTierSchedule_MultiMerchantIsolation(t *testing.T) {
+// TestTrustLevelSchedule_MultiMerchantIsolation confirms a merchant-wide default
+// schedule in one merchant does not affect a payer in another merchant.
+func TestTrustLevelSchedule_MultiMerchantIsolation(t *testing.T) {
 	svc, pool, _, _, _ := moneyInEnv(t)
 	ctx := context.Background()
 
@@ -87,7 +88,7 @@ func TestTierSchedule_MultiMerchantIsolation(t *testing.T) {
 	// Merchant B (a second, isolated merchant row).
 	tenantB := uuid.New()
 	merchantB := merchant.ID(tenantB)
-	slugB := "tier-iso-" + merchantB.String()[:8]
+	slugB := "trust-iso-" + merchantB.String()[:8]
 	_, err := pool.Exec(ctx,
 		"INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')",
 		tenantB, slugB)
@@ -106,9 +107,9 @@ func TestTierSchedule_MultiMerchantIsolation(t *testing.T) {
 	})
 	_ = tA
 
-	// Merchant A: a merchant-wide default schedule with a low tier1 threshold.
-	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, money.DefaultCurrency, []money.TierThreshold{
-		{Tier: "free", MinPaidAmount: 0}, {Tier: "tier1", MinPaidAmount: 1_000},
+	// Merchant A: a merchant-wide default schedule with a low trust1 threshold.
+	require.NoError(t, svc.SetTrustLevelSchedule(ctxA, identity.CustomerID{}, money.DefaultCurrency, []money.TrustLevelThreshold{
+		{TrustLevel: "free", MinPaidAmount: 0}, {TrustLevel: "trust1", MinPaidAmount: 1_000},
 	}))
 
 	depA := func(amt int64) {
@@ -121,13 +122,13 @@ func TestTierSchedule_MultiMerchantIsolation(t *testing.T) {
 	}
 
 	depA(2_000)
-	tierA, err := svc.GetTier(ctxA, payerA, money.DefaultCurrency)
+	trustLevelA, err := svc.GetTrustLevel(ctxA, payerA, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, "tier1", tierA, "merchant A's schedule graduates payer A")
+	require.Equal(t, "trust1", trustLevelA, "merchant A's schedule graduates payer A")
 
 	// Merchant B has NO schedule — a deposit of the same size does NOT graduate.
 	depB(2_000)
-	tierB, err := svc.GetTier(ctxB, payerB, money.DefaultCurrency)
+	trustLevelB, err := svc.GetTrustLevel(ctxB, payerB, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, "", tierB, "merchant B has no schedule — no auto-graduation")
+	require.Equal(t, "", trustLevelB, "merchant B has no schedule — no auto-graduation")
 }

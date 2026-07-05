@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestRemoteTrustTierWireNames(t *testing.T) {
+func TestRemoteTrustLevelWireNames(t *testing.T) {
 	var settingsBody map[string]any
 	var admissionsBody map[string]any
 
@@ -28,8 +28,8 @@ func TestRemoteTrustTierWireNames(t *testing.T) {
 				t.Fatalf("decode admissions body: %v", err)
 			}
 			_, _ = w.Write([]byte(`{"items":[{"status":200,"result":{"allowed":true}}]}`))
-		case "/v1/merchant/trust-tier":
-			_, _ = w.Write([]byte(`{"currency":"USD","trust_tier":"gold"}`))
+		case "/v1/merchant/trust-level":
+			_, _ = w.Write([]byte(`{"currency":"USD","trust_level":"gold"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -41,21 +41,21 @@ func TestRemoteTrustTierWireNames(t *testing.T) {
 	}))
 
 	if err := client.SetMerchantSettings(context.Background(), MerchantSettings{
-		TierSpendLimits: []PayerSpendLimitInput{{TrustTier: "gold"}},
+		TrustLevelSpendLimits: []PayerSpendLimitInput{{TrustLevel: "gold"}},
 	}); err != nil {
 		t.Fatalf("SetMerchantSettings: %v", err)
 	}
-	policies, ok := settingsBody["tier_spend_limits"].([]any)
+	policies, ok := settingsBody["trust_level_spend_limits"].([]any)
 	if !ok || len(policies) != 1 {
-		t.Fatalf("expected one tier_spend_limits item, got %#v", settingsBody)
+		t.Fatalf("expected one trust_level_spend_limits item, got %#v", settingsBody)
 	}
 	policy, _ := policies[0].(map[string]any)
-	if policy["trust_tier"] != "gold" {
-		t.Fatalf("expected trust_tier inside settings document, got %#v", settingsBody)
+	if policy["trust_level"] != "gold" {
+		t.Fatalf("expected trust_level inside settings document, got %#v", settingsBody)
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{
-		CustomerID: "cust_1", TrustTier: "gold", EstimatedAmount: 1, RequestID: "req_1",
+		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, RequestID: "req_1",
 	}}); err != nil {
 		t.Fatalf("AdmitBatch: %v", err)
 	}
@@ -64,19 +64,16 @@ func TestRemoteTrustTierWireNames(t *testing.T) {
 		t.Fatalf("expected one admissions item, got %#v", admissionsBody)
 	}
 	admitBody, _ := items[0].(map[string]any)
-	if admitBody["trust_tier"] != "gold" {
-		t.Fatalf("expected trust_tier on admission item, got %#v", admissionsBody)
-	}
-	if _, ok := admitBody["tier"]; ok {
-		t.Fatalf("did not expect deprecated tier on wire: %#v", admissionsBody)
+	if admitBody["trust_level"] != "gold" {
+		t.Fatalf("expected trust_level on admission item, got %#v", admissionsBody)
 	}
 
-	tier, err := client.GetTier(context.Background(), "cust_1", "USD")
+	trustLevel, err := client.GetTrustLevel(context.Background(), "cust_1", "USD")
 	if err != nil {
-		t.Fatalf("GetTier: %v", err)
+		t.Fatalf("GetTrustLevel: %v", err)
 	}
-	if tier != "gold" {
-		t.Fatalf("expected trust_tier response to decode, got %q", tier)
+	if trustLevel != "gold" {
+		t.Fatalf("expected trust_level response to decode, got %q", trustLevel)
 	}
 }
 

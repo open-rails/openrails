@@ -47,7 +47,7 @@ func WithMerchant(ctx context.Context, id MerchantID) context.Context {
 }
 
 // AdmissionClient is the Tensorhub hot path: batch admission, settle, release,
-// wasted-spend reporting, and trust-tier read.
+// wasted-spend reporting, and trust-level read.
 type AdmissionClient interface {
 	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 	// Capture settles the admission/authorize hold request_id at the actual
@@ -55,13 +55,13 @@ type AdmissionClient interface {
 	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error
 	// Release frees the admission/authorize hold request_id without charging.
 	Release(ctx context.Context, requestID string) error
-	// GetTier returns the payer's current trust tier (#477) for one currency:
+	// GetTrustLevel returns the payer's current trust level (#477) for one currency:
 	// the value OpenRails auto-maintains from same-currency cumulative paid spend
 	// against the persisted schedule (#476), or a manual admin override. Empty
-	// means the host treats it as the lowest/default trust tier.
-	GetTier(ctx context.Context, customerID, currency string) (string, error)
+	// means the host treats it as the lowest/default trust level.
+	GetTrustLevel(ctx context.Context, customerID, currency string) (string, error)
 	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
-	// accrue toward their flat cutoff; direct payer credentials use trust-tier
+	// accrue toward their flat cutoff; direct payer credentials use trust-level
 	// grace and charge overage through the normal ledger. Source+SourceID are
 	// required for retry idempotency.
 	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
@@ -217,17 +217,15 @@ type CreditTransaction struct {
 // capacity, delegated spend policy, delegated wasted-spend cutoff, and places the
 // request hold when allowed.
 //
-// TrustTier selects money policy. Resource is host-side attribution only;
+// TrustLevel selects money policy. Resource is host-side attribution only;
 // endpoint authorization stays with the host.
 // EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID  string `json:"customer_id"`
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type,omitempty"`
-	TrustTier   string `json:"trust_tier,omitempty"`
-	// Tier is a deprecated alias for TrustTier, kept for current Go callers.
-	Tier            string `json:"tier,omitempty"`
+	CustomerID      string `json:"customer_id"`
+	Invoker         string `json:"invoker"`
+	InvokerType     string `json:"invoker_type,omitempty"`
+	TrustLevel      string `json:"trust_level,omitempty"`
 	Resource        string `json:"resource,omitempty"`
 	Currency        string `json:"currency,omitempty"`
 	EstimatedAmount int64  `json:"estimated_amount"`
@@ -368,16 +366,16 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                           *MerchantProfileInput  `json:"profile,omitempty"`
-	TierSchedules                     []MerchantTierSchedule `json:"tier_schedules,omitempty"`
-	TierSpendLimits                   []PayerSpendLimitInput `json:"tier_spend_limits,omitempty"`
-	DelegatedInvokerWastedSpendLimits []BudgetWindowInput    `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	Profile                           *MerchantProfileInput        `json:"profile,omitempty"`
+	TrustLevelSchedules               []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	TrustLevelSpendLimits             []PayerSpendLimitInput       `json:"trust_level_spend_limits,omitempty"`
+	DelegatedInvokerWastedSpendLimits []BudgetWindowInput          `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 }
 
-// MerchantTierSchedule is one currency's trust-tier ladder.
-type MerchantTierSchedule struct {
-	Currency string             `json:"currency"`
-	Schedule []TierScheduleRung `json:"schedule"`
+// MerchantTrustLevelSchedule is one currency's trust-level ladder.
+type MerchantTrustLevelSchedule struct {
+	Currency string                   `json:"currency"`
+	Schedule []TrustLevelScheduleRung `json:"schedule"`
 }
 
 // BudgetWindow is one computed window from admission policy checks and Admit's
@@ -396,18 +394,16 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// PayerSpendLimitInput configures a per-payer trust-tier policy via merchant
+// PayerSpendLimitInput configures a per-payer trust-level policy via merchant
 // settings (#298): fixed money-budget windows and wasted
 // spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
 // travels alongside it).
 type PayerSpendLimitInput struct {
-	TrustTier string `json:"trust_tier,omitempty"`
-	// Tier is a deprecated alias for TrustTier, kept for current Go callers.
-	Tier           string              `json:"tier,omitempty"`
+	TrustLevel     string              `json:"trust_level,omitempty"`
 	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string              `json:"policy_currency,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this trust tier: at most Limit of host-reported wasted spend is
+	// windows for this trust level: at most Limit of host-reported wasted spend is
 	// forgiven per window; direct-payer overage is charged.
 	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }
@@ -443,13 +439,13 @@ type WastedSpendResponse struct {
 	Duplicate            bool   `json:"duplicate,omitempty"`
 }
 
-// TierScheduleRung is one rung of the persisted same-currency tier ladder set
-// via merchant settings (#476): a payer reaches Tier once its
+// TrustLevelScheduleRung is one rung of the persisted same-currency trust-level
+// ladder set via merchant settings (#476): a payer reaches TrustLevel once its
 // cumulative paid spend in the schedule currency is at least
 // MinCumulativePaidAmount. Order ascending by MinCumulativePaidAmount (the
 // server sorts defensively regardless).
-type TierScheduleRung struct {
-	Tier                    string `json:"tier"`
+type TrustLevelScheduleRung struct {
+	TrustLevel              string `json:"trust_level"`
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 

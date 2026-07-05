@@ -544,15 +544,15 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	}
 
 	// AUTO-graduation (#476): cumulative credits granted in this currency just
-	// changed, so recompute + persist the payer's same-currency tier from the
-	// stored tier_schedule, in-band with the deposit.
+	// changed, so recompute + persist the payer's same-currency trust level from
+	// the stored tier_schedule, in-band with the deposit.
 	cumPaid, perr := q.SumCreditGrants(ctx, gen.SumCreditGrantsParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 	})
 	if perr != nil {
 		return nil, perr
 	}
-	if err := s.autoGraduateTierTx(ctx, q, tenantID, payer, cur, cumPaid, now); err != nil {
+	if err := s.autoGraduateTrustLevelTx(ctx, q, tenantID, payer, cur, cumPaid, now); err != nil {
 		return nil, err
 	}
 

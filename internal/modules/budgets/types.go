@@ -10,9 +10,10 @@ package budgets
 
 import "strings"
 
-// BudgetWindow is one fixed money-budget window in a tier/budget policy: at most
-// Limit (the currency's minor units) of spend per WindowSeconds. The loader maps
-// this onto a spendgate.Window (reset boundaries staggered per payer, #337).
+// BudgetWindow is one fixed money-budget window in a trust-level/budget policy:
+// at most Limit (the currency's minor units) of spend per WindowSeconds. The
+// loader maps this onto a spendgate.Window (reset boundaries staggered per
+// payer, #337).
 type BudgetWindow struct {
 	// Key is a stable identifier for the window (e.g. "5h", "7d").
 	Key string
@@ -28,10 +29,15 @@ type BudgetWindow struct {
 // Invoker spend-limit scopes (#473/#517): a limit is {scope, scope_key, windows[]};
 // at admit time a request (invoker, roles[]) is gated by EVERY matching scope's
 // windows. These identifiers are stored in invoker_spend_limits.scope.
+//
+// ScopeInvokerTrustLevel's wire/stored value stays "invoker_tier" — it is
+// constrained by the invoker_spend_limits.scope CHECK constraint in the DB
+// schema, and renaming the stored value would require a schema migration
+// (out of scope for the Go-level trust-tier -> trust-level rename).
 const (
-	ScopeInvoker     = "invoker"
-	ScopeRole        = "role"
-	ScopeInvokerTier = "invoker_tier"
+	ScopeInvoker           = "invoker"
+	ScopeRole              = "role"
+	ScopeInvokerTrustLevel = "invoker_tier"
 )
 
 // NormalizeScope canonicalizes a stored scope string.

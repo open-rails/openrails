@@ -474,12 +474,12 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 			FromEmail:   "billing@example.com",
 			SupportURL:  "https://example.com/support",
 		},
-		TierSchedules: []openrails.MerchantTierSchedule{{
+		TrustLevelSchedules: []openrails.MerchantTrustLevelSchedule{{
 			Currency: money.DefaultCurrency,
-			Schedule: []openrails.TierScheduleRung{{Tier: "conf", MinCumulativePaidAmount: 0}},
+			Schedule: []openrails.TrustLevelScheduleRung{{TrustLevel: "conf", MinCumulativePaidAmount: 0}},
 		}},
-		TierSpendLimits: []openrails.PayerSpendLimitInput{{
-			TrustTier: "conf",
+		TrustLevelSpendLimits: []openrails.PayerSpendLimitInput{{
+			TrustLevel: "conf",
 			BudgetWindows: []openrails.BudgetWindowInput{
 				{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
 			},

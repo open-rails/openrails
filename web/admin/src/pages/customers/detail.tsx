@@ -75,7 +75,7 @@ export function CustomerDetailPage() {
         <div>
           <h2 className="font-mono text-sm">{profile.customer_id}</h2>
           <p className="text-xs text-muted-foreground">
-            Trust tier: {profile.trust_tier || "default"}
+            Trust level: {profile.trust_level || "default"}
           </p>
         </div>
         <div className="ml-auto flex gap-2">

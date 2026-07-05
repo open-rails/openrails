@@ -165,10 +165,8 @@ func admitRequestBody(req AdmitRequest) map[string]any {
 	if req.InvokerType != "" {
 		body["invoker_type"] = req.InvokerType
 	}
-	if tier := strings.TrimSpace(req.TrustTier); tier != "" {
-		body["trust_tier"] = tier
-	} else if tier := strings.TrimSpace(req.Tier); tier != "" {
-		body["trust_tier"] = tier
+	if trustLevel := strings.TrimSpace(req.TrustLevel); trustLevel != "" {
+		body["trust_level"] = trustLevel
 	}
 	if req.Resource != "" {
 		body["resource"] = req.Resource
@@ -314,23 +312,19 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 	return resp.Rows, nil
 }
 
-// GetTier implements Client (handler ServiceGetTier, #477).
-func (c *remote) GetTier(ctx context.Context, customerID, currency string) (string, error) {
+// GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
+func (c *remote) GetTrustLevel(ctx context.Context, customerID, currency string) (string, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
-		Currency  string `json:"currency"`
-		TrustTier string `json:"trust_tier"`
-		Tier      string `json:"tier"`
+		Currency   string `json:"currency"`
+		TrustLevel string `json:"trust_level"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/trust-tier?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/trust-level?"+q.Encode(), nil, &resp); err != nil {
 		return "", err
 	}
-	if resp.TrustTier != "" {
-		return resp.TrustTier, nil
-	}
-	return resp.Tier, nil
+	return resp.TrustLevel, nil
 }
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).

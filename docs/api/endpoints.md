@@ -327,7 +327,7 @@ Credential examples:
 
 | Route | Required permission |
 |-------|---------------------|
-| `GET /v1/merchant/customers/{customer_id}/entitlements`, `GET /v1/merchant/users/{user_id}/product-access`, `GET /v1/merchant/invokers/{invoker}/credits`, `GET /v1/merchant/trust-tier`, `GET /v1/merchant/credit-limit`, `GET /v1/merchant/credits/balance` | `merchant:customer-settings:read` |
+| `GET /v1/merchant/customers/{customer_id}/entitlements`, `GET /v1/merchant/users/{user_id}/product-access`, `GET /v1/merchant/invokers/{invoker}/credits`, `GET /v1/merchant/trust-level`, `GET /v1/merchant/credit-limit`, `GET /v1/merchant/credits/balance` | `merchant:customer-settings:read` |
 | `POST /v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` |
 | `PUT /v1/merchant/credit-limit`, `POST /v1/merchant/credits/deposit` | `merchant:customer-settings:update` |
 | `POST /v1/merchant/admissions`, `POST /v1/merchant/admissions/{id}/capture`, `POST /v1/merchant/admissions/{id}/release`, `POST /v1/merchant/wasted-spend` | `merchant:admissions:create` |
@@ -493,7 +493,7 @@ resource-named merchant surface below. Merchant admins can read saved payment
 method metadata, but cannot create/update/delete customer payment methods.
 
 ### GET /v1/merchant/customers/{customer_id}
-Returns the customer billing profile: customer id, trust tier/status, balances,
+Returns the customer billing profile: customer id, trust level/status, balances,
 entitlements, product access, payment history, subscription history, and saved
 payment-method metadata. Requires `merchant:customer-settings:read`.
 
