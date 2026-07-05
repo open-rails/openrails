@@ -207,6 +207,59 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	require.Contains(t, err.Error(), "no control plane attached")
 }
 
+// TestProvisionMerchant_ConcurrentFirstCreateRace proves the #750 race design
+// end-to-end: two goroutines calling ProvisionMerchant for the SAME fresh slug
+// at once must both succeed with the identical MerchantID/GroupID, and
+// exactly one observes Created=true. ProvisionMerchant's retry-resolve (see
+// its doc comment) — not a separate ErrSlugTaken sentinel — converts the race
+// loser into the ordinary idempotent path. Repeated across several fresh
+// slugs so the goroutine-scheduling race is likely to actually overlap inside
+// the DB (CreatePermissionGroup's unique-constraint conflict).
+func TestProvisionMerchant_ConcurrentFirstCreateRace(t *testing.T) {
+	ctx := context.Background()
+	dsn := dbtest.SharedPostgresDSN(t)
+	cfg := hostedTestConfig(dsn, "https://race.openrails.test")
+	e := newHostApp(t, cfg)
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+
+	// Warm up the root group/containment (idempotent, but not the race under
+	// test) with a throwaway slug first, so every iteration below races ONLY
+	// on the merchant group's own creation — matching how a real deployment's
+	// bootstrap already runs ahead of user-triggered provisioning.
+	_, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
+		Slug: "race-warmup-" + strings.ToLower(uuid.NewString()[:8]),
+	})
+	require.NoError(t, err)
+
+	const iterations = 5
+	for i := 0; i < iterations; i++ {
+		slug := "race-" + strings.ToLower(uuid.NewString()[:8])
+
+		var wg sync.WaitGroup
+		results := make([]*embcp.ProvisionMerchantResult, 2)
+		errs := make([]error, 2)
+		start := make(chan struct{})
+		for g := 0; g < 2; g++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				<-start
+				results[idx], errs[idx] = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
+					Slug: slug,
+				})
+			}(g)
+		}
+		close(start)
+		wg.Wait()
+
+		require.NoError(t, errs[0], "iteration %d goroutine 0", i)
+		require.NoError(t, errs[1], "iteration %d goroutine 1", i)
+		require.Equal(t, results[0].MerchantID, results[1].MerchantID, "iteration %d: same merchant id", i)
+		require.Equal(t, results[0].GroupID, results[1].GroupID, "iteration %d: same group id", i)
+		require.NotEqual(t, results[0].Created, results[1].Created, "iteration %d: exactly one Created=true", i)
+	}
+}
+
 // TestSelfHostedPosture_RegistrationStaysClosed guards the default posture: a
 // plain Attach (no options, no sender) still boots, and the public registration
 // surface is not mounted.

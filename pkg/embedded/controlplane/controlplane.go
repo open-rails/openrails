@@ -39,10 +39,10 @@ import (
 // authcore.Config (the AuthKit engine):
 //   - Token (Issuer/Audiences/durations/SessionMaxPerUser): NOT forwarded.
 //     Issuer comes from cfg.Auth.Issuer (already host-configurable at the
-//     config layer); the "openrails" audience is an OpenRails product
-//     constant, not a per-host dial (#750 tracks exporting it as a named
-//     constant instead of a literal). Token durations/session caps have no
-//     AttachOptions knob yet — an open gap, not yet requested by a host.
+//     config layer); the audience is the OpenRails product constant
+//     billingauth.TokenAudience, not a per-host dial (#750). Token
+//     durations/session caps have no AttachOptions knob yet — an open gap,
+//     not yet requested by a host.
 //   - Frontend: FORWARDED (this issue) via AttachOptions.Frontend.
 //   - Registration: NOT a raw forward. OpenRails computes it from
 //     HostedPosture (open+required vs closed+none) — this is product policy

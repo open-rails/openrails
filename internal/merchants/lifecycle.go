@@ -110,35 +110,47 @@ func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 // so provisioning is safe to retry. Default-merchant seeding of catalog/credit
 // definitions is left to the existing bootstrap/seed paths and is not duplicated
 // here.
-func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, error) {
+//
+// The returned bool reports whether THIS call inserted the directory row
+// (true) or the row already existed (false) — derived from the INSERT's own
+// RETURNING, not a separate existence check, so it stays correct under
+// concurrent first-provisions of the same slug: exactly one racing caller
+// observes true (#750).
+func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, bool, error) {
 	slug := normalizeSlug(req.Slug)
 	if slug == "" {
-		return nil, errors.New("merchants: provision requires a slug")
+		return nil, false, errors.New("merchants: provision requires a slug")
 	}
 	// #567: the merchant slug must be a legal AuthKit permission-group instance slug.
 	if err := merchant.ValidateSlug(slug); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	groupID := strings.TrimSpace(req.PermissionGroupID)
 	if groupID == "" {
-		return nil, ErrPermissionGroupRequired
+		return nil, false, ErrPermissionGroupRequired
 	}
 
-	// 1. Upsert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps the
-	//    existing row, then we re-read so provision is idempotent. The merchant's
-	//    permission-group id is resolved/created by the caller and recorded here.
-	_, err := s.pool.Exec(ctx, `
+	// 1. Insert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps
+	//    the existing row; RETURNING only yields a row when THIS statement
+	//    performed the insert, which is how `created` is derived race-safely.
+	var insertedID string
+	err := s.pool.QueryRow(ctx, `
 		INSERT INTO openrails.merchants (slug, status, permission_group_id)
 		VALUES ($1, 'active', NULLIF($2,''))
 		ON CONFLICT (slug) DO NOTHING
-	`, slug, groupID)
-	if err != nil {
-		return nil, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
+		RETURNING id::text
+	`, slug, groupID).Scan(&insertedID)
+	created := true
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		created = false
+	case err != nil:
+		return nil, false, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
 	}
 
 	t, err := s.merchantBySlug(ctx, slug)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// 2. Record the merchant's own permission-group id (#567). Idempotent.
@@ -147,11 +159,15 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 			   SET permission_group_id = $2, updated_at = current_timestamp
 			 WHERE id = $1::uuid AND permission_group_id IS DISTINCT FROM $2
 		`, t.ID.String(), groupID); uerr != nil {
-		return nil, fmt.Errorf("merchants: record permission group on merchant: %w", uerr)
+		return nil, false, fmt.Errorf("merchants: record permission group on merchant: %w", uerr)
 	}
 	t.PermissionGroupID = groupID
 
-	return s.merchantBySlug(ctx, slug)
+	t, err = s.merchantBySlug(ctx, slug)
+	if err != nil {
+		return nil, false, err
+	}
+	return t, created, nil
 }
 
 // Get returns the merchant directory row by id.

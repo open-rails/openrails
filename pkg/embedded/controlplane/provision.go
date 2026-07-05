@@ -30,6 +30,12 @@ type ProvisionMerchantRequest struct {
 	OwnerUserID string
 }
 
+// ErrInvalidSlug wraps pkg/merchant's slug-validation error (errors.Is-able)
+// so a host can map a bad slug to 400 without string-matching the error
+// text. The validation detail (pkg/merchant.ValidateSlug's own message) is
+// preserved in the wrap.
+var ErrInvalidSlug = errors.New("control plane provision: invalid slug")
+
 // ProvisionMerchantResult reports what ProvisionMerchant ensured.
 type ProvisionMerchantResult struct {
 	// MerchantID is the openrails.merchants directory row id.
@@ -63,7 +69,7 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	}
 	slug := merchant.NormalizeSlug(req.Slug)
 	if err := merchant.ValidateSlug(slug); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidSlug, err)
 	}
 	owner := strings.TrimSpace(req.OwnerUserID)
 
@@ -77,6 +83,31 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 
 	// Resolve-or-create the merchant permission-group — the merchant IS the
 	// group (#567): type=merchant, resourceRef=slug, parent=root.
+	//
+	// Race handling (#750): two concurrent first-creates of the same fresh
+	// slug both observe ErrGroupNotFound and race CreatePermissionGroup; the
+	// loser hits the DB's uniqueness constraint on (persona, instance_slug),
+	// which authkit's PermissionGroupStore.CreateGroup wraps in a bare
+	// fmt.Errorf (no stable "already exists" sentinel to errors.Is against —
+	// confirmed against authkit v0.80.0). Rather than string-matching that
+	// error, the loser re-resolves once: if the winner's row is now visible,
+	// the loser proceeds exactly like any other already-provisioned merchant
+	// (groupCreated stays false) — the SAME retry-resolve pattern
+	// EnsureCustomerPermissionGroup already uses for the identical race on
+	// customer groups (customer_group.go). Only when the re-resolve ALSO
+	// fails do we conclude CreatePermissionGroup's error was a genuine
+	// failure (DB outage, etc.), not a slug race, and return it wrapped as
+	// before (hosts 500 it).
+	//
+	// Deliberately no ErrSlugTaken sentinel: the retry-resolve converts every
+	// race loser into the ordinary Created=false idempotent path callers
+	// already handle — a genuine slug conflict (a pre-existing merchant owned
+	// by someone else) is ALSO Created=false, and hosts distinguish "mine"
+	// vs. "taken" by checking ownership afterward (see
+	// openrails-saas/internal/api/accounts.go's handleCreateMerchant). If a
+	// future authkit release exposes a stable duplicate-group sentinel,
+	// mapping it to a typed ErrSlugTaken here — skipping the extra
+	// round-trip — is a non-breaking follow-up.
 	groupCreated := false
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
 	switch {
@@ -88,27 +119,31 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 			OwnerSubjectID: owner,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, err)
+			createErr := err
+			if resolvedID, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug); rerr == nil {
+				groupID = resolvedID
+			} else {
+				return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, createErr)
+			}
+		} else {
+			groupCreated = true
 		}
-		groupCreated = true
 	case err != nil:
 		return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
 	}
 
 	// Create/link the directory row (permission_group_id) via the merchants
 	// lifecycle slice — the same row bootstrap requires to pre-exist (#480);
-	// runtime provisioning creates it.
+	// runtime provisioning creates it. Provision's own `rowCreated` return
+	// (derived from its INSERT ... RETURNING, not a separate existence check)
+	// is what stays race-safe under concurrent first-provisions of the same
+	// slug — a pre-check-then-insert here would let both racers observe
+	// "did not yet exist" and both wrongly report Created=true.
 	dir, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision: build merchant directory service: %w", err)
 	}
-	rowExisted := true
-	if _, gerr := dir.GetBySlug(ctx, slug); errors.Is(gerr, merchants.ErrMerchantNotFound) {
-		rowExisted = false
-	} else if gerr != nil {
-		return nil, fmt.Errorf("control plane provision: resolve merchant directory row %q: %w", slug, gerr)
-	}
-	m, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: slug, PermissionGroupID: groupID})
+	m, rowCreated, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: slug, PermissionGroupID: groupID})
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision: provision merchant directory row %q: %w", slug, err)
 	}
@@ -116,6 +151,6 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	return &ProvisionMerchantResult{
 		MerchantID: m.ID,
 		GroupID:    groupID,
-		Created:    groupCreated || !rowExisted,
+		Created:    groupCreated || rowCreated,
 	}, nil
 }
