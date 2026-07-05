@@ -584,19 +584,19 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 // are NOT persisted — the running server holds its own from its boot manifest).
 func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, opts MerchantManifestReconcileOptions) (merchants.MerchantSecretStore, solana.TransitClient, error) {
 	if opts.SecretStore != nil {
-		transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
-		return opts.SecretStore, transit, nil
+		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
 	if cfg.IsManifestMerchantSource() {
 		log.Info("merchant bootstrap: merchant_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
-		transit, err := merchantsecrets.BuildTransit(ctx, cfg)
+		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
-		return merchants.NewMemorySecretStore(), transit, nil
+		return merchants.NewMemorySecretStore(), transitStore.SolanaTransit, nil
 	}
 	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
 	if err != nil {
