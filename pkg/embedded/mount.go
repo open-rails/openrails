@@ -36,6 +36,11 @@ type MountOptions struct {
 // framework-neutral net/http handler. The host mounts this once (a gin host
 // uses gin.WrapH) and rewrites nothing.
 func MountHandler(e *Embedded, opts MountOptions) (http.Handler, error) {
+	mountPrefix, err := normalizeMountPrefix(opts.MountPrefix)
+	if err != nil {
+		return nil, err
+	}
+
 	// Resolve + record the full selection (incl. customer); the combined mount
 	// serves customer via the self handler, so it is part of the advertised set.
 	active := e.MountRouteSets(opts.RouteSets)
@@ -64,7 +69,22 @@ func MountHandler(e *Embedded, opts MountOptions) (http.Handler, error) {
 	// base is the canonical embedded mount ("/billing"); both handlers serve at
 	// base + "/v1/...".
 	base := strings.TrimSuffix(embedhttp.EmbeddedV1Prefix, "/v1")
-	return combinedMount(opts.MountPrefix, base, self, user), nil
+	return combinedMount(mountPrefix, base, self, user), nil
+}
+
+// normalizeMountPrefix trims trailing slashes (so "/billing/" and "/billing//"
+// both mean the canonical "/billing") and requires a leading "/" when
+// non-empty — a prefix silently missing its leading slash is far more likely
+// a caller bug than an intentional relative mount, so it fails loudly here at
+// boot time instead of silently 404ing every request.
+func normalizeMountPrefix(prefix string) (string, error) {
+	for strings.HasSuffix(prefix, "/") {
+		prefix = strings.TrimSuffix(prefix, "/")
+	}
+	if prefix != "" && !strings.HasPrefix(prefix, "/") {
+		return "", fmt.Errorf("embedded billing: MountPrefix %q must start with \"/\"", prefix)
+	}
+	return prefix, nil
 }
 
 // SelfHandler returns the mountable browser-direct SELF-SERVICE surface for an
@@ -149,17 +169,25 @@ func routeSetsWithoutCustomer(routeSets []RouteSet) []RouteSet {
 
 // combinedMount strips mountPrefix, rewrites to the canonical base, and routes
 // selected customer subtrees to the self handler; everything else to the user
-// handler.
+// handler. Paths not under mountPrefix (including prefix-boundary near-misses
+// like "/billingfoo" against "/billing") get a clean 404 instead of a garbage
+// rewrite.
 func combinedMount(mountPrefix, base string, self, user http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rest := strings.TrimPrefix(r.URL.Path, mountPrefix)
-		if rest == "" {
-			rest = "/"
+		rest, ok := stripMountPrefix(r.URL.Path, mountPrefix)
+		if !ok {
+			http.NotFound(w, r)
+			return
 		}
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = base + rest
 		if r2.URL.RawPath != "" {
-			r2.URL.RawPath = base + strings.TrimPrefix(r.URL.RawPath, mountPrefix)
+			rawRest, ok := stripMountPrefix(r.URL.RawPath, mountPrefix)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			r2.URL.RawPath = base + rawRest
 		}
 		if self != nil && (rest == "/v1/me" || rest == "/v1/customers" ||
 			strings.HasPrefix(rest, "/v1/me/") || strings.HasPrefix(rest, "/v1/customers/")) {
@@ -168,4 +196,23 @@ func combinedMount(mountPrefix, base string, self, user http.Handler) http.Handl
 		}
 		user.ServeHTTP(w, r2)
 	})
+}
+
+// stripMountPrefix removes mountPrefix from path at a "/" boundary (path
+// equals mountPrefix exactly, or continues with "/"). Returns ok=false when
+// path is not under mountPrefix at all.
+func stripMountPrefix(path, mountPrefix string) (rest string, ok bool) {
+	if mountPrefix == "" {
+		if path == "" {
+			return "/", true
+		}
+		return path, true
+	}
+	if path == mountPrefix {
+		return "/", true
+	}
+	if strings.HasPrefix(path, mountPrefix+"/") {
+		return path[len(mountPrefix):], true
+	}
+	return "", false
 }
