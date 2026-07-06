@@ -43,8 +43,18 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 // matches (`merchants.permission_group_id`, repurposed under #567 to hold the merchant
 // permission-group's internal id).
 //
+// #734: when a Host resolver has pinned a merchant onto ctx (merchant.WithHostMerchant
+// — set only by the opt-in Host-based resolution middleware/mount, internal/http),
+// the resolved issuer-merchant MUST equal it: a token minted for merchant A
+// presented against merchant B's Host fails closed here, exactly like an
+// unregistered issuer. No Host pin on ctx (the common case: no Host resolver
+// configured) is a pure no-op — this is the SAME sentinel every other
+// unresolvable-issuer case already returns, so every existing caller's error
+// mapping covers it with no changes.
+//
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, is attached
-// to no group, or that group is no active merchant (fail closed). The returned
+// to no group, that group is no active merchant, or (#734) the resolved merchant
+// disagrees with ctx's Host-pinned merchant (fail closed). The returned
 // groupID/groupRef identify the merchant permission-group.
 func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, groupID, groupRef, remoteApplicationID string, err error) {
 	issuer = strings.TrimSpace(issuer)
@@ -71,6 +81,9 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 	}
 	if err != nil {
 		return merchant.ID{}, "", "", "", "", err
+	}
+	if hostMID, ok := merchant.HostMerchant(ctx); ok && hostMID != mid {
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
 	return mid, mslug, groupID, mslug, ra.ID, nil
 }

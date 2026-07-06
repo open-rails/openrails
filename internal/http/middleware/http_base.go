@@ -101,11 +101,15 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	}
 }
 
-// CORSOriginSource returns the browser Origin allow-list for the current request.
-type CORSOriginSource func(context.Context) ([]string, error)
+// CORSOriginSource returns the browser Origin allow-list for the current
+// request's Host (#734: per-merchant CORS resolves live from the request Host,
+// e.g. AuthKit remote_application state resolves BY MERCHANT, and merchant is
+// resolved from host). Sources that don't vary by host (a single global
+// allow-list) simply ignore the parameter.
+type CORSOriginSource func(ctx context.Context, host string) ([]string, error)
 
 // CORSFromSourceHTTP grants browser CORS headers only to origins allow-listed by
-// a per-request source (e.g. AuthKit remote_application state). An empty or
+// a per-request source (e.g. a merchant resolved from Host — #734). An empty or
 // failing source grants no browser Origin. OPTIONS is still answered with 204 so
 // denied preflight fails in the browser without invoking handlers.
 func CORSFromSourceHTTP(source CORSOriginSource) HTTPMiddleware {
@@ -114,7 +118,7 @@ func CORSFromSourceHTTP(source CORSOriginSource) HTTPMiddleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origins := []string(nil)
 			if source != nil && strings.TrimSpace(r.Header.Get("Origin")) != "" {
-				if got, err := source(r.Context()); err == nil {
+				if got, err := source(r.Context(), r.Host); err == nil {
 					origins = got
 				}
 			}
@@ -257,4 +261,40 @@ func ResolveMerchantHTTP(resolve func() merchant.ID) HTTPMiddleware {
 // merchant for the lifetime of a test server.
 func StaticMerchant(id merchant.ID) func() merchant.ID {
 	return func() merchant.ID { return id }
+}
+
+// ResolveMerchantFromHostHTTP resolves the merchant owning the request's Host
+// header (#734) and, when resolved, pins it BOTH as the ordinary "configured
+// merchant" (merchant.WithID — the same key ResolveMerchantHTTP sets, so
+// unauthenticated merchant-scoped routes such as public catalog reads work
+// per-Host in a multi-merchant deployment) AND as merchant.WithHostMerchant, a
+// marker the control plane's JWT-issuer resolution (internal/controlplane)
+// reads to enforce Host-merchant == issuer-merchant, fail closed on mismatch.
+//
+// resolve is called ON EVERY REQUEST (live per call, #734: no boot-time host
+// map — a merchant registered after this process started resolves on its very
+// next request, on every process sharing the database). resolve == nil, or an
+// unresolvable Host (unknown/disabled/ambiguous merchant), is a NO-OP: this
+// middleware only ever narrows context, never blocks a request outright, so
+// health/platform routes and Hosts with no configured merchant keep working
+// exactly as before. A deployment that configures no Host resolver never calls
+// this middleware at all — single-merchant self-hosters see no behavior change
+// without opting in.
+func ResolveMerchantFromHostHTTP(resolve merchant.HostResolver) HTTPMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if resolve == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			mid, err := resolve(r.Context(), r.Host)
+			if err != nil || mid.IsZero() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := merchant.WithID(r.Context(), mid)
+			ctx = merchant.WithHostMerchant(ctx, mid)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

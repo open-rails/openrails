@@ -140,6 +140,33 @@ func MerchantWebhook(r *httprequest.Request) {
 	processResolvedMerchantWebhook(r, provider, route.MerchantID, strings.TrimSpace(r.Param("account_id")))
 }
 
+// HostWebhook returns the Host-routed webhook handler (#734): resolve pins the
+// merchant from the request's Host header — the SAME mechanism per-merchant
+// CORS preflight uses — instead of a URL slug (contrast MerchantWebhook), so
+// the exact same verify/dispatch primitive (processResolvedMerchantWebhook)
+// runs unchanged once the merchant is known. This is the engine half of saas
+// #15's "api.<slug>.<domain>" hostname scheme: the mount is opt-in
+// (pkg/embedded's RegisterHostWebhookRoutes, gated on an attached control
+// plane); an unresolvable Host (unknown/disabled/ambiguous merchant) is a hard
+// 404, never a fall-through to payload-derived resolution.
+func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
+	return func(r *httprequest.Request) {
+		if resolve == nil {
+			r.ErrorJSON(http.StatusServiceUnavailable, "Host-routed webhook resolution is not configured")
+			return
+		}
+		provider := webhookutil.CanonicalRail(r.Param("provider"))
+		mid, err := resolve(r.Request.Context(), r.Request.Host)
+		if err != nil || mid.IsZero() {
+			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
+			return
+		}
+		ctx := merchant.WithID(r.Request.Context(), mid)
+		r.Request = r.Request.WithContext(ctx)
+		processResolvedMerchantWebhook(r, provider, mid, strings.TrimSpace(r.Param("account_id")))
+	}
+}
+
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {

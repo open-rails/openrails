@@ -86,6 +86,19 @@ two ways over one source of truth:
   — public, cached, hand-written (not OpenAPI; nothing is generated).
 - **Go** (in-process host code): `rt.ActiveRouteSets()` returns the same selection.
 
+### Per-merchant CORS + Host-routed webhooks (#734)
+
+A host serving multiple merchants behind distinct hostnames (e.g. openrails-saas's
+`api.<slug>.<domain>` scheme) gets per-merchant browser CORS and Host-routed
+webhooks for free, with NO extra `MountOptions`/`Options` field to set:
+attaching a control plane (`pkg/embedded/controlplane.AttachWithOptions`)
+BEFORE calling `MountHandler`/`NewHTTPHandler` is the only step — CORS
+preflight, the Host->merchant resolver, and the `/v1/webhooks/:provider` mount
+under `RouteSetWebhooks` all derive from whatever control plane is attached
+(`embedhttp.HostMerchantResolverFrom`). A host with no control plane attached,
+or one that never sets a merchant's `api_host` (see docs/operations.md), is
+completely unaffected — CORS stays the pre-#734 `CORSHTTP(nil)` default.
+
 ## Payment Providers
 
 Embedded hosts have two credential planes; `config.yaml` carries neither:
