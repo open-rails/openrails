@@ -836,7 +836,13 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	// per merchant (Redis-backed when available, in-process fallback).
 	var dashboardLLM dashboard.LLM
 	if cfg.LLM.IsConfigured() {
-		dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), "")
+		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
+		switch cfg.LLM.ResolvedProvider() {
+		case config.LLMProviderOpenAI:
+			dashboardLLM = dashboard.NewOpenAILLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), llmBaseURL)
+		default: // anthropic — unknown providers refuse boot in config.Validate
+			dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), llmBaseURL)
+		}
 	}
 	var askLimiter dashboard.AskLimiter
 	if redisClient != nil {

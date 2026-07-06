@@ -1023,3 +1023,57 @@ func TestValidateEncryption(t *testing.T) {
 		})
 	}
 }
+
+// #741/#761: llm.provider enum + llm.base_url validation + per-provider model
+// defaults.
+func TestValidateLLM(t *testing.T) {
+	devCfg := func(llm *LLMConfig) *Config {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "dev"
+		cfg.LLM = llm
+		assembleDBURL(cfg)
+		return cfg
+	}
+	prodCfg := func(llm *LLMConfig) *Config {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.ProviderWriteMode = ProviderWriteModeFull
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.LLM = llm
+		assembleDBURL(cfg)
+		return cfg
+	}
+
+	t.Run("anthropic, openai and empty providers boot", func(t *testing.T) {
+		assert.NoError(t, Validate(devCfg(&LLMConfig{Provider: "anthropic", APIKey: "k"})))
+		assert.NoError(t, Validate(devCfg(&LLMConfig{Provider: "openai", APIKey: "k"})))
+		assert.NoError(t, Validate(devCfg(&LLMConfig{APIKey: "k"})))
+	})
+
+	t.Run("unknown provider refuses boot", func(t *testing.T) {
+		assert.ErrorContains(t, Validate(devCfg(&LLMConfig{Provider: "gemini"})),
+			`invalid llm.provider "gemini"`)
+	})
+
+	t.Run("base_url must be an absolute http(s) URL", func(t *testing.T) {
+		for _, bad := range []string{"api.openai.com/v1", "/v1", "ftp://host/v1", "://nope"} {
+			assert.ErrorContains(t, Validate(devCfg(&LLMConfig{Provider: "openai", BaseURL: bad})),
+				"invalid llm.base_url", "base_url %q", bad)
+		}
+	})
+
+	t.Run("http base_url is development-only", func(t *testing.T) {
+		llm := &LLMConfig{Provider: "openai", BaseURL: "http://localhost:11434/v1"}
+		assert.NoError(t, Validate(devCfg(llm)))
+		assert.ErrorContains(t, Validate(prodCfg(llm)), "must use https outside development")
+		assert.NoError(t, Validate(prodCfg(&LLMConfig{Provider: "openai", BaseURL: "https://api.groq.com/openai/v1"})))
+	})
+
+	t.Run("per-provider model defaults", func(t *testing.T) {
+		assert.Equal(t, LLMDefaultModelAnthropic, (&LLMConfig{}).ResolvedModel())
+		assert.Equal(t, LLMDefaultModelAnthropic, (&LLMConfig{Provider: "anthropic"}).ResolvedModel())
+		assert.Equal(t, LLMDefaultModelOpenAI, (&LLMConfig{Provider: "openai"}).ResolvedModel())
+		assert.Equal(t, "custom-model", (&LLMConfig{Provider: "openai", Model: " custom-model "}).ResolvedModel())
+	})
+}

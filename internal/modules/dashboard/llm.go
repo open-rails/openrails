@@ -57,8 +57,8 @@ type ToolTurn struct {
 
 // LLM is the provider seam for the dashboard module's model calls: text
 // completion (widget generation, #741) and tool-use turns (metrics Q&A, #756).
-// The production implementation is AnthropicLLM; tests inject deterministic
-// stubs via Service.SetLLM.
+// Production implementations: AnthropicLLM and OpenAILLM (#761); tests inject
+// deterministic stubs via Service.SetLLM.
 type LLM interface {
 	Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error)
 	CompleteTools(ctx context.Context, system string, tools []ToolDef, msgs []ToolMessage, maxTokens int) (*ToolTurn, error)
