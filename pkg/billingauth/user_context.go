@@ -23,7 +23,16 @@ import (
 // populates whichever fields apply to its identity model and OpenRails treats
 // everything beyond UserID as optional.
 type UserContext struct {
-	// UserID is the unique identifier for the principal/payer (required).
+	// UserID is the unique identifier for the principal/payer (required). It
+	// MUST be a UUID (#364/#766): OpenRails uses it directly as the payable
+	// customer_id, and ValidateSubject enforces this at every auth middleware.
+	// A host whose native subject ids are NOT UUIDs (e.g. sequential integers,
+	// external-provider opaque strings) must map them to a stable UUID before
+	// returning UserContext from its Authenticator — otherwise EVERY request
+	// from that host fails this gate: required routes 401 ("subject ... is not
+	// a UUID"), optional routes silently downgrade to anonymous (no error
+	// surfaced), a correctness footgun that looks like "auth isn't working" if
+	// undocumented.
 	UserID string
 
 	// Email is the user's email address (optional).

@@ -462,17 +462,60 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	}
 	mid, ok := merchant.FromContext(ctx)
 	if !ok {
-		resolver, ok := g.AdminPermissionChecker.(merchantGroupResolver)
-		if !ok {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+		var rerr error
+		mid, rerr = g.resolveMerchantForGroup(ctx, uc.Merchant)
+		if rerr != nil {
+			return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
 		}
-		var err error
-		mid, _, err = resolver.ResolveMerchantForGroup(ctx, uc.Merchant)
-		if err != nil {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+	}
+	// #766: uc.Merchant was resolved from the USER'S group membership, but mid
+	// may instead be the Host-pinned merchant (merchant.WithHostMerchant, set by
+	// ResolveMerchantFromHostHTTP alongside merchant.WithID — #734). Without this
+	// assertion a user with permission on merchant A, whose request lands on
+	// merchant B's Host, would get a Principal scoped to B on authority checked
+	// against A. Mirrors merchantForIssuer's identical Host-pin check
+	// (internal/controlplane/issuer_registry.go) for the service-JWT/API-key/
+	// delegated paths; HostMerchant (not the plain FromContext merchant) is the
+	// right signal because it is a no-op unless a Host resolver actually ran, so
+	// single-merchant self-hosters are unaffected.
+	if hostMID, ok := merchant.HostMerchant(ctx); ok {
+		membershipMID, rerr := g.resolveMerchantForGroup(ctx, uc.Merchant)
+		if rerr != nil {
+			return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
+		}
+		if hostMID != membershipMID {
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
 		}
 	}
 	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
+}
+
+// errMerchantGroupResolverUnavailable distinguishes "AdminPermissionChecker
+// doesn't implement merchantGroupResolver" (a server misconfiguration, 500)
+// from "the merchant ref itself didn't resolve" (403, fail closed) in
+// resolveMerchantForGroup's callers.
+var errMerchantGroupResolverUnavailable = errors.New("merchant resolver unavailable")
+
+// resolveMerchantForGroup resolves the merchant.ID that owns merchantRef (a
+// merchant-group ref, e.g. from user-membership resolution) via the
+// AdminPermissionChecker's merchantGroupResolver facet.
+func (g legacyGate) resolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, error) {
+	resolver, ok := g.AdminPermissionChecker.(merchantGroupResolver)
+	if !ok {
+		return merchant.ID{}, errMerchantGroupResolverUnavailable
+	}
+	mid, _, err := resolver.ResolveMerchantForGroup(ctx, merchantRef)
+	if err != nil {
+		return merchant.ID{}, err
+	}
+	return mid, nil
+}
+
+func resolveMerchantForGroupGateError(err error) billingauth.GateError {
+	if errors.Is(err, errMerchantGroupResolverUnavailable) {
+		return billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+	}
+	return billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 }
 
 func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserContext, bool) {
