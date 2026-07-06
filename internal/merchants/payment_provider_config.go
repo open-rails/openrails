@@ -227,14 +227,19 @@ func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID,
 		return gen.OpenrailsRailMerchantAccount{}, err
 	}
 	archived := !enabled
+	// #662: derive the id from the global natural key and store the SAME
+	// normalized (rail, environment, account_id) the id is hashed from, so the
+	// id corresponds 1:1 to the unique index.
+	railAcctID, nRail, nEnv, nAccount := RailMerchantAccountNaturalKey(rail, environment, accountID)
 	var row gen.OpenrailsRailMerchantAccount
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+			ID:          railAcctID,
 			MerchantID:  id.UUID(),
-			Rail:        rail,
-			Environment: &environment,
-			AccountID:   accountID,
+			Rail:        nRail,
+			Environment: &nEnv,
+			AccountID:   nAccount,
 			Archived:    &archived,
 			Evidence:    evidence,
 		})

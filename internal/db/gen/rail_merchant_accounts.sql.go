@@ -244,17 +244,18 @@ func (q *Queries) ListRailMerchantAccountsForMerchant(ctx context.Context, arg L
 const upsertRailMerchantAccount = `-- name: UpsertRailMerchantAccount :one
 
 INSERT INTO openrails.rail_merchant_accounts (
-    merchant_id, rail, environment, account_id, display_name,
+    id, merchant_id, rail, environment, account_id, display_name,
     archived, evidence, last_verified_at
 ) VALUES (
     $1::uuid,
-    lower($2::text),
-    COALESCE($3::text, 'live'),
-    $4::text,
-    $5,
-    COALESCE($6::boolean, false),
-    $7,
-    COALESCE($8::timestamptz, now())
+    $2::uuid,
+    lower($3::text),
+    COALESCE($4::text, 'live'),
+    $5::text,
+    $6,
+    COALESCE($7::boolean, false),
+    $8,
+    COALESCE($9::timestamptz, now())
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.rail_merchant_accounts.display_name),
@@ -271,6 +272,7 @@ RETURNING id, merchant_id, rail, environment, account_id, display_name, evidence
 `
 
 type UpsertRailMerchantAccountParams struct {
+	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	Rail           string
 	Environment    *string
@@ -284,6 +286,7 @@ type UpsertRailMerchantAccountParams struct {
 // openrails.rail_merchant_accounts: merchant-scoped provider account registry (#518).
 func (q *Queries) UpsertRailMerchantAccount(ctx context.Context, arg UpsertRailMerchantAccountParams) (OpenrailsRailMerchantAccount, error) {
 	row := q.db.QueryRow(ctx, upsertRailMerchantAccount,
+		arg.ID,
 		arg.MerchantID,
 		arg.Rail,
 		arg.Environment,

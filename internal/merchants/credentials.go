@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -482,6 +483,30 @@ type RailMerchantAccountIdentity struct {
 // upsert rejects a cross-merchant claim, but with an opaque no-rows /
 // unique-violation error — this names the conflict instead.
 var ErrRailMerchantAccountOwnedByAnotherMerchant = errors.New("provider account is already owned by another merchant")
+
+// RailMerchantAccountNaturalKey canonicalizes a provider account's GLOBAL
+// natural key (rail, environment, account_id) and derives its deterministic id
+// from it (#662). It is the SINGLE place this canonicalization lives — the same
+// normalization the ownership guard and secret layer use (lower(rail);
+// environment mapped to live/test; account_id trimmed). Every writer stores the
+// returned nRail/nEnv/nAccount so the stored row matches the id and the
+// (rail, environment, account_id) unique index exactly; the id is a pure
+// function of that key, identical across environments and fresh rebuilds.
+func RailMerchantAccountNaturalKey(rail, environment, accountID string) (id uuid.UUID, nRail, nEnv, nAccount string) {
+	nRail = normalizeProviderSecretType(rail)
+	nEnv = normalizeProviderSecretEnvironment(environment)
+	nAccount = strings.TrimSpace(accountID)
+	id = uuidutil.DeterministicID(uuidutil.DeterministicNamespace, nRail, nEnv, nAccount)
+	return id, nRail, nEnv, nAccount
+}
+
+// RailMerchantAccountID returns just the deterministic id for a provider
+// account's natural key (#662) — for callers that already hold the row and only
+// need to compute or match its id.
+func RailMerchantAccountID(rail, environment, accountID string) uuid.UUID {
+	id, _, _, _ := RailMerchantAccountNaturalKey(rail, environment, accountID)
+	return id
+}
 
 // AssertRailMerchantAccountUnowned is a clear-error preflight for the
 // global-uniqueness upsert: it returns ErrRailMerchantAccountOwnedByAnotherMerchant

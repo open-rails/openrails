@@ -238,35 +238,11 @@ func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("prices cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
-// updateRow writes the full price row (the raw persistence Update, formerly
-// repo.PriceRepo.Update). Unexported on purpose: the public Update() forbids
-// arbitrary changes; the allowed mutations (SetArchived, UpdateRails) funnel here.
-func (s *PriceService) updateRow(ctx context.Context, price *models.Price) error {
-	rails, err := priceRailsJSONB(price)
-	if err != nil {
-		return err
-	}
-	rows, err := s.db.Gen(ctx).UpdatePrice(ctx, gen.UpdatePriceParams{
-		ID:                  price.ID,
-		ProductID:           price.ProductID,
-		Archived:            price.Archived,
-		Amount:              price.Amount,
-		Currency:            price.Currency,
-		AccessDurationHours: models.IntPtrTo32(price.AccessDurationHours),
-		AutoRenew:           price.AutoRenew,
-		TrialUnitAmount:     price.TrialUnitAmount,
-		TrialDurationHours:  models.IntPtrTo32(price.TrialDurationHours),
-		Rails:               rails,
-		UpdatedAt:           models.UpdateTimestamp(price.UpdatedAt),
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
+// #662: there is no full-row price update. A price's money/identity columns are
+// immutable (a reprice creates a new row and archives the old); the only allowed
+// mutations are archived (SetArchived) and rails (UpdateRails), each writing
+// exactly its own column via a narrow query, so the immutable columns cannot be
+// SET at the DB layer.
 
 // Deactivate archives a price so it won't appear in product listings and
 // cannot be purchased by new customers. Existing subscriptions and payments
@@ -282,21 +258,35 @@ func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
 
 // SetArchived sets the archived lifecycle flag on a price.
 func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
-	price, err := s.GetByID(ctx, id)
+	rows, err := s.db.Gen(ctx).UpdatePriceStatus(ctx, gen.UpdatePriceStatusParams{
+		ID:       id,
+		Archived: archived,
+	})
 	if err != nil {
 		return err
 	}
-	price.Archived = archived
-	return s.updateRow(ctx, price)
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
 }
 
 // UpdateRails updates the rail mappings (external IDs, does not affect historical data).
 // This is useful when adding new rails or updating external price/plan IDs.
 func (s *PriceService) UpdateRails(ctx context.Context, id uuid.UUID, rails map[string]map[string]string) error {
-	price, err := s.GetByID(ctx, id)
+	railsJSONB, err := models.ToJSONB(rails)
 	if err != nil {
 		return err
 	}
-	price.Rails = rails
-	return s.updateRow(ctx, price)
+	rows, err := s.db.Gen(ctx).UpdatePriceRails(ctx, gen.UpdatePriceRailsParams{
+		ID:    id,
+		Rails: railsJSONB,
+	})
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
 }

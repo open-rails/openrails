@@ -1125,11 +1125,15 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 	}
 	mctx := merchant.WithID(ctx, merchantID)
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		// #662: derive the id from the global natural key and store the SAME
+		// normalized (rail, environment, account_id) it is hashed from.
+		railAcctID, nRail, nEnv, nAccount := merchants.RailMerchantAccountNaturalKey(rail, environment, accountID)
 		_, err := database.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+			ID:          railAcctID,
 			MerchantID:  merchantID.UUID(),
-			Rail:        rail,
-			Environment: stringPtrIfNotEmpty(environment),
-			AccountID:   accountID,
+			Rail:        nRail,
+			Environment: &nEnv,
+			AccountID:   nAccount,
 			DisplayName: displayName,
 			Archived:    &account.Archived,
 			Evidence:    evidenceJSON,

@@ -642,49 +642,47 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUI
 	return items, nil
 }
 
-const updatePrice = `-- name: UpdatePrice :execrows
+const updatePriceRails = `-- name: UpdatePriceRails :execrows
 UPDATE openrails.prices SET
-    product_id = $2,
-    archived = $3,
-    amount = $4,
-    currency = $5,
-    access_duration_hours = $6,
-    auto_renew = $7::boolean,
-    trial_unit_amount = $8,
-    trial_duration_hours = $9,
-    rails = $10,
-    updated_at = $11
-WHERE id = $1
+    rails = $1,
+    updated_at = now()
+WHERE id = $2
 `
 
-type UpdatePriceParams struct {
-	ID                  uuid.UUID
-	ProductID           uuid.UUID
-	Archived            bool
-	Amount              int64
-	Currency            string
-	AccessDurationHours *int32
-	AutoRenew           bool
-	TrialUnitAmount     *int64
-	TrialDurationHours  *int32
-	Rails               []byte
-	UpdatedAt           time.Time
+type UpdatePriceRailsParams struct {
+	Rails []byte
+	ID    uuid.UUID
 }
 
-func (q *Queries) UpdatePrice(ctx context.Context, arg UpdatePriceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePrice,
-		arg.ID,
-		arg.ProductID,
-		arg.Archived,
-		arg.Amount,
-		arg.Currency,
-		arg.AccessDurationHours,
-		arg.AutoRenew,
-		arg.TrialUnitAmount,
-		arg.TrialDurationHours,
-		arg.Rails,
-		arg.UpdatedAt,
-	)
+func (q *Queries) UpdatePriceRails(ctx context.Context, arg UpdatePriceRailsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePriceRails, arg.Rails, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updatePriceStatus = `-- name: UpdatePriceStatus :execrows
+
+UPDATE openrails.prices SET
+    archived = $1::boolean,
+    updated_at = now()
+WHERE id = $2
+`
+
+type UpdatePriceStatusParams struct {
+	Archived bool
+	ID       uuid.UUID
+}
+
+// #662: a price's money/identity columns (product_id, amount, currency,
+// access_duration_hours, auto_renew, trial_*) are IMMUTABLE — a reprice creates
+// a new row and archives the old. Only the two mutable fields are settable, and
+// each has its own narrow query so the immutable columns cannot be SET at the DB
+// layer at all (not merely by caller convention). A change to any immutable
+// column is, by construction, a different price with a different deterministic id.
+func (q *Queries) UpdatePriceStatus(ctx context.Context, arg UpdatePriceStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePriceStatus, arg.Archived, arg.ID)
 	if err != nil {
 		return 0, err
 	}

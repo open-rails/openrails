@@ -96,19 +96,24 @@ JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.rails -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
 LIMIT 1;
 
--- name: UpdatePrice :execrows
+-- #662: a price's money/identity columns (product_id, amount, currency,
+-- access_duration_hours, auto_renew, trial_*) are IMMUTABLE — a reprice creates
+-- a new row and archives the old. Only the two mutable fields are settable, and
+-- each has its own narrow query so the immutable columns cannot be SET at the DB
+-- layer at all (not merely by caller convention). A change to any immutable
+-- column is, by construction, a different price with a different deterministic id.
+
+-- name: UpdatePriceStatus :execrows
 UPDATE openrails.prices SET
-    product_id = $2,
-    archived = $3,
-    amount = $4,
-    currency = $5,
-    access_duration_hours = sqlc.narg(access_duration_hours),
-    auto_renew = sqlc.arg(auto_renew)::boolean,
-    trial_unit_amount = sqlc.narg(trial_unit_amount),
-    trial_duration_hours = sqlc.narg(trial_duration_hours),
+    archived = sqlc.arg(archived)::boolean,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: UpdatePriceRails :execrows
+UPDATE openrails.prices SET
     rails = sqlc.narg(rails),
-    updated_at = sqlc.arg(updated_at)
-WHERE id = $1;
+    updated_at = now()
+WHERE id = sqlc.arg(id);
 
 -- name: DeletePrice :execrows
 DELETE FROM openrails.prices WHERE id = $1;

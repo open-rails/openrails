@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,7 +151,9 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		return nil, err
 	}
 	p := &models.Product{
-		ID:               uuidutil.NewV7(),
+		// #662: the product id is a pure function of its immutable natural key
+		// (merchant_id, key) — same logical product → same id in every DB.
+		ID:               uuidutil.DeterministicID(uuidutil.DeterministicNamespace, tid.UUID().String(), req.Key),
 		MerchantID:       tid.UUID(),
 		Key:              req.Key,
 		DisplayName:      req.DisplayName,
@@ -410,6 +413,45 @@ type CreatePriceRequest struct {
 	Archived bool `json:"archived,omitempty"`
 }
 
+// priceNaturalKeyNull is the canonical encoding of a SQL NULL price field for
+// id derivation (#662). The unique_prices_product_amount_window index is
+// NULLS NOT DISTINCT (a NULL equals another NULL), so every absent value must
+// hash to ONE fixed token — and it carries a NUL byte, which a decimal integer
+// string can never contain, so it can never collide with a present value.
+const priceNaturalKeyNull = "\x00null"
+
+// priceDeterministicID derives a price's id from the immutable financial tuple
+// that IS its identity — exactly the unique_prices_product_amount_window
+// columns (#662), canonicalized the SAME way that NULLS-NOT-DISTINCT unique
+// index compares them (amount as decimal, currency lowercased, absent nullable
+// fields → priceNaturalKeyNull). Equal terms therefore always hash equal, so a
+// derived id can never violate the constraint; a reprice changes a frozen field
+// and correctly hashes to a new id while the archived old row keeps its own.
+func priceDeterministicID(productID uuid.UUID, amount int64, currency string, accessDurationHours *int, autoRenew bool, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
+	accessDur := priceNaturalKeyNull
+	if accessDurationHours != nil {
+		accessDur = strconv.Itoa(*accessDurationHours)
+	}
+	trialAmt := priceNaturalKeyNull
+	if trialUnitAmount != nil {
+		trialAmt = strconv.FormatInt(*trialUnitAmount, 10)
+	}
+	trialDur := priceNaturalKeyNull
+	if trialDurationHours != nil {
+		trialDur = strconv.Itoa(*trialDurationHours)
+	}
+	return uuidutil.DeterministicID(
+		uuidutil.DeterministicNamespace,
+		productID.String(),
+		strconv.FormatInt(amount, 10),
+		strings.ToLower(currency),
+		accessDur,
+		strconv.FormatBool(autoRenew),
+		trialAmt,
+		trialDur,
+	)
+}
+
 // RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
 // auto-renewing request, or nil for a one-off/durable price (#622). The window
 // is in hours; providers bill in days, so the cadence is hours/24.
@@ -470,7 +512,11 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, fmt.Errorf("product not found")
 	}
 
-	priceID := uuidutil.NewV7()
+	// #662: the price id is a pure function of its immutable financial tuple —
+	// exactly the unique_prices_product_amount_window columns. A reprice hashes
+	// to a NEW id (the archived old row keeps its own); equal terms always hash
+	// equal, so the id can never violate that unique constraint.
+	priceID := priceDeterministicID(req.ProductID, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
 
 	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
 	if err != nil {

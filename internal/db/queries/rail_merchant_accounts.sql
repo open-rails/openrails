@@ -2,9 +2,10 @@
 
 -- name: UpsertRailMerchantAccount :one
 INSERT INTO openrails.rail_merchant_accounts (
-    merchant_id, rail, environment, account_id, display_name,
+    id, merchant_id, rail, environment, account_id, display_name,
     archived, evidence, last_verified_at
 ) VALUES (
+    sqlc.arg(id)::uuid,
     sqlc.arg(merchant_id)::uuid,
     lower(sqlc.arg(rail)::text),
     COALESCE(sqlc.narg(environment)::text, 'live'),
