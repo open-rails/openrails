@@ -164,6 +164,8 @@ const (
 	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate
 	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
 	PermMerchantBillingImport          = permissions.MerchantBillingImport
+	PermMerchantMembersRead            = permissions.MerchantMembersRead
+	PermMerchantMembersManage          = permissions.MerchantMembersManage
 	PermMerchantCredentialsManage      = permissions.MerchantCredentialsManage
 
 	// --- Platform operator (root persona, #721): cross-merchant directory

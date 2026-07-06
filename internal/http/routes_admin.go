@@ -19,6 +19,8 @@ func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix st
 		}),
 		// #757 self-serve API keys (mint/list/revoke via AuthKit core).
 		APIKeys: s.controlPlane,
+		// #760 team management (roster/invites/role/remove via AuthKit membership).
+		Team: s.controlPlane,
 	}
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone
 	// mounts every merchant route set here: human admin/support, settings/catalog,

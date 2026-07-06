@@ -345,6 +345,34 @@ export interface MintedAPIKey extends MerchantAPIKey {
   secret: string
 }
 
+// --- Team management (#760) ---
+
+export interface TeamMember {
+  user_id: string
+  email?: string
+  username?: string
+  role: string
+}
+
+export interface TeamInvite {
+  id: string
+  role: string
+  created_at: string
+  expires_at?: string
+  redeemed_at?: string
+  revoked_at?: string
+}
+
+// Outcome of inviting an email: either the address was an existing user (added
+// to the team immediately) or a single-use register+join link was minted (url
+// shown once for the owner to share).
+export interface TeamInviteResult {
+  added: boolean
+  member?: TeamMember
+  invite?: TeamInvite
+  url?: string
+}
+
 // --- Auth (AuthKit authhttp) ---
 
 export interface AuthCapabilities {

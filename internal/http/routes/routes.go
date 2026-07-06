@@ -38,6 +38,12 @@ type Options struct {
 	// (an embedded host without a control plane) keeps the /api-keys routes
 	// mounted but answering 501.
 	APIKeys httphandlers.MerchantAPIKeyManager
+
+	// Team is the #760 merchant team manager (roster, invites, role changes,
+	// removal via AuthKit group membership). Implemented by
+	// *controlplane.ControlPlane. Nil (an embedded host without a control plane)
+	// keeps the /team routes mounted but answering 501.
+	Team httphandlers.MerchantTeamManager
 }
 
 type GateOptions struct {
@@ -657,6 +663,23 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	apiKeys.Handle(http.MethodPost, "", h(httphandlers.MerchantCreateAPIKey(opts.APIKeys)), credentialsManage)
 	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
 	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
+
+	// #760 merchant team management: roster, invites (register+join links),
+	// role changes, and removal — all through AuthKit group membership. Reads
+	// gate on merchant:members:read; mutations on merchant:members:manage. Only
+	// the owner (merchant:*) holds either in the fixed #567 catalog, so the whole
+	// surface is owner-only (mirrors #757). No MerchantDBConnMW: control plane
+	// only. `/team/invites` (literal) and `/team/:user_id` never collide — they
+	// differ by segment shape/method.
+	membersRead := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersRead)
+	membersManage := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersManage)
+	team := rr.Group("/team")
+	team.Handle(http.MethodGet, "", h(httphandlers.MerchantListTeam(opts.Team)), membersRead)
+	team.Handle(http.MethodGet, "/invites", h(httphandlers.MerchantListTeamInvites(opts.Team)), membersRead)
+	team.Handle(http.MethodPost, "/invites", h(httphandlers.MerchantInviteTeamMember(opts.Team)), membersManage)
+	team.Handle(http.MethodDelete, "/invites/:id", h(httphandlers.MerchantRevokeTeamInvite(opts.Team)), membersManage)
+	team.Handle(http.MethodPatch, "/:user_id", h(httphandlers.MerchantChangeTeamRole(opts.Team)), membersManage)
+	team.Handle(http.MethodDelete, "/:user_id", h(httphandlers.MerchantRemoveTeamMember(opts.Team)), membersManage)
 
 	// #736 metric threshold alerting: rule/webhook CRUD + test-fire (settings-
 	// write gated for mutations) and the notification bell (metrics-read). Reads

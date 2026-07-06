@@ -47,12 +47,14 @@ import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { AlertsTab } from "./alerts"
 import { ApiKeysTab } from "./api-keys"
+import { TeamTab } from "./team"
 
 export function SettingsPage() {
   return (
     <Tabs defaultValue="merchant" className="flex flex-col gap-4">
       <TabsList>
         <TabsTrigger value="merchant">Merchant</TabsTrigger>
+        <TabsTrigger value="team">Team</TabsTrigger>
         <TabsTrigger value="alerts">Alerts</TabsTrigger>
         <TabsTrigger value="providers">Payment providers</TabsTrigger>
         <TabsTrigger value="api-keys">API keys</TabsTrigger>
@@ -60,6 +62,9 @@ export function SettingsPage() {
       </TabsList>
       <TabsContent value="merchant">
         <MerchantSettingsTab />
+      </TabsContent>
+      <TabsContent value="team">
+        <TeamTab />
       </TabsContent>
       <TabsContent value="alerts">
         <AlertsTab />

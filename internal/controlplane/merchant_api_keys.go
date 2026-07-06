@@ -40,10 +40,17 @@ type MerchantAPIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
+// MerchantRoles returns the fixed merchant catalog roles (#567), least privilege
+// first. The one source of truth for the role vocabulary shared by API keys
+// (#757) and team membership (#760).
+func MerchantRoles() []string {
+	return []string{MerchantRoleViewer, MerchantRoleSupport, MerchantRoleOwner}
+}
+
 // MerchantAPIKeyRoles returns the fixed catalog roles a merchant API key may
 // hold, least privilege first.
 func MerchantAPIKeyRoles() []string {
-	return []string{MerchantRoleViewer, MerchantRoleSupport, MerchantRoleOwner}
+	return MerchantRoles()
 }
 
 // MerchantRolePermissions resolves a fixed merchant catalog role to its

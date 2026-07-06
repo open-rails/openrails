@@ -27,6 +27,9 @@ import type {
   PaymentProviderConfig,
   RawEntitlement,
   RepairAlert,
+  TeamInvite,
+  TeamInviteResult,
+  TeamMember,
   WebhookFormat,
   WorkerHealth,
 } from "./types"
@@ -269,6 +272,28 @@ export const createApiKey = (name: string, role: string) =>
 
 export const revokeApiKey = (id: string) =>
   api<{ revoked: boolean; id: string }>(`/merchant/api-keys/${id}`, { method: "DELETE" })
+
+// --- Team management (#760) ---
+
+export const listTeam = () => api<{ data: TeamMember[] | null }>("/merchant/team")
+
+export const listTeamInvites = () =>
+  api<{ data: TeamInvite[] | null; invites_enabled: boolean }>("/merchant/team/invites")
+
+export const inviteTeamMember = (email: string, role: string) =>
+  api<TeamInviteResult>("/merchant/team/invites", { method: "POST", body: { email, role } })
+
+export const revokeTeamInvite = (id: string) =>
+  api<{ revoked: boolean; id: string }>(`/merchant/team/invites/${id}`, { method: "DELETE" })
+
+export const changeTeamRole = (userId: string, role: string) =>
+  api<{ user_id: string; role: string }>(`/merchant/team/${userId}`, {
+    method: "PATCH",
+    body: { role },
+  })
+
+export const removeTeamMember = (userId: string) =>
+  api<{ removed: boolean; user_id: string }>(`/merchant/team/${userId}`, { method: "DELETE" })
 
 export const getCreditLimit = (customerId: string, currency: string) =>
   api<{ currency: string; credit_limit_amount: number }>("/merchant/credit-limit", {

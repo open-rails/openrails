@@ -116,8 +116,8 @@ filters incl. the past_due dunning view, cancel with typed confirmation, resume,
 NMI payment-method change), Payments (filters, detail, rail-aware refund — disabled on
 rails without API refunds), Catalog (products/prices CRUD + activate/deactivate,
 manifest publish with plan preview, drift view + refresh), Ops (findings queue with
-approve/ignore, repair alerts, worker health), Settings (merchant profile, payment
-providers, API keys, credit limit, trust level).
+approve/ignore, repair alerts, worker health), Settings (merchant profile, team,
+payment providers, API keys, credit limit, trust level).
 
 ## API keys (#757)
 
@@ -155,6 +155,47 @@ Use a key as a normal Bearer token against the same `/v1/merchant/*` surface:
 curl -H "Authorization: Bearer openrails_st_..." \
   https://billing.example.com/v1/merchant/metrics/schema
 ```
+
+## Team (#760)
+
+Settings → **Team** manages who can sign in to this merchant console. Every teammate
+is an AuthKit user holding exactly one fixed catalog role (#567) in the merchant
+permission-group; the whole surface rides AuthKit group membership through the control
+plane — OpenRails stores no team state of its own.
+
+- **Roster** — `GET /v1/merchant/team` → `{data: [{user_id, email, username, role}]}`,
+  owner first. The synthetic bootstrap api-key actor (a non-login system owner seeded
+  on admin-less deployments) is filtered out — it is not a teammate and never counts
+  toward the owner total.
+- **Invite** — `POST /v1/merchant/team/invites` `{email, role}` → `201`. Two outcomes,
+  because AuthKit exposes no consumer-facing "consent invite" to a known user:
+  - the email is an **existing** user → they are added to the team immediately
+    (`{added: true, member}`); they see the merchant on next sign-in.
+  - the email is **unregistered** → a single-use register+join link is minted
+    (`{added: false, invite, url}`); the `url` is shown once for the owner to send.
+    This path requires the deployment to permit self-registration
+    (`ExternalInvitesEnabled`). **Locked-down standalone runs registration closed**, so
+    it returns `409 invites_disabled`: a new teammate must be provisioned by the
+    operator first, then added here by email. Hosted/embedded-open postures mint the
+    link. (This is the documented "register-then-accept hosted / operator-provisioned
+    embedded" split.)
+- **Pending invites** — `GET /v1/merchant/team/invites` → `{data: [...], invites_enabled}`
+  (the invite links, never the code); revoke with `DELETE /v1/merchant/team/invites/{id}`.
+- **Change role** — `PATCH /v1/merchant/team/{user_id}` `{role}`.
+- **Remove** — `DELETE /v1/merchant/team/{user_id}` (typed-confirm in the console).
+
+**Last-owner invariant.** A merchant must always keep at least one (human) owner:
+demoting or removing the sole owner is refused with a corrective `400 last_owner`.
+Self-demotion is therefore allowed only when another owner exists. The check counts
+human owners (the bootstrap actor is excluded); AuthKit's own `refuseIfLastOwner` is a
+backstop underneath.
+
+Reads gate on `merchant:members:read`, mutations on `merchant:members:manage` — both
+held only by the **owner** in the fixed catalog (the same built-in permission strings
+AuthKit's group-management authorization checks), so the team surface is owner-only,
+exactly like API keys. No-escalation holds on every grant: a caller can only assign a
+role whose permissions its own credential already covers. Teams are per-merchant:
+merchant A's members are invisible to (and unmanageable by) B.
 
 ## Dashboard (#741, #755)
 

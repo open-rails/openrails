@@ -5,6 +5,8 @@ DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/payment-providers/{provider}
+DELETE /v1/merchant/team/invites/{id}
+DELETE /v1/merchant/team/{user_id}
 DELETE /v1/merchant/webhooks/{id}
 DELETE /v1/platform/merchants/{id}
 GET /health/live
@@ -73,6 +75,8 @@ GET /v1/merchant/repair-alerts
 GET /v1/merchant/settings
 GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
+GET /v1/merchant/team
+GET /v1/merchant/team/invites
 GET /v1/merchant/trust-level
 GET /v1/merchant/users/{user_id}/product-access
 GET /v1/merchant/webhooks
@@ -87,6 +91,7 @@ GET /{$}
 PATCH /v1/merchant/alerts/rules/{id}
 PATCH /v1/merchant/catalog/prices/{id}
 PATCH /v1/merchant/catalog/products/{id}
+PATCH /v1/merchant/team/{user_id}
 POST /v1/checkout
 POST /v1/checkout/{id}/confirm
 POST /v1/checkout/{id}/solana-pay
@@ -135,6 +140,7 @@ POST /v1/merchant/notifications/{id}/read
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/resume
+POST /v1/merchant/team/invites
 POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
 POST /v1/merchant/wasted-spend
