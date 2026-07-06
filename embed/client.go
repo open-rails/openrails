@@ -60,6 +60,10 @@ type localClient struct {
 	// currency is the default currency the unified client is built with
 	// (openrails.WithCurrency on the in-process remote).
 	currency string
+	// remoteOpts are host-supplied openrails.RemoteOption values (#767,
+	// WithRemoteOptions) applied to the in-process remote AFTER Runtime.Client's
+	// built-ins, so a host can override any remote knob (e.g. WithTimeout).
+	remoteOpts []openrails.RemoteOption
 }
 
 // merchantCtx replicates the transport's merchant pinning (transport.go) for
@@ -86,6 +90,15 @@ type ClientOption func(*localClient)
 // WithCurrency mirrors openrails.WithCurrency for the embedded client.
 func WithCurrency(currency string) ClientOption {
 	return func(c *localClient) { c.currency = strings.TrimSpace(currency) }
+}
+
+// WithRemoteOptions passes openrails.RemoteOption values straight through to
+// the in-process remote Runtime.Client builds, applied AFTER its built-ins
+// (transport, token provider, currency, timeout) — so a host can override any
+// remote knob (e.g. reinstate a per-call deadline via openrails.WithTimeout)
+// without embed re-exposing each one individually (#767).
+func WithRemoteOptions(opts ...openrails.RemoteOption) ClientOption {
+	return func(c *localClient) { c.remoteOpts = append(c.remoteOpts, opts...) }
 }
 
 // --- shared transcription helpers -----------------------------------------
