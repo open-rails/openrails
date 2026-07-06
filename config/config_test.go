@@ -364,14 +364,31 @@ func TestRequiresRLS(t *testing.T) {
 }
 
 func TestProductionTestModeValidation(t *testing.T) {
-	t.Run("prod env rejects test_mode=sandbox", func(t *testing.T) {
+	t.Run("prod env allows test_mode=sandbox (#762: posture and environment strictness are independent axes)", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.ProviderWriteMode = ProviderWriteModeFull
 		cfg.TestMode = CredentialPostureSandbox
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsDev(), "env=prod should not be dev")
-		assert.ErrorContains(t, Validate(cfg), "test_mode=sandbox is not allowed outside development")
+		assert.NoError(t, Validate(cfg), "sandbox posture must boot outside development — rail-credential validation, not the environment string, is what keeps it honest")
+	})
+
+	t.Run("staging env + sandbox + full non-dev gates boots (#762 staging-shaped acceptance test)", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "staging"
+		cfg.ProviderWriteMode = ProviderWriteModeFull
+		cfg.TestMode = CredentialPostureSandbox
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "staging-db-password"
+		assembleDBURL(cfg)
+		cfg.Auth.Issuer = "https://auth.staging.example.com"
+		require.NotNil(t, cfg.RateLimits, "GetDefaultBillingConfig seeds rate limits")
+		assert.False(t, cfg.IsDev(), "env=staging should not be dev")
+		assert.True(t, cfg.RequiresRLS(), "env=staging requires RLS enforcement")
+		assert.NoError(t, Validate(cfg), "env=staging + sandbox + every other non-dev gate satisfied must boot")
 	})
 
 	t.Run("prod env rejects a plaintext-http auth issuer", func(t *testing.T) {

@@ -435,7 +435,8 @@ or your own tooling instead — admin routes without a permission checker fail c
 - **Sandbox vs live:** `TEST_MODE=sandbox` routes every rail to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
   card. It defaults to sandbox in development, must be explicit (`live`) for live local
-  runs, and is rejected outside development (see Operating modes below).
+  runs, and is allowed in every environment — including staging and production (see
+  Operating modes below).
 
 ## Configuration
 
@@ -478,8 +479,13 @@ crash-looping supervisor pays one declined auth total, not one per restart — a
 `simulated` verdict skips the probe, and a rotated key or stale verdict always
 re-probes (cache failures degrade to probing); CCBill uses
 `sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_mode=sandbox` is
-**rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
-is exactly `TEST_MODE=sandbox` + `PROVIDER_WRITE_MODE=full`.
+**allowed in every environment** (#762) — posture and environment strictness are
+independent axes, so a staging (or even production) deployment can run sandbox rails
+under full non-dev hard gates. Nothing about `env=production` special-cases this field;
+what keeps it honest is rail-credential validation — every configured rail account's
+declared `environment` is cross-checked against `test_mode` (`ExpectedProviderEnvironment`),
+and a live secret key is refused outright whenever `test_mode=sandbox`, in any
+environment. The old `mode=test` is exactly `TEST_MODE=sandbox` + `PROVIDER_WRITE_MODE=full`.
 
 At a glance — what each provider write mode permits (the `test_mode` axis applies orthogonally: with
 `TEST_MODE=sandbox` the same matrix holds against sandbox rails, so no real money can
