@@ -20,6 +20,12 @@ import (
 // valid credential. OpenRails maps that to 401 on required routes and to
 // anonymous access on optional routes. A returned error's message is surfaced on
 // required routes, so it should be safe to expose to clients.
+//
+// UserContext.UserID MUST be a UUID (see its doc, #364/#766): a host whose
+// native subject ids are not UUIDs must map them to a stable UUID here. A
+// non-UUID UserID fails [UserContext.ValidateSubject] on every request — 401
+// on required routes, but a SILENT downgrade to anonymous on optional routes
+// (no error surfaced) — so this is easy to miss during embedding.
 type Authenticator interface {
 	Authenticate(ctx context.Context, r *http.Request) (UserContext, error)
 }

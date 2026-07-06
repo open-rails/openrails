@@ -12,10 +12,12 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // #734: host-resolved merchant API hosts (browser CORS was cut in #765 — see
@@ -172,5 +174,66 @@ func TestHostMerchantVsIssuerMismatchHTTP(t *testing.T) {
 	// unaffected — single-host deployments see no behavior change.
 	status, body = requestJSON(t, http.MethodGet,
 		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, tokenA.Token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+}
+
+// TestHostMerchantVsUserSessionMembershipMismatchHTTP is the #766 user-session
+// analogue of TestHostMerchantVsIssuerMismatchHTTP: a plain user access token
+// (no service JWT / API key / delegated credential in play) whose ONLY
+// merchant-group membership is merchant A must be rejected when the request's
+// Host resolves to a DIFFERENT merchant B — even though the user genuinely has
+// owner permissions on A, and even though the permission check alone (against
+// A) would pass. Before the #766 fix, legacyGate.Authorize resolved the
+// principal's MerchantID from ctx (Host-pinned B) without ever asserting it
+// matched the membership-resolved merchant (A), so this request would have
+// reached B's money-moving handlers on authority checked against A.
+func TestHostMerchantVsUserSessionMembershipMismatchHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+
+	b := surface.ProvisionOwnedMerchant("host-user-mismatch-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
+
+	hostA := "api.host-user-mismatch-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
+	hostB := "api.host-user-mismatch-b-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
+	surface.SetMerchantHostConfig(dbtest.TestMerchantID, hostA)
+	surface.SetMerchantHostConfig(b.MerchantID, hostB)
+
+	cp := embcp.Get(surface.app)
+	require.NotNil(t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(t, core, "authkit core")
+
+	username := "host-user-mismatch-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	email := username + "@example.com"
+	user, err := core.CreateUser(ctx, email, username)
+	require.NoError(t, err, "create user")
+	// Owner of merchant A ONLY — no membership in B whatsoever.
+	require.NoError(t, core.Genesis().AssignGroupRole(
+		ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner,
+	), "assign merchant A owner role")
+	token, _, err := core.MintAccessToken(ctx, user.ID, nil)
+	require.NoError(t, err, "issue user access token")
+
+	payer := uuid.NewString()
+
+	// A owner's user session, on A's own host: works normally (membership ==
+	// Host-pinned merchant).
+	status, body := requestJSONHost(t, http.MethodGet,
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, hostA, token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	// The SAME user session, presented on B's host: fails closed. HasAdminPermission
+	// alone would pass (checked against A, where the user IS owner) — only the
+	// #766 Host-vs-membership assertion catches this.
+	status, body = requestJSONHost(t, http.MethodGet,
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, hostB, token, nil)
+	require.Equalf(t, http.StatusForbidden, status,
+		"user session with membership only in A must fail closed on B's host: %s", string(body))
+
+	// No Host override at all (unconfigured host): unaffected — single-merchant
+	// self-hosters see no behavior change (regression check, #766).
+	status, body = requestJSON(t, http.MethodGet,
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 }
