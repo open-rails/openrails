@@ -247,7 +247,14 @@ INSERT INTO openrails.rail_merchant_accounts (
     id, merchant_id, rail, environment, account_id, display_name,
     archived, evidence, last_verified_at
 ) VALUES (
-    $1::uuid,
+    -- #662: the id column keeps its uuidv7() default. The production write paths
+    -- (merchant payment-provider config + manifest bootstrap) supply a
+    -- deterministic uuidv5 derived from the (rail, environment, account_id)
+    -- natural key via merchants.RailMerchantAccountNaturalKey, so a provider
+    -- account has one stable id across environments; any other caller (fixtures,
+    -- ad-hoc inserts) omits it (passes the zero uuid) and gets the uuidv7 default.
+    -- Mirrors the COALESCE(narg, default) idiom used for ` + "`" + `environment` + "`" + ` below.
+    COALESCE(NULLIF($1::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
     $2::uuid,
     lower($3::text),
     COALESCE($4::text, 'live'),

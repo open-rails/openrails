@@ -71,7 +71,9 @@ func TestMerchantTeamManagement(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
-	owner := surface.Token // the real bootstrap-minted owner admin key
+	owner := surface.Token // bootstrap-minted owner admin key (its actor is the
+	// filtered `openrailsbootstrap` synthetic owner — never in the roster, so the
+	// owner-cleanup in the last-owner subtest never touches it and the key keeps working).
 	base := surface.BaseURL
 
 	cp := embcp.Get(surface.App())
@@ -145,7 +147,20 @@ func TestMerchantTeamManagement(t *testing.T) {
 	})
 
 	t.Run("last owner cannot be demoted or removed", func(t *testing.T) {
-		// alice is the sole owner.
+		// Reduce to alice as the SOLE owner: remove any OTHER owners this merchant
+		// carries — the standalone bootstrap admin's own user, plus any owner a
+		// sibling test seeded on the shared `test` merchant. Removing them is
+		// allowed while alice is also an owner, and leaves alice the last owner.
+		// (The filtered `openrailsbootstrap` actor behind `owner` is never in the
+		// roster, so it is untouched and the admin key keeps working.)
+		_, members, _ := listTeamHTTP(t, base, owner)
+		for _, m := range members {
+			if m.Role == "owner" && m.UserID != aliceID {
+				st, rb := requestJSON(t, http.MethodDelete, base+"/v1/merchant/team/"+m.UserID, owner, nil)
+				require.Equalf(t, http.StatusOK, st, "remove co-owner %s: %s", m.UserID, string(rb))
+			}
+		}
+		// alice is now the sole owner.
 		status, body := requestJSON(t, http.MethodPatch, base+"/v1/merchant/team/"+aliceID, owner,
 			map[string]any{"role": "viewer"})
 		require.Equalf(t, http.StatusBadRequest, status, "demote: %s", string(body))
