@@ -51,8 +51,15 @@ func SharedRLSPostgres(t *testing.T) (superDSN, appDSN string) {
 }
 
 // enableAppRoleLogin grants the openrails_app role LOGIN + a password so tests can
-// connect as it. Migration 050 creates the role NOLOGIN; production attaches login
+// connect as it. Migration 001 creates the role NOLOGIN; production attaches login
 // credentials out of band. The role keeps NOBYPASSRLS so RLS still enforces.
+//
+// Grants on public (River) / profiles (AuthKit) / public.migrations used to be
+// re-derived here in test-only code (#764) — that shape is now migration
+// 0007_openrails_app_grants, applied by migrate.RunPostgres like any other
+// migration (SharedPostgresDSN runs the full migration set before this is
+// ever called), so there is nothing left for this helper to grant beyond the
+// test-only login credential.
 func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 	sqlDB, err := sql.Open("pgx", superDSN)
 	if err != nil {
@@ -61,23 +68,6 @@ func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 	defer func() { _ = sqlDB.Close() }()
 	if _, err := sqlDB.ExecContext(ctx, `ALTER ROLE `+appRole+` WITH LOGIN PASSWORD '`+appPassword+`'`); err != nil {
 		return fmt.Errorf("grant %s login: %w", appRole, err)
-	}
-	// Full-app integration tests (the StartStandalone harness) run the whole server as openrails_app,
-	// which shares one pool with AuthKit's profiles.* schema and reads public.migrations
-	// at boot. Grant those (prod-faithful — the prod app role holds both); the role
-	// stays NOBYPASSRLS, so openrails.* RLS still enforces. Guarded on schema existence.
-	const grantProfiles = `
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'profiles') THEN
-    GRANT USAGE ON SCHEMA profiles TO openrails_app;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA profiles TO openrails_app;
-    GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA profiles TO openrails_app;
-  END IF;
-END $$;
-GRANT SELECT ON public.migrations TO openrails_app;`
-	if _, err := sqlDB.ExecContext(ctx, grantProfiles); err != nil {
-		return fmt.Errorf("grant %s profiles access: %w", appRole, err)
 	}
 	return nil
 }

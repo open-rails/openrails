@@ -108,9 +108,18 @@ type Config struct {
 	// — so a local boot is sandbox by default and a prod boot is live by
 	// default. embedded.New never runs Load's defaulting and refuses to
 	// construct with it unset — an embedded host must declare its posture,
-	// never guess (supersedes #711's warn-only). test_mode=sandbox is
-	// rejected outside env=development — sandbox money is dev-only. Set
-	// test_mode=live explicitly to run live credentials locally.
+	// never guess (supersedes #711's warn-only).
+	//
+	// Posture (this field) and environment strictness (Env/IsDev) are
+	// INDEPENDENT axes (#762): sandbox is allowed in every environment,
+	// including production — a staging (or production) deployment running
+	// sandbox rails under full non-dev hard gates is a legitimate, common
+	// shape, not a footgun. Nothing here special-cases env=production; the
+	// credential guarantees this field attaches (live-key refusal above,
+	// ExpectedProviderEnvironment's cross-check against each configured rail
+	// account's declared Environment) are what keep a sandbox posture honest
+	// regardless of Env. Set test_mode=live explicitly to run live credentials
+	// locally in development.
 	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
@@ -1036,11 +1045,26 @@ func Validate(cfg *Config) error {
 
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
-		// Sandbox credentials are dev-only (#355): a production deployment
-		// must never boot pointed at sandbox rails.
-		if cfg.TestMode == CredentialPostureSandbox {
-			return fmt.Errorf("test_mode=sandbox is not allowed outside development")
-		}
+		// #762: posture (TestMode: sandbox|live) and environment strictness
+		// (isDev vs non-dev hard gates) are INDEPENDENT axes — sandbox is
+		// legitimate outside development (a staging environment running
+		// sandbox rails under full production-grade gates is exactly the
+		// point), so there is no environment-based rejection of
+		// test_mode=sandbox here. The #355-era "sandbox is dev-only" rule
+		// this superseded conflated the two axes; that left staging with no
+		// honest posture (it had to lie as env=development to unlock sandbox,
+		// disabling every other hard gate, or lie as live with no rail
+		// credentials). What actually prevents a sandbox posture from being
+		// misused in a genuinely-live deployment is rail-credential
+		// validation, not the environment string: ExpectedProviderEnvironment
+		// cross-checks every configured rail account's declared Environment
+		// against TestMode (ValidateRailSet/validateRails below), and
+		// validateStripeKeyForTestMode hard-rejects a live secret key
+		// (sk_live_/rk_live_) whenever TestMode is sandbox, in every
+		// environment including production. A deployment that declares
+		// env=production and test_mode=sandbox simply runs a fully-gated
+		// sandbox deployment — self-consistent, not a security hole.
+		//
 		// Outside development the operating mode must be declared explicitly —
 		// "I forgot to set it" must never silently pick a behavior. Checked on
 		// the RAW value: GetProviderWriteMode fail-closes unset to readonly,
@@ -1601,8 +1625,9 @@ func (cfg *Config) GetProviderWriteMode() string {
 // live, matching the historical bool zero value; standalone Load() always
 // resolves TestMode explicitly before this is read, and embedded.New refuses
 // to construct with it unset (#745), so "unset" in practice only reaches this
-// accessor via a direct Config{} literal in a test. Validate rejects
-// test_mode=sandbox outside development.
+// accessor via a direct Config{} literal in a test. Sandbox is allowed in
+// every environment (#762) — Validate no longer rejects test_mode=sandbox
+// outside development.
 func (cfg *Config) IsTestMode() bool {
 	return cfg.TestMode == CredentialPostureSandbox
 }

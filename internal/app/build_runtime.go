@@ -244,6 +244,19 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
+	// Surface (and, outside development, enforce) the Row Level Security
+	// posture of the connected role (issue #227/#763): RLS policies only
+	// constrain a non-superuser, non-BYPASSRLS role. This ONE call covers BOTH
+	// construction paths above — a config-built standalone pool (createDatabase)
+	// AND a host-injected embedded pool (overrides.DB) — so an embedded host
+	// connecting as a privileged/BYPASSRLS role outside development fails boot
+	// exactly like standalone does, with no separate gate to keep in sync.
+	// Previously this ran only inside createDatabase, so embedded construction
+	// (which always supplies overrides.DB) never hit it at all.
+	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
+		return nil, err
+	}
+
 	if overrides != nil && overrides.Redis != nil {
 		redisClient = overrides.Redis
 	} else {
@@ -254,8 +267,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	// Webhook-dedup posture (#678). Embedded hosts are identified by the injected
-	// DB pool — the same signal that scopes createDatabase's RLS gate to the
-	// config-built (standalone) path.
+	// DB pool.
 	if err := enforceWebhookDedupPosture(cfg, redisClient != nil, overrides != nil && overrides.DB != nil); err != nil {
 		return nil, err
 	}
@@ -532,15 +544,8 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 	if err := validateDatabase(cfg, database); err != nil {
 		return nil, err
 	}
-
-	// Surface (and, outside development, enforce) the Row Level Security
-	// posture of the connected role (issue #227): RLS policies only constrain a
-	// non-superuser, non-BYPASSRLS role. Non-development boots fail if the app
-	// would connect as a privileged role that silently bypasses every per-merchant
-	// policy.
-	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
-		return nil, err
-	}
+	// RLS posture (issue #227/#763) is enforced once, in buildRuntimeWithOverrides,
+	// for both this path and the overrides.DB (embedded) path — see there.
 	return database, nil
 }
 

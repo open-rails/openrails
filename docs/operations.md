@@ -406,7 +406,10 @@ what backfills those missed provider events from the durable watermark.
   verdict refuses the boot from cache without re-probing (a crash loop costs
   one declined auth total), a fresh `simulated` verdict skips the probe, a
   rotated key or stale verdict re-probes, and cache failures degrade to
-  probing. Dev-only.
+  probing. Allowed in every environment (#762) — posture and environment
+  strictness are independent axes; rail-credential validation (the live-key
+  refusal above, plus each account's declared `environment` cross-checked
+  against `test_mode`) is what keeps it honest, not the environment string.
 **Cutover posture** (migration/reconciliation against production
 credentials): use `PROVIDER_WRITE_MODE=limited` when OpenRails should keep serving reactive
 customer/admin flows while system-origin provider writes stay parked, or
