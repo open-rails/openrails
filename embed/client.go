@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,15 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
+
+// SingleAdmitter is the embedded-only single-Admit extra (no /v1/merchant wire
+// counterpart, #666 kept the batch route as the surviving HTTP surface). The
+// value returned by Runtime.Client always implements it via *localClient; hosts
+// that need single-Admit semantics reach it by type-asserting the
+// openrails.Client to SingleAdmitter.
+type SingleAdmitter interface {
+	Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error)
+}
 
 // localClient is the PERMANENT remainder of the pre-#685 handler-transcribing
 // adapter. Every openrails.Client interface method except one runs through the
@@ -39,7 +49,7 @@ import (
 //     direct engine access by the process owner.
 //   - Embedded-only extra with NO wire counterpart: single Admit (the batch
 //     route is the surviving HTTP surface, #666), reachable via type assertion
-//     by hosts that need it. (SetCreditAccountSettings, ListCreditTransactions,
+//     to SingleAdmitter by hosts that need it. (SetCreditAccountSettings, ListCreditTransactions,
 //     BudgetStatus, AbuseUsage were deleted in the #685 tail — no host used
 //     them.)
 type localClient struct {
@@ -104,8 +114,11 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-func internalErr(msg string) error {
-	return openrails.NewStatusError(http.StatusInternalServerError, "", msg)
+// wrapInternalErr wraps a 500 StatusError, appending the underlying cause: these
+// StatusErrors never leave the process (in-process embedded path only), so
+// folding the cause into the message is safe and needed for host debugging.
+func wrapInternalErr(msg string, cause error) error {
+	return openrails.NewStatusError(http.StatusInternalServerError, "", fmt.Sprintf("%s: %v", msg, cause))
 }
 
 // parseCustomer transcribes handlers.parseServiceCustomerID +
@@ -143,7 +156,10 @@ func budgetWindowFromDTO(w billingservice.AdmitBudgetWindowDTO) openrails.Budget
 // Admit carries the single-admit semantics of the retired handlers.ServiceAdmit
 // (#666; the batch /admissions route is the surviving HTTP surface). All verdict
 // outcomes — allowed, abuse (429), money (402), gated (403) — return
-// (resp, nil), like the remote client.
+// (resp, nil), like the remote client. Admit implements SingleAdmitter.
+// Bypasses the in-process transport like the rest of localClient, so it must
+// pin the bound merchant itself (merchantCtx) or every call fails
+// merchant.Require.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	if req.EstimatedAmount < 0 {
 		return nil, invalidErr("estimated_amount must be >= 0")
@@ -158,9 +174,9 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 	}
 	req.Currency = currency
 
-	res, err := c.svc.Admit(ctx, admitInputFromSDK(req, payer))
+	res, err := c.svc.Admit(c.merchantCtx(ctx), admitInputFromSDK(req, payer))
 	if err != nil {
-		return nil, internalErr("admission check failed")
+		return nil, wrapInternalErr("admission check failed", err)
 	}
 	return admitResponseFromResult(res), nil
 }
@@ -233,7 +249,7 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 		})
 	}
 	if err := c.svc.ReplaceInvokerSpendLimits(c.merchantCtx(ctx), payer, next); err != nil {
-		return internalErr("set customer spend delegations failed")
+		return wrapInternalErr("set customer spend delegations failed", err)
 	}
 	return nil
 }

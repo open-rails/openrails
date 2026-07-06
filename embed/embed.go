@@ -139,7 +139,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 //
 // One interface method (SetCustomerSpendDelegations) is PERMANENTLY served by
 // the transcribed localClient — see unifiedClient and the localClient doc for
-// the authz reasoning.
+// the authz reasoning. The returned Client also always implements
+// SingleAdmitter (embedded-only single Admit, no wire counterpart) — reach it
+// via a type assertion.
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 	c := &localClient{svc: r.svc, rt: r.emb.App().Runtime}
 	for _, opt := range opts {
