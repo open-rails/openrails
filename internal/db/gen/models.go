@@ -511,6 +511,8 @@ type OpenrailsMerchant struct {
 	DeletedAt         *time.Time
 	// human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
 	DisplayName *string
+	// Canonical Host-header value this merchant resolves from (#734), e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
+	ApiHost *string
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.

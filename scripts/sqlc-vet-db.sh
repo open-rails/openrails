@@ -30,9 +30,13 @@ VET_URL="$(printf '%s' "$ADMIN_URL" | sed -E "s|(postgres(ql)?://[^/]+/)[^?]+|\1
 for f in migrations/bootstrap/*.sql; do
     psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f "$f" 1>&2
 done
+# profiles_shim stands in for AuthKit's own migrations, which create the
+# `profiles` schema FIRST in a real deploy. It must load BEFORE the openrails
+# migrations, because 0007+ GRANT on schema profiles — loading it afterwards
+# fails the whole build at 0007 with "schema profiles does not exist".
+psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f internal/db/schema/profiles_shim.sql 1>&2
 for f in $(ls migrations/postgres/*.up.sql | sort -V); do
     psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f "$f" 1>&2
 done
-psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f internal/db/schema/profiles_shim.sql 1>&2
 
 printf '%s\n' "$VET_URL"
