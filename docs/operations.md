@@ -415,24 +415,22 @@ customer/admin flows while system-origin provider writes stay parked, or
 paused work is delayed,
 not lost; missed billing periods are never back-billed.
 
-## Per-merchant API hosts + CORS (#734)
+## Per-merchant API hosts (#734) + browser CORS (#765)
 
 Public multi-merchant deployments (one running engine serving several
-merchants) give each merchant its own canonical API hostname instead of a
-global `Access-Control-Allow-Origin` union — a global union means every
-accepted merchant origin is trusted by every OTHER merchant's preflight
-before any request even carries a JWT. Real API security is always
-JWT signature/issuer/audience/permissions; Origin/Host are browser-transport
-hardening, never authentication.
+merchants) give each merchant its own canonical API hostname — used for
+Host→merchant resolution and Host-routed webhooks. Browser CORS is a
+**separate, fixed, engine-wide policy**, not a per-merchant setting: see
+below.
 
-- **Configuring a merchant's host + origins**: `merchants.Service.SetHostConfig(ctx,
-  merchantID, apiHost, allowedOrigins)` sets `openrails.merchants.api_host` /
-  `.allowed_origins` — a plain row UPDATE, resolved LIVE on the next request.
-  There is no boot-time host map to restart or refresh: a merchant configured
-  on one node resolves immediately on every other node/process sharing the
-  database. Embedding hosts (openrails-saas) reach this through their
-  attached control plane; leave `api_host` unset (the default) for a merchant
-  that should never resolve from any Host.
+- **Configuring a merchant's host**: `merchants.Service.SetHostConfig(ctx,
+  merchantID, apiHost)` sets `openrails.merchants.api_host` — a plain row
+  UPDATE, resolved LIVE on the next request. There is no boot-time host map to
+  restart or refresh: a merchant configured on one node resolves immediately
+  on every other node/process sharing the database. Embedding hosts
+  (openrails-saas) reach this through their attached control plane; leave
+  `api_host` unset (the default) for a merchant that should never resolve
+  from any Host.
 - **Local-dev hostnames**: `api_host` compares against the request Host with
   the port stripped (`merchants.NormalizeAPIHost`), so a merchant configured
   with `api_host = "api.acme.localhost"` resolves whether the dev server
@@ -443,12 +441,6 @@ hardening, never authentication.
   self-provision as a slug, since a slug commonly becomes part of the
   hostname scheme (`api.<slug>.<domain>`) — the engine doesn't enforce this
   (slug MECHANISM vs slug RESERVATION, see reserved.go), the host does.
-- **Interaction with the global `cors_origins` config key**: that key was
-  retired in #519 (`browser CORS belongs to the host app, not OpenRails`) and
-  is ignored wherever still set. Per-merchant `allowed_origins` (#734) is the
-  only OpenRails-owned CORS mechanism, and it is 100% opt-in per merchant: a
-  private single-merchant deployment that never sets `api_host` sees zero
-  CORS grants and zero behavior change, exactly as before this issue.
 - **Webhooks**: the same Host→merchant resolver mounts the Host-routed
   webhook surface (`pkg/embedded`'s `RegisterHostWebhookRoutes`, saas #15's
   engine half) at `/v1/webhooks/:provider` — merchant resolved from Host
@@ -459,3 +451,42 @@ hardening, never authentication.
   token verifies perfectly — Host-merchant must equal issuer-merchant on every
   merchant-scoped route. This check is also 100% opt-in: it only fires when a
   Host actually resolved a merchant for the request.
+
+### Browser CORS doctrine (#765)
+
+CORS protects requests authorized by an **ambient credential** (a cookie the
+browser attaches automatically) — the whole point of an origin allowlist is
+to stop a malicious page's script from riding the user's cookie to a
+different origin. OpenRails never issues cookies: every browser-tier request
+carries an explicit bearer JWT that the calling page's own JS put in the
+`Authorization` header. A different origin's script can't read that token
+(browser storage is same-origin-isolated, which CORS has nothing to do with);
+an unauthenticated cross-origin call just 401s; and a **stolen** token is
+replayed from `curl`, where CORS doesn't exist at all. So a per-merchant
+origin allowlist (#734's original design) protected nothing while adding a
+settings surface, a schema column, and onboarding friction — cut in #765.
+
+The engine now answers a **static, non-configurable** policy, by route tier:
+
+- **Checkout + self-service + customer-treasury** (the browser-facing
+  surfaces: buyer-facing catalog/checkout, `/v1/me/*`, `/v1/customers/*`, and
+  their embedded equivalents) answer every preflight and response with
+  `Access-Control-Allow-Origin: *`, the methods/headers those routes need, and
+  a 12h `Access-Control-Max-Age` — from ANY origin, with zero configuration.
+  `Access-Control-Allow-Credentials` is NEVER set (OpenRails never uses
+  cookies, and a wildcard origin with credentials is invalid CORS besides).
+  A merchant frontend calls OpenRails directly with no origin registration
+  step, Firebase-style.
+- **Every other surface** (admin console, cross-merchant platform directory,
+  merchant/service API, inbound webhooks, control-plane auth) emits NO CORS
+  headers at all. A browser refuses cross-origin script access to those by
+  default — the correct, free posture, since only bearer-JWT curl/service
+  callers use them, never a browser page's `fetch`/XHR.
+- This is engine code (`internal/http/middleware.PermissiveCORSHTTP`, gated by
+  a `BrowserTierRoutes` registry populated as the checkout/self-service routes
+  mount), not a database column or a config key. It has NO dependency on
+  `api_host`/Host resolution above — a deployment with zero merchants
+  Host-configured still gets the full CORS grant on its browser tier.
+- The legacy global `cors_origins` config key (retired in #519) stays
+  retired: OpenRails' CORS posture isn't configurable at all, by either a
+  global key or a per-merchant column.

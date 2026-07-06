@@ -29,12 +29,13 @@ import (
 // behaviorally consistent with the base embedded handler. Host-supplied
 // delegated authenticators own their own browser-origin policy.
 //
-// hostResolve/corsSource are the #734 Host->merchant mechanism (nil for hosts
-// with no control plane attached — HostMerchantResolverFrom derives both, and
-// mount.go's selfHandler is the sole caller), the browser-facing surface
-// self-service checkout apps actually call, so per-merchant CORS matters here
-// at least as much as on the base handler.
-func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver, corsSource middleware.CORSOriginSource) http.Handler {
+// hostResolve is the #734 Host->merchant mechanism (nil for hosts with no
+// control plane attached — HostMerchantResolverFrom derives it, and
+// mount.go's selfHandler is the sole caller). This handler's ENTIRE mounted
+// surface (self-service + customer-treasury) is browser tier, so it always
+// gets the #765 static permissive CORS policy unconditionally — no
+// control-plane/source dependency, unlike hostResolve.
+func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
 	mux := http.NewServeMux()
 	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
 	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
@@ -56,14 +57,12 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 			captchaCfg = rt.Config.Captcha
 		}
 	}
-	corsMW := middleware.CORSHTTP(nil)
-	if corsSource != nil {
-		corsMW = middleware.CORSFromSourceHTTP(corsSource)
-	}
 	return middleware.ChainHTTP(mux,
 		middleware.RecoverHTTP(),
 		middleware.SecurityHeadersHTTP(),
-		corsMW,
+		// #765: this handler's entire surface is browser tier — always the
+		// static permissive `*` grant, no per-request source.
+		middleware.PermissiveCORSHTTP(middleware.AllRequests),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
 		// here at construction time, so a mount that races UpsertMerchantConfig's

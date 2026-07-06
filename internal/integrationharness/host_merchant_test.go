@@ -18,17 +18,19 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// #734: host-resolved merchant API hosts + per-merchant CORS preflight.
+// #734: host-resolved merchant API hosts (browser CORS was cut in #765 — see
+// browser_tier_cors_test.go for the static per-route-tier policy that
+// replaced it).
 //
 // A public multi-merchant deployment gets ONE standalone server serving
 // several merchants, each with its own canonical API hostname. These tests
-// prove the engine mechanism: Host resolves to a merchant, CORS preflight
-// answers ONLY that merchant's stored allowed_origins, an unrecognized Host
-// grants nothing, and a token minted for one merchant is rejected on another
-// merchant's Host — all sharing the SAME openrails.merchants directory lookup
-// issuer resolution already uses.
+// prove the engine mechanism: Host resolves to a merchant live (no
+// boot-time map, no restart needed), an unrecognized Host resolves nothing,
+// and a token minted for one merchant is rejected on another merchant's Host
+// — all sharing the SAME openrails.merchants directory lookup issuer
+// resolution already uses.
 
-// preflight sends an OPTIONS request to url with the given Host + Origin
+// preflightHost sends an OPTIONS request to url with the given Host + Origin
 // headers, mirroring a browser CORS preflight.
 func preflightHost(t *testing.T, url, host, origin string) *http.Response {
 	t.Helper()
@@ -72,83 +74,49 @@ func requestJSONHost(t *testing.T, method, url, host, token string, body any) (i
 	return resp.StatusCode, raw
 }
 
-func TestHostMerchantCORSPreflightHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-
-	b := surface.ProvisionOwnedMerchant("host-cors-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
-
-	hostA := "api.host-cors-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
-	hostB := "api.host-cors-b-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
-	originA := "https://storefront-a.example"
-	originB := "https://storefront-b.example"
-
-	surface.SetMerchantHostConfig(dbtest.TestMerchantID, hostA, []string{originA})
-	surface.SetMerchantHostConfig(b.MerchantID, hostB, []string{originB})
-
-	// A's own origin, on A's host: granted.
-	resp := preflightHost(t, surface.BaseURL+"/v1/products", hostA, originA)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Equal(t, originA, resp.Header.Get("Access-Control-Allow-Origin"))
-	require.Equal(t, "true", resp.Header.Get("Access-Control-Allow-Credentials"))
-
-	// B's origin, presented on A's host: fail closed — no global origin union.
-	resp = preflightHost(t, surface.BaseURL+"/v1/products", hostA, originB)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Credentials"))
-
-	// B's own origin, on B's host: granted.
-	resp = preflightHost(t, surface.BaseURL+"/v1/products", hostB, originB)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Equal(t, originB, resp.Header.Get("Access-Control-Allow-Origin"))
-
-	// A's origin, presented on B's host: fail closed too (isolation is symmetric).
-	resp = preflightHost(t, surface.BaseURL+"/v1/products", hostB, originA)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
-
-	// A Host that maps to no merchant at all: fail closed.
-	resp = preflightHost(t, surface.BaseURL+"/v1/products", "api.unknown-host.test", originA)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
-
-	// Health checks (merchant-independent) are unaffected by the new Host
-	// resolution/CORS middleware — no merchant resolves, no error.
-	status, _ := requestJSON(t, http.MethodGet, surface.BaseURL+"/health/live", "", nil)
-	require.Equal(t, http.StatusOK, status)
-}
-
-// TestHostMerchantRegisteredAfterBootResolvesHTTP is the #734 multi-node proof:
-// a merchant's Host/CORS config set AFTER the server already booted and started
-// serving requests resolves on the very NEXT request against this SAME running
-// server — there is no boot-time host map to restart or refresh. This is the
-// load-bearing behavior for a multi-node deployment: a merchant registered on
-// node A must resolve on node B without redeploying/restarting node B.
+// TestHostMerchantRegisteredAfterBootResolvesHTTP is the #734 multi-node
+// proof: a merchant's Host config set AFTER the server already booted and
+// started serving requests resolves on the very NEXT request against this
+// SAME running server — there is no boot-time host map to restart or
+// refresh. Observable via the Host-vs-issuer mismatch check (unrelated to
+// CORS since #765): a token valid for merchant B is accepted against a host
+// that resolves to no merchant at all (Host resolution is a no-op there),
+// then rejected the instant that SAME host is mapped, live, to a DIFFERENT
+// merchant — proving the new mapping took effect immediately, no restart.
 func TestHostMerchantRegisteredAfterBootResolvesHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
+	b := surface.ProvisionOwnedMerchant("host-late-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
+	tokenB := surface.RegisterServiceJWTIssuer(
+		"host-late-issuer-b-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
+		b.MerchantSlug,
+		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate},
+	)
+
 	host := "api.host-late-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
-	origin := "https://late-storefront.example"
+	payer := uuid.NewString()
 
-	// Before configuring anything, this host resolves nothing (server already
-	// running).
-	resp := preflightHost(t, surface.BaseURL+"/v1/products", host, origin)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+	// Before any Host config exists for `host`, it resolves no merchant at
+	// all: Host resolution is a no-op there, so B's own token works fine
+	// against it (falls back to ordinary issuer-based resolution).
+	status, body := requestJSONHost(t, http.MethodGet,
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, host, tokenB.Token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
 
-	// Provision a brand-new merchant and configure its host/origins — entirely
-	// AFTER the server started serving traffic above.
-	late := surface.ProvisionOwnedMerchant("host-late-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
-	surface.SetMerchantHostConfig(late.MerchantID, host, []string{origin})
+	// Provision a brand-new "late" merchant and map THIS SAME host to it —
+	// entirely AFTER the server started serving traffic above.
+	late := surface.ProvisionOwnedMerchant("host-late-late-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
+	surface.SetMerchantHostConfig(late.MerchantID, host)
 
-	// The SAME already-running server now resolves it, no restart.
-	resp = preflightHost(t, surface.BaseURL+"/v1/products", host, origin)
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	require.Equal(t, origin, resp.Header.Get("Access-Control-Allow-Origin"))
+	// The SAME already-running server now resolves `host` to `late`, no
+	// restart: B's token is rejected on it, since Host-merchant (late) now
+	// disagrees with the token's own issuer-merchant (B).
+	status, body = requestJSONHost(t, http.MethodGet,
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, host, tokenB.Token, nil)
+	require.Containsf(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status,
+		"host must resolve the newly-configured merchant live, no restart: %s", string(body))
 }
 
 // TestHostMerchantVsIssuerMismatchHTTP proves the request-path fail-closed
@@ -165,8 +133,8 @@ func TestHostMerchantVsIssuerMismatchHTTP(t *testing.T) {
 
 	hostA := "api.host-mismatch-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
 	hostB := "api.host-mismatch-b-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
-	surface.SetMerchantHostConfig(dbtest.TestMerchantID, hostA, nil)
-	surface.SetMerchantHostConfig(b.MerchantID, hostB, nil)
+	surface.SetMerchantHostConfig(dbtest.TestMerchantID, hostA)
+	surface.SetMerchantHostConfig(b.MerchantID, hostB)
 
 	tokenA := surface.RegisterServiceJWTIssuer(
 		"host-mismatch-issuer-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),

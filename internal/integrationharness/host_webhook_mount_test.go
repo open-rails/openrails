@@ -20,8 +20,9 @@ import (
 
 // TestHostRoutedWebhookMountHTTP proves the #734 Host-routed webhook mount
 // (pkg/embedded's RegisterHostWebhookRoutes, saas #15's engine half): the SAME
-// Host->merchant resolver CORS preflight uses ALSO pins the merchant for
-// inbound webhooks at the canonical no-merchant-segment path
+// Host->merchant resolver used elsewhere (merchant-scoped route resolution,
+// the issuer-consistency check) ALSO pins the merchant for inbound webhooks
+// at the canonical no-merchant-segment path
 // ("/billing/v1/webhooks/:provider"), mounted only when a control plane is
 // attached. An unrecognized Host is a hard 404 (fail closed, never a
 // fall-through to unscoped processing); a recognized Host resolves and reaches

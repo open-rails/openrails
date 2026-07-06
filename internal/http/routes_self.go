@@ -29,8 +29,11 @@ func (s *Server) registerSelfServiceRoutes(mux *http.ServeMux) {
 	delegatedMW := s.delegatedMiddleware()
 	providerRoutes := embedhttp.ProviderRoutesForRuntime(s.runtime, nil)
 
+	// Browser tier (#765): self-service + customer-treasury are the delegated
+	// browser-direct surfaces, so their patterns feed browserTierRoutes for the
+	// static permissive CORS policy.
 	httproutes.RegisterSelfServiceRoutes(
-		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordRoute),
+		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
 		s.runtime, delegatedMW, providerRoutes)
 
 	var ensurer middleware.CustomerGroupEnsurer
@@ -38,7 +41,7 @@ func (s *Server) registerSelfServiceRoutes(mux *http.ServeMux) {
 		ensurer = s.controlPlane
 	}
 	httproutes.RegisterCustomerTreasuryRoutes(
-		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.CustomerRoutePrefix, s.runtime, s.recordRoute),
+		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.CustomerRoutePrefix, s.runtime, s.recordBrowserRoute),
 		s.runtime, delegatedMW, providerRoutes,
 		middleware.EnsureCustomerPermissionGroup(ensurer))
 

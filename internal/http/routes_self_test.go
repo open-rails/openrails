@@ -81,7 +81,11 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.NoError(t, err)
 	defer preflightResp.Body.Close()
 	require.Equal(t, http.StatusNoContent, preflightResp.StatusCode)
-	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Origin"))
+	// #765: /v1/me is browser tier — the static permissive policy grants `*`
+	// regardless of Origin, but never credentials. The delegated-origin check
+	// below is a SEPARATE application-layer rule (AuthKit remote_application
+	// trust), unrelated to this browser CORS grant.
+	require.Equal(t, "*", preflightResp.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Credentials"))
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me/status", nil)
@@ -97,18 +101,21 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.Contains(t, responseBody(t, resp), "delegated_origin_not_allowed")
 }
 
-func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
-	srv := &Server{
-		cfg: &config.Config{},
-		browserCORSOriginSource: func(context.Context, string) ([]string, error) {
-			return []string{
-				"https://doujins.com",
-				"https://hentai0.com",
-			}, nil
-		},
-	}
+// TestWrapPublicHandlerPermissiveCORSOnlyOnBrowserTier proves the #765 static
+// policy at the wrapPublicHandler wiring level: a pattern recorded through
+// recordBrowserRoute (the browser tier — checkout/self-service/customer) gets
+// the wildcard grant from ANY origin, never credentials; a plain route NOT
+// recorded that way (standing in for admin/platform/merchant-API/webhooks/
+// auth, none of which use recordBrowserRoute) gets no CORS headers at all.
+func TestWrapPublicHandlerPermissiveCORSOnlyOnBrowserTier(t *testing.T) {
+	srv := &Server{cfg: &config.Config{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /probe", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /probe/browser", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	srv.recordBrowserRoute("GET /probe/browser")
+	mux.HandleFunc("GET /probe/other", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -117,9 +124,9 @@ func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 
-	preflight := func(origin string) *http.Response {
+	preflight := func(path, origin string) *http.Response {
 		t.Helper()
-		req, err := http.NewRequest(http.MethodOptions, ts.URL+"/probe", nil)
+		req, err := http.NewRequest(http.MethodOptions, ts.URL+path, nil)
 		require.NoError(t, err)
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -130,36 +137,26 @@ func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
 		return resp
 	}
 
-	allowed := preflight("https://doujins.com")
+	// Browser tier: any origin gets the static wildcard, never credentials.
+	allowed := preflight("/probe/browser", "https://storefront-a.example")
 	require.Equal(t, http.StatusNoContent, allowed.StatusCode)
-	require.Equal(t, "https://doujins.com", allowed.Header.Get("Access-Control-Allow-Origin"))
-	require.Equal(t, "true", allowed.Header.Get("Access-Control-Allow-Credentials"))
+	require.Equal(t, "*", allowed.Header.Get("Access-Control-Allow-Origin"))
+	require.Empty(t, allowed.Header.Get("Access-Control-Allow-Credentials"))
 
-	alsoAllowed := preflight("https://hentai0.com")
+	alsoAllowed := preflight("/probe/browser", "https://storefront-b.example")
 	require.Equal(t, http.StatusNoContent, alsoAllowed.StatusCode)
-	require.Equal(t, "https://hentai0.com", alsoAllowed.Header.Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "*", alsoAllowed.Header.Get("Access-Control-Allow-Origin"))
 
-	denied := preflight("https://evil.example")
-	require.Equal(t, http.StatusNoContent, denied.StatusCode)
-	require.Empty(t, denied.Header.Get("Access-Control-Allow-Origin"))
-	require.Empty(t, denied.Header.Get("Access-Control-Allow-Credentials"))
+	// Outside the browser tier: no CORS grant at all, from any origin.
+	outside := preflight("/probe/other", "https://storefront-a.example")
+	require.Empty(t, outside.Header.Get("Access-Control-Allow-Origin"))
 
-	// No Origin is a non-browser/server-to-server request shape. CORS grants
-	// nothing, and the handler still runs; auth remains the real boundary.
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/probe", nil)
+	// The actual (non-preflight) response on the browser-tier route also
+	// carries the grant; outside the tier it never does.
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/probe/other", nil)
 	require.NoError(t, err)
+	req.Header.Set("Origin", "https://storefront-a.example")
 	resp, err := ts.Client().Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
-
-	// A disallowed Origin is not an auth failure. The browser gets no CORS grant,
-	// while an arbitrary HTTP client can still receive the response.
-	req, err = http.NewRequest(http.MethodGet, ts.URL+"/probe", nil)
-	require.NoError(t, err)
-	req.Header.Set("Origin", "https://evil.example")
-	resp, err = ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -62,12 +61,77 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 	}
 }
 
-// CORSHTTP is the net/http analogue of CORS. It mirrors the gin CORS policy:
-// the same allowed headers/methods, exposed headers, credentials, and max-age.
-// Empty allowedOrigins means no browser origin is granted CORS. OPTIONS
-// preflight is answered with 204 either way; denied origins simply receive no
-// CORS grant headers.
-func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
+// BrowserTierRoutes tracks which route patterns belong to the permissive-CORS
+// browser tier (#765): checkout, self-service, and customer-treasury routes
+// register their pattern here as they mount; PermissiveCORSHTTP consults it to
+// decide whether an inbound request qualifies for the static `*` policy.
+//
+// Matching is by PATH, independent of method: an OPTIONS preflight is never
+// itself a registered route method (routes register GET/POST/etc, never
+// OPTIONS), so membership can't be tested by asking the real serving mux "do
+// you have a handler for OPTIONS <path>" — it never does. Registering each
+// browser-tier pattern here a second time, method-agnostic, lets Match answer
+// "is this path browser tier" for ANY method, preflight included, using the
+// exact same pattern syntax (incl. wildcards) the real mux was given.
+type BrowserTierRoutes struct {
+	mux  *http.ServeMux
+	seen map[string]bool
+}
+
+// NewBrowserTierRoutes returns an empty registry (matches nothing until
+// routes are Added).
+func NewBrowserTierRoutes() *BrowserTierRoutes {
+	return &BrowserTierRoutes{mux: http.NewServeMux(), seen: make(map[string]bool)}
+}
+
+// Add registers pattern as browser tier. pattern may be a bare ServeMux path
+// ("/v1/me/{id}") or a "METHOD path" pattern (the method prefix, if present,
+// is stripped — CORS eligibility never depends on method). Idempotent: the
+// same path may be added once per method without panicking on the underlying
+// mux's duplicate-registration check.
+func (b *BrowserTierRoutes) Add(pattern string) {
+	if b == nil {
+		return
+	}
+	path := pattern
+	if i := strings.IndexByte(pattern, ' '); i >= 0 {
+		path = pattern[i+1:]
+	}
+	if path == "" || b.seen[path] {
+		return
+	}
+	b.seen[path] = true
+	b.mux.HandleFunc(path, func(http.ResponseWriter, *http.Request) {})
+}
+
+// Match reports whether r's path falls under a registered browser-tier
+// pattern, independent of r.Method — an OPTIONS preflight against a
+// registered GET-only route still matches.
+func (b *BrowserTierRoutes) Match(r *http.Request) bool {
+	if b == nil || r == nil {
+		return false
+	}
+	_, pattern := b.mux.Handler(r)
+	return pattern != ""
+}
+
+// AllRequests is a browser-tier matcher that matches unconditionally — for
+// handlers whose ENTIRE mounted surface is already browser tier by
+// construction (e.g. the embedded self-service handler, which serves only
+// /me and /customers), so no per-pattern registry is needed.
+func AllRequests(*http.Request) bool { return true }
+
+// PermissiveCORSHTTP is the #765 static browser-tier CORS policy: bearer JWTs,
+// never ambient cookies, authorize every request this engine accepts, so an
+// origin allow-list protects nothing here — a stolen token is replayed from
+// curl, where CORS doesn't exist. Every browser-tier request (per match, e.g.
+// BrowserTierRoutes.Match) gets `Access-Control-Allow-Origin: *`; every other
+// request gets NO CORS headers at all, so a browser refuses cross-origin
+// script access to it by default (the free, correct posture for surfaces only
+// bearer-JWT curl/service callers use, never a browser page's fetch/XHR).
+// Access-Control-Allow-Credentials is NEVER set — OpenRails never uses
+// cookies, and a wildcard origin with credentials is invalid CORS besides.
+func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	const (
 		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,X-Request-ID,X-Forwarded-For,X-Real-IP,X-Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
 		allowMethods  = "GET,POST,PUT,DELETE,OPTIONS"
@@ -75,58 +139,21 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	)
 	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 
-	setCommon := func(h http.Header) {
-		h.Set("Access-Control-Allow-Headers", allowHeaders)
-		h.Set("Access-Control-Allow-Methods", allowMethods)
-		h.Set("Access-Control-Expose-Headers", exposeHeaders)
-		h.Set("Access-Control-Max-Age", maxAge)
-	}
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := strings.TrimSpace(r.Header.Get("Origin"))
-			if origin != "" && OriginAllowed(origin, allowedOrigins) {
+			if match != nil && match(r) {
 				h := w.Header()
-				h.Set("Access-Control-Allow-Origin", origin)
-				h.Add("Vary", "Origin")
-				h.Set("Access-Control-Allow-Credentials", "true")
-				setCommon(h)
-			}
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// CORSOriginSource returns the browser Origin allow-list for the current
-// request's Host (#734: per-merchant CORS resolves live from the request Host,
-// e.g. AuthKit remote_application state resolves BY MERCHANT, and merchant is
-// resolved from host). Sources that don't vary by host (a single global
-// allow-list) simply ignore the parameter.
-type CORSOriginSource func(ctx context.Context, host string) ([]string, error)
-
-// CORSFromSourceHTTP grants browser CORS headers only to origins allow-listed by
-// a per-request source (e.g. a merchant resolved from Host — #734). An empty or
-// failing source grants no browser Origin. OPTIONS is still answered with 204 so
-// denied preflight fails in the browser without invoking handlers.
-func CORSFromSourceHTTP(source CORSOriginSource) HTTPMiddleware {
-	staticCORS := CORSHTTP(nil)
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origins := []string(nil)
-			if source != nil && strings.TrimSpace(r.Header.Get("Origin")) != "" {
-				if got, err := source(r.Context(), r.Host); err == nil {
-					origins = got
+				h.Set("Access-Control-Allow-Origin", "*")
+				h.Set("Access-Control-Allow-Headers", allowHeaders)
+				h.Set("Access-Control-Allow-Methods", allowMethods)
+				h.Set("Access-Control-Expose-Headers", exposeHeaders)
+				h.Set("Access-Control-Max-Age", maxAge)
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
 				}
 			}
-			if origins == nil {
-				staticCORS(next).ServeHTTP(w, r)
-				return
-			}
-			CORSHTTP(origins)(next).ServeHTTP(w, r)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -202,22 +229,6 @@ func (s *statusWriter) status() int {
 		return http.StatusOK
 	}
 	return s.code
-}
-
-// OriginAllowed reports whether origin is explicitly allow-listed for browser
-// CORS. Matching is exact after trimming whitespace; OpenRails does not grant
-// wildcard browser credentials.
-func OriginAllowed(origin string, allowedOrigins []string) bool {
-	origin = strings.TrimSpace(origin)
-	if origin == "" {
-		return false
-	}
-	for _, allowed := range allowedOrigins {
-		if strings.TrimSpace(allowed) == origin {
-			return true
-		}
-	}
-	return false
 }
 
 // ResolveMerchantHTTP is the net/http analogue of ResolveMerchant. It pins the
