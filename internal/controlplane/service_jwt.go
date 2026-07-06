@@ -42,11 +42,11 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	// group roles, #567). A service JWT may only DOWN-SCOPE its stored grants,
 	// never widen them — a merchant cannot mint a token claiming a permission its
 	// remote_application was never granted.
-	storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
+	authority, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: cannot resolve authority for issuer %s: %w", principal.Issuer, err)
 	}
-	permissions := intersectPermissions(cleanPermissionList(principal.Permissions), storedPerms)
+	permissions := intersectPermissions(cleanPermissionList(principal.Permissions), authority.Permissions)
 	if len(permissions) == 0 {
 		return nil, ErrServiceCredentialScopeDenied
 	}

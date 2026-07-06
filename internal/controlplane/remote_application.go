@@ -83,7 +83,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 	// `permissions` claim (which is ignored). A principal with no stored role has
 	// no authority even if its token claims perms (the self-JWT cross-merchant
 	// isolation guarantee).
-	storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
+	authority, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		OwnerGroupRef: groupRef,
 		MerchantID:    mid,
 		MerchantSlug:  mslug,
-		Permissions:   storedPerms,
+		Permissions:   authority.Permissions,
 	}, nil
 }
 
