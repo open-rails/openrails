@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -95,6 +96,13 @@ type Runtime struct {
 
 	workersCancel context.CancelFunc
 	workersDone   chan error
+
+	// handlerOnce/handler memoize the in-process route mux (#767): it depends
+	// only on r.emb's *app.Runtime, never on per-Client() options, so building
+	// it once and reusing it across every Client() call avoids re-running
+	// RegisterServiceRoutes/RegisterImportRoutes on every call.
+	handlerOnce sync.Once
+	handler     http.Handler
 }
 
 // New builds the embedded runtime: the gin-free app graph (pkg/embedded.New),
@@ -142,6 +150,11 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 // the authz reasoning. The returned Client also always implements
 // SingleAdmitter (embedded-only single Admit, no wire counterpart) — reach it
 // via a type assertion.
+//
+// Built-in RemoteOptions (transport, token provider, currency, timeout) are
+// applied first; any host-supplied opts carrying WithRemoteOptions are applied
+// LAST, so a host can override any one of them (e.g. opt back into a deadline)
+// without embed re-exposing each knob individually.
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 	c := &localClient{svc: r.svc, rt: r.emb.App().Runtime}
 	for _, opt := range opts {
@@ -150,16 +163,21 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 		}
 	}
 	rt := r.emb.App().Runtime
-	transport := &inprocessTransport{handler: newServiceHandler(rt), rt: rt}
-	remote := openrails.NewRemote(inprocessBaseURL,
-		// No Timeout on the client: in-process calls are bounded by the caller's
-		// ctx, matching the old localClient behavior.
+	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
+	transport := &inprocessTransport{handler: r.handler, rt: rt}
+	builtins := []openrails.RemoteOption{
 		openrails.WithHTTPClient(&http.Client{Transport: transport}),
 		// The credential is the context-attached host principal; the bearer is a
 		// placeholder the in-process gate never consults.
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
 		openrails.WithCurrency(c.currency),
-	)
+		// In-process calls have no network hop to bound: disable the remote's
+		// default 2s per-call context deadline so calls are bounded ONLY by the
+		// caller's own ctx (#767 — the deadline previously fired regardless of
+		// the injected http.Client, silently truncating every embedded call).
+		openrails.WithTimeout(0),
+	}
+	remote := openrails.NewRemote(inprocessBaseURL, append(builtins, c.remoteOpts...)...)
 	return &unifiedClient{Client: remote, localClient: c}
 }
 
