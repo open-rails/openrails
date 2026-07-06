@@ -71,6 +71,32 @@ deployments that need grant/revoke changes reflected before token expiry can
 configure a live freshness check, but standalone/remote mode accepts verified
 JWT entitlement claims without that optional check.
 
+## Idempotency-Key
+
+Any mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) on the public HTTP surface
+may carry an `Idempotency-Key` header. It is optional — clients that omit it
+get no replay protection, but every existing route keeps working exactly as
+before.
+
+- **Scope**: keys are scoped per merchant, not per subject/route — the same
+  key reused against a different mutating route+body will be treated as a
+  key-reuse conflict (see below), not a cross-route no-op.
+- **Window**: a completed response is cached for **24 hours**; after that the
+  key is free to reuse.
+- **Same key, same request body** (method + path + raw body): the ORIGINAL
+  response is replayed byte-for-byte, with an added
+  `Idempotent-Replayed: true` response header. The handler never runs a
+  second time — no duplicate checkout/subscription/charge.
+- **Same key, different request body**: `409` with
+  `{"error":{"type":"invalid_request_error","code":"idempotency_key_reuse",...}}`.
+- **A request with the same key is still in flight**: `409` with
+  `code":"idempotency_in_progress"`.
+- Server errors (`5xx`) and oversized responses are never cached — a retry
+  with the same key re-runs the handler.
+- This is a pure HTTP-response replay cache layered ON TOP of each route's own
+  correctness guards (e.g. the admin-refund DB dedup, the checkout service's
+  content-addressed intent identity) — it never replaces them.
+
 ## Health & Service Banner
 
 ### GET /
@@ -131,7 +157,7 @@ Creates a checkout session for **new** subscriptions and one-off purchases.
 > message directing the client to use `POST /v1/me/subscriptions/change-tier` instead.
 
 - Auth: bearer token
-- Optional header: `X-Idempotency-Key` to dedupe create requests
+- Optional header: `Idempotency-Key` to dedupe create requests — see [Idempotency-Key](#idempotency-key)
 - Body:
   - `price_id` (required)
   - `mode` (optional) – `one_off` or `subscription`; if omitted, resolved from the price
@@ -206,7 +232,7 @@ Unified tier change endpoint for upgrades and downgrades across all rails.
 
 **Request:**
 - Body: `{ "price_id": "price_..." }`
-- Optional header: `X-Idempotency-Key` for retry safety
+- Optional header: `Idempotency-Key` for retry safety — see [Idempotency-Key](#idempotency-key)
 
 **Response:** `TierChangeResponse`
 ```json

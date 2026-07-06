@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -43,7 +44,7 @@ type refundRequest struct {
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
 
-const adminRefundIdempotencyHeader = "X-Idempotency-Key"
+const adminRefundIdempotencyHeader = "Idempotency-Key"
 
 var adminRefundLocks sync.Map
 
@@ -93,7 +94,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	idempotencyKey := strings.TrimSpace(r.Header(adminRefundIdempotencyHeader))
+	idempotencyKey := strings.TrimSpace(middleware.IdempotencyKeyFromRequest(r.Request))
 	if idempotencyKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
 		return

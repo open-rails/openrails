@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -264,12 +265,14 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies
+	var httpIdempotency *idempotency.IdempotencyService
 	if s.Cfg != nil {
 		rateLimits = s.Cfg.RateLimits
 		captchaCfg = s.Cfg.Captcha
 	}
 	if s.Runtime != nil {
 		resolver = s.Runtime.TrustedProxies
+		httpIdempotency = s.Runtime.HTTPIdempotency
 	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
@@ -287,6 +290,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
 		// OpenRails-native rate-limiting + captcha for embedded hosts.
 		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver),
+		// #579: client-facing Idempotency-Key replay (opt-in per request).
+		middleware.IdempotencyHTTP(httpIdempotency),
 	)
 }
 

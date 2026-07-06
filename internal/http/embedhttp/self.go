@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -49,9 +50,11 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 	var captchaCfg *config.CaptchaConfig
 	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
+	var httpIdempotency *idempotency.IdempotencyService
 	if rt != nil {
 		rdb = rt.RedisClient
 		resolver = rt.TrustedProxies
+		httpIdempotency = rt.HTTPIdempotency
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
 			captchaCfg = rt.Config.Captcha
@@ -71,6 +74,8 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 		// #734: a no-op when hostResolve is nil (no control plane attached).
 		middleware.ResolveMerchantFromHostHTTP(hostResolve),
 		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver),
+		// #579: client-facing Idempotency-Key replay (opt-in per request).
+		middleware.IdempotencyHTTP(httpIdempotency),
 	)
 }
 

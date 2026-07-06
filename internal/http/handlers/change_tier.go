@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -44,7 +45,7 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	idempotencyKey := r.Header("X-Idempotency-Key")
+	idempotencyKey := middleware.IdempotencyKeyFromRequest(r.Request)
 
 	svcReq := &checkout.TierChangeRequest{
 		PriceID:        req.PriceID,

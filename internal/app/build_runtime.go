@@ -387,6 +387,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,
 		IdempotencyService:           serviceInstances.IdempotencyService,
+		HTTPIdempotency:              serviceInstances.HTTPIdempotency,
 
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
@@ -798,7 +799,9 @@ type servicesInstances struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *idempotency.IdempotencyService
-	WebhookDispatcher            *webhooks.WebhookDispatcher
+	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579).
+	HTTPIdempotency   *idempotency.IdempotencyService
+	WebhookDispatcher *webhooks.WebhookDispatcher
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
@@ -928,6 +931,10 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
+	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
+	// HTTP replay middleware, separate from the internal checkout dedup
+	// (idempotencyService) and webhook dedup (webhookIdempotencyService) above.
+	httpIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, idempotency.HTTPIdempotencyTTL)
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
@@ -1056,6 +1063,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		IdempotencyService:           idempotencyService,
+		HTTPIdempotency:              httpIdempotencyService,
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,

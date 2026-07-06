@@ -92,7 +92,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "unsupported rail")
 		return
 	}
-	req.IdempotencyKey = r.Header("X-Idempotency-Key")
+	req.IdempotencyKey = middleware.IdempotencyKeyFromRequest(r.Request)
 	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
 	if e2eRunID != "" {
 		if req.Metadata == nil {

@@ -186,7 +186,7 @@ never posted to OpenRails.
 
 Use:
 - `X-E2E-Run-ID: $E2E_RUN_ID`
-- `X-Idempotency-Key: e2e_${E2E_RUN_ID}_checkout`
+- `Idempotency-Key: e2e_${E2E_RUN_ID}_checkout`
 
 Example (replace `price_PRICE_UUID` + `pm_PAYMENT_METHOD_UUID`):
 
@@ -195,7 +195,7 @@ curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/me/checkout" \
   -H "Authorization: Bearer $E2E_JWT" \
   -H "Content-Type: application/json" \
   -H "X-E2E-Run-ID: $E2E_RUN_ID" \
-  -H "X-Idempotency-Key: e2e_${E2E_RUN_ID}_checkout" \
+  -H "Idempotency-Key: e2e_${E2E_RUN_ID}_checkout" \
   --data '{
     "price_id": "price_PRICE_UUID",
     "mode": "subscription",

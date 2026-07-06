@@ -140,7 +140,7 @@ export const getPayment = (id: string) => api<PaymentObject>(`/merchant/payments
 export const refundPayment = (id: string, amount: number, reason: string, revokeAccess: boolean) =>
   api<PaymentObject>(`/merchant/payments/${id}/refunds`, {
     method: "POST",
-    headers: { "X-Idempotency-Key": crypto.randomUUID() },
+    headers: { "Idempotency-Key": crypto.randomUUID() },
     body: { amount, reason: reason || undefined, revoke_access: revokeAccess },
   })
 

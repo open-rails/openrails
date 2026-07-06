@@ -185,6 +185,11 @@ type Runtime struct {
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *idempotency.IdempotencyService
+	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579):
+	// a THIRD idempotency instance (24h TTL), separate from IdempotencyService
+	// (checkout's internal dedup) and the webhook dedup instance, backing the
+	// generic HTTP response-replay middleware on public mutating routes.
+	HTTPIdempotency *idempotency.IdempotencyService
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
@@ -289,6 +294,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 	}
 	if r.IdempotencyService != nil {
 		r.IdempotencyService.Close()
+	}
+	if r.HTTPIdempotency != nil {
+		r.HTTPIdempotency.Close()
 	}
 	if r.RedisClient != nil {
 		if err := r.RedisClient.Close(); err != nil {

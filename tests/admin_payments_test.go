@@ -492,7 +492,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", nonExistentID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-missing-payment-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-missing-payment-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 for non-existent payment")
@@ -522,7 +522,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-missing-amount-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-missing-amount-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for missing amount")
@@ -541,7 +541,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-zero-amount-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-zero-amount-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for zero amount")
@@ -562,7 +562,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-subcent-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-subcent-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusBadRequest, w.Code, "sub-cent refund micros must be a 400")
@@ -588,7 +588,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-stripe-old-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-stripe-old-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return actionable 400 for unsupported Stripe transaction ID")
@@ -619,7 +619,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-ccbill-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-ccbill-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for a CCBill payment with no subscription link")
@@ -667,7 +667,7 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", "refund-boundary-"+uuid.NewString())
+		req.Header.Set("Idempotency-Key", "refund-boundary-"+uuid.NewString())
 		admin.ServeHTTP(w, req)
 
 		// Should get the CCBill rail error, not an auth error.
@@ -733,7 +733,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 			strings.NewReader(`{"amount": 4000000}`)) // $4 in micros
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-		req.Header.Set("X-Idempotency-Key", idempotencyKey)
+		req.Header.Set("Idempotency-Key", idempotencyKey)
 		admin.ServeHTTP(w, req)
 		return w
 	}
@@ -795,7 +795,7 @@ func ccbillAdminRefundReq(t *testing.T, admin http.Handler, paymentID uuid.UUID,
 		strings.NewReader(`{"amount": 5000000}`)) // $5 in micros
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
-	req.Header.Set("X-Idempotency-Key", idempotencyKey)
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 	admin.ServeHTTP(w, req)
 	return w
 }

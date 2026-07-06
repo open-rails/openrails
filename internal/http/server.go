@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -431,6 +432,17 @@ func (s *Server) trustedProxies() *iputil.TrustedProxies {
 	return s.runtime.TrustedProxies
 }
 
+// httpIdempotencyService returns the runtime's client-facing Idempotency-Key
+// replay store (#579), nil-safe against a Server built without New() (some
+// unit tests construct &Server{} directly and call wrapPublicHandler, e.g.
+// routes_self_test.go).
+func (s *Server) httpIdempotencyService() *idempotency.IdempotencyService {
+	if s == nil || s.runtime == nil {
+		return nil
+	}
+	return s.runtime.HTTPIdempotency
+}
+
 // wrapPublicHandler applies the global middleware chain — the neutral analogue
 // (and successor, #670) of the old gin engine's global middleware, same order.
 func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
@@ -467,6 +479,8 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
 		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies()),
+		// #579: client-facing Idempotency-Key replay (opt-in per request).
+		middleware.IdempotencyHTTP(s.httpIdempotencyService()),
 	)
 }
 
