@@ -2,13 +2,16 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/config"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -31,8 +34,9 @@ type StaticJWKConfig = boot.StaticJWKConfig
 // migrate) can just say "here are the payment providers for this merchant" on
 // every run. Billing-only: it touches no AuthKit/control-plane state (the merchant
 // is an ownerless billing bucket). Already-present secrets are left untouched. If
-// the engine is not yet bound to a merchant, it binds to this one. Returns the
-// merchant id.
+// the engine is not yet bound to a merchant, it binds to this one; a later call
+// with a DIFFERENT slug errors (#770 — one embedded engine serves one merchant).
+// Returns the merchant id.
 func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error) {
 	if rt == nil || rt.emb == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: runtime not initialized")
@@ -46,6 +50,23 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		return merchant.ID{}, fmt.Errorf("openrails embed: config/db is required")
 	}
 	database := a.Runtime.DB
+
+	// #770: one embedded engine serves ONE merchant (first upsert binds it; the
+	// SDK transport always serves the bound merchant). A second upsert with a
+	// different slug used to return nil and leave the client silently pinned to
+	// the first merchant — refuse loudly here, BEFORE any rows are written.
+	// Re-upserting the bound merchant's own slug stays the normal boot reconcile.
+	if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() {
+		row, err := gen.New(database.DataPool()).GetMerchantBySlug(ctx, merchant.NormalizeSlug(slug))
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return merchant.ID{}, fmt.Errorf("openrails embed: engine already bound to merchant %s; one embedded engine serves one merchant — refusing to provision %q (run one engine per merchant)", bound, slug)
+		case err != nil:
+			return merchant.ID{}, fmt.Errorf("openrails embed: resolve merchant slug %q: %w", slug, err)
+		case merchant.ID(row.ID) != bound:
+			return merchant.ID{}, fmt.Errorf("openrails embed: engine already bound to merchant %s; one embedded engine serves one merchant — refusing second merchant %q (%s)", bound, slug, merchant.ID(row.ID))
+		}
+	}
 
 	// Run it through the same billing-only merchant-provisioning boundary embed.New
 	// and the bootstrap CLI use, with ControlPlane nil. Provider-account reconcile

@@ -71,4 +71,15 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 	_, err = rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
 	require.Equal(t, 2, countRailMerchantAccounts(), "re-run does not duplicate provider accounts")
+
+	// #770: the engine is bound to `slug` now — upserting a DIFFERENT merchant
+	// into the same engine must fail loudly (one embedded engine, one merchant),
+	// and must fail BEFORE writing anything: no second merchant row appears.
+	otherSlug := slug + "-second"
+	_, err = rt.UpsertMerchantConfig(ctx, otherSlug, embed.MerchantConfig{DisplayName: otherSlug})
+	require.ErrorContains(t, err, "already bound to merchant")
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.merchants WHERE slug = $1`, otherSlug).Scan(&n))
+	require.Zero(t, n, "refused second merchant must not be provisioned")
 }
