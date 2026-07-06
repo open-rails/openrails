@@ -111,24 +111,37 @@ func provision(ctx context.Context) (addr, token string, ctr testcontainers.Cont
 }
 
 func startContainer(ctx context.Context) (testcontainers.Container, string, error) {
-	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        image,
-			ExposedPorts: []string{"8200/tcp"},
-			Env: map[string]string{
-				"VAULT_DEV_ROOT_TOKEN_ID":  devRootToken,
-				"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
+	// Retry startup: sharedOnce makes a single failure poison every Vault test
+	// in the process, and loaded CI runners intermittently blow the readiness
+	// window (the recurring "wait until ready: context deadline exceeded" flake).
+	var ctr testcontainers.Container
+	var err error
+	for attempt := 1; ; attempt++ {
+		ctr, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Image:        image,
+				ExposedPorts: []string{"8200/tcp"},
+				Env: map[string]string{
+					"VAULT_DEV_ROOT_TOKEN_ID":  devRootToken,
+					"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
+				},
+				// Dev mode is initialized+unsealed+active => sys/health returns 200.
+				WaitingFor: wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").
+					WithStartupTimeout(120 * time.Second),
+				HostConfigModifier: func(hc *container.HostConfig) {
+					hc.Resources.Memory = 512 << 20
+					hc.Resources.NanoCPUs = 1_000_000_000
+				},
 			},
-			// Dev mode is initialized+unsealed+active => sys/health returns 200.
-			WaitingFor: wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").
-				WithStartupTimeout(60 * time.Second),
-			HostConfigModifier: func(hc *container.HostConfig) {
-				hc.Resources.Memory = 256 << 20
-				hc.Resources.NanoCPUs = 500_000_000
-			},
-		},
-		Started: true,
-	})
+			Started: true,
+		})
+		if err == nil || attempt >= 3 || ctx.Err() != nil {
+			break
+		}
+		if ctr != nil {
+			_ = ctr.Terminate(context.WithoutCancel(ctx))
+		}
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("start vault container: %w", err)
 	}
