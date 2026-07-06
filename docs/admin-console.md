@@ -187,13 +187,37 @@ refining queries needs the key.
 
 ```yaml
 llm:
-  # provider: anthropic      # default (only supported value)
-  # model: claude-haiku-4-5-20251001   # default — cheapest capable model on purpose: the
-  # /schema examples + all-at-once corrective errors are designed so query generation needs
+  # provider: anthropic      # anthropic (default) | openai — unknown values refuse boot
+  # model: ...               # default per provider (see matrix) — cheapest capable on purpose:
+  # the /schema examples + all-at-once corrective errors are designed so query generation needs
   # no model cleverness; configure a bigger model only if generation quality demands it
   api_key: "..."             # SECRET — prefer env LLM_API_KEY or a mounted secret file
+  # base_url: ...            # override the provider endpoint (OpenAI-compatible backends);
+  #                          # absolute URL, https outside development; env LLM_BASE_URL
   # ask_enabled: true        # #756 metrics Q&A consent — see below; env LLM_ASK_ENABLED
 ```
+
+Provider matrix (#761):
+
+| `provider` | default `model` | `base_url` |
+|---|---|---|
+| `anthropic` (default) | `claude-haiku-4-5-20251001` | optional; origin form, e.g. `https://api.anthropic.com` |
+| `openai` | `gpt-5.4-nano` | optional; version-inclusive form, e.g. `https://api.openai.com/v1` |
+| OpenAI-compatible (Groq, Together, Ollama, vLLM) | none — set `model` to the backend's id | `provider: openai` + required `base_url`, e.g. Ollama `http://localhost:11434/v1` (http = development only) |
+
+Defaults are the cheapest tool-capable model per provider (`gpt-5.4-nano`: $0.20/M in,
+$1.25/M out — the current-generation floor). Example — local Ollama in development:
+
+```yaml
+llm:
+  provider: openai
+  base_url: http://localhost:11434/v1
+  model: qwen3:8b            # any tool-capable local model
+  api_key: ollama            # compatible backends still require a bearer value
+```
+
+The provider is invisible to the frontend: the fail-closed gates
+(`nl_widgets_enabled` / `ask_enabled`) and every endpoint behave identically.
 
 ## Ask your metrics (#756)
 

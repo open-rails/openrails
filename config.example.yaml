@@ -89,9 +89,13 @@ admin_console:
 # and metrics Q&A (#756). FAIL-CLOSED: no api_key = the generate/ask endpoints
 # answer 501 and the console hides the NL box; the dashboard works without it.
 # llm:
-#   provider: anthropic      # default (only supported value)
-#   model: claude-haiku-4-5-20251001   # default (cheapest capable; schema does the heavy lifting)
+#   provider: anthropic      # anthropic (default) | openai
+#   model: ""                # default per provider (anthropic: claude-haiku-4-5-20251001,
+#                            # openai: gpt-5.4-nano — cheapest capable; schema does the heavy lifting)
 #   api_key: ""              # SECRET — set env LLM_API_KEY or a mounted secret file
+#   base_url: ""             # optional endpoint override (env LLM_BASE_URL) — with provider=openai
+#                            # this serves any OpenAI-compatible backend, base INCLUDES /v1
+#                            # (e.g. https://api.groq.com/openai/v1, dev-only http://localhost:11434/v1)
 #   ask_enabled: false       # #756 consent: /metrics/ask sends aggregate query RESULTS to the
 #                            # LLM provider (widget generation sends only the schema) — opt in
 #                            # explicitly; env LLM_ASK_ENABLED

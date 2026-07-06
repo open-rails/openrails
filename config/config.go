@@ -153,8 +153,8 @@ type Config struct {
 	// natural-language widget generator. FAIL-CLOSED: no api_key → the
 	// generate endpoint answers 501 and the admin console hides the NL box;
 	// the dashboard itself never depends on an LLM. Env: LLM_PROVIDER,
-	// LLM_MODEL, LLM_API_KEY (secret — mounted secret files work like any
-	// other secret env name).
+	// LLM_MODEL, LLM_BASE_URL, LLM_API_KEY (secret — mounted secret files
+	// work like any other secret env name).
 	LLM *LLMConfig `koanf:"llm,omitempty"`
 
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
@@ -319,24 +319,41 @@ type AdminConsoleConfig struct {
 // IsEnabled reports whether the admin console SPA should be served.
 func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
 
-// LLM provider names (#741). Anthropic is the only wired provider; the knob
-// exists so adding one later is config, not code archaeology.
-const LLMProviderAnthropic = "anthropic"
+// LLM provider names (#741/#761). The provider selects the API dialect;
+// unknown values refuse to boot.
+const (
+	LLMProviderAnthropic = "anthropic"
+	LLMProviderOpenAI    = "openai"
+)
 
-// LLMDefaultModel is used when llm.model is unset.
+// Per-provider default models when llm.model is unset.
 // Cheapest-capable-first (Paul): query generation is designed to need no model
 // cleverness — /schema + corrective errors carry the intelligence. Configure a
 // bigger model only if generation quality measurably demands it.
-const LLMDefaultModel = "claude-haiku-4-5-20251001"
+const (
+	LLMDefaultModelAnthropic = "claude-haiku-4-5-20251001"
+	// gpt-5.4-nano is the cheapest current-generation tool-capable OpenAI
+	// model ($0.20/M in, $1.25/M out as of 2026-07). gpt-4.1-nano is nominally
+	// cheaper but the 4.1 family is mid-retirement — a default must not 404.
+	LLMDefaultModelOpenAI = "gpt-5.4-nano"
+)
 
 // LLMConfig configures the #741 natural-language widget generator and the
 // #756 metrics Q&A endpoint.
 type LLMConfig struct {
-	// Provider selects the API dialect. Empty = "anthropic" (the only
-	// supported value today); unknown values refuse to boot.
+	// Provider selects the API dialect: "anthropic" (default) or "openai";
+	// unknown values refuse to boot.
 	Provider string `koanf:"provider,omitempty"`
-	// Model is the provider model id. Empty = LLMDefaultModel.
+	// Model is the provider model id. Empty = the provider's default
+	// (LLMDefaultModelAnthropic / LLMDefaultModelOpenAI).
 	Model string `koanf:"model,omitempty"`
+	// BaseURL overrides the provider's public API endpoint — with
+	// provider=openai this is the door to every OpenAI-compatible endpoint
+	// (Groq, Together, Ollama, vLLM). Convention per dialect: openai INCLUDES
+	// the version segment (e.g. http://localhost:11434/v1), anthropic is the
+	// origin (e.g. https://api.anthropic.com). Must be an absolute URL; https
+	// required outside development. Env: LLM_BASE_URL.
+	BaseURL string `koanf:"base_url,omitempty"`
 	// APIKey is the provider credential (SECRET — env LLM_API_KEY or a
 	// mounted secret file, never committed config). Empty = feature off.
 	APIKey string `koanf:"api_key,omitempty"`
@@ -364,12 +381,15 @@ func (c *LLMConfig) ResolvedProvider() string {
 	return strings.ToLower(strings.TrimSpace(c.Provider))
 }
 
-// ResolvedModel returns the effective model id.
+// ResolvedModel returns the effective model id (per-provider default).
 func (c *LLMConfig) ResolvedModel() string {
-	if c == nil || strings.TrimSpace(c.Model) == "" {
-		return LLMDefaultModel
+	if c != nil && strings.TrimSpace(c.Model) != "" {
+		return strings.TrimSpace(c.Model)
 	}
-	return strings.TrimSpace(c.Model)
+	if c.ResolvedProvider() == LLMProviderOpenAI {
+		return LLMDefaultModelOpenAI
+	}
+	return LLMDefaultModelAnthropic
 }
 
 // DBConfig holds database configuration.
@@ -1058,10 +1078,26 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("captcha config validation failed: %w", err)
 	}
 
-	// #741: an unknown llm.provider must never silently boot with the
-	// anthropic dialect pointed at another vendor's key.
-	if cfg.LLM != nil && cfg.LLM.ResolvedProvider() != LLMProviderAnthropic {
-		return fmt.Errorf("invalid llm.provider %q: only %q is supported", cfg.LLM.Provider, LLMProviderAnthropic)
+	// #741/#761: an unknown llm.provider must never silently boot with one
+	// vendor's dialect pointed at another vendor's key.
+	if cfg.LLM != nil {
+		switch cfg.LLM.ResolvedProvider() {
+		case LLMProviderAnthropic, LLMProviderOpenAI:
+		default:
+			return fmt.Errorf("invalid llm.provider %q: must be %q or %q", cfg.LLM.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
+		}
+		// Same root-of-trust posture as the auth issuer: plaintext HTTP to
+		// the model endpoint (prompts + aggregate results in flight) is
+		// dev-only.
+		if base := strings.TrimSpace(cfg.LLM.BaseURL); base != "" {
+			u, err := url.Parse(base)
+			if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
+			}
+			if !isDev && u.Scheme != "https" {
+				return fmt.Errorf("llm.base_url %q must use https outside development", base)
+			}
+		}
 	}
 
 	// Always validate database configuration
