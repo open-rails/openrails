@@ -74,11 +74,12 @@ type Server struct {
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
 
-	// browserCORSOriginSource is the standalone browser CORS origin source.
-	// OpenRails ships no default: AuthKit no longer owns remote-application
-	// origins, so unset means no browser CORS. A host that wants browser CORS
-	// wires an OpenRails-owned source here.
-	browserCORSOriginSource middleware.CORSOriginSource
+	// browserTierRoutes tracks which registered patterns belong to the
+	// permissive-CORS browser tier (#765: checkout + self-service +
+	// customer-treasury) — populated as registerUserRoutesAt/
+	// registerSelfServiceRoutes mount their routes, consulted by
+	// wrapPublicHandler's PermissiveCORSHTTP. Never nil once New() has run.
+	browserTierRoutes *middleware.BrowserTierRoutes
 
 	// publicHandler is the single "full surface" HTTP handler: health + user +
 	// self/customer + merchant + control-plane auth + webhook routes AND the
@@ -97,6 +98,20 @@ func (s *Server) recordRoute(pattern string) {
 	s.routeTable = append(s.routeTable, pattern)
 }
 
+// recordBrowserRoute is recordRoute plus browser-tier CORS registration
+// (#765): used ONLY by the checkout + self-service + customer-treasury
+// registration call sites, so PermissiveCORSHTTP grants the static `*` policy
+// on exactly those routes and nothing else. Lazily initializes
+// browserTierRoutes so hand-built *Server{} unit tests that skip New() still
+// behave correctly.
+func (s *Server) recordBrowserRoute(pattern string) {
+	s.recordRoute(pattern)
+	if s.browserTierRoutes == nil {
+		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
+	}
+	s.browserTierRoutes.Add(pattern)
+}
+
 // RouteTable returns every route pattern the standalone surface registered
 // ("GET /v1/me/balance", ServeMux syntax). Used by the route-surface test.
 func (s *Server) RouteTable() []string {
@@ -109,6 +124,18 @@ func (s *Server) RouteTable() []string {
 func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 	s.recordRoute(pattern)
 	mux.Handle(pattern, h)
+}
+
+// handleBrowser is handle plus browser-tier CORS registration (#765): use for
+// raw net/http handlers (not routed through router.Router) that belong to the
+// checkout/self-service surface, e.g. the captcha discovery endpoints
+// registered alongside RegisterUserRoutes.
+func (s *Server) handleBrowser(mux *http.ServeMux, pattern string, h http.Handler) {
+	s.handle(mux, pattern, h)
+	if s.browserTierRoutes == nil {
+		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
+	}
+	s.browserTierRoutes.Add(pattern)
 }
 
 func New(deps Dependencies) (*Server, error) {
@@ -183,6 +210,7 @@ func New(deps Dependencies) (*Server, error) {
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 		consoleAssets:          deps.ConsoleAssets,
+		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -410,14 +438,18 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		middleware.RecoverHTTP(),
 		middleware.RequestLogHTTP("/health/live", "/health/ready", "/healthz", "/readyz", "/health"),
 		middleware.SecurityHeadersHTTP(),
-		// CORS is browser transport policy, not API authorization. Preflight has no
-		// JWT issuer. JWT signature/issuer/audience/permissions and merchant ownership
-		// remain the real request security boundary; hosts that need browser CORS wire
-		// an explicit origin source. Per-merchant preflight (#734) is the control
-		// plane's own openrails.merchants directory (api_host/allowed_origins) — a
-		// merchant that never configures an api_host resolves nothing, so this is a
-		// pure no-op for single-merchant self-hosters.
-		middleware.CORSFromSourceHTTP(s.browserCORSOrigins),
+		// CORS is browser transport policy, not API authorization; real request
+		// security is always JWT signature/issuer/audience/permissions plus
+		// merchant ownership, which a browser preflight can't even carry (no
+		// JWT on OPTIONS). #765: since every accepted request is a bearer JWT
+		// (never an ambient cookie), an origin allow-list protects nothing —
+		// a stolen token is replayed from curl, where CORS doesn't exist — so
+		// the policy is a static, non-configurable `*` grant on exactly the
+		// browser-tier routes (checkout + self-service + customer-treasury,
+		// tracked in browserTierRoutes as they register) and NO CORS headers
+		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
+		// browser refuses cross-origin script access to those by default.
+		middleware.PermissiveCORSHTTP(s.browserTierRoutes.Match),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		// Resolve the merchant / billing namespace before authorization and before any
 		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime
@@ -438,27 +470,11 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 	)
 }
 
-// browserCORSOrigins is the standalone CORSOriginSource (#734): an explicit
-// browserCORSOriginSource override wins (test seam / a host that wants a
-// different policy); otherwise it resolves the SAME control-plane merchant
-// directory the Host-merchant resolver and JWT-issuer resolution share.
-func (s *Server) browserCORSOrigins(ctx context.Context, host string) ([]string, error) {
-	if s == nil {
-		return nil, nil
-	}
-	if s.browserCORSOriginSource != nil {
-		return s.browserCORSOriginSource(ctx, host)
-	}
-	if s.controlPlane != nil {
-		return s.controlPlane.AllowedOriginsForHost(ctx, host)
-	}
-	return nil, nil
-}
-
-// hostMerchantResolver is the standalone #734 Host->merchant resolver (shared
-// with browserCORSOrigins above) — always the attached control plane in a
-// server built via New() (#469: the control plane is mandatory); nil-safe for
-// hand-built *Server{} unit tests that skip New().
+// hostMerchantResolver is the standalone #734 Host->merchant resolver —
+// always the attached control plane in a server built via New() (#469: the
+// control plane is mandatory); nil-safe for hand-built *Server{} unit tests
+// that skip New(). Unrelated to CORS since #765 (CORS is a static per-route
+// policy, not sourced from Host/merchant resolution).
 func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchant.ID, error) {
 	if s == nil || s.controlPlane == nil {
 		return merchant.ID{}, nil

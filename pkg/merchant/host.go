@@ -3,9 +3,11 @@ package merchant
 import "context"
 
 // HostResolver resolves the merchant that owns an inbound request Host header
-// (#734) — the ONE mechanism shared by per-merchant browser CORS preflight and
-// the Host-routed webhook mount (pkg/embedded). Implementations MUST resolve
-// LIVE per call: OpenRails never builds a boot-time host->merchant map, so a
+// (#734) — shared by the Host-based merchant-scoped route resolution and the
+// Host-routed webhook mount (pkg/embedded). Browser CORS no longer uses this
+// (#765: CORS is a static per-route-tier policy, not sourced from Host/merchant
+// resolution). Implementations MUST resolve LIVE per call: OpenRails never
+// builds a boot-time host->merchant map, so a
 // merchant registered (or reconfigured) on any node resolves immediately on
 // every other node/process sharing the same database — no restart, no cache
 // refresh required. Returns a zero ID and a non-nil error when host maps to no

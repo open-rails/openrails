@@ -43,7 +43,6 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 
 	handler := middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)),
 	)

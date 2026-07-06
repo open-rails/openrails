@@ -81,13 +81,15 @@ type Assembler struct {
 	// gate on its permissions — the gin-free counterpart of the self surface's
 	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	// HostResolve and CORSSource are the #734 Host->merchant mechanism, derived
-	// from the attached control plane (HostMerchantResolverFrom) exactly like
+	// HostResolve is the #734 Host->merchant mechanism, derived from the
+	// attached control plane (HostMerchantResolverFrom) exactly like
 	// AdminChecker/ServiceCredentialResolver above — nil for embedded hosts
-	// without a control plane, in which case CORS/merchant resolution behave
-	// exactly as before this issue (no behavior change without opting in).
+	// without a control plane, in which case Host-based merchant resolution
+	// behaves exactly as before this issue (no behavior change without opting
+	// in). Unrelated to CORS since #765: browser CORS is now a static
+	// per-route-tier policy (PermissiveCORSHTTP), not sourced from the control
+	// plane or any Host lookup.
 	HostResolve merchant.HostResolver
-	CORSSource  middleware.CORSOriginSource
 }
 
 // hostMerchantResolver is the #734 neutral capability a *controlplane.ControlPlane
@@ -96,23 +98,22 @@ type Assembler struct {
 // pattern above.
 type hostMerchantResolver interface {
 	ResolveMerchantByHost(ctx context.Context, host string) (merchant.ID, error)
-	AllowedOriginsForHost(ctx context.Context, host string) ([]string, error)
 }
 
-// HostMerchantResolverFrom derives the #734 Host->merchant resolver + CORS
-// origin source from an app's ControlPlane field (an `any` on app.App).
-// Returns (nil, nil) when no control plane is attached, or it doesn't
-// implement the capability — callers treat that identically to never having
-// called this at all (single-merchant self-hosters see no behavior change
-// without opting in). Exported so pkg/embedded/mount.go (a sibling package,
-// composing the self-service handler) can derive the SAME resolver this
-// package's own FromApp uses, without duplicating the type assertion.
-func HostMerchantResolverFrom(controlPlane any) (merchant.HostResolver, middleware.CORSOriginSource) {
+// HostMerchantResolverFrom derives the #734 Host->merchant resolver from an
+// app's ControlPlane field (an `any` on app.App). Returns nil when no control
+// plane is attached, or it doesn't implement the capability — callers treat
+// that identically to never having called this at all (single-merchant
+// self-hosters see no behavior change without opting in). Exported so
+// pkg/embedded/mount.go (a sibling package, composing the self-service
+// handler) can derive the SAME resolver this package's own FromApp uses,
+// without duplicating the type assertion.
+func HostMerchantResolverFrom(controlPlane any) merchant.HostResolver {
 	c, ok := controlPlane.(hostMerchantResolver)
 	if !ok || c == nil {
-		return nil, nil
+		return nil
 	}
-	return c.ResolveMerchantByHost, c.AllowedOriginsForHost
+	return c.ResolveMerchantByHost
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -136,7 +137,7 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(httphandlers.MerchantAPIKeyManager); ok {
 		apiKeys = c
 	}
-	hostResolve, corsSource := HostMerchantResolverFrom(a.ControlPlane)
+	hostResolve := HostMerchantResolverFrom(a.ControlPlane)
 	asm := &Assembler{
 		Cfg:                       a.Config,
 		Runtime:                   a.Runtime,
@@ -146,7 +147,6 @@ func FromApp(a *app.App) *Assembler {
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
 		HostResolve:               hostResolve,
-		CORSSource:                corsSource,
 	}
 	if checker != nil || resolver != nil {
 		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
@@ -196,11 +196,19 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", CapabilitiesHandler(advertise, providerRoutes))
 
+	// browserTier tracks the checkout patterns mounted below (#765): the ONLY
+	// route set on this combined handler that belongs to the permissive-CORS
+	// browser tier. Empty (matches nothing) when RouteSetCheckout isn't
+	// selected, so PermissiveCORSHTTP is a pure no-op for a merchant-admin/
+	// catalog/payment-providers/merchant-API/webhooks-only mount.
+	browserTier := middleware.NewBrowserTierRoutes()
 	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
+		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
-		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
+		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, browserTier.Add), s.Runtime, httproutes.Options{
 			Authenticator:  s.Authenticator,
 			ProviderRoutes: &providerRoutes,
 		})
@@ -263,20 +271,17 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if s.Runtime != nil {
 		resolver = s.Runtime.TrustedProxies
 	}
-	// #734: per-merchant CORS when a control plane is attached (CORSSource !=
-	// nil); otherwise the pre-#734 static CORSHTTP(nil) (no browser CORS) —
-	// unchanged for embedded hosts that never attach one.
-	corsMW := middleware.CORSHTTP(nil)
-	if s.CORSSource != nil {
-		corsMW = middleware.CORSFromSourceHTTP(s.CORSSource)
-	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
-		corsMW,
+		// #765: static permissive CORS on exactly the checkout patterns
+		// registered into browserTier above — `*` from any origin, no
+		// credentials, nothing on merchant-admin/catalog/payment-providers/
+		// merchant-API/webhooks.
+		middleware.PermissiveCORSHTTP(browserTier.Match),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
 		// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
-		// nil), sharing the same control-plane directory lookup as corsMW above.
+		// nil), unrelated to CORS since #765.
 		middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),

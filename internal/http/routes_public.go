@@ -13,12 +13,15 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
+// registerUserRoutesAt mounts the buyer-facing checkout/catalog surface —
+// browser tier (#765): every pattern registered here is also recorded into
+// browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux *http.ServeMux, apiPrefix string) {
-	s.handle(mux, http.MethodGet+" "+apiPrefix+"/captcha/status",
+	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/status",
 		embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()))
-	s.handle(mux, http.MethodGet+" "+apiPrefix+"/captcha/client.js",
+	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/client.js",
 		embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha))
-	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordRoute), s.runtime, httproutes.Options{
+	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
 		Authenticator: s.authenticator,
 	})
 }

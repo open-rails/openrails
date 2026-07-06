@@ -726,9 +726,10 @@ func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 
 // RegisterHostWebhookRoutes mounts the Host-routed webhook surface (#734):
 // POST /webhooks/:provider[/:account_id], merchant resolved from the request's
-// Host header via resolve — the SAME mechanism per-merchant CORS preflight
-// uses — rather than a URL slug (RegisterMerchantWebhookRoutes) or payload
-// account identity (RegisterWebhookRoutes). This is the engine half of saas
+// Host header via resolve — the SAME resolver merchant-scoped route
+// resolution and the issuer-consistency check use — rather than a URL slug
+// (RegisterMerchantWebhookRoutes) or payload account identity
+// (RegisterWebhookRoutes). This is the engine half of saas
 // #15's "api.<slug>.<domain>" hostname scheme: pkg/embedded mounts it
 // alongside the merchant-scoped surface at the SAME canonical path shape the
 // standalone provider-only surface uses, since Host (not a path segment)

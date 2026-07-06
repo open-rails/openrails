@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -99,18 +98,20 @@ func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, provider
 	if authn == nil {
 		return nil, fmt.Errorf("embedded billing: self surface requires MountOptions.DelegatedAuthenticator")
 	}
-	// #734: derive the SAME Host->merchant resolver + CORS source the base
-	// handler uses (embedhttp.FromApp) from whatever control plane is attached
-	// — nil/nil when none is, in which case this surface behaves exactly as
-	// before this issue.
-	hostResolve, corsSource := embedhttp.HostMerchantResolverFrom(a.ControlPlane)
-	return newSelfHandler(a.Runtime, authn, providerRouteOverride, hostResolve, corsSource), nil
+	// #734: derive the SAME Host->merchant resolver the base handler uses
+	// (embedhttp.FromApp) from whatever control plane is attached — nil when
+	// none is, in which case this surface's Host resolution behaves exactly
+	// as before this issue. CORS is unrelated since #765: this surface's
+	// entire mounted range is browser tier, so it always gets the static
+	// permissive policy regardless of control-plane attachment.
+	hostResolve := embedhttp.HostMerchantResolverFrom(a.ControlPlane)
+	return newSelfHandler(a.Runtime, authn, providerRouteOverride, hostResolve), nil
 }
 
 // newSelfHandler delegates to the neutral assembly; kept as the unit-testable
 // seam (no live app graph required).
-func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver, corsSource middleware.CORSOriginSource) http.Handler {
-	return embedhttp.NewSelfHandler(rt, authn, providerRouteOverride, hostResolve, corsSource)
+func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
+	return embedhttp.NewSelfHandler(rt, authn, providerRouteOverride, hostResolve)
 }
 
 func providerRoutesFromMountOptions(opt *ProviderRoutes) *routesurface.ProviderRoutes {

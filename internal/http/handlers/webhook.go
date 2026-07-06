@@ -141,8 +141,9 @@ func MerchantWebhook(r *httprequest.Request) {
 }
 
 // HostWebhook returns the Host-routed webhook handler (#734): resolve pins the
-// merchant from the request's Host header — the SAME mechanism per-merchant
-// CORS preflight uses — instead of a URL slug (contrast MerchantWebhook), so
+// merchant from the request's Host header — the SAME resolver merchant-scoped
+// route resolution and the issuer-consistency check use — instead of a URL
+// slug (contrast MerchantWebhook), so
 // the exact same verify/dispatch primitive (processResolvedMerchantWebhook)
 // runs unchanged once the merchant is known. This is the engine half of saas
 // #15's "api.<slug>.<domain>" hostname scheme: the mount is opt-in

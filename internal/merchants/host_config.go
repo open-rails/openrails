@@ -32,26 +32,25 @@ func NormalizeAPIHost(host string) string {
 	return strings.ToLower(host)
 }
 
-// SetHostConfig sets a merchant's canonical API host + browser CORS
-// allowed-origins (#734): the ONE per-merchant Host->CORS/webhook-routing
-// config, engine-owned (never AuthKit's remote_application — CORS is browser
-// transport policy, not federation identity). apiHost empty clears the
+// SetHostConfig sets a merchant's canonical API host (#734): the per-merchant
+// Host->webhook-routing config, engine-owned. apiHost empty clears the
 // mapping (the merchant no longer resolves from any Host). This is a plain
 // UPDATE on the live directory row: the very next request against the new
 // Host resolves immediately, on every process sharing this database (#734's
 // multi-node requirement) — there is no boot-time host map to refresh.
-func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost string, allowedOrigins []string) error {
+// Browser CORS is NOT configured here (#765: it's a static per-route-tier
+// policy, not per-merchant — see internal/http/middleware.PermissiveCORSHTTP).
+func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost string) error {
 	if id.IsZero() {
 		return errors.New("merchants: merchant id is required")
 	}
 	host := NormalizeAPIHost(apiHost)
-	origins := normalizeOrigins(allowedOrigins)
 
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE openrails.merchants
-		   SET api_host = NULLIF($2, ''), allowed_origins = $3, updated_at = current_timestamp
+		   SET api_host = NULLIF($2, ''), updated_at = current_timestamp
 		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, id.UUID(), host, origins)
+	`, id.UUID(), host)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("merchants: set host config for %s host %q: %w", id, host, ErrAPIHostTaken)
@@ -64,31 +63,29 @@ func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost str
 	return nil
 }
 
-// HostConfig is a merchant's #734 Host/CORS configuration.
+// HostConfig is a merchant's #734 Host configuration.
 type HostConfig struct {
-	APIHost        string
-	AllowedOrigins []string
+	APIHost string
 }
 
-// GetHostConfig returns id's current #734 Host/CORS configuration.
+// GetHostConfig returns id's current #734 Host configuration.
 func (s *Service) GetHostConfig(ctx context.Context, id merchant.ID) (*HostConfig, error) {
 	if id.IsZero() {
 		return nil, errors.New("merchants: merchant id is required")
 	}
 	var apiHost *string
-	var origins []string
 	err := s.pool.QueryRow(ctx, `
-		SELECT api_host, allowed_origins
+		SELECT api_host
 		  FROM openrails.merchants
 		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, id.UUID()).Scan(&apiHost, &origins)
+	`, id.UUID()).Scan(&apiHost)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMerchantNotFound
 		}
 		return nil, fmt.Errorf("merchants: get host config: %w", err)
 	}
-	cfg := &HostConfig{AllowedOrigins: origins}
+	cfg := &HostConfig{}
 	if apiHost != nil {
 		cfg.APIHost = *apiHost
 	}
@@ -98,16 +95,4 @@ func (s *Service) GetHostConfig(ctx context.Context, id merchant.ID) (*HostConfi
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
-
-func normalizeOrigins(origins []string) []string {
-	out := make([]string, 0, len(origins))
-	for _, o := range origins {
-		o = strings.TrimSpace(o)
-		if o == "" {
-			continue
-		}
-		out = append(out, o)
-	}
-	return out
 }

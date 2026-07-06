@@ -43,37 +43,13 @@ func (c *ControlPlane) merchantForHost(ctx context.Context, host string) (mercha
 }
 
 // ResolveMerchantByHost is the exported #734 Host->merchant resolver: the
-// single mechanism both per-merchant CORS preflight and the Host-routed
+// single mechanism both merchant-scoped Host resolution and the Host-routed
 // webhook mount (pkg/embedded) share. Its signature matches
 // pkg/merchant.HostResolver, so a method value (cp.ResolveMerchantByHost) is
-// directly assignable wherever that type is expected.
+// directly assignable wherever that type is expected. Browser CORS no longer
+// resolves through this (#765: CORS is now a static per-route-tier policy,
+// not per-merchant — see internal/http/middleware.PermissiveCORSHTTP).
 func (c *ControlPlane) ResolveMerchantByHost(ctx context.Context, host string) (merchant.ID, error) {
 	mid, _, err := c.merchantForHost(ctx, host)
 	return mid, err
-}
-
-// AllowedOriginsForHost resolves host -> merchant -> that merchant's stored
-// browser CORS allow-list (#734's preflight half). It fails closed identically
-// to merchantForHost (unknown host, inactive/ambiguous merchant) and ALSO
-// when the merchant is resolved but has configured no allowed_origins — an
-// api_host with no allowed_origins simply grants no browser CORS, matching
-// "no fallback merchant, no implicit allow-list."
-func (c *ControlPlane) AllowedOriginsForHost(ctx context.Context, host string) ([]string, error) {
-	mid, _, err := c.merchantForHost(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	if c.pool == nil {
-		return nil, errors.New("controlplane: pgx pool unavailable for host resolution")
-	}
-	var origins []string
-	if err := c.pool.QueryRow(ctx, `
-		SELECT allowed_origins FROM openrails.merchants WHERE id = $1 AND deleted_at IS NULL
-	`, mid.UUID()).Scan(&origins); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrHostMerchantUnknown
-		}
-		return nil, err
-	}
-	return origins, nil
 }
