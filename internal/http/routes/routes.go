@@ -357,6 +357,11 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_merchant_unresolved"}
 			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_resource_scope_denied"}
+			case errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
+				// #734: the issuer resolves fine, but its merchant disagrees with the
+				// request's Host-pinned merchant (or, as for any other caller of
+				// merchantForIssuer, the issuer itself is unregistered/disabled).
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
 			default:
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
 			}
@@ -520,12 +525,14 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 			return resolved, nil, true
 		}
 		// A VERIFIED service JWT that is definitively rejected (cross-merchant
-		// resource scope, or its issuer owns no merchant) must surface as 403 — not
-		// fall through to the delegated/user-session paths, which would mislabel it
-		// 401 access_token_wrong_typ. A wrong-typ (not-a-service-JWT) error still
-		// falls through so delegated/user tokens reach their own resolvers.
+		// resource scope, its issuer owns no merchant, or — #734 — its issuer's
+		// merchant disagrees with the request's Host-pinned merchant) must surface
+		// as 403 — not fall through to the delegated/user-session paths, which
+		// would mislabel it 401 access_token_wrong_typ. A wrong-typ (not-a-service-JWT)
+		// error still falls through so delegated/user tokens reach their own resolvers.
 		if errors.Is(err, controlplane.ErrServiceCredentialScopeDenied) ||
-			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
+			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) ||
+			errors.Is(err, controlplane.ErrDelegatedIssuerUnknown) {
 			return nil, err, true
 		}
 	}
@@ -715,4 +722,20 @@ func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	// #641: per-account endpoint — account_id in the path selects which account the
 	// event is for (verify with its secret). For multi-account rails like NMI.
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider/:account_id", h(httphandlers.MerchantWebhook))
+}
+
+// RegisterHostWebhookRoutes mounts the Host-routed webhook surface (#734):
+// POST /webhooks/:provider[/:account_id], merchant resolved from the request's
+// Host header via resolve — the SAME mechanism per-merchant CORS preflight
+// uses — rather than a URL slug (RegisterMerchantWebhookRoutes) or payload
+// account identity (RegisterWebhookRoutes). This is the engine half of saas
+// #15's "api.<slug>.<domain>" hostname scheme: pkg/embedded mounts it
+// alongside the merchant-scoped surface at the SAME canonical path shape the
+// standalone provider-only surface uses, since Host (not a path segment)
+// carries the merchant here. Opt-in: callers only mount this when a resolver
+// is available (an attached control plane).
+func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime, resolve merchant.HostResolver) {
+	handler := h(httphandlers.HostWebhook(resolve))
+	rr.Handle(http.MethodPost, "/webhooks/:provider", handler)
+	rr.Handle(http.MethodPost, "/webhooks/:provider/:account_id", handler)
 }

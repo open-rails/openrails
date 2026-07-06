@@ -100,7 +100,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 func TestStandaloneCORSUsesConfiguredOriginSource(t *testing.T) {
 	srv := &Server{
 		cfg: &config.Config{},
-		browserCORSOriginSource: func(context.Context) ([]string, error) {
+		browserCORSOriginSource: func(context.Context, string) ([]string, error) {
 			return []string{
 				"https://doujins.com",
 				"https://hentai0.com",

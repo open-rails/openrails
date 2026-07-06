@@ -55,7 +55,7 @@ func doSelf(h http.Handler, method, path string) *httptest.ResponseRecorder {
 func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 	self := newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal(),
-	}, nil)
+	}, nil, nil, nil)
 
 	w := doSelf(self, http.MethodGet, "/billing/v1/me/balance")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
@@ -79,7 +79,7 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 // Host authenticator rejection and invalid principals map to 401 (fail closed),
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
-	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, nil)
+	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, nil, nil, nil)
 	w := doSelf(h, http.MethodGet, "/billing/v1/me/balance?currency=usd")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
@@ -88,7 +88,7 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 		principal: &billingauth.DelegatedPrincipal{
 			SubjectID: "user-1",
 		},
-	}, nil)
+	}, nil, nil, nil)
 	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance?currency=usd")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
@@ -96,7 +96,7 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	// Merchant-admin routes live on the base embedded handler, not SelfHandler.
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("platform:metrics:read"),
-	}, nil)
+	}, nil, nil, nil)
 	w = doSelf(h, http.MethodGet, "/billing/v1/merchant/metrics")
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }

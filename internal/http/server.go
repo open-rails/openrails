@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Dependencies struct {
@@ -412,7 +413,10 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// CORS is browser transport policy, not API authorization. Preflight has no
 		// JWT issuer. JWT signature/issuer/audience/permissions and merchant ownership
 		// remain the real request security boundary; hosts that need browser CORS wire
-		// an explicit origin source.
+		// an explicit origin source. Per-merchant preflight (#734) is the control
+		// plane's own openrails.merchants directory (api_host/allowed_origins) — a
+		// merchant that never configures an api_host resolves nothing, so this is a
+		// pure no-op for single-merchant self-hosters.
 		middleware.CORSFromSourceHTTP(s.browserCORSOrigins),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		// Resolve the merchant / billing namespace before authorization and before any
@@ -421,17 +425,45 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// is configured, in which case merchant-owned operations hard-fail (there is
 		// no default merchant).
 		middleware.ResolveMerchantHTTP(s.runtime.ConfiguredMerchant),
+		// #734: Host-based multi-merchant resolution, sharing the SAME control-plane
+		// directory lookup as CORS above and as the JWT-issuer resolution
+		// (internal/controlplane.merchantForIssuer checks the marker this pins).
+		// Runs after the static ResolveMerchantHTTP so a live per-request Host match
+		// is authoritative over any process-wide configured merchant. A Host with no
+		// api_host configured for any merchant is a no-op — behavior is unchanged.
+		middleware.ResolveMerchantFromHostHTTP(s.hostMerchantResolver),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
 		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies()),
 	)
 }
 
-func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
-	if s != nil && s.browserCORSOriginSource != nil {
-		return s.browserCORSOriginSource(ctx)
+// browserCORSOrigins is the standalone CORSOriginSource (#734): an explicit
+// browserCORSOriginSource override wins (test seam / a host that wants a
+// different policy); otherwise it resolves the SAME control-plane merchant
+// directory the Host-merchant resolver and JWT-issuer resolution share.
+func (s *Server) browserCORSOrigins(ctx context.Context, host string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if s.browserCORSOriginSource != nil {
+		return s.browserCORSOriginSource(ctx, host)
+	}
+	if s.controlPlane != nil {
+		return s.controlPlane.AllowedOriginsForHost(ctx, host)
 	}
 	return nil, nil
+}
+
+// hostMerchantResolver is the standalone #734 Host->merchant resolver (shared
+// with browserCORSOrigins above) — always the attached control plane in a
+// server built via New() (#469: the control plane is mandatory); nil-safe for
+// hand-built *Server{} unit tests that skip New().
+func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchant.ID, error) {
+	if s == nil || s.controlPlane == nil {
+		return merchant.ID{}, nil
+	}
+	return s.controlPlane.ResolveMerchantByHost(ctx, host)
 }
 
 // Handler returns the full public HTTP surface: health + user + self/customer

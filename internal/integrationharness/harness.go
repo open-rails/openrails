@@ -582,6 +582,21 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	}
 }
 
+// SetMerchantHostConfig sets a merchant's #734 canonical API host + browser
+// CORS allowed-origins through the REAL merchants.Service the running
+// standalone server itself resolves Host->merchant/CORS from (server.go wires
+// Runtime.Merchants to the exact same *merchants.Service instance) — a live
+// DB write, so the very next request against the new host resolves
+// immediately on this SAME running server, with no restart (the #734
+// multi-node/no-boot-mount proof).
+func (s *Surface) SetMerchantHostConfig(mid merchant.ID, apiHost string, allowedOrigins []string) {
+	h := s.h
+	h.t.Helper()
+	require.NotNil(h.t, s.app, "SetMerchantHostConfig requires the standalone surface")
+	require.NotNil(h.t, s.app.Runtime.Merchants, "merchants service must be armed")
+	require.NoError(h.t, s.app.Runtime.Merchants.SetHostConfig(h.ctx, mid, apiHost, allowedOrigins), "set merchant host config")
+}
+
 // CreateMerchantGroup creates a top-level merchant permission-group through the
 // standalone control plane and returns its slug.
 func (s *Surface) CreateMerchantGroup(slug string) string {

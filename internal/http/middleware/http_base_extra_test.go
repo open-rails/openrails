@@ -21,7 +21,7 @@ func TestSecurityHeadersHTTPSetsCSP(t *testing.T) {
 }
 
 func TestCORSFromSourceHTTPGrantsOnlyListedOrigins(t *testing.T) {
-	source := func(context.Context) ([]string, error) {
+	source := func(context.Context, string) ([]string, error) {
 		return []string{"https://app.example"}, nil
 	}
 	h := CORSFromSourceHTTP(source)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

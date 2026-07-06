@@ -10,6 +10,7 @@
 package embedhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
@@ -79,6 +81,38 @@ type Assembler struct {
 	// gate on its permissions — the gin-free counterpart of the self surface's
 	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	// HostResolve and CORSSource are the #734 Host->merchant mechanism, derived
+	// from the attached control plane (HostMerchantResolverFrom) exactly like
+	// AdminChecker/ServiceCredentialResolver above — nil for embedded hosts
+	// without a control plane, in which case CORS/merchant resolution behave
+	// exactly as before this issue (no behavior change without opting in).
+	HostResolve merchant.HostResolver
+	CORSSource  middleware.CORSOriginSource
+}
+
+// hostMerchantResolver is the #734 neutral capability a *controlplane.ControlPlane
+// satisfies, asserted off App.ControlPlane (held as `any`) so this package stays
+// free of AuthKit (#284) — matching the AdminChecker/ServiceCredentialResolver
+// pattern above.
+type hostMerchantResolver interface {
+	ResolveMerchantByHost(ctx context.Context, host string) (merchant.ID, error)
+	AllowedOriginsForHost(ctx context.Context, host string) ([]string, error)
+}
+
+// HostMerchantResolverFrom derives the #734 Host->merchant resolver + CORS
+// origin source from an app's ControlPlane field (an `any` on app.App).
+// Returns (nil, nil) when no control plane is attached, or it doesn't
+// implement the capability — callers treat that identically to never having
+// called this at all (single-merchant self-hosters see no behavior change
+// without opting in). Exported so pkg/embedded/mount.go (a sibling package,
+// composing the self-service handler) can derive the SAME resolver this
+// package's own FromApp uses, without duplicating the type assertion.
+func HostMerchantResolverFrom(controlPlane any) (merchant.HostResolver, middleware.CORSOriginSource) {
+	c, ok := controlPlane.(hostMerchantResolver)
+	if !ok || c == nil {
+		return nil, nil
+	}
+	return c.ResolveMerchantByHost, c.AllowedOriginsForHost
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -102,6 +136,7 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(httphandlers.MerchantAPIKeyManager); ok {
 		apiKeys = c
 	}
+	hostResolve, corsSource := HostMerchantResolverFrom(a.ControlPlane)
 	asm := &Assembler{
 		Cfg:                       a.Config,
 		Runtime:                   a.Runtime,
@@ -110,6 +145,8 @@ func FromApp(a *app.App) *Assembler {
 		APIKeys:                   apiKeys,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
+		HostResolve:               hostResolve,
+		CORSSource:                corsSource,
 	}
 	if checker != nil || resolver != nil {
 		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
@@ -196,6 +233,16 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetWebhooks] {
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
+		// #734: the Host-routed webhook mount (saas #15's "api.<slug>.<domain>"
+		// scheme) is additive — it mounts at the canonical no-merchant-segment
+		// path ("/billing/v1/webhooks/:provider"), distinct from the merchant-scoped
+		// path above, and only when a control plane is attached (HostResolve != nil).
+		// A host with no control plane, or one that never configures any
+		// merchant's api_host, is unaffected: the path simply isn't mounted / never
+		// resolves.
+		if s.HostResolve != nil {
+			httproutes.RegisterHostWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, s.HostResolve)
+		}
 	}
 
 	// Merchant resolution (#223/#336) pins Runtime.ConfiguredMerchant() onto
@@ -216,11 +263,21 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if s.Runtime != nil {
 		resolver = s.Runtime.TrustedProxies
 	}
+	// #734: per-merchant CORS when a control plane is attached (CORSSource !=
+	// nil); otherwise the pre-#734 static CORSHTTP(nil) (no browser CORS) —
+	// unchanged for embedded hosts that never attach one.
+	corsMW := middleware.CORSHTTP(nil)
+	if s.CORSSource != nil {
+		corsMW = middleware.CORSFromSourceHTTP(s.CORSSource)
+	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(nil),
+		corsMW,
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
+		// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
+		// nil), sharing the same control-plane directory lookup as corsMW above.
+		middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
 		// OpenRails-native rate-limiting + captcha for embedded hosts.
