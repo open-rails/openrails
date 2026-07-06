@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ master ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 # Run the JavaScript-based actions (checkout, setup-go) on Node.js 24. Those
 # actions still declare the Node 20 runtime, which GitHub deprecates on
 # 2026-06-16; this opts into the new runtime ahead of the cutover.
@@ -75,6 +79,30 @@ jobs:
         env:
           POSTGRES_HOST_PORT: "5434"
         run: task sqlc-check
+
+  # Admin console SPA (#754: dist is NOT committed, so nothing else compiles
+  # web/admin) — lint + typecheck+build the frontend, then prove the tagged Go
+  # binary embeds the produced dist.
+  console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build console (npm ci + tsc + vite)
+        run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+      - name: Lint console
+        run: npm run lint
+        working-directory: web/admin
+      - name: Tagged Go build embeds the dist
+        run: go vet -tags console_assets ./...
 
   integration:
     runs-on: ubuntu-latest
