@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -522,4 +523,147 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, id, boundID, "the empty upsert binds to the same merchant")
 	require.Equal(t, boundID, reader.Embedded().App().Runtime.ConfiguredMerchant())
+}
+
+// bootManifestRuntimeWithRailAccounts boots a MODE-1 runtime declaring
+// railAccounts through UpsertMerchantConfig directly (no manifest bytes/YAML,
+// no catalog) — the same doujins/hentai0 shape as
+// TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders. Options.PaymentProviders
+// is deliberately unset, so Runtime.Rails (the legacy boot-config bridge) stays
+// empty while Runtime.Merchants arms from the DB-projected accounts (#775).
+func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn, slug string, railAccounts map[string]embed.RailMerchantAccountConfig) (*embed.Runtime, merchant.ID) {
+	t.Helper()
+	appDB := dbtest.OpenAppDB(t, dsn)
+	cfg := manifestModeConfig(dsn)
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+		DisplayName:          slug,
+		RailMerchantAccounts: railAccounts,
+	})
+	require.NoError(t, err)
+	require.False(t, id.IsZero())
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.merchants WHERE id = $1`,
+		} {
+			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
+		}
+	})
+	require.Empty(t, rt.Embedded().App().Runtime.Rails, "MODE-1 manifest host never populates the legacy Rails bridge")
+	return rt, id
+}
+
+// TestManifestMode_CheckoutPreGateAcceptsDBArmedRail is #775's RED/GREEN pin:
+// before the fix, checkoutRailConfigured only consulted the DB for NMI, so a
+// MODE-1 host with a manifest-armed ccbill account (and no
+// embedded.Options.PaymentProviders, since manifest hosts deliberately don't
+// use it) 400s "unsupported rail" on POST /v1/me/checkout with rail=ccbill —
+// even though the deeper checkout service would resolve the account fine.
+//
+// A deliberately-nonexistent price_id is used: the point of this test is the
+// PRE-GATE boundary, not a full checkout — proving the request reaches
+// price-lookup validation (a DIFFERENT 400 message) instead of being rejected
+// by the rail pre-gate is exactly what distinguishes the two behaviors.
+func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
+	ctx := context.Background()
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	nano := time.Now().UnixNano()
+	slug := fmt.Sprintf("mccbill%d", nano)
+	ccbillAccount := fmt.Sprintf("92%04d-0000", nano%10_000)
+
+	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.RailMerchantAccountConfig{
+		"ccbill": {
+			"ccbill": {
+				Environment: "live",
+				AccountID:   ccbillAccount,
+				Secrets: map[string]string{
+					"datalink_username": "dl-user-" + slug,
+					"datalink_password": "dl-pass-" + slug,
+				},
+			},
+		},
+	})
+
+	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
+		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
+	})
+	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
+		DelegatedAuthenticator: authn,
+	})
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"ccbill"}}`, api.FormatPriceID(uuid.New()))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/me/checkout", strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer host-credential")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+	require.NotContains(t, string(raw), "unsupported rail", "the ccbill pre-gate must pass: an active manifest/DB-armed ccbill account exists")
+	require.Contains(t, string(raw), "price not found", "past the pre-gate, the request fails deeper on the fabricated price_id")
+}
+
+// TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts is #775's
+// other RED/GREEN pin: ProviderRoutesForRuntime derived the mounted provider
+// surface from the empty Rails bridge alone, silently dropping the webhook
+// routes for a MODE-1 host with a manifest-armed rail account. With the fix,
+// an armed ccbill account is enough to mount the merchant webhook route: the
+// request reaches the ccbill handler (403 IP-allowlist, since this isn't a
+// real CCBill source) instead of 404 (route never registered).
+func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing.T) {
+	ctx := context.Background()
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	nano := time.Now().UnixNano()
+	slug := fmt.Sprintf("mwebhook%d", nano)
+	ccbillAccount := fmt.Sprintf("93%04d-0000", nano%10_000)
+
+	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.RailMerchantAccountConfig{
+		"ccbill": {
+			"ccbill": {
+				Environment: "live",
+				AccountID:   ccbillAccount,
+				Secrets: map[string]string{
+					"datalink_username": "dl-user-" + slug,
+					"datalink_password": "dl-pass-" + slug,
+				},
+			},
+		},
+	})
+
+	// RouteSetWebhooks alone needs neither Gate nor Authenticator
+	// (validateAuthBoundary only requires them for checkout/customer/merchant-admin
+	// route sets) — and ProviderRoutes is left nil, so MountHandler must derive it
+	// via ProviderRoutesForRuntime.
+	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
+	})
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/ccbill", strings.NewReader("{}"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.NotEqual(t, http.StatusNotFound, resp.StatusCode, string(raw))
+	require.Equal(t, http.StatusForbidden, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), "Unauthorized webhook source", "the route must be mounted and resolve the merchant slug to reach the ccbill IP-allowlist check")
 }
