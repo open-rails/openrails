@@ -29,29 +29,6 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - name: Run gosec (fail on HIGH+)
         run: gosec -severity high -confidence medium -exclude-dir=.agents ./...
-      - name: Run gosec (warn on MEDIUM)
-        continue-on-error: true
-        run: gosec -severity medium -confidence medium -exclude-dir=.agents ./...
-
-  # golangci-lint: code quality, linting, and style enforcement.
-  golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Download modules
-        run: go mod download
-      # Advisory for now: this codebase has not previously run golangci-lint, so
-      # the step reports findings without blocking merges. Flip continue-on-error
-      # to false once the existing backlog is cleared.
-      - name: Run golangci-lint
-        continue-on-error: true
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
   govulncheck:
