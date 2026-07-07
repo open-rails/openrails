@@ -637,6 +637,8 @@ type OpenrailsNotificationQueue struct {
 	CreatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+	// #789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
+	EmailedAt *time.Time
 }
 
 // #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).

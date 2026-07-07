@@ -832,3 +832,34 @@ CROSS JOIN (SELECT count(*) AS total,
 SELECT id FROM openrails.merchants
 WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id;
+
+-- #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
+-- window closed inside (closed_after, now] — the close instant is
+-- LEAST(end_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
+-- — with NO other live window for the same (customer, entitlement). One row per
+-- customer (latest close) — one email per customer, whatever ended the access
+-- (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
+-- NULL = merchant-wide sweep.
+-- name: ListRecentlyClosedLastEntitlementWindows :many
+SELECT DISTINCT ON (e.customer_id)
+       e.id, e.customer_id, e.entitlement,
+       LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
+       e.source_type, e.source_id
+FROM openrails.entitlements e
+WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
+  AND e.deleted_at IS NULL
+  AND (e.end_at IS NOT NULL OR e.revoked_at IS NOT NULL)
+  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(closed_after)::timestamptz
+  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.entitlements live
+      WHERE live.merchant_id = e.merchant_id
+        AND live.customer_id = e.customer_id
+        AND live.entitlement = e.entitlement
+        AND live.deleted_at IS NULL AND live.revoked_at IS NULL
+        AND live.start_at <= sqlc.arg(now)::timestamptz
+        AND (live.end_at IS NULL OR live.end_at > sqlc.arg(now)::timestamptz)
+  )
+ORDER BY e.customer_id,
+         LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC;

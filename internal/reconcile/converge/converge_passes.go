@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -710,6 +711,80 @@ func stuckIntentFinding(si *gen.OpenrailsRailIntent, now time.Time) ConvergeFind
 		f.Severity = "low"
 	}
 	return f
+}
+
+// accessEndedLookback bounds the NOTIFY access-ended scan: a window closed
+// longer ago than this is stale news, never emailed.
+const accessEndedLookback = 30 * 24 * time.Hour
+
+// notifyPass — NOTIFY plane (#789): whatever plane closed a customer's LAST
+// entitlement window (dunning, reconcile-driven cancel, grant lapse), the
+// customer is told exactly once. The pass only CREATES notification_queue rows
+// (emailed_at NULL); delivery belongs to the notification email sweep — the
+// converge engine carries no EmailService. Dedupe: any premium_ended row at or
+// after the close means a transition site already told them.
+type notifyPass struct{ e *ConvergeEngine }
+
+func (*notifyPass) Plane() string { return "NOTIFY" }
+func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
+	if scope.Customer == nil && scope.Subscription != nil {
+		return nil, nil // subscription-scope rides on its customer/merchant run
+	}
+	q := p.e.DB.Gen(ctx)
+	now := p.e.Now()
+	closed, err := q.ListRecentlyClosedLastEntitlementWindows(ctx, gen.ListRecentlyClosedLastEntitlementWindowsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer,
+		ClosedAfter: now.Add(-accessEndedLookback), Now: now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("notify: scan recently closed entitlement windows: %w", err)
+	}
+	var out []ConvergeFinding
+	repo := subscriptions.NewNotificationQueueRepo(p.e.DB)
+	for i := range closed {
+		c := closed[i]
+		if c.ClosedAt == nil {
+			continue // WHERE guarantees a bound; guard the pointer anyway
+		}
+		closedAt := c.ClosedAt.UTC()
+		already, err := q.PremiumEndedNotificationExistsSince(ctx, gen.PremiumEndedNotificationExistsSinceParams{
+			MerchantID: scope.Merchant.UUID(), CustomerID: c.CustomerID, Since: closedAt,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("notify: check premium_ended dedupe: %w", err)
+		}
+		if already {
+			continue
+		}
+		cust, entName := c.CustomerID, c.Entitlement
+		out = append(out, ConvergeFinding{
+			Type:       "notify.access_ended.missing",
+			Shape:      ShapeMissing,
+			Class:      ClassAuto,
+			Severity:   "low",
+			SubjectKey: "customer:" + cust.String(),
+			Provider:   "self",
+			Evidence: map[string]any{
+				"customer_id": cust.String(), "entitlement": entName,
+				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": c.SourceID.String(),
+			},
+			Repair: func(ctx context.Context) error {
+				ctx = merchant.WithID(ctx, scope.Merchant)
+				return repo.Create(ctx, &models.NotificationQueue{
+					ID:         uuidutil.NewV7(),
+					CustomerID: cust,
+					EventType:  models.NotificationPremiumEnded,
+					Data: map[string]any{
+						"reason":      string(subscriptions.PremiumEndReasonAccessEnded),
+						"ended_at":    closedAt.Format(time.RFC3339),
+						"entitlement": entName,
+						"source":      "converge_notify",
+					},
+				})
+			},
+		})
+	}
+	return out, nil
 }
 
 // conPass — CON plane: residual internal consistency (duplicate /

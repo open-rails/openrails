@@ -549,8 +549,10 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
-				merchantID, []string{"subscription:" + subAuto.String(), "subscription:" + subBounded.String(), "subscription:" + subBare.String()})
+				merchantID, []string{"subscription:" + subAuto.String(), "subscription:" + subBounded.String(), "subscription:" + subBare.String(),
+					"customer:" + custAuto.String(), "customer:" + custBounded.String(), "customer:" + custBare.String()})
 			for _, c := range []uuid.UUID{custAuto, custBounded, custBare} {
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
@@ -598,7 +600,9 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &custBounded})
 		require.NoError(t, err)
-		require.Equal(t, 1, res.AutoFixed)
+		// 2 auto-fixed: derive.subscription.missing + the #789 NOTIFY access-ended
+		// row for the already-past window it just materialized (grant lapse plane).
+		require.Equal(t, 2, res.AutoFixed)
 		var endAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,

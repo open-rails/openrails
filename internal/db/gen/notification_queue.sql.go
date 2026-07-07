@@ -149,7 +149,7 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, cutoff time
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue WHERE id = $1
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue WHERE id = $1
 `
 
 func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (OpenrailsNotificationQueue, error) {
@@ -163,6 +163,7 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Openra
 		&i.CreatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.EmailedAt,
 	)
 	return i, err
 }
@@ -199,7 +200,7 @@ func (q *Queries) ListCustomersWithPendingDigest(ctx context.Context, arg ListCu
 }
 
 const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1
 ORDER BY nq.created_at DESC
 `
@@ -221,6 +222,7 @@ func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uu
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -233,7 +235,7 @@ func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uu
 }
 
 const listNotificationsByEventType = `-- name: ListNotificationsByEventType :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC
 `
@@ -255,6 +257,7 @@ func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType st
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -267,7 +270,7 @@ func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType st
 }
 
 const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE ($1::uuid IS NULL OR nq.customer_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
@@ -306,6 +309,7 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -318,7 +322,7 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 }
 
 const listPendingDigestForCustomer = `-- name: ListPendingDigestForCustomer :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
@@ -355,6 +359,7 @@ func (q *Queries) ListPendingDigestForCustomer(ctx context.Context, arg ListPend
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -367,7 +372,7 @@ func (q *Queries) ListPendingDigestForCustomer(ctx context.Context, arg ListPend
 }
 
 const listRepairAlerts = `-- name: ListRepairAlerts :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
@@ -407,6 +412,50 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :many
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
+WHERE nq.merchant_id = $1::uuid
+  AND nq.emailed_at IS NULL
+ORDER BY nq.created_at
+LIMIT $2::int
+`
+
+type ListUndeliveredNotificationsParams struct {
+	MerchantID uuid.UUID
+	PageLimit  int32
+}
+
+// #789: undelivered rows for the notification email sweep (emailed_at NULL).
+func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]OpenrailsNotificationQueue, error) {
+	rows, err := q.db.Query(ctx, listUndeliveredNotifications, arg.MerchantID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsNotificationQueue
+	for rows.Next() {
+		var i OpenrailsNotificationQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.Seen,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -419,7 +468,7 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 }
 
 const listUnseenNotificationsByCustomer = `-- name: ListUnseenNotificationsByCustomer :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC
 `
@@ -441,6 +490,7 @@ func (q *Queries) ListUnseenNotificationsByCustomer(ctx context.Context, custome
 			&i.CreatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -450,6 +500,25 @@ func (q *Queries) ListUnseenNotificationsByCustomer(ctx context.Context, custome
 		return nil, err
 	}
 	return items, nil
+}
+
+const markNotificationEmailed = `-- name: MarkNotificationEmailed :execrows
+UPDATE openrails.notification_queue
+SET emailed_at = $2::timestamptz
+WHERE id = $1 AND emailed_at IS NULL
+`
+
+type MarkNotificationEmailedParams struct {
+	ID        uuid.UUID
+	EmailedAt time.Time
+}
+
+func (q *Queries) MarkNotificationEmailed(ctx context.Context, arg MarkNotificationEmailedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markNotificationEmailed, arg.ID, arg.EmailedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markNotificationSeen = `-- name: MarkNotificationSeen :execrows
@@ -462,6 +531,31 @@ func (q *Queries) MarkNotificationSeen(ctx context.Context, id uuid.UUID) (int64
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const premiumEndedNotificationExistsSince = `-- name: PremiumEndedNotificationExistsSince :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = $1::uuid
+      AND nq.customer_id = $2::uuid
+      AND nq.event_type = 'premium_ended'
+      AND nq.created_at >= $3::timestamptz
+)::boolean AS found
+`
+
+type PremiumEndedNotificationExistsSinceParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Since      time.Time
+}
+
+// #789: dedupe guard for the converge NOTIFY pass — any premium_ended row
+// created at/after the window close means the customer was already told.
+func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg PremiumEndedNotificationExistsSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, premiumEndedNotificationExistsSince, arg.MerchantID, arg.CustomerID, arg.Since)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
 }
 
 const updateNotification = `-- name: UpdateNotification :execrows

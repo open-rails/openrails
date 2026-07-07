@@ -126,7 +126,9 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+				merchantID, []string{"grant_effect:" + grantID.String(), "customer:" + customer.String()})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND event<>'grant'`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
@@ -138,8 +140,10 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
-		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 1, res.AutoFixed, "terminated grant retraction is AUTO (recorded revoke, not absence)")
+		// 2 findings: the excess retraction + the #789 post-repair NOTIFY
+		// access-ended row for the window this run just revoked.
+		require.Equal(t, 2, res.Findings)
+		require.Equal(t, 2, res.AutoFixed, "terminated grant retraction is AUTO (recorded revoke, not absence)")
 
 		var live bool
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `

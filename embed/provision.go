@@ -139,7 +139,8 @@ func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
 		strings.TrimSpace(m.Profile.DisplayName) != "" ||
 		strings.TrimSpace(m.Profile.LogoURL) != "" ||
 		strings.TrimSpace(m.Profile.FromEmail) != "" ||
-		strings.TrimSpace(m.Profile.SupportURL) != ""
+		strings.TrimSpace(m.Profile.SupportURL) != "" ||
+		strings.TrimSpace(m.Profile.SignupURL) != ""
 }
 
 // ParseMerchantConfig parses a single merchant YAML document into a MerchantConfig.

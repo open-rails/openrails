@@ -87,6 +87,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			LogoURL:     conf.Profile.LogoURL,
 			FromEmail:   conf.Profile.FromEmail,
 			SupportURL:  conf.Profile.SupportURL,
+			SignupURL:   conf.Profile.SignupURL,
 		}
 		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil || strings.TrimSpace(conf.InvoiceBillingBoundary) != "" {
 			mt.Invoice = &InvoiceConfig{
