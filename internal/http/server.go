@@ -388,10 +388,13 @@ func New(deps Dependencies) (*Server, error) {
 	// standalone-only (root-group-gated; no embedded analogue).
 	s.registerPlatformRoutes(mux)
 
-	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
-	// ONLY the intentional AuthKit route groups (login/session/user) under
-	// /auth — never AuthKit DefaultAPI.
-	s.registerControlPlaneAuthRoutes(mux)
+	// Selective AuthKit route mounting (#224, authhttp.MountHandler since
+	// authkit #250). In locked-down mode this mounts ONLY the intentional
+	// AuthKit route groups (login/session/user) under /auth — never AuthKit
+	// DefaultAPI.
+	if err := s.registerControlPlaneAuthRoutes(mux); err != nil {
+		return nil, err
+	}
 
 	// Merchant admin console SPA (#740/#754): mounted only when assets are
 	// present AND admin_console.enabled; enabled without assets refuses boot.
