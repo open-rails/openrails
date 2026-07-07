@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -485,6 +486,11 @@ type MerchantManifestReconcileOptions struct {
 	// discovery. Production uses the default resolver over provider read-only
 	// identity APIs.
 	IdentityResolver ManifestProviderIdentityResolver
+	// NMIProbeV5BaseURL is a test-only seam: overrides the base URL the #348
+	// test_mode arm-time probe (probeNMIAccountBeforeArm) hits, so tests can
+	// point it at a fake gateway instead of the real NMI API. Empty in
+	// production — the probe uses nmi.NewClient's documented default.
+	NMIProbeV5BaseURL string
 }
 
 type ManifestProviderIdentityResolver interface {
@@ -1046,6 +1052,14 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 			return fmt.Errorf("store secret %s: %w", name, err)
 		}
 	}
+	// #348, reinstated at arm time (#788 deleted the boot-time client map this
+	// used to probe, with no replacement — refusing an armed live NMI account
+	// under test_mode). Runs before anything below persists the account row.
+	if rail == string(models.RailNMI) && cfg != nil && cfg.IsTestMode() {
+		if err := probeNMIAccountBeforeArm(ctx, database, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL); err != nil {
+			return err
+		}
+	}
 	reconcileStripeWebhook := func() error {
 		if rail != string(models.RailStripe) {
 			return nil
@@ -1146,6 +1160,70 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 		return err
 	}
 	return reconcileStripeWebhook()
+}
+
+// probeNMIAccountBeforeArm reinstates #348 at the manifest arm boundary: a
+// test_mode deployment must never arm an NMI account whose credentials
+// actually belong to a LIVE gateway — every charge through it would move
+// real money while the operator believes the account is sandboxed. It reads
+// the account's EFFECTIVE security_key (whatever this reconcile pass just
+// wrote, or — under seed-once — whatever was already stored) and, cache-first
+// (internal/integrations/nmi.CheckTestModeArm, #348's cooldown), probes the
+// live gateway with the documented non-issued test card.
+//
+// Posture, preserved exactly from #348's original boot probe: only a
+// conclusive "live" verdict refuses. A probe error (offline dev, bad
+// credentials, transport failure — nmi.ArmDecision.ProbeErr) is
+// indeterminate and only warns; it is NEVER fail-closed, because network or
+// credential noise is not evidence of a live account. Production deployments
+// (test_mode=false) never reach this at all — probing charges a real card.
+func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
+	name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, "security_key")
+	if err != nil {
+		return err
+	}
+	sec, err := secretStore.Get(ctx, merchantID, name)
+	if errors.Is(err, merchants.ErrSecretNotFound) {
+		return nil // unconfigured; nothing to verify
+	}
+	if err != nil {
+		return fmt.Errorf("provider account %s:%s:%s: read security_key for test_mode probe: %w", rail, environment, accountID, err)
+	}
+	securityKey := strings.TrimSpace(sec.Value)
+	if securityKey == "" {
+		return nil
+	}
+	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	if err != nil {
+		return nil // never stricter than #348: a client that fails to construct cannot be probed
+	}
+	if probeV5BaseURL != "" {
+		client.V5BaseURL = probeV5BaseURL
+	}
+	// Scoped by merchant + rail + environment + account so a cached verdict
+	// never answers for a different merchant's account (#348's original cache
+	// had exactly one deployment-wide credential set to consider; this one
+	// has many).
+	cacheKey := merchantID.String() + ":" + name
+	decision := nmi.CheckTestModeArm(database.GenGlobal(), client, cacheKey)
+	if decision.ProbeErr != nil {
+		log.WithError(decision.ProbeErr).WithFields(log.Fields{
+			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
+		}).Warnf("⚠️  provider account %s:%s: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)", rail, accountID)
+		return nil
+	}
+	if !decision.Refuse {
+		log.WithFields(log.Fields{
+			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
+		}).Info("provider account: NMI account verified as simulating (test env, #348)")
+		return nil
+	}
+	if decision.Cached {
+		return fmt.Errorf("provider account %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to arm (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
+			rail, environment, accountID, decision.CheckedAt.UTC().Format(time.RFC3339), nmi.ProbeVerdictCooldown)
+	}
+	return fmt.Errorf("provider account %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to arm (use the sandbox account credentials, or unset test_mode) (#348)",
+		rail, environment, accountID)
 }
 
 // manifestProviderSignerEvidence validates the Solana signer and returns signer

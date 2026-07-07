@@ -123,6 +123,15 @@ DROP POLICY IF EXISTS merchant_isolation ON openrails.rail_merchant_accounts;
 CREATE POLICY merchant_isolation ON openrails.rail_merchant_accounts
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
+    rail text NOT NULL,
+    key_hash text NOT NULL,
+    verdict text NOT NULL,
+    checked_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_probe_verdicts_verdict CHECK (verdict = ANY (ARRAY['live', 'simulated'])),
+    CONSTRAINT probe_verdicts_pkey PRIMARY KEY (rail, key_hash)
+);
 `
 
 func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {

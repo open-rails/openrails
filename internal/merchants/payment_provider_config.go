@@ -11,9 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -149,6 +152,9 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
 		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider account_id required")
+	}
+	if err := s.refuseLiveNMIUnderTestMode(ctx, id, rail, environment, accountID, req.Credentials); err != nil {
+		return PaymentProviderConfig{}, err
 	}
 	enabled := true
 	if req.Enabled != nil {
@@ -407,4 +413,68 @@ func unmarshalProviderEvidence(raw []byte) railMerchantAccountEvidence {
 	var out railMerchantAccountEvidence
 	_ = json.Unmarshal(raw, &out)
 	return out
+}
+
+// refuseLiveNMIUnderTestMode reinstates #348 at the MODE-2 (API) arm
+// boundary — the #788 rail-layering refactor deleted the boot-time probe
+// with no per-merchant replacement, so a test_mode deployment could arm real
+// production NMI credentials with nothing to catch it. Under test_mode, an
+// NMI account whose credentials belong to a LIVE gateway must never be
+// armed: every charge through it would move real money while the deployment
+// believes it is sandboxed. Non-NMI rails and non-test_mode deployments
+// (s.providerEnvironment == "live") are untouched — probing on every arm in
+// production would charge a real card on every credential rotation.
+//
+// Posture, preserved exactly from #348's original boot probe: only a
+// conclusive "live" verdict refuses the arm. A probe error (offline dev, bad
+// credentials, transport failure) is indeterminate and only warns — it is
+// NEVER fail-closed, because network/credential noise is not evidence of a
+// live account.
+func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID, rail, environment, accountID string, credentials map[string]string) error {
+	if rail != string(models.RailNMI) || s.providerEnvironment != "test" {
+		return nil
+	}
+	name, err := RailMerchantAccountSecretName(rail, environment, accountID, "security_key")
+	if err != nil {
+		return err
+	}
+	securityKey := strings.TrimSpace(credentials["security_key"])
+	if securityKey == "" && s.secrets != nil {
+		// The arm may only be touching other fields (public_config, a second
+		// credential) — resolve the EFFECTIVE key already on file so a
+		// live account can't slip through by omitting security_key from this
+		// particular request.
+		if sec, gerr := s.secrets.Get(ctx, id, name); gerr == nil {
+			securityKey = strings.TrimSpace(sec.Value)
+		}
+	}
+	if securityKey == "" {
+		return nil // unconfigured; nothing to verify
+	}
+	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	if err != nil {
+		return nil // never stricter than #348: a client that fails to construct cannot be probed
+	}
+	if s.nmiProbeV5BaseURL != "" {
+		client.V5BaseURL = s.nmiProbeV5BaseURL
+	}
+	// Scoped by merchant + rail + environment + account so a cached verdict
+	// never answers for a different merchant's account.
+	cacheKey := id.String() + ":" + name
+	decision := nmi.CheckTestModeArm(gen.New(s.pool), client, cacheKey)
+	if decision.ProbeErr != nil {
+		log.WithError(decision.ProbeErr).WithFields(log.Fields{
+			"merchant_id": id.String(), "rail": rail, "account_id": accountID,
+		}).Warn("payment provider arm: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)")
+		return nil
+	}
+	if !decision.Refuse {
+		return nil
+	}
+	if decision.Cached {
+		return fmt.Errorf("merchants: rail %q account %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); arm refused (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
+			rail, accountID, decision.CheckedAt.UTC().Format(time.RFC3339), nmi.ProbeVerdictCooldown)
+	}
+	return fmt.Errorf("merchants: rail %q account %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; arm refused (use the sandbox account credentials, or unset test_mode) (#348)",
+		rail, accountID)
 }

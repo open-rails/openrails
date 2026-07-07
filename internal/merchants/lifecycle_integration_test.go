@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     UNIQUE (rail, environment, account_id)
 );
 
+CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
+    rail text NOT NULL,
+    key_hash text NOT NULL,
+    verdict text NOT NULL,
+    checked_at timestamptz DEFAULT current_timestamp NOT NULL,
+    PRIMARY KEY (rail, key_hash)
+);
+
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
