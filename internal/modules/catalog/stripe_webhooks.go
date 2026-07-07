@@ -68,7 +68,7 @@ func (e StripeWebhookEndpoint) managed() bool {
 // the endpoint AND its signing secret — the secret is only ever returned here (on
 // create), so the caller MUST persist it for inbound signature verification.
 func (s *StripeCatalogService) CreateWebhookEndpoint(ctx context.Context, webhookURL string, events []string) (StripeWebhookEndpoint, string, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return StripeWebhookEndpoint{}, "", fmt.Errorf("stripe is not configured")
 	}
@@ -111,7 +111,7 @@ func (s *StripeCatalogService) CreateWebhookEndpoint(ctx context.Context, webhoo
 
 // ListWebhookEndpoints returns every webhook endpoint in the account (paginated).
 func (s *StripeCatalogService) ListWebhookEndpoints(ctx context.Context) ([]StripeWebhookEndpoint, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -156,7 +156,7 @@ type UpdateWebhookEndpointParams struct {
 // UpdateWebhookEndpoint patches mutable fields in place; the signing secret is
 // preserved.
 func (s *StripeCatalogService) UpdateWebhookEndpoint(ctx context.Context, id string, params UpdateWebhookEndpointParams) error {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}
@@ -193,7 +193,7 @@ func (s *StripeCatalogService) UpdateWebhookEndpoint(ctx context.Context, id str
 
 // DeleteWebhookEndpoint removes a webhook endpoint. A 404 is treated as success.
 func (s *StripeCatalogService) DeleteWebhookEndpoint(ctx context.Context, id string) error {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}

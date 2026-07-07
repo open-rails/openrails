@@ -3,6 +3,8 @@ package solana
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"math"
 	"strings"
 	"time"
@@ -63,13 +65,16 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 	return uint64(math.Ceil((usd / priceUSD) * scale))
 }
 
-func RequireSolanaRailConfig(rails config.RailMerchantAccountSet) (*config.RailMerchantAccountConfig, error) {
-	if rails == nil {
+// RequireSolanaRailConfig resolves the ctx merchant's armed Solana rail
+// account (Layer C, #788): the rail_merchant_accounts row's settings
+// materialized into the runtime Solana config. Unarmed fails closed.
+func RequireSolanaRailConfig(ctx context.Context, src railresolve.Source) (*config.RailMerchantAccountConfig, error) {
+	if src == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
-	proc := rails.GetSolanaRail()
-	if proc == nil {
-		return nil, fmt.Errorf("solana not configured")
+	proc, err := src.RailConfig(ctx, string(models.RailSolana), "")
+	if err != nil {
+		return nil, fmt.Errorf("solana not configured: %w", err)
 	}
 	return proc, nil
 }

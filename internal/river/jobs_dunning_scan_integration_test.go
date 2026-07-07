@@ -125,7 +125,7 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 
 	// Nil-clients guard: a deployment without NMI clients (e.g. Stripe-only)
 	// skips the run cleanly instead of erroring the River job.
-	worker := &DunningWorker{DB: dbi, NMIClients: nil}
+	worker := &DunningWorker{DB: dbi}
 	require.NoError(t, worker.Work(context.Background(), &river.Job[DunningArgs]{Args: DunningArgs{}}))
 }
 
@@ -232,7 +232,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client}}
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

@@ -49,7 +49,8 @@ type CheckoutNMISaleService struct {
 	VaultResolver    *CheckoutVaultService
 	VaultService     *paymentmethods.VaultService
 	IdempotencyStore checkoutIdempotencyStore
-	NMIClients       map[string]*nmi.NMIClient
+	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
+	// state (#788) — the ONLY client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
 	// Intents executes the durable write-ahead sale intent (#674). Every NMI
 	// charge in this flow goes through it — there is no direct RunSale here.
@@ -61,14 +62,12 @@ func NewCheckoutNMISaleService(
 	vaultResolver *CheckoutVaultService,
 	vaultService *paymentmethods.VaultService,
 	idempotencyStore checkoutIdempotencyStore,
-	nmiClients map[string]*nmi.NMIClient,
 ) *CheckoutNMISaleService {
 	return &CheckoutNMISaleService{
 		PurchaseService:  purchaseService,
 		VaultResolver:    vaultResolver,
 		VaultService:     vaultService,
 		IdempotencyStore: idempotencyStore,
-		NMIClients:       nmiClients,
 	}
 }
 
@@ -244,12 +243,8 @@ func saleResponse(cached checkoutSaleIdempotencyResult, message string) *Checkou
 }
 
 func (s *CheckoutNMISaleService) nmiClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
-	if s.ResolveNMIClient != nil {
-		return s.ResolveNMIClient(ctx, provider)
-	}
-	client, ok := s.NMIClients[provider]
-	if !ok || client == nil {
+	if s.ResolveNMIClient == nil {
 		return nil, fmt.Errorf("missing client")
 	}
-	return client, nil
+	return s.ResolveNMIClient(ctx, provider)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"os"
 	"strings"
 	"testing"
@@ -33,13 +34,13 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 
 	stripeSvc := &catalog.StripeCatalogService{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}
 	svc := &Service{rt: &app.Runtime{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
-		Rails: config.RailMerchantAccountSet{
+		RailConfigs: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}}

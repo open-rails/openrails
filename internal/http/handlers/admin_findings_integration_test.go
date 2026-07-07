@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -168,19 +169,32 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 	productSvc := catalog.NewProductService(dbi)
 	entSvc := entitlements.NewEntitlementService(dbi, clock)
 	paySvc := payments.NewPaymentService(dbi, clock)
-	clients := map[string]*nmi.NMIClient{"nmi": fx.client}
 	fx.rt = &app.Runtime{
 		DB:                           dbi,
 		Config:                       &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Clock:                        clock,
-		NMIClients:                   clients,
-		SubscriptionService:          subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clients, nil, clock),
+		CollectionResolver:           findingsNMIResolver{client: fx.client},
+		SubscriptionService:          subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock),
 		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, nil, paySvc, clock),
 		PaymentService:               paySvc,
 		EntitlementService:           entSvc,
 		ProductAccessService:         productaccess.NewService(dbi, clock),
 	}
 	return fx
+}
+
+// findingsNMIResolver is a fixed money.CollectionPlane (#788 test stand-in).
+type findingsNMIResolver struct{ client *nmi.NMIClient }
+
+func (f findingsNMIResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID) (*nmi.NMIClient, bool, error) {
+	if f.client == nil {
+		return nil, false, nil
+	}
+	return f.client, true, nil
+}
+
+func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.OpenrailsPaymentMethod) (money.CollectionAdapter, bool, error) {
+	return nil, false, nil
 }
 
 func (fx *findingsFixture) exec(sql string, args ...any) {
@@ -320,7 +334,7 @@ func (fx *findingsFixture) findingRow(id uuid.UUID) gen.OpenrailsReconciliationF
 func (fx *findingsFixture) deleteRunner() *intents.Runner {
 	return &intents.Runner{
 		Store:    intents.NewStore(fx.dbi),
-		Registry: intents.NewRegistry(intents.NewNMIDeleteHandler(fx.dbi, fx.rt.Config, fx.rt.NMIClients, nil)),
+		Registry: intents.NewRegistry(intents.NewNMIDeleteHandler(fx.dbi, fx.rt.Config, findingsNMIResolver{client: fx.client}, nil)),
 		Config:   fx.rt.Config,
 		Breaker:  intents.NewVolumeBreaker(fx.dbi),
 	}

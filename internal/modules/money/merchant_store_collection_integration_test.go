@@ -37,7 +37,6 @@ func storeArmedCharger(dbi *db.DB, msvc *merchants.Service, boot map[string]mone
 	ch := money.NewScopedCharger(dbi, boot)
 	ch.SetAdapterResolver(&money.MerchantCollectionAdapterBuilder{
 		Config:      storeCollectionTestConfig(),
-		Rails:       nil, // boot plane empty: credentials exist ONLY in the store
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return msvc },
 		Endpoints:   endpoints,

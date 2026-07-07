@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"strings"
 	"time"
 
@@ -72,14 +73,16 @@ type NMIPaymentSourceUpdatePayload struct {
 //     only AFTER the provider is confirmed, and the intent row is the durable
 //     source of truth for repairing every crash/timeout ordering in between.
 type NMIPaymentSourceUpdateHandler struct {
-	DB      *db.DB
-	Clients map[string]*nmi.NMIClient
-	Clock   clockwork.Clock
-	Policy  BackoffPolicy
+	DB *db.DB
+	// Resolver arms the subscription merchant's NMI client from the armed
+	// rail state at drain time (#788).
+	Resolver money.NMIClientResolver
+	Clock    clockwork.Clock
+	Policy   BackoffPolicy
 }
 
-func NewNMIPaymentSourceUpdateHandler(d *db.DB, clients map[string]*nmi.NMIClient, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
-	return &NMIPaymentSourceUpdateHandler{DB: d, Clients: clients, Clock: clock, Policy: DefaultBackoff}
+func NewNMIPaymentSourceUpdateHandler(d *db.DB, resolver money.NMIClientResolver, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
+	return &NMIPaymentSourceUpdateHandler{DB: d, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *NMIPaymentSourceUpdateHandler) Type() string { return TypeNMIPaymentSourceUpdate }
@@ -274,12 +277,12 @@ func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, in
 // (rows pinned to a provider account resolve by account key, #641/#655).
 // ok=false carries the Parked outcome to return.
 func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.OpenrailsRailIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
-	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.DB, h.Clients, sub)
+	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.Resolver, sub)
 	if err != nil {
 		return nil, Parked(fmt.Sprintf("resolve nmi client for provider %q: %v", intent.Rail, err)), false
 	}
 	if !ok {
-		return nil, Parked(fmt.Sprintf("nmi client not configured for provider account %q", key)), false
+		return nil, Parked(fmt.Sprintf("nmi rail is not armed for provider account %q", key)), false
 	}
 	return client, Outcome{}, true
 }

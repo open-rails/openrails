@@ -5,6 +5,10 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -27,6 +31,28 @@ type fakeCCBillSMS struct {
 	cancelCalls atomic.Int64
 	refundCalls atomic.Int64
 	status      atomic.Value // string
+}
+
+// #788: the intent handlers arm their DataLink clients from the armed rail
+// state; the test rails carry the fake server's credentials.
+func adminFindingsCCBillRails() railresolve.FixedSet {
+	return railresolve.FixedSet{"ccbill": {
+		Rail:      models.RailCCBill,
+		AccountID: "900100-0000",
+		CCBill:    &config.CCBillRailConfig{DataLinkUsername: "dluser", DataLinkPassword: "dlpass"},
+	}}
+}
+
+func newAdminFindingsCCBillCancelHandler(dbi *db.DB, client *ccbill.DataLinkClient) *intents.CCBillCancelHandler {
+	h := intents.NewCCBillCancelHandler(dbi, nil, adminFindingsCCBillRails(), nil)
+	h.DataLinkBaseURL = client.BaseURL
+	return h
+}
+
+func newAdminFindingsCCBillRefundHandler(dbi *db.DB, client *ccbill.DataLinkClient) *intents.CCBillRefundHandler {
+	h := intents.NewCCBillRefundHandler(dbi, nil, adminFindingsCCBillRails(), nil)
+	h.DataLinkBaseURL = client.BaseURL
+	return h
 }
 
 func newFakeCCBillSMS(t *testing.T) (*fakeCCBillSMS, *ccbill.DataLinkClient) {
@@ -114,8 +140,8 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	runner := &intents.Runner{
 		Store: intents.NewStore(fx.dbi),
 		Registry: intents.NewRegistry(
-			intents.NewCCBillCancelHandler(fx.dbi, client, nil),
-			intents.NewCCBillRefundHandler(fx.dbi, client, nil),
+			newAdminFindingsCCBillCancelHandler(fx.dbi, client),
+			newAdminFindingsCCBillRefundHandler(fx.dbi, client),
 		),
 		Config:  fx.rt.Config,
 		Breaker: intents.NewVolumeBreaker(fx.dbi),

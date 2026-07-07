@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -96,7 +95,7 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 		return &Runner{
 			Store: fx.store,
 			// The intent's provider is lower(sub.Rail) = "nmi".
-			Registry: NewRegistry(NewNMIDeleteHandler(dbi, cfg, map[string]*nmi.NMIClient{"nmi": client}, nil)),
+			Registry: NewRegistry(NewNMIDeleteHandler(dbi, cfg, fakeNMIResolver{client: client}, nil)),
 			Config:   cfg,
 		}
 	}

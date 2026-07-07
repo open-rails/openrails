@@ -170,20 +170,16 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 		return nil, err
 	}
 	var stripeLister stripeProductLister
-	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil && strings.TrimSpace(stripeProc.Stripe.SecretKey) != "" {
-			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
-		}
+	if s.rt != nil && s.railArmed(ctx, string(models.RailStripe)) {
+		stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.RailConfigs}
 	}
 	var nmiLister nmiPlanLister
-	if s.rt != nil && s.rt.NMIClients != nil {
-		if client, ok := s.rt.NMIClients[string(models.RailNMI)]; ok && client != nil {
-			nmiLister = client
-		}
+	if client := s.resolveNMIClientForMerchant(ctx); client != nil {
+		nmiLister = client
 	}
 	var solanaReader solanaPlanReader
-	if s.rt != nil && s.rt.SolanaRPC != nil {
-		solanaReader = s.rt.SolanaRPC
+	if s.rt != nil && s.rt.SolanaRPCResolver != nil && s.railArmed(ctx, string(models.RailSolana)) {
+		solanaReader = s.rt.SolanaRPCResolver.ChainReader()
 	}
 	return s.detectCatalogExtrasWith(ctx, stripeLister, nmiLister, solanaReader)
 }

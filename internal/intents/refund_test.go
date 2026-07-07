@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -84,17 +84,17 @@ func TestRefundIntentForRoutesByRail(t *testing.T) {
 func TestNMIRefundExecuteParksBeforeProviderTraffic(t *testing.T) {
 	intent := refundIntent(t, TypeNMIRefund, testRefundPayload())
 
-	t.Run("no client for provider", func(t *testing.T) {
-		h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{}, nil)
+	t.Run("unarmed rail parks", func(t *testing.T) {
+		h := NewNMIRefundHandler(nil, fakeNMIResolver{}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
-		assert.Contains(t, out.Reason, "not configured")
+		assert.Contains(t, out.Reason, "not armed")
 	})
 
 	t.Run("read-only client", func(t *testing.T) {
 		client := newTestNMIClient(t, "")
 		client.ReadOnly = true
-		h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{"mobius": client}, nil)
+		h := NewNMIRefundHandler(nil, fakeNMIResolver{client: client}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "read-only")
@@ -109,7 +109,7 @@ func TestNMIRefundExecuteTransportFailureIsAmbiguous(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	t.Cleanup(srv.Close)
-	h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
+	h := NewNMIRefundHandler(nil, fakeNMIResolver{client: newTestNMIClient(t, srv.URL)}, nil)
 
 	out := h.Execute(context.Background(), refundIntent(t, TypeNMIRefund, testRefundPayload()))
 	assert.Equal(t, OutcomeAmbiguous, out.Class)
@@ -117,7 +117,7 @@ func TestNMIRefundExecuteTransportFailureIsAmbiguous(t *testing.T) {
 }
 
 func TestNMIRefundUnusablePayloadIsTerminal(t *testing.T) {
-	h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, "")}, nil)
+	h := NewNMIRefundHandler(nil, fakeNMIResolver{client: newTestNMIClient(t, "")}, nil)
 	intent := refundIntent(t, TypeNMIRefund, testRefundPayload())
 	intent.Payload = []byte(`{"amount_cents": 0}`)
 	out := h.Execute(context.Background(), intent)
@@ -191,9 +191,10 @@ func TestNMIRefundFindRefundParsesQueryShapes(t *testing.T) {
 				fmt.Fprint(w, tc.body)
 			}))
 			t.Cleanup(srv.Close)
-			h := NewNMIRefundHandler(nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
+			client := newTestNMIClient(t, srv.URL)
+			h := NewNMIRefundHandler(nil, fakeNMIResolver{client: client}, nil)
 
-			txnID, found, err := h.findRefund(h.Clients["mobius"], payload)
+			txnID, found, err := h.findRefund(client, payload)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -234,8 +235,8 @@ func stripeTestConfig() *config.Config {
 	return &config.Config{}
 }
 
-func stripeTestRails() config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func stripeTestRails() railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }

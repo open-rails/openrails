@@ -18,8 +18,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
@@ -92,15 +90,6 @@ type ProviderRefreshSchedulerWorker struct {
 	Config *config.Config
 	Clock  clockwork.Clock
 
-	// Boot-plane deps, presence only: any boot-config fallback rail can arm
-	// EVERY merchant (merchant_wiring.go precedence), so the zero-accounts
-	// skip applies only when the deployment has no boot plane at all (hosted
-	// SaaS posture).
-	Rails          config.RailMerchantAccountSet
-	NMIClients     map[string]*nmi.NMIClient
-	CCBillDataLink *ccbill.DataLinkClient
-	SolanaRPC      *solanaint.RPCClient
-
 	// MerchantQueue is where per-merchant jobs land ("" = QueueProviderRefresh).
 	MerchantQueue string
 	// Stagger is the fan-out spread window (0 = defaultRefreshStagger). Slot 0
@@ -134,10 +123,6 @@ func (w *ProviderRefreshSchedulerWorker) merchantQueue() string {
 		return w.MerchantQueue
 	}
 	return QueueProviderRefresh
-}
-
-func (w *ProviderRefreshSchedulerWorker) bootPlaneArmed() bool {
-	return len(w.Rails) > 0 || len(w.NMIClients) > 0 || w.CCBillDataLink != nil || w.SolanaRPC != nil
 }
 
 func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]uuid.UUID, error) {
@@ -191,18 +176,18 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	if n := len(merchantIDs); n > 0 {
 		spacing = w.stagger() / time.Duration(n)
 	}
-	checkAccounts := !w.bootPlaneArmed()
+	// #788: the armed rail state (rail_merchant_accounts) is the only
+	// credential plane, so a merchant with zero declared accounts has nothing
+	// to refresh — always skip it before enqueue.
 	var enqueued, deduped, skipped, failed, slot int
 	for _, mid := range merchantIDs {
-		if checkAccounts {
-			ok, err := w.merchantHasRailAccounts(ctx, mid)
-			if err != nil {
-				// Fail open: a broken predicate must not starve refresh.
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: accounts predicate failed; enqueueing anyway")
-			} else if !ok {
-				skipped++
-				continue
-			}
+		ok, err := w.merchantHasRailAccounts(ctx, mid)
+		if err != nil {
+			// Fail open: a broken predicate must not starve refresh.
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: accounts predicate failed; enqueueing anyway")
+		} else if !ok {
+			skipped++
+			continue
 		}
 		res, err := inserter.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: mid}, &river.InsertOpts{
 			Queue:       w.merchantQueue(),
@@ -253,14 +238,10 @@ type ProviderRefreshWorker struct {
 	river.WorkerDefaults[ProviderRefreshMerchantArgs]
 	DB     *db.DB
 	Config *config.Config
-	Rails  config.RailMerchantAccountSet
 	Clock  clockwork.Clock
 	// Merchants resolves per-merchant provider accounts + scoped secrets
-	// (#699). nil = boot-config plane only.
+	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
 	Merchants           *merchants.Service
-	NMIClients          map[string]*nmi.NMIClient
-	CCBillDataLink      *ccbill.DataLinkClient
-	SolanaRPC           *solanaint.RPCClient
 	DeferDelete         subscriptions.DeferredDeleteScheduler
 	NotificationService *subscriptions.NotificationService
 
@@ -299,19 +280,15 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshMerchant).WithField("merchant_id", mid)
 	stats := providerRefreshStats{Merchants: 1}
 
-	// #699: fetchers + per-sub probers (#665) arm PER MERCHANT inside the
-	// merchant scope — merchant-store credentials first, boot-config rails as
-	// the fallback plane. A rail that cannot arm is absent for that merchant
-	// (its WARN names merchant/rail/secret); the other rails keep pulling.
+	// #699/#788: fetchers + per-sub probers (#665) arm PER MERCHANT inside
+	// the merchant scope from the armed rail state. A rail that cannot arm is
+	// absent for that merchant (its WARN names merchant/rail/secret); the
+	// other rails keep pulling.
 	builder := reconcile.MerchantFetcherBuilder{
-		Config:         w.Config,
-		Rails:          w.Rails,
-		Merchants:      w.Merchants,
-		DB:             w.DB,
-		NMIClients:     w.NMIClients,
-		CCBillDataLink: w.CCBillDataLink,
-		SolanaRPC:      w.SolanaRPC,
-		Endpoints:      w.PullEndpoints,
+		Config:    w.Config,
+		Merchants: w.Merchants,
+		DB:        w.DB,
+		Endpoints: w.PullEndpoints,
 	}
 
 	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)

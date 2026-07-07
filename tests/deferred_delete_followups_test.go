@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -285,7 +284,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	worker := &riverjobs.DunningWorker{
 		DB:          suite.App.Runtime.DB,
 		Config:      suite.App.Runtime.Config,
-		NMIClients:  map[string]*nmi.NMIClient{string(models.RailNMI): {}},
+		NMIResolver: suite.App.Runtime.CollectionResolver,
 		DeferDelete: recorder,
 	}
 
@@ -359,7 +358,6 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 		EntitlementService:           rt.EntitlementService,
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
-		NMIClients:                   rt.NMIClients,
 	}
 	require.NoError(t, resumeWorker.Work(ctx, &river.Job[riverjobs.ResumeSubscriptionArgs]{
 		Args: riverjobs.ResumeSubscriptionArgs{UserID: userID, SubscriptionID: sub.ID},

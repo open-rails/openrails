@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func dbCatalogRowsLoader(d *db.DB) catalogRowsLoader {
 // handlers; the per-type bits (object kind, read, write) are parameterized.
 type stripeArchiveCore struct {
 	Config      *config.Config
-	Rails       config.RailMerchantAccountSet
+	Rails       railresolve.Source
 	Stripe      stripeCatalogAPI
 	LoadCatalog catalogRowsLoader
 	Policy      BackoffPolicy
@@ -104,13 +105,15 @@ type stripeArchiveCore struct {
 
 func (h *stripeArchiveCore) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-func (h *stripeArchiveCore) stripeConfigured() bool {
+// stripeConfigured reports whether the ctx merchant's Stripe rail is armed
+// (#788). Resolution failures read as unconfigured — the intent parks.
+func (h *stripeArchiveCore) stripeConfigured(ctx context.Context) bool {
 	if h.Rails == nil {
-		// nil config = unit-test harness; the injected API decides.
+		// nil source = unit-test harness; the injected API decides.
 		return h.Stripe != nil
 	}
-	proc := h.Rails.GetStripeRail()
-	return proc != nil && proc.Stripe != nil && strings.TrimSpace(proc.Stripe.SecretKey) != "" && h.Stripe != nil
+	armed, err := h.Rails.Armed(ctx, string(models.RailStripe))
+	return err == nil && armed && h.Stripe != nil
 }
 
 // checkRelevance: the archive applies while the remote object is STILL an
@@ -146,7 +149,7 @@ func (h *stripeArchiveCore) execute(
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 	write func(ctx context.Context, id, idempotencyKey string) error,
 ) Outcome {
-	if !h.stripeConfigured() {
+	if !h.stripeConfigured(ctx) {
 		return Parked("stripe not configured")
 	}
 	p, err := decodeStripeArchivePayload(intent)
@@ -179,7 +182,7 @@ func (h *stripeArchiveCore) verify(
 	intent gen.OpenrailsRailIntent,
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 ) Outcome {
-	if !h.stripeConfigured() {
+	if !h.stripeConfigured(ctx) {
 		return Ambiguous("stripe not configured; cannot verify")
 	}
 	p, err := decodeStripeArchivePayload(intent)
@@ -208,7 +211,7 @@ type StripeArchiveProductHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, _ clockwork.Clock) *StripeArchiveProductHandler {
+func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock) *StripeArchiveProductHandler {
 	return &StripeArchiveProductHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,
@@ -266,7 +269,7 @@ type StripeArchivePriceHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, _ clockwork.Clock) *StripeArchivePriceHandler {
+func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock) *StripeArchivePriceHandler {
 	return &StripeArchivePriceHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,

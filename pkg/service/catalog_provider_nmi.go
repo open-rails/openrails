@@ -39,6 +39,8 @@ import (
 // billing on the plan, so the plan must outlive the OpenRails price.
 type nmiAdapter struct {
 	svc *Service
+	// testEndpointURL points built NMI clients at a fake gateway (test seam).
+	testEndpointURL string
 }
 
 func (a *nmiAdapter) Name() string { return string(models.RailNMI) }
@@ -58,7 +60,7 @@ func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	}
 }
 
-func (a *nmiAdapter) Attach(_ context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
+func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
@@ -78,7 +80,7 @@ func (a *nmiAdapter) Attach(_ context.Context, link map[string]string, in autoCr
 	//   - missing: create the plan at the supplied id from the price's terms.
 	// When no NMI rail is configured there is no API to verify/create
 	// against, so the link is stored as-is (operator-owned).
-	if client, ok := a.nmiClient(); ok && client != nil {
+	if client, ok := a.nmiClient(ctx); ok && client != nil {
 		detail, err := client.GetRecurringPlanDetailByID(planID)
 		if err != nil {
 			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
@@ -151,30 +153,42 @@ func nmiDeterministicPlanID(productKey, currency string, unitAmount int64, billi
 	return strings.ReplaceAll(key, ".", "-")
 }
 
-// nmiClient resolves the primary NMI client (the rail-key alias); see nmiClientFor.
-func (a *nmiAdapter) nmiClient() (*nmi.NMIClient, bool) {
-	return a.nmiClientFor("")
+// nmiClient resolves the ctx merchant's active NMI client; see nmiClientFor.
+func (a *nmiAdapter) nmiClient(ctx context.Context) (*nmi.NMIClient, bool) {
+	return a.nmiClientFor(ctx, "")
 }
 
-// nmiClientFor resolves the NMI client for a target account (#641): empty → the
-// primary (rail-key alias); an account_id → that account's client.
-func (a *nmiAdapter) nmiClientFor(targetAccountID string) (*nmi.NMIClient, bool) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.NMIClients == nil {
+// nmiClientFor arms the NMI client from the ctx merchant's armed rail state
+// (#641/#788): empty → the active account; an account_id → THAT declared
+// account's credentials. ok=false = not armed (callers defer to manual link
+// or signal sync_disabled — never a cross-plane fallback).
+func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (*nmi.NMIClient, bool) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.RailConfigs == nil {
 		return nil, false
 	}
-	key := string(models.RailNMI)
-	if id := strings.TrimSpace(targetAccountID); id != "" {
-		key = id
+	proc, err := a.svc.rt.RailConfigs.RailConfig(ctx, string(models.RailNMI), strings.TrimSpace(targetAccountID))
+	if err != nil || proc == nil || proc.NMI == nil || strings.TrimSpace(proc.NMI.SecurityKey) == "" {
+		return nil, false
 	}
-	client, ok := a.svc.rt.NMIClients[key]
-	return client, ok
+	testMode := a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode()
+	client, cerr := nmi.NewClient(proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
+	if cerr != nil {
+		return nil, false
+	}
+	client.ReadOnly = a.svc.rt.Config != nil && a.svc.rt.Config.IsProviderReadOnly()
+	if a.testEndpointURL != "" {
+		client.DirectPostURL = a.testEndpointURL
+		client.QueryURL = a.testEndpointURL
+		client.V5BaseURL = a.testEndpointURL
+	}
+	return client, true
 }
 
 // AutoCreate creates (or attaches to) the NMI Recurring Plan for a price under a
 // deterministic plan_id. When no NMI rail is configured it returns
 // errPendingManualLink so the dispatcher converts the slot to a manual link.
-func (a *nmiAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
-	client, ok := a.nmiClientFor(in.TargetAccountID)
+func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	client, ok := a.nmiClientFor(ctx, in.TargetAccountID)
 	if !ok || client == nil {
 		// No NMI rail configured (or unknown target account): defer to manual link.
 		return nil, errPendingManualLink
@@ -204,8 +218,8 @@ func (a *nmiAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[st
 }
 
 // Verify performs a live retrieve of the NMI plan and computes plan_name drift.
-func (a *nmiAdapter) Verify(_ context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
-	client, ok := a.nmiClient()
+func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
+	client, ok := a.nmiClient(ctx)
 	if !ok || client == nil {
 		// No read API available (NMI not configured): signal sync_disabled.
 		return nil, false, nil

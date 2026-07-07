@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchants"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +24,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -717,15 +717,10 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
-	nmiClient, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey:   "test_security_key",
-		WebhookSecret: "test_secret",
-	}, true)
-	require.NoError(t, err)
-	nmiClient.DirectPostURL = srv.URL
-	nmiClient.QueryURL = srv.URL
-	nmiClient.V5BaseURL = srv.URL
-	suite.App.Runtime.NMIClients["nmi"] = nmiClient
+	// #788: NMI clients arm per charge from the armed rail state; point them
+	// at the fake gateway via the endpoint override.
+	suite.SetNMIGateway(srv.URL)
+	t.Cleanup(func() { suite.SetNMIGateway("") })
 
 	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -827,12 +822,10 @@ func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	t.Cleanup(srv.Close)
-	prevClient := suite.App.Runtime.CCBillDataLink
-	suite.App.Runtime.CCBillDataLink = &ccbill.DataLinkClient{
-		BaseURL: srv.URL, ClientAccNum: "900100", ClientSubAcc: "0000",
-		Username: "u", Password: "p", HTTPClient: srv.Client(),
-	}
-	t.Cleanup(func() { suite.App.Runtime.CCBillDataLink = prevClient })
+	// #788: the refund handler arms its DataLink client from the armed rail
+	// state (the suite-seeded ccbill account); only the endpoint is overridden.
+	suite.App.Runtime.CCBillDataLinkEndpoint = srv.URL
+	t.Cleanup(func() { suite.App.Runtime.CCBillDataLinkEndpoint = "" })
 
 	w := ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-1")
 	require.Equal(t, http.StatusCreated, w.Code, "synchronous ledger execution completes inline: %s", w.Body.String())
@@ -883,9 +876,24 @@ func TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured(t *testing.T) {
 	products := suite.SeedProducts()
 	payment, _, _ := seedCCBillRefundablePayment(suite, products[0].Prices[0].ID)
 
-	prevClient := suite.App.Runtime.CCBillDataLink
-	suite.App.Runtime.CCBillDataLink = nil
-	t.Cleanup(func() { suite.App.Runtime.CCBillDataLink = prevClient })
+	// #788: "unconfigured" = the merchant's armed ccbill account carries no
+	// DataLink credentials. Remove them for the duration of the test.
+	ctxBg := dbtest.WithTestMerchant(context.Background())
+	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	store := suite.App.Runtime.Merchants.Secrets()
+	for _, key := range []string{"datalink_username", "datalink_password"} {
+		name, err := merchants.RailMerchantAccountSecretName("ccbill", env, "945280-0000", key)
+		require.NoError(t, err)
+		require.NoError(t, store.Delete(ctxBg, dbtest.TestMerchantID, name))
+	}
+	t.Cleanup(func() {
+		for key, value := range map[string]string{"datalink_username": "dl-user", "datalink_password": "dl-pass"} {
+			name, err := merchants.RailMerchantAccountSecretName("ccbill", env, "945280-0000", key)
+			require.NoError(t, err)
+			_, err = store.Put(ctxBg, dbtest.TestMerchantID, name, value)
+			require.NoError(t, err)
+		}
+	})
 
 	w := ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-queued-key-1")
 	require.Equal(t, http.StatusAccepted, w.Code, "parked intent reports 202 with the pending reservation: %s", w.Body.String())

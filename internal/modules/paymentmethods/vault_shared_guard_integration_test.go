@@ -4,6 +4,7 @@ package paymentmethods
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/merchants"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -83,12 +84,20 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
+	// #788: the client arms from the scoped merchant secret store (the ONE
+	// armed-state plane); the boot-config bridge is gone.
+	secretStore := merchants.NewMemorySecretStore()
+	secretName, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	require.NoError(t, err)
+	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, "test-key")
+	require.NoError(t, err)
 	svc := &VaultService{
 		SubscriptionService:  noSubsReader{},
 		PaymentMethodService: NewPaymentMethodService(database),
 		DB:                   database,
 		Config:               vaultTestConfig(true),
-		Rails:                vaultTestRails("test-key"),
+		MerchantSecrets:      secretStore,
+		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
 			client, err := nmi.NewClient(provider, cfg, testMode)
 			if err != nil {

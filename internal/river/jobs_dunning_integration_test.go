@@ -199,8 +199,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	client.QueryURL = srv.URL
 
 	worker := &DunningWorker{
-		DB:         dbi,
-		NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client},
+		DB:          dbi,
+		NMIResolver: fakeDunningNMIResolver{client: client},
 	}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -336,7 +336,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client}}
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

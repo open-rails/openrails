@@ -5,6 +5,7 @@ package money_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -85,7 +86,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	// point is a real test-mode invoice write.
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccountID, Stripe: &config.StripeRailConfig{SecretKey: storeCreds.SecretKey}},
 		},
 	}

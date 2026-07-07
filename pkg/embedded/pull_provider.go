@@ -137,24 +137,20 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			explicitBindings[provider] = binding
 		}
 
-		// #699: fetchers arm from the merchant-secrets store for this merchant
-		// (boot-config rails as fallback) — a manifest-seeded host pulls with no
-		// process-wide rail set. An explicit --provider-account pins that rail to
-		// the named account (archived accounts stay addressable for drain, #655).
+		// #699/#788: fetchers arm from the merchant's armed rail state
+		// (rail_merchant_accounts + secret store) — the ONLY credential plane.
+		// An explicit --provider-account pins that rail to the named account
+		// (archived accounts stay addressable for drain, #655).
 		armed := reconcile.MerchantFetcherBuilder{
-			Config:         rt.Config,
-			Rails:          rt.Rails,
-			Merchants:      rt.Merchants,
-			DB:             rt.DB,
-			NMIClients:     rt.NMIClients,
-			CCBillDataLink: rt.CCBillDataLink,
-			SolanaRPC:      rt.SolanaRPC,
-			AccountIDs:     accountPins,
-			Endpoints:      opts.Endpoints,
+			Config:     rt.Config,
+			Merchants:  rt.Merchants,
+			DB:         rt.DB,
+			AccountIDs: accountPins,
+			Endpoints:  opts.Endpoints,
 		}.Build(ctx, merchantID)
 		fetchers := armed.Fetchers
 		if len(fetchers) == 0 {
-			return fmt.Errorf("no payment providers configured for reconciliation (no merchant-store provider secrets and no boot-config rails)")
+			return fmt.Errorf("no payment providers configured for reconciliation (no armed rail accounts for this merchant)")
 		}
 		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(explicitBindings))
 		for provider, binding := range explicitBindings {

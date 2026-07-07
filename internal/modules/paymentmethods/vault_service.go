@@ -26,13 +26,14 @@ import (
 type VaultService struct {
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
-	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.RailMerchantAccountSecretResolver
-	ProviderScopes       merchants.RailMerchantAccountScopeResolver
-	Config               *config.Config
-	Rails                config.RailMerchantAccountSet
-	DB                   *db.DB
+	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
+	// (test seam; empty = real endpoints).
+	NMIEndpointOverride string
+	ProviderSecrets     merchants.RailMerchantAccountSecretResolver
+	ProviderScopes      merchants.RailMerchantAccountScopeResolver
+	Config              *config.Config
+	DB                  *db.DB
 	// DeleteIntents routes DeleteVault through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents VaultDeleteExecutor
@@ -146,13 +147,11 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
-		NMIClients:           nmiClients,
 		Config:               cfg,
-		Rails:                rails,
 		DB:                   dbx,
 		clock:                timeutil.FirstClock(clocks...),
 	}
@@ -294,17 +293,6 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 		return client, &scope.ID, nil
 	}
 
-	if s != nil && s.NMIClients != nil {
-		if client := s.NMIClients[provider]; client != nil {
-			return client, nil, nil
-		}
-	}
-	if rails.IsNMI(models.Rail(provider)) {
-		if proc := s.activeNMIConfig(); proc != nil {
-			client, err := s.buildNMIClient(provider, proc.ToNMIProviderSettings())
-			return client, nil, err
-		}
-	}
 	return nil, nil, errors.New("missing client")
 }
 
@@ -312,11 +300,6 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	provider := strings.TrimSpace(scope.AccountID)
 	if provider == "" {
 		return nil, errors.New("provider account_id required")
-	}
-	if s != nil && s.NMIClients != nil {
-		if client := s.NMIClients[provider]; client != nil {
-			return client, nil
-		}
 	}
 	if s == nil || s.MerchantSecrets == nil {
 		return nil, errors.New("missing scoped merchant NMI secret for provider account")
@@ -340,18 +323,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	if value == "" {
 		return nil, errors.New("missing scoped merchant NMI secret for provider account")
 	}
-	proc := cloneRailConfig(s.railConfig(scope.AccountID))
-	if proc == nil {
-		proc = cloneRailConfig(s.activeNMIConfig())
-	}
-	if proc == nil {
-		proc = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
-	}
-	proc.Rail = models.RailNMI
-	if proc.NMI == nil {
-		proc.NMI = &config.NMIRailConfig{}
-	}
-	proc.NMI.SecurityKey = value
+	proc := &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
 	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
 }
 
@@ -360,39 +332,16 @@ func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSe
 	if s != nil && s.newNMIClient != nil {
 		return s.newNMIClient(provider, cfg, testMode)
 	}
-	return nmi.NewClient(provider, cfg, testMode)
-}
-
-func (s *VaultService) railConfig(name string) *config.RailMerchantAccountConfig {
-	if s == nil {
-		return nil
+	client, err := nmi.NewClient(provider, cfg, testMode)
+	if err != nil {
+		return nil, err
 	}
-	return s.Rails.GetRail(name)
-}
-
-// activeNMIConfig returns the configured active NMI provider account, if any.
-func (s *VaultService) activeNMIConfig() *config.RailMerchantAccountConfig {
-	if s == nil {
-		return nil
+	if s != nil && s.NMIEndpointOverride != "" {
+		client.DirectPostURL = s.NMIEndpointOverride
+		client.QueryURL = s.NMIEndpointOverride
+		client.V5BaseURL = s.NMIEndpointOverride
 	}
-	_, proc, _ := s.Rails.ActiveRailByType(models.RailNMI)
-	return proc
-}
-
-func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantAccountConfig {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	if in.Solana != nil && in.Solana.Tokens != nil {
-		out.Solana = &config.SolanaRailConfig{}
-		*out.Solana = *in.Solana
-		out.Solana.Tokens = make(map[string]config.TokenConfig, len(in.Solana.Tokens))
-		for k, v := range in.Solana.Tokens {
-			out.Solana.Tokens[k] = v
-		}
-	}
-	return &out
+	return client, nil
 }
 
 func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {

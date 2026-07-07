@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -80,16 +79,14 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, gatewayURL string) *money.MerchantCollectionAdapterBuilder {
 	return &money.MerchantCollectionAdapterBuilder{
 		Config:      cfg,
-		Rails:       nil, // boot plane empty inside the builder: store only
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return svc },
 		Endpoints:   money.CollectionEndpoints{NMIDirectPostURL: gatewayURL, NMIQueryURL: gatewayURL},
 	}
 }
 
-func storeArmedRebillRunner(fx rebillFixture, boot map[string]*nmi.NMIClient, resolver money.NMIClientResolver, cfg *config.Config) *Runner {
-	h := NewManualRebillHandler(fx.db, cfg, boot, nil)
-	h.SetNMIClientResolver(resolver)
+func storeArmedRebillRunner(fx rebillFixture, resolver money.NMIClientResolver, cfg *config.Config) *Runner {
+	h := NewManualRebillHandler(fx.db, cfg, resolver, nil)
 	return &Runner{Store: fx.store, Registry: NewRegistry(h), Config: cfg}
 }
 
@@ -109,7 +106,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 		map[string]string{"security_key": storeKey})
 
 	cfg := storeRebillConfig()
-	runner := storeArmedRebillRunner(fx, nil, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
+	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
 	params := fx.enqueueParams(1)
 	params.RailMerchantAccountID = &accountRowID // #704 provenance stamp (what dunning enqueues)
@@ -134,8 +131,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	accountRowID := seedNMIRailAccountForRebill(t, fx.db, msvc, "gw-secretless-"+sfx, nil)
 
 	cfg := storeRebillConfig()
-	boot := map[string]*nmi.NMIClient{"mobius": bootClient} // must NOT be reached
-	runner := storeArmedRebillRunner(fx, boot, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
+	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
 	params.RailMerchantAccountID = &accountRowID
@@ -149,10 +145,10 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 }
 
-// TestManualRebillNoStoreRow_FallsBackToBootClients: a merchant with no
-// declared NMI account charges through the boot-plane Clients map (embedded
-// hosts' model).
-func TestManualRebillNoStoreRow_FallsBackToBootClients(t *testing.T) {
+// TestManualRebillNoStoreRow_ParksFailClosed (#788): a merchant with no
+// declared NMI account has no armed rail — the charge parks on the ledger,
+// never fires, never falls back to any other credential plane.
+func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, bootClient := newFakeNMIRebillGateway(t)
 
@@ -164,13 +160,13 @@ func TestManualRebillNoStoreRow_FallsBackToBootClients(t *testing.T) {
 	liveCfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}
 
 	cfg := storeRebillConfig()
-	boot := map[string]*nmi.NMIClient{"mobius": bootClient}
-	runner := storeArmedRebillRunner(fx, boot, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)
+	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
-	assert.Equal(t, StatusSucceeded, row.Status)
-	assert.EqualValues(t, 1, fake.saleCalls.Load())
-	assert.Equal(t, "test_security_key", fake.saleAuthKey.Load(), "boot client served the merchant with no store row")
-	assert.Equal(t, "active", string(fx.subscription(t).Status))
+	assert.Equal(t, StatusPending, row.Status, "unarmed rail parks, never charges")
+	require.NotNil(t, row.LastFailureReason)
+	assert.Contains(t, *row.LastFailureReason, "not armed")
+	assert.Zero(t, fake.saleCalls.Load(), "fail-closed must never charge through another plane")
+	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 }

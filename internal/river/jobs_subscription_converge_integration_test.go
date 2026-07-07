@@ -478,7 +478,7 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 
 	worker := buildConvergeWorker(dbi, "")
 	worker.StripeProber = nil
-	worker.NMIClients = map[string]*nmi.NMIClient{"nmi": nmiClient}
+	worker.NMIResolver = fakeDunningNMIResolver{client: nmiClient}
 	workers := river.NewWorkers()
 	require.NoError(t, river.AddWorkerSafely(workers, worker))
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
@@ -512,7 +512,6 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 		DB:                   dbi,
 		DeduplicationService: webhooks.NewDeduplicationService(nil, dbi),
 		ConvergeEnqueuer:     &SubscriptionConvergeEnqueuer{Client: client, Debounce: 200 * time.Millisecond},
-		NMIClients:           map[string]*nmi.NMIClient{"nmi": nmiClient},
 	}
 	verified := true
 	msg := &webhooks.WebhookMessage{

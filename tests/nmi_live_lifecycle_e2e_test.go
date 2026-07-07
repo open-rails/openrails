@@ -196,24 +196,11 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	// The checkout money path resolves the NMI client from MERCHANT SECRETS
 	// first (production posture); the suite seeds a placeholder key there, so
 	// overwrite it with the real sandbox key or every charge 401s at NMI.
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIRailMerchantAccountID, "security_key")
+	secretName, err := merchants.RailMerchantAccountSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIRailMerchantAccountID(), "security_key")
 	require.NoError(t, err)
 	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
 	require.NoError(t, err)
 
-	rt.NMIClients[nmiE2EProvider] = client
-	if rt.SubscriptionService != nil {
-		rt.SubscriptionService.NMIClients = rt.NMIClients
-	}
-	if rt.VaultService != nil {
-		rt.VaultService.NMIClients = rt.NMIClients
-	}
-	if rt.CheckoutService != nil {
-		rt.CheckoutService.NMIClients = rt.NMIClients
-		if rt.CheckoutService.NMISaleService != nil {
-			rt.CheckoutService.NMISaleService.NMIClients = rt.NMIClients
-		}
-	}
 	return client
 }
 

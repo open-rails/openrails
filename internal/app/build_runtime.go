@@ -23,13 +23,9 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -53,6 +49,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
@@ -84,7 +81,6 @@ type runtimeOverrides struct {
 	DB    *db.DB
 	Redis *redis.Client
 	Clock clockwork.Clock
-	Rails config.RailMerchantAccountSet
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -95,76 +91,6 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 		return "devnet"
 	}
 	return "mainnet"
-}
-
-// configureSolanaRail normalizes the Solana token set and applies the
-// pricing policy (#360). It NEVER fails the boot over token configuration —
-// tokens that cannot function are dropped with a loud warning:
-//
-//   - devnet (test_mode): NO pricing requirements at all — devnet money is fake.
-//   - mainnet, Pyth feed exists for the symbol: feed pricing (for stablecoins
-//     the feed is the depeg failsafe).
-//   - mainnet, known USD-pegged stablecoin mint without a feed: kept, priced
-//     at $1.00 parity, LOUD warning (no depeg protection).
-//   - mainnet, non-USD-pegged stablecoin (e.g. EURC) or unknown token without
-//     a feed: that TOKEN is disabled with a loud warning; everything else
-//     keeps working.
-//
-// The error return is retained for signature stability; it is always nil.
-func configureSolanaRail(cfg *config.Config, rails config.RailMerchantAccountSet) error {
-	proc := rails.GetSolanaRail()
-	if proc == nil {
-		return nil
-	}
-	if proc.Solana == nil {
-		proc.Solana = &config.SolanaRailConfig{}
-	}
-	proc.Solana.Network = effectiveSolanaNetwork(cfg)
-	if len(proc.Solana.Tokens) == 0 {
-		proc.Solana.Tokens = solanatokens.ForNetwork(proc.Solana.Network)
-	}
-
-	normalized := make(map[string]config.TokenConfig, len(proc.Solana.Tokens))
-	for symbol, token := range proc.Solana.Tokens {
-		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
-		if normalizedSymbol == "" {
-			log.Warn("⚠️  solana token with empty symbol in configuration; entry dropped")
-			continue
-		}
-		if strings.TrimSpace(token.Mint) == "" {
-			log.Warnf("⚠️  solana token %s has no mint configured; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
-			continue
-		}
-		if token.Decimals < 0 {
-			log.Warnf("⚠️  solana token %s has invalid decimals (%d); payments in %s unavailable", normalizedSymbol, token.Decimals, normalizedSymbol)
-			continue
-		}
-		if strings.TrimSpace(token.Name) == "" {
-			token.Name = normalizedSymbol
-		}
-
-		// Pricing policy applies to MAINNET only: devnet money is fake, so a
-		// devnet deployment never needs price feeds (or Hermes) at all.
-		if proc.Solana.Network != "devnet" {
-			switch decision, sc := solanatokens.ClassifyPricing(normalizedSymbol, token.Mint); decision {
-			case solanatokens.TokenPricingFeed:
-				// Live Pyth pricing; for stablecoins the feed doubles as the
-				// depeg failsafe.
-			case solanatokens.TokenPricingUSDParity:
-				log.Warnf("⚠️  solana token %s has no pyth price feed; degrading to $1.00 USD parity (known USD-pegged stablecoin, NO depeg protection)", normalizedSymbol)
-			case solanatokens.TokenPricingDisabled:
-				if sc.Symbol != "" {
-					log.Warnf("⚠️  solana token %s is pegged to %s and has no price feed; payments in %s unavailable (cannot default a non-USD peg to USD parity)", normalizedSymbol, strings.ToUpper(sc.Peg), normalizedSymbol)
-				} else {
-					log.Warnf("⚠️  solana token %s has no pyth price feed and is not a known stablecoin; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
-				}
-				continue
-			}
-		}
-		normalized[normalizedSymbol] = token
-	}
-	proc.Solana.Tokens = normalized
-	return nil
 }
 
 // devnetParityPriceProvider wraps the Pyth client under test_mode (#360).
@@ -188,10 +114,10 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 	return 1.0, nil
 }
 
-func createPythPriceProvider(cfg *config.Config, rails config.RailMerchantAccountSet) (solanamodule.TokenPriceProvider, error) {
-	if rails.GetSolanaRail() == nil {
-		return nil, nil
-	}
+func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvider, error) {
+	// Always constructed (#788): whether a merchant's Solana rail is armed is
+	// per-merchant runtime state, not boot config; the client is a cheap
+	// lazily-used HTTP wrapper.
 	// Pyth is not configurable (#352): Hermes URL, freshness bounds and the
 	// price-feed map are protocol constants.
 	hermesURL := solanatokens.DefaultPythHermesURL
@@ -218,14 +144,6 @@ func createPythPriceProvider(cfg *config.Config, rails config.RailMerchantAccoun
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
-	var railSet config.RailMerchantAccountSet
-	if overrides != nil {
-		railSet = overrides.Rails
-	}
-	if err := config.ValidateRailSet(cfg, railSet); err != nil {
-		return nil, err
-	}
-
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
@@ -274,23 +192,38 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		return nil, err
 	}
 
-	ccbillClient := createCCBillClient(cfg, railSet)
-	ccbillRESTClient := createCCBillRESTClient(railSet)
-	ccbillDataLinkClient := createCCBillDataLinkClient(cfg, railSet)
-	nmiClients, err := createNMIClients(cfg, railSet, database)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create nmi clients: %w", err)
-	}
-
-	if err := configureSolanaRail(cfg, railSet); err != nil {
-		return nil, err
-	}
-	solanaPriceProvider, err := createPythPriceProvider(cfg, railSet)
+	solanaPriceProvider, err := createPythPriceProvider(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	serviceInstances := createServices(database, cfg, railSet, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
+	// #788 Layer C: ONE rail resolution seam for the whole runtime. The
+	// merchants service late-binds (EnsureMerchantsService / manifest
+	// provisioning / the standalone server arm it after build), so every
+	// resolver closes over the runtime pointer assigned below.
+	var runtimeRef *Runtime
+	merchantsFn := func() *merchants.Service {
+		if runtimeRef == nil {
+			return nil
+		}
+		return runtimeRef.Merchants
+	}
+	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
+	// #725/#730/#788: the ONE store-armed per-merchant credential builder
+	// (arrears/top-up adapters, manual-rebill + cancel NMI clients).
+	collectionResolver := &money.MerchantCollectionAdapterBuilder{
+		Config:      cfg,
+		DB:          database,
+		MerchantsFn: merchantsFn,
+	}
+	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
+	// request-plane transaction builds).
+	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
+		Config:      cfg,
+		MerchantsFn: merchantsFn,
+	}
+
+	serviceInstances := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -340,28 +273,20 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		)
 	}
 
-	// Boot-plane collection adapters (embedded hosts' rail set). #725 attaches
-	// the per-merchant store resolver right after the runtime literal below.
-	moneyCharger := money.NewScopedCharger(database, func() map[string]money.CollectionAdapter {
-		adapters := money.NewNMICollectionAdapters(nmiClients)
-		adapters[string(models.RailStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg, Rails: railSet})
-		return adapters
-	}())
+	// #725/#788: collection adapters arm PER MERCHANT from the armed rail
+	// state at charge time — no boot adapter map exists anymore.
+	moneyCharger := money.NewScopedCharger(database, nil)
 
 	runtime := &Runtime{
 		DB:          database,
 		RedisClient: redisClient,
 		Config:      cfg,
-		Rails:       railSet,
 		Clock:       clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
 		// empty cfg.TrustedProxies yields a resolver that trusts nothing.
 		TrustedProxies:       iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
-		CCBillClient:         ccbillClient,
-		CCBillRESTClient:     ccbillRESTClient,
-		CCBillDataLink:       ccbillDataLinkClient,
-		NMIClients:           nmiClients,
+		RailConfigs:          railConfigs,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
 		ProductService:           serviceInstances.ProductService,
@@ -375,7 +300,6 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
-		SolanaRPC:                serviceInstances.SolanaRPC,
 		SolanaPriceProvider:      solanaPriceProvider,
 		FXProvider:               serviceInstances.FXProvider,
 		FXRateRefresher:          serviceInstances.FXRateRefresher,
@@ -412,31 +336,14 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		runtime.ManifestSecrets = merchants.NewManifestSecretStore()
 	}
 
-	// #725: the arrears/top-up collection path resolves rail credentials PER
-	// MERCHANT from the merchant-secrets store at charge time (store wins; the
-	// boot adapters above serve only merchants with no declared account).
-	// Merchants late-binds — EnsureMerchantsService / the standalone server set
-	// it after build. The SAME builder arms manual-rebill NMI clients (#730)
-	// via Runtime.CollectionResolver.
-	runtime.CollectionResolver = &money.MerchantCollectionAdapterBuilder{
-		Config:      cfg,
-		Rails:       railSet,
-		DB:          database,
-		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
-	}
-	moneyCharger.SetAdapterResolver(runtime.CollectionResolver)
-
-	// #728: the process-wide Solana services (payment poller, recurring crank,
-	// intent verify legs) arm their RPC PER MERCHANT at use time — store
-	// rail-account settings win, the boot client serves merchants with no
-	// declared account. Merchants late-binds like the #725 builder above.
-	runtime.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{
-		Config:      cfg,
-		Boot:        serviceInstances.SolanaRPC,
-		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
-	}
+	// Arm the late-bound resolvers built above (#788): they close over
+	// runtimeRef, so every post-boot Merchants bind is visible immediately.
+	runtimeRef = runtime
+	runtime.CollectionResolver = collectionResolver
+	moneyCharger.SetAdapterResolver(collectionResolver)
+	runtime.SolanaRPCResolver = solanaRPCResolver
 	if serviceInstances.SolanaPayPoller != nil {
-		serviceInstances.SolanaPayPoller.SetMerchantRPC(runtime.SolanaRPCResolver)
+		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
 
 	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
@@ -585,103 +492,6 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	return nil
 }
 
-func createNMIClients(cfg *config.Config, rails config.RailMerchantAccountSet, database *db.DB) (map[string]*nmi.NMIClient, error) {
-	clients := make(map[string]*nmi.NMIClient)
-
-	nmiRails := rails.ByRail(models.RailNMI)
-	if len(nmiRails) == 0 {
-		return clients, nil
-	}
-
-	// #641: one client per configured NMI account, keyed by its operator-declared
-	// account_id (gateway-id). Multiple NMI accounts per deployment are supported;
-	// the primary is aliased under the rail key below for back-compat resolution.
-	for _, procConfig := range nmiRails {
-		accountID := procConfig.EffectiveAccountID()
-		if accountID == "" {
-			return nil, fmt.Errorf("nmi provider account is missing account_id (the rail-native gateway id)")
-		}
-		if _, exists := clients[accountID]; exists {
-			return nil, fmt.Errorf("duplicate NMI provider account_id %q", accountID)
-		}
-
-		// The client's identity IS its account_id (#641). TestMode set by caller.
-		settings := procConfig.ToNMIProviderSettings()
-		if settings.SecurityKey == "" {
-			return nil, fmt.Errorf("nmi provider account %q security key is required", accountID)
-		}
-		if settings.WebhookSecret == "" {
-			log.Warnf("nmi provider account %q webhook secret is not configured; signature validation will be disabled", accountID)
-		}
-
-		client, err := nmi.NewClient(accountID, settings, cfg.IsTestMode())
-		if err != nil {
-			return nil, err
-		}
-		client.ReadOnly = cfg.IsProviderReadOnly()
-
-		clients[accountID] = client
-	}
-
-	// #348: test_mode guarantees sandbox money, but NMI accounts are
-	// undetectable by configuration (sandbox hits the same gateway URL, the key
-	// carries no marker). Probe instead: only a simulating account can approve
-	// the non-issued test card, so a decline proves PRODUCTION credentials —
-	// refuse to start. Probe errors (offline dev, bad credentials) are
-	// inconclusive and only warn.
-	//
-	// Probe-cooldown cache (#348 tail): conclusive verdicts persist in
-	// openrails.probe_verdicts keyed by sha256(security key). A fresh 'live'
-	// verdict refuses the boot from cache (a crash-looping supervisor stops
-	// paying one declined auth per restart); a fresh 'simulated' verdict skips
-	// the probe. A rotated key or a stale verdict always re-probes, and cache
-	// failures degrade to probing.
-	if cfg.IsTestMode() {
-		for providerKey, client := range clients {
-			if client.SecurityKey == "" {
-				continue // unconfigured dev client, nothing to verify
-			}
-			keyHash := probeKeyHash(client.SecurityKey)
-			if verdict, checkedAt, ok := lookupProbeVerdict(database, providerKey, keyHash); ok {
-				switch probeCacheDecision(verdict, checkedAt, time.Now()) {
-				case probeCacheRefuseBoot:
-					return nil, fmt.Errorf("rail %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_mode)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
-				case probeCacheSkipProbe:
-					log.Infof("rail %q: NMI account verified as simulating (cached probe verdict from %s; #348 probe cooldown, no probe sent)", providerKey, checkedAt.UTC().Format(time.RFC3339))
-					continue
-				}
-			}
-			result, probeErr := client.ProbeTestMode()
-			switch result {
-			case nmi.ProbeLive:
-				storeProbeVerdict(database, providerKey, keyHash, probeVerdictLive)
-				return nil, fmt.Errorf("rail %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_mode)", providerKey)
-			case nmi.ProbeSimulated:
-				storeProbeVerdict(database, providerKey, keyHash, probeVerdictSimulated)
-				log.Infof("rail %q: NMI account verified as simulating (test env)", providerKey)
-			default:
-				// Indeterminate verdicts are never cached: the next boot
-				// re-probes once the transport/credential issue clears.
-				log.WithError(probeErr).Warnf("⚠️  rail %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode", providerKey)
-			}
-		}
-	}
-
-	// Also expose the active account under the rail key "nmi" so existing
-	// NMIClients["nmi"] consumers keep resolving it. Provider-account-specific
-	// callers should use observed provider identity instead.
-	railKey := string(models.RailNMI)
-	_, active, err := rails.ActiveRailByType(models.RailNMI)
-	if err != nil {
-		return nil, err
-	}
-	if active != nil {
-		clients[railKey] = clients[active.EffectiveAccountID()]
-	}
-
-	return clients, nil
-}
-
 func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	if cfg.Redis == nil {
 		return nil, nil
@@ -734,47 +544,6 @@ func webhookDedupPostureWarning(cfg *config.Config, embeddedHost bool) string {
 	)
 }
 
-func createCCBillClient(cfg *config.Config, rails config.RailMerchantAccountSet) *ccbill.CCBillClient {
-	ccbillProc := rails.GetCCBillRail()
-	if ccbillProc == nil {
-		log.Info("CCBill config missing; CCBill integration disabled")
-		return nil
-	}
-
-	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
-}
-
-func createCCBillRESTClient(rails config.RailMerchantAccountSet) *ccbill.RESTClient {
-	ccbillProc := rails.GetCCBillRail()
-	if ccbillProc == nil {
-		return nil
-	}
-	return ccbill.NewRESTClient(ccbillProc.ToCCBillConfig())
-}
-
-func createCCBillDataLinkClient(cfg *config.Config, rails config.RailMerchantAccountSet) *ccbill.DataLinkClient {
-	ccbillProc := rails.GetCCBillRail()
-	if ccbillProc == nil {
-		return nil
-	}
-	ccbillConfig := ccbillProc.ToCCBillConfig()
-	if ccbillProc.CCBill == nil || ccbillProc.CCBill.DataLinkUsername == "" || ccbillProc.CCBill.DataLinkPassword == "" || ccbillConfig.ClientAccNum == "" {
-		log.Info("CCBill DataLink credentials missing; DataLink worker disabled")
-		return nil
-	}
-
-	ccbillConfig.TestMode = cfg.IsTestMode()
-	client := ccbill.NewDataLinkClient(ccbillConfig)
-	// #696: SMS mutations (cancelSubscription) are blocked at the transport
-	// under mode=readonly, mirroring the NMI clients.
-	client.ReadOnly = cfg.IsProviderReadOnly()
-	if err := client.ValidateConfig(); err != nil {
-		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")
-		return nil
-	}
-	return client
-}
-
 type servicesInstances struct {
 	SubscriptionService *subscriptions.SubscriptionService
 
@@ -789,7 +558,6 @@ type servicesInstances struct {
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
-	SolanaRPC                *solana.RPCClient
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
 	FXRateRefresher          interface {
@@ -835,7 +603,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return base
 }
 
-func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerchantAccountSet, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -902,18 +670,9 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, railSet, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
-	var solanaRPC *solana.RPCClient
-	if solanaProc := railSet.GetSolanaRail(); solanaProc != nil && solanaProc.Solana != nil {
-		solanaNetwork := effectiveSolanaNetwork(cfg)
-		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
-			RPCProvider: solanaProc.Solana.RPCProvider,
-			RPCAPIKey:   solanaProc.Solana.RPCAPIKey,
-			Network:     solanaNetwork,
-			ReadOnly:    cfg.IsProviderReadOnly(),
-		})
-	}
-	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider, clock)
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, railConfigs, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
+	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, nil, cfg, priceService, fxProvider, clock)
+	solanaTransactionService.SetMerchantRPC(solanaRPCResolver)
 
 	subscriptionLifecycleService := subscriptions.NewSubscriptionLifecycleService(
 		database,
@@ -930,8 +689,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		database,
 		priceService,
 		productService,
-		ccbillRESTClient,
-		nmiClients,
 		paymentMethodService,
 		clock,
 	)
@@ -966,7 +723,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		Clock:    clock,
 	})
 
-	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
+	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
@@ -982,7 +739,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		purchaseService,
 		notificationService,
 		entitlementService,
-		nmiClients,
+		collectionResolver,
 		clock,
 	)
 
@@ -998,10 +755,10 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		entitlementService,
 		notificationService,
 		purchaseService,
-		nmiClients,
+		collectionResolver,
 		clock,
 	)
-	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railSet}
+	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railConfigs}
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
@@ -1018,8 +775,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		ProfileRepo:                  profileRepo,
 		DeduplicationService:         deduplicationService,
 		RailCustomerService:          railCustomerService,
-		CCBillRESTClient:             ccbillRESTClient,
-		NMIClients:                   nmiClients,
+		RailConfigs:                  railConfigs,
 		MoneyService:                 moneyService,
 	}
 
@@ -1033,10 +789,9 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		paymentMethodService,
 		vaultService,
 		idempotencyService,
-		nmiClients,
 		railCustomerService,
 		cfg,
-		railSet,
+		railConfigs,
 		clock,
 	)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
@@ -1060,7 +815,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		fxProvider,
 		solanaPriceProvider,
 		cfg,
-		railSet,
+		railConfigs,
 		clock,
 	)
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
@@ -1071,7 +826,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		database,
 		redisClient,
 		cfg,
-		railSet,
 		solanaPayService,
 		solanaTransactionService,
 		&solanaPurchaseRegistrarAdapter{service: checkoutService},
@@ -1092,7 +846,6 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,
-		SolanaRPC:                    solanaRPC,
 		SolanaPriceProvider:          solanaPriceProvider,
 		FXProvider:                   fxProvider,
 		FXRateRefresher:              fxRateRefresher,

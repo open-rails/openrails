@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"sort"
 	"strconv"
 	"strings"
@@ -387,19 +389,33 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 }
 
 // syncSecondaryCatalogAccounts best-effort find-or-creates the price in each
-// active account on a rail. No links stored; find-or-create re-discovers by
-// content key and failures are logged.
+// of the ctx merchant's non-archived declared accounts on a rail (#788: the
+// armed rail_merchant_accounts state, never a boot artifact). No links
+// stored; find-or-create re-discovers by content key and failures are logged.
 func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
-	if s.rt == nil {
+	if s.rt == nil || s.rt.DB == nil {
 		return
 	}
-	for _, key := range s.rt.Rails.ActiveRailKeysByType(models.Rail(rail)) {
-		acct := s.rt.Rails[key]
-		if acct == nil {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return
+	}
+	railName := strings.ToLower(strings.TrimSpace(rail))
+	rows, err := s.rt.DB.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+		MerchantID: mid.UUID(),
+		Rail:       &railName,
+	})
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("rail", rail).
+			Warn("secondary catalog sync: list declared accounts failed")
+		return
+	}
+	for _, acct := range rows {
+		if acct.Archived {
 			continue
 		}
 		sctx := pctx
-		sctx.TargetAccountID = acct.EffectiveAccountID()
+		sctx.TargetAccountID = strings.TrimSpace(acct.AccountID)
 		if _, err := adapter.AutoCreate(ctx, sctx); err != nil && !errors.Is(err, errPendingManualLink) {
 			log.WithContext(ctx).WithError(err).
 				WithField("rail", rail).

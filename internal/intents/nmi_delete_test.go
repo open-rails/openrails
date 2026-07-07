@@ -53,7 +53,7 @@ func TestNMIDeleteIdempotencyKeyIsDeterministic(t *testing.T) {
 func TestNMIDeleteExecuteReadOnlyClientParks(t *testing.T) {
 	client := newTestNMIClient(t, "")
 	client.ReadOnly = true
-	h := NewNMIDeleteHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": client}, nil)
+	h := NewNMIDeleteHandler(nil, nil, fakeNMIResolver{client: client}, nil)
 
 	out := h.Execute(context.Background(), nmiDeleteIntent())
 	assert.Equal(t, OutcomeParked, out.Class)
@@ -61,14 +61,14 @@ func TestNMIDeleteExecuteReadOnlyClientParks(t *testing.T) {
 }
 
 func TestNMIDeleteExecuteMissingClientParks(t *testing.T) {
-	h := NewNMIDeleteHandler(nil, nil, map[string]*nmi.NMIClient{}, nil)
+	h := NewNMIDeleteHandler(nil, nil, fakeNMIResolver{}, nil)
 	out := h.Execute(context.Background(), nmiDeleteIntent())
 	assert.Equal(t, OutcomeParked, out.Class, "missing client is a wiring/credentials problem, not a failure")
-	assert.Contains(t, out.Reason, "not configured")
+	assert.Contains(t, out.Reason, "not armed")
 }
 
 func TestNMIDeleteVerifyMissingClientStaysAmbiguous(t *testing.T) {
-	h := NewNMIDeleteHandler(nil, nil, map[string]*nmi.NMIClient{}, nil)
+	h := NewNMIDeleteHandler(nil, nil, fakeNMIResolver{}, nil)
 	out := h.Verify(context.Background(), nmiDeleteIntent())
 	assert.Equal(t, OutcomeAmbiguous, out.Class, "cannot verify without a client; stay unknown")
 }

@@ -159,7 +159,7 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	gateway, client := newFakeNMISwapGateway(t, railSubID, oldPM.RailCustomerRef)
 	runner := &Runner{
 		Store:    NewStore(dbi),
-		Registry: NewRegistry(NewNMIPaymentSourceUpdateHandler(dbi, map[string]*nmi.NMIClient{"mobius": client}, nil)),
+		Registry: NewRegistry(NewNMIPaymentSourceUpdateHandler(dbi, fakeNMIResolver{client: client}, nil)),
 	}
 	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)

@@ -33,6 +33,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -100,7 +101,6 @@ type CheckoutService struct {
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	VaultService         *paymentmethods.VaultService
 	IdempotencyService   checkoutIdempotencyStore
-	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchants.MerchantSecretReader
 	ProviderSecrets      merchants.RailMerchantAccountSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
@@ -115,7 +115,13 @@ type CheckoutService struct {
 	Intents intentExecutor
 	clock   clockwork.Clock
 	Config  *config.Config
-	Rails   config.RailMerchantAccountSet
+	Rails   railresolve.Source
+	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
+	// (test seam; empty = real endpoints).
+	NMIEndpointOverride string
+	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
+	// entirely (test seam; nil = the scoped resolution).
+	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -147,10 +153,9 @@ func NewCheckoutService(
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	vaultService *paymentmethods.VaultService,
 	idempotencyService checkoutIdempotencyStore,
-	nmiClients map[string]*nmi.NMIClient,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
-	railSet config.RailMerchantAccountSet,
+	railSet railresolve.Source,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
@@ -165,7 +170,6 @@ func NewCheckoutService(
 		PaymentMethodService: paymentMethodService,
 		VaultService:         vaultService,
 		IdempotencyService:   idempotencyService,
-		NMIClients:           nmiClients,
 		RailCustomerService:  railCustomerService,
 		StripeService:        &subscriptions.StripeService{Config: cfg, Rails: railSet},
 		clock:                clock,
@@ -177,8 +181,10 @@ func NewCheckoutService(
 		service.VaultResolver,
 		vaultService,
 		idempotencyService,
-		nmiClients,
 	)
+	// The scoped resolver is the ONLY NMI client source (#788); armed for
+	// real once SetMerchantSecretStore wires the merchant secret store.
+	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
 	return service
 }
 
@@ -1193,7 +1199,7 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	_, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
+	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -1269,7 +1275,7 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	_, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
+	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -1534,7 +1540,7 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Rails)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -2180,8 +2186,8 @@ func (s *CheckoutService) compensateFailedUpgrade(
 
 	// Refund the proration charge.
 	if prorationTransactionID != "" {
-		client, ok := s.NMIClients[provider]
-		if !ok || client == nil {
+		client, cerr := s.resolveNMIClient(ctx, provider)
+		if cerr != nil || client == nil {
 			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
 		} else if _, err := client.Refund(nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
 			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")

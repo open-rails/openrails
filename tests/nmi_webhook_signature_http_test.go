@@ -70,7 +70,7 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	// exact secret LoadNMIWebhookSigningSecret resolves on the merchant surface.
 	const signingSecret = "nmi-e2e-webhook-signing-secret"
 	nmiEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID, "webhook_signing_secret")
+	secretName, err := merchants.RailMerchantAccountSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID(), "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, secretName, signingSecret)
 	require.NoError(t, err)

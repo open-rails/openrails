@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 func intPtr(i int) *int { return &i }
@@ -23,17 +23,15 @@ func intPtr(i int) *int { return &i }
 // the given test server for both direct-post and query traffic.
 func newMobiusAdapterWithServer(t *testing.T, serverURL string) *nmiAdapter {
 	t.Helper()
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey: "test-security-key",
-	}, false)
-	if err != nil {
-		t.Fatalf("new nmi client: %v", err)
-	}
-	client.DirectPostURL = serverURL
-	client.QueryURL = serverURL
-	client.V5BaseURL = serverURL
-	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{"nmi": client}}}
-	return &nmiAdapter{svc: svc}
+	svc := &Service{rt: &app.Runtime{
+		Config: &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull},
+		RailConfigs: railresolve.FixedSet{"mobius": {
+			Rail:      models.RailNMI,
+			AccountID: "mobius",
+			NMI:       &config.NMIRailConfig{SecurityKey: "test-security-key"},
+		}},
+	}}
+	return &nmiAdapter{svc: svc, testEndpointURL: serverURL}
 }
 
 func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
@@ -140,38 +138,28 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 // account's NMI client (not the primary alias), so a catalog push reaches the
 // secondary account.
 func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
-	var primaryCalled, secondaryCalled bool
-	mkServer := func(flag *bool) *httptest.Server {
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodPost && r.URL.Path == "/plans" {
-				*flag = true
-				_, _ = w.Write([]byte(`{"object":"plan","id":"x"}`))
-				return
-			}
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
-		}))
-		t.Cleanup(s.Close)
-		return s
-	}
-	primarySrv := mkServer(&primaryCalled)
-	secondarySrv := mkServer(&secondaryCalled)
-
-	mkClient := func(url string) *nmi.NMIClient {
-		c, err := nmi.NewClient("acct", &config.NMIProviderSettings{SecurityKey: "k"}, false)
-		if err != nil {
-			t.Fatalf("new nmi client: %v", err)
+	// #788: clients arm from the armed rail state per account; the account a
+	// call targets is proven by the credential it arrives with.
+	var seenKeys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/plans" {
+			seenKeys = append(seenKeys, r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"object":"plan","id":"x"}`))
+			return
 		}
-		c.DirectPostURL = url
-		c.QueryURL = url
-		c.V5BaseURL = url
-		return c
-	}
-	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{
-		"nmi":    mkClient(primarySrv.URL),   // primary (rail-key alias)
-		"100002": mkClient(secondarySrv.URL), // secondary, keyed by account_id
-	}}}
-	a := &nmiAdapter{svc: svc}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"no plan"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := &Service{rt: &app.Runtime{
+		Config: &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull},
+		RailConfigs: railresolve.FixedSet{
+			"mobius": {Rail: models.RailNMI, AccountID: "100001", NMI: &config.NMIRailConfig{SecurityKey: "primary-key"}},
+			"backup": {Rail: models.RailNMI, AccountID: "100002", Archived: true, NMI: &config.NMIRailConfig{SecurityKey: "secondary-key"}},
+		},
+	}}
+	a := &nmiAdapter{svc: svc, testEndpointURL: srv.URL}
 
 	if _, err := a.AutoCreate(context.Background(), autoCreateContext{
 		PriceID: uuid.New(), ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000,
@@ -179,11 +167,13 @@ func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !secondaryCalled {
+	if len(seenKeys) == 0 {
 		t.Fatal("secondary account's client must receive the plan create")
 	}
-	if primaryCalled {
-		t.Fatal("primary account's client must NOT be called when targeting the secondary")
+	for _, k := range seenKeys {
+		if k != "Bearer secondary-key" && k != "secondary-key" {
+			t.Fatalf("plan create must carry the TARGET account's credential, got %q", k)
+		}
 	}
 }
 

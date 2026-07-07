@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 func manualRebillIntent(t *testing.T, payload ManualRebillPayload) gen.OpenrailsRailIntent {
@@ -62,17 +61,17 @@ func TestManualRebillIdempotencyKey(t *testing.T) {
 func TestManualRebillExecuteParksBeforeProviderTraffic(t *testing.T) {
 	intent := manualRebillIntent(t, testManualRebillPayload())
 
-	t.Run("no client for provider", func(t *testing.T) {
-		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{}, nil)
+	t.Run("unarmed rail parks", func(t *testing.T) {
+		h := NewManualRebillHandler(nil, nil, fakeNMIResolver{}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
-		assert.Contains(t, out.Reason, "not configured")
+		assert.Contains(t, out.Reason, "not armed")
 	})
 
 	t.Run("read-only client", func(t *testing.T) {
 		client := newTestNMIClient(t, "")
 		client.ReadOnly = true
-		h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": client}, nil)
+		h := NewManualRebillHandler(nil, nil, fakeNMIResolver{client: client}, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "read-only")
@@ -80,7 +79,7 @@ func TestManualRebillExecuteParksBeforeProviderTraffic(t *testing.T) {
 }
 
 func TestManualRebillUnusablePayloadIsTerminal(t *testing.T) {
-	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, "")}, nil)
+	h := NewManualRebillHandler(nil, nil, fakeNMIResolver{client: newTestNMIClient(t, "")}, nil)
 	intent := manualRebillIntent(t, testManualRebillPayload())
 	intent.Payload = []byte(`{}`)
 	out := h.Execute(context.Background(), intent)
@@ -132,9 +131,10 @@ func TestManualRebillFindSuccessfulSale(t *testing.T) {
 				fmt.Fprint(w, tc.xml)
 			}))
 			t.Cleanup(srv.Close)
-			h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
+			client := newTestNMIClient(t, srv.URL)
+			h := NewManualRebillHandler(nil, nil, fakeNMIResolver{client: client}, nil)
 
-			txnID, found, err := h.findSuccessfulSale(h.Clients["mobius"], p)
+			txnID, found, err := h.findSuccessfulSale(client, p)
 			require.NoError(t, err)
 			assert.Equal(t, p.OrderReference, gotOrderID, "query must filter by the period's order reference")
 			assert.Equal(t, tc.wantFound, found)
@@ -150,7 +150,7 @@ func TestManualRebillVerifyReadFailureStaysAmbiguous(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
-	h := NewManualRebillHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": newTestNMIClient(t, srv.URL)}, nil)
+	h := NewManualRebillHandler(nil, nil, fakeNMIResolver{client: newTestNMIClient(t, srv.URL)}, nil)
 	out := h.Verify(context.Background(), manualRebillIntent(t, testManualRebillPayload()))
 	assert.Equal(t, OutcomeAmbiguous, out.Class)
 }

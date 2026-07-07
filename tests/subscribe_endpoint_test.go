@@ -14,10 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 // MockNMIServer simulates the NMI Direct Post API for testing
@@ -222,47 +218,12 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 	suite := setupTestSuite(t, WithSuiteClock(clockwork.NewRealClock()))
 	mock := NewMockNMIServer()
 
-	// Create NMI client with mock server URL
-	nmiSettings := &config.NMIProviderSettings{
-		SecurityKey: "test-security-key",
-	}
-
-	client, err := nmi.NewClient("mobius", nmiSettings, true) // true = test mode (sandbox endpoints)
-	require.NoError(t, err)
-
-	// Override the DirectPostURL to point to mock server
-	client.DirectPostURL = mock.URL()
-	client.QueryURL = mock.URL()
-	client.V5BaseURL = mock.URL()
-
-	// Inject the mock client into the runtime
-	suite.App.Runtime.NMIClients = map[string]*nmi.NMIClient{
-		"nmi": client,
-	}
-
-	// Also update the subscription service's NMI clients
-	if suite.App.Runtime.SubscriptionService != nil {
-		suite.App.Runtime.SubscriptionService.NMIClients = suite.App.Runtime.NMIClients
-	}
-	if suite.App.Runtime.VaultService != nil {
-		suite.App.Runtime.VaultService.SetMerchantSecretStore(nil)
-		suite.App.Runtime.VaultService.SetRailMerchantAccountSecretResolver(nil)
-		suite.App.Runtime.VaultService.NMIClients = suite.App.Runtime.NMIClients
-	}
-	if suite.App.Runtime.CheckoutService != nil {
-		suite.App.Runtime.CheckoutService.SetMerchantSecretStore(nil)
-		suite.App.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(nil)
-		suite.App.Runtime.CheckoutService.NMIClients = suite.App.Runtime.NMIClients
-		if suite.App.Runtime.CheckoutService.NMISaleService != nil {
-			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients
-		}
-	}
-	// #729: the intent registry captured the boot-time client map; re-arm so
-	// the #674 write-through paths (payment-source swap, sale, vault delete)
-	// resolve the mock instead of the real sandbox.
-	suite.RearmIntentPlumbing()
+	// #788: every NMI consumer arms per charge from the armed rail state (the
+	// suite-seeded mobius account); only the gateway endpoint is overridden.
+	suite.SetNMIGateway(mock.URL())
 
 	t.Cleanup(func() {
+		suite.SetNMIGateway("")
 		mock.Close()
 	})
 

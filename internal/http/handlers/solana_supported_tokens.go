@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/models"
+	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"math"
 	"net/http"
 	"sort"
@@ -14,13 +18,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchants"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -85,37 +87,22 @@ type TokenBalance struct {
 // declared rail-account `settings` (store-wins, #699). This is how standalone
 // reaches the knobs — its boot plane is empty; the manifest declares them per
 // merchant. nil (with nil error) means no Solana account on either plane.
+// effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
+// config (#775/#788): the rail_merchant_accounts row's settings materialized
+// over the test_mode-derived network + curated token defaults. nil = not
+// armed (callers fail closed with their "not configured" errors).
 func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {
-	var base *config.SolanaRailConfig
-	if proc := r.State.Rails.GetSolanaRail(); proc != nil {
-		base = proc.Solana
+	if r.State.RailConfigs == nil {
+		return nil, nil
 	}
-	testMode := r.State.Config != nil && r.State.Config.IsTestMode()
-	if r.State.Merchants != nil {
-		if mid, err := merchant.Require(r.Request.Context()); err == nil {
-			env := config.ExpectedProviderEnvironment(testMode)
-			scope, ok, err := r.State.Merchants.ActiveRailMerchantAccountScope(r.Request.Context(), mid, "solana", env)
-			if err != nil && !errors.Is(err, merchants.ErrNoActiveRailMerchantAccount) {
-				return nil, fmt.Errorf("resolve merchant solana account: %w", err)
-			}
-			if ok {
-				settings, err := config.ParseSolanaAccountSettings(scope.Settings)
-				if err != nil {
-					return nil, err
-				}
-				out := settings.ApplyTo(base)
-				if out.Network == "" {
-					// Network is always derived from test_mode (#349).
-					out.Network = "mainnet"
-					if testMode {
-						out.Network = "devnet"
-					}
-				}
-				return out, nil
-			}
+	proc, err := r.State.RailConfigs.RailConfig(r.Request.Context(), string(models.RailSolana), "")
+	if err != nil {
+		if errors.Is(err, railresolve.ErrRailNotArmed) {
+			return nil, nil
 		}
+		return nil, fmt.Errorf("resolve merchant solana account: %w", err)
 	}
-	return base, nil
+	return proc.Solana, nil
 }
 
 func GetSupportedTokens(r *httprequest.Request) {
@@ -374,8 +361,28 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 	return resolvePriceFromID(ctx, r, session.PriceID)
 }
 
+// merchantSolanaRPC arms the ctx merchant's Solana RPC client through the
+// #728 resolver. nil = not armed (callers answer "unavailable" — fail closed).
+func merchantSolanaRPC(ctx context.Context, r *httprequest.Request) *solanarpc.RPCClient {
+	if r.State == nil || r.State.SolanaRPCResolver == nil {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil
+	}
+	client, err := r.State.SolanaRPCResolver.Resolve(ctx, mid)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("solana rpc resolution failed (fail closed)")
+		return nil
+	}
+	return client
+}
+
 func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr string, mints []string) (map[string]uint64, uint64, string) {
-	if r.State.SolanaRPC == nil {
+	// #788: chain reads arm from the ctx merchant's declared solana account.
+	rpc := merchantSolanaRPC(ctx, r)
+	if rpc == nil {
 		return nil, 0, "solana rpc unavailable"
 	}
 
@@ -384,12 +391,12 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 		return nil, 0, fmt.Sprintf("invalid wallet address: %v", err)
 	}
 
-	solBalance, err := r.State.SolanaRPC.GetBalance(ctx, wallet)
+	solBalance, err := rpc.GetBalance(ctx, wallet)
 	if err != nil {
 		log.WithError(err).Warn("Failed to fetch SOL balance")
 	}
 
-	tokenAccounts, err := r.State.SolanaRPC.GetTokenBalances(ctx, wallet, mints)
+	tokenAccounts, err := rpc.GetTokenBalances(ctx, wallet, mints)
 	if err != nil {
 		log.WithError(err).Warn("Failed to fetch token balances")
 		return nil, solBalance, ""

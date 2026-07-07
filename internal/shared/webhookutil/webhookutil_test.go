@@ -147,7 +147,6 @@ func TestPrepareCCBill(t *testing.T) {
 	require.Equal(t, subscriptions.RailCCBill, prepared.Rail)
 	require.Equal(t, "NewSaleSuccess", prepared.EventType)
 	require.JSONEq(t, `{"eventType":"NewSaleSuccess","subscriptionId":"123"}`, string(prepared.Body))
-	require.Equal(t, prepared.UniqueKey(), prepared.QueueArgs("127.0.0.1").UniqueKey)
 
 	_, err = PrepareCCBill([]byte("bad=%zz"), "NewSaleSuccess")
 	require.ErrorIs(t, err, ErrWebhookPayloadInvalid)

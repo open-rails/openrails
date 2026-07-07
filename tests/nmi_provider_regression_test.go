@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,33 +150,10 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	suite.Rails[provider] = &config.RailMerchantAccountConfig{
-		Rail: models.RailNMI,
-		NMI:  &config.NMIRailConfig{SecurityKey: "test-security-key-" + provider},
-	}
-
-	settings := &config.NMIProviderSettings{
-		SecurityKey: "test-security-key-" + provider,
-	}
-	client, err := nmi.NewClient(provider, settings, true)
-	require.NoError(t, err)
-	client.DirectPostURL = mock.URL()
-	client.QueryURL = mock.URL()
-	client.V5BaseURL = mock.URL()
-
-	suite.App.Runtime.NMIClients[provider] = client
-	if suite.App.Runtime.SubscriptionService != nil {
-		suite.App.Runtime.SubscriptionService.NMIClients = suite.App.Runtime.NMIClients
-	}
-	if suite.App.Runtime.VaultService != nil {
-		suite.App.Runtime.VaultService.NMIClients = suite.App.Runtime.NMIClients
-	}
-	if suite.App.Runtime.CheckoutService != nil {
-		suite.App.Runtime.CheckoutService.NMIClients = suite.App.Runtime.NMIClients
-		if suite.App.Runtime.CheckoutService.NMISaleService != nil {
-			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients
-		}
-	}
+	// #788: the secondary account arms as rail_merchant_accounts state; every
+	// consumer resolves it through the ONE seam. The mock gateway serves it.
+	suite.SeedNMIProviderAccount(t, provider, "test-security-key-"+provider)
+	suite.SetNMIGateway(mock.URL())
 
 	price := suite.GetPrice(priceID)
 	if price.Rails == nil {

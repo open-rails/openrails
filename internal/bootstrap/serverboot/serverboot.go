@@ -57,7 +57,6 @@ type Options struct {
 	ConsoleAssets fs.FS
 
 	ConfiguredMerchant merchant.ID
-	Rails              config.RailMerchantAccountSet
 }
 
 // NewServer constructs the application runtime and the HTTP server graph
@@ -71,7 +70,6 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 		Cache:              optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
 		Clock:              optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 		ConfiguredMerchant: optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
-		Rails:              optsValue(opts, func(o *Options) config.RailMerchantAccountSet { return o.Rails }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"strings"
 	"time"
 
@@ -52,15 +53,17 @@ func NMIDeleteIdempotencyKey(subscriptionID uuid.UUID) string {
 //   - on success the DeletionScheduledAt read model is cleared (the
 //     cancellation becomes destructive), exactly like the retired worker.
 type NMIDeleteHandler struct {
-	DB      *db.DB
-	Config  *config.Config
-	Clients map[string]*nmi.NMIClient
-	Clock   clockwork.Clock
-	Policy  BackoffPolicy
+	DB     *db.DB
+	Config *config.Config
+	// Resolver arms the intent merchant's NMI client from the armed rail
+	// state at drain time (#788).
+	Resolver money.NMIClientResolver
+	Clock    clockwork.Clock
+	Policy   BackoffPolicy
 }
 
-func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, clients map[string]*nmi.NMIClient, clock clockwork.Clock) *NMIDeleteHandler {
-	return &NMIDeleteHandler{DB: d, Config: cfg, Clients: clients, Clock: clock, Policy: DefaultBackoff}
+func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver money.NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
+	return &NMIDeleteHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *NMIDeleteHandler) Type() string { return TypeNMIDeleteSubscription }
@@ -93,9 +96,12 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Openra
 }
 
 func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Rail)]
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil {
+		return Parked("nmi rail not armable (fail closed): " + err.Error())
+	}
 	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Rail))
+		return Parked(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -149,9 +155,9 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // the delete (whenever it happened) is done; present means it definitely has
 // not happened and the executor may retry.
 func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Rail)]
-	if !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil || !ok || client == nil {
+		return Ambiguous(fmt.Sprintf("nmi rail not armed for provider %q; cannot verify", intent.Rail))
 	}
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {

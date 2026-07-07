@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -18,22 +17,14 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #699: the pull plane (provider refresh, unknown-cohort resolution, per-sub
-// probes, operator pulls) arms PER MERCHANT from the merchant-secrets store.
-//
-// Two credential planes exist post-#653/#667 and this file defines their ONE
-// precedence rule: MERCHANT-STORE FIRST, BOOT-CONFIG RAILS AS FALLBACK.
-//
-//   - A merchant that declares a rail account row (rail_merchant_accounts, the
-//     manifest-seeded catalog) resolves that rail from the store ONLY. Missing
-//     or incomplete secrets fail LOUD: the rail's fetcher/prober is simply
-//     absent and ONE WARN names the merchant, rail and missing secret — never a
-//     silent empty map, never a cross-plane fallback (mirrors the checkout
-//     write path's fail-closed rule).
-//   - A rail with no store row falls back to the boot-config rail set
-//     (embedded Options.PaymentProviders / standalone overrides).
-//   - Both planes armed with DIFFERING credentials → the store wins, with a
-//     WARN naming the conflict.
+// #699/#788: the pull plane (provider refresh, unknown-cohort resolution,
+// per-sub probes, operator pulls) arms PER MERCHANT from the armed rail state
+// (rail_merchant_accounts rows + the merchant secret store) — the ONE Layer-C
+// resolution seam. There is no boot-config plane anymore: a rail with no
+// declared account row is simply not armed. Missing or incomplete secrets
+// fail LOUD: the rail's fetcher/prober is absent and ONE WARN names the
+// merchant, rail and missing secret — never a silent empty map, never a
+// default-allow.
 //
 // Secrets are resolved per merchant, at use time, inside the merchant scope.
 // Nothing is cached process-wide (#653: never a plaintext all-merchants tree);
@@ -57,19 +48,12 @@ type ProviderEndpoints struct {
 	StripeBaseURL         string
 }
 
-// MerchantFetcherBuilder builds one merchant's fetchers/probers at use time.
-// Merchants is the store plane (nil = boot plane only); Rails plus the
-// boot-built clients are the fallback plane.
+// MerchantFetcherBuilder builds one merchant's fetchers/probers at use time
+// from the armed rail state (nil Merchants = nothing arms; fail closed).
 type MerchantFetcherBuilder struct {
 	Config    *config.Config
-	Rails     config.RailMerchantAccountSet
 	Merchants *merchants.Service
 	DB        *db.DB
-
-	// Boot-built fallback clients (the pre-#699 plane).
-	NMIClients     map[string]*nmi.NMIClient
-	CCBillDataLink *ccbill.DataLinkClient
-	SolanaRPC      *solanaint.RPCClient
 
 	// AccountIDs optionally pins a rail to one declared account_id (operator
 	// pulls; may target archived accounts for drain, #655).
@@ -188,12 +172,6 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.
 	return value, true
 }
 
-func (b MerchantFetcherBuilder) warnStoreOverridesBoot(ctx context.Context, mid merchant.ID, provider Provider) {
-	log.WithContext(ctx).WithFields(log.Fields{
-		"merchant_id": mid.String(), "rail": string(provider),
-	}).Warn("provider pull: merchant-store credentials differ from boot-config rails; store wins (#699)")
-}
-
 func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScope(ctx, mid, ProviderNMI); ok {
 		securityKey, ok := b.requireSecret(ctx, mid, scope, "security_key")
@@ -220,25 +198,9 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, o
 		if b.Endpoints.NMIV5BaseURL != "" {
 			client.V5BaseURL = b.Endpoints.NMIV5BaseURL
 		}
-		if _, boot, _ := selectNMIClient(b.Rails, b.NMIClients, ""); boot != nil && boot.SecurityKey != "" && boot.SecurityKey != securityKey {
-			b.warnStoreOverridesBoot(ctx, mid, ProviderNMI)
-		}
 		out.Fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(client), key: scope.AccountID}
 		out.Probers[ProviderNMI] = &NMISubscriptionProber{Client: client}
-		return
 	}
-	// Boot-config fallback: no declared account on this rail.
-	key, c, err := selectNMIClient(b.Rails, b.NMIClients, "")
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).
-			Warn("provider pull: boot-config NMI rail selection failed")
-		return
-	}
-	if c == nil {
-		return
-	}
-	out.Fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(c), key: key}
-	out.Probers[ProviderNMI] = &NMISubscriptionProber{Client: c}
 }
 
 func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
@@ -271,32 +233,10 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID
 		if b.Endpoints.CCBillDataLinkBaseURL != "" {
 			dl.BaseURL = b.Endpoints.CCBillDataLinkBaseURL
 		}
-		if boot := b.CCBillDataLink; boot != nil &&
-			(boot.Username != username || boot.Password != password || boot.ClientAccNum != dl.ClientAccNum || boot.ClientSubAcc != dl.ClientSubAcc) {
-			b.warnStoreOverridesBoot(ctx, mid, ProviderCCBill)
-		}
 		out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(dl), key: scope.AccountID}
 		out.Probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: dl}
 		out.CCBillDataLink = dl
-		return
 	}
-	// Boot-config fallback. The DataLink bulk lane keeps the boot client even
-	// without a declared rail entry (pre-#699 refresh-job behavior).
-	out.CCBillDataLink = b.CCBillDataLink
-	if b.CCBillDataLink == nil {
-		return
-	}
-	out.Probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: b.CCBillDataLink}
-	key, proc, err := selectRailByType(b.Rails, models.RailCCBill, "")
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).
-			Warn("provider pull: boot-config CCBill rail selection failed")
-		return
-	}
-	if proc == nil {
-		return
-	}
-	out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(b.CCBillDataLink), key: key}
 }
 
 func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
@@ -305,10 +245,6 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID
 		if !ok {
 			return
 		}
-		if _, boot, _ := selectRailByType(b.Rails, models.RailStripe, ""); boot != nil && boot.Stripe != nil &&
-			boot.Stripe.SecretKey != "" && boot.Stripe.SecretKey != secretKey {
-			b.warnStoreOverridesBoot(ctx, mid, ProviderStripe)
-		}
 		fetcher := NewStripeFetcher(secretKey)
 		fetcher.BaseURL = b.Endpoints.StripeBaseURL
 		out.Fetchers[ProviderStripe] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
@@ -316,54 +252,34 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID
 			SecretKey: secretKey,
 			BaseURL:   b.Endpoints.StripeBaseURL,
 		}}
-		return
-	}
-	// Boot-config fallback.
-	key, proc, err := selectRailByType(b.Rails, models.RailStripe, "")
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).
-			Warn("provider pull: boot-config Stripe rail selection failed")
-		return
-	}
-	if proc == nil || proc.Stripe == nil || proc.Stripe.SecretKey == "" {
-		return
-	}
-	out.Fetchers[ProviderStripe] = keyedFetcher{RailFetcher: NewStripeFetcher(proc.Stripe.SecretKey), key: key}
-	if p, err := subscriptions.NewStripeLivenessProber(b.Rails); err == nil && p != nil {
-		out.Probers[ProviderStripe] = &StripeSubscriptionProber{Prober: p}
 	}
 }
 
 // buildSolana: Solana pulls read public chain state — the rail holds no
 // per-merchant PULL credential (private_key is the operator-only SIGNING key).
-// A declared solana account row arms the fetcher using the deployment RPC
-// client when one was boot-built, else a read-only default (public RPC
-// fallback, network derived from test_mode — both declared config defaults).
+// A declared solana account row arms the fetcher; its settings block carries
+// the merchant's RPC knobs (rpc_provider / rpc_api_key, #711), defaulting to
+// the public RPC fallback with the network derived from test_mode.
 func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
 	if b.DB == nil {
 		return
 	}
 	if scope, ok := b.resolveScope(ctx, mid, ProviderSolana); ok {
-		rpc := b.SolanaRPC
-		// #711: the account settings block carries the merchant's RPC knobs
-		// (rpc_provider / rpc_api_key); store settings win over the boot client (#699).
 		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
 		if err != nil {
 			b.warnScopeError(ctx, mid, ProviderSolana, err)
 			return
 		}
-		if rpc == nil || settings.RPCProvider != "" || settings.RPCAPIKey != "" {
-			network := "mainnet"
-			if b.testMode() {
-				network = "devnet"
-			}
-			rpc = solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-				RPCProvider: settings.RPCProvider,
-				RPCAPIKey:   settings.RPCAPIKey,
-				Network:     network,
-				ReadOnly:    true,
-			})
+		network := "mainnet"
+		if b.testMode() {
+			network = "devnet"
 		}
+		rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
+			RPCProvider: settings.RPCProvider,
+			RPCAPIKey:   settings.RPCAPIKey,
+			Network:     network,
+			ReadOnly:    true,
+		})
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
 		// #714 discovery lanes: the declared account_id IS the merchant wallet.
 		fetcher.MerchantWallet = scope.AccountID
@@ -371,27 +287,5 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 		fetcher.Due = SolanaDueSubscriptionSourceFromDB(b.DB) // #720: due-window bulk-fetch filter
 		fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
 		out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
-		return
 	}
-	// Boot-config fallback.
-	if b.SolanaRPC == nil {
-		return
-	}
-	key, proc, err := selectRailByType(b.Rails, models.RailSolana, "")
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).
-			Warn("provider pull: boot-config Solana rail selection failed")
-		return
-	}
-	if proc == nil {
-		return
-	}
-	fetcher := NewSolanaFetcher(b.SolanaRPC, SolanaSubscriptionSourceFromDB(b.DB))
-	// Boot-config fallback declares no account_id, so the wallet scan stays
-	// disarmed unless an operator pull passes one; enumeration + resolution
-	// still arm from the DB.
-	fetcher.Plans = SolanaPlanSourceFromDB(b.DB)
-	fetcher.Due = SolanaDueSubscriptionSourceFromDB(b.DB) // #720: due-window bulk-fetch filter
-	fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
-	out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: key}
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"strconv"
 	"strings"
 	"time"
@@ -186,14 +188,16 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 // resolves it by reading the transaction's refund actions off the Query API.
 type NMIRefundHandler struct {
 	refundReservations
-	Clients map[string]*nmi.NMIClient
-	Policy  BackoffPolicy
+	// Resolver arms the intent merchant's NMI client from the armed rail
+	// state at drain time (#788).
+	Resolver money.NMIClientResolver
+	Policy   BackoffPolicy
 }
 
-func NewNMIRefundHandler(d *db.DB, clients map[string]*nmi.NMIClient, clock clockwork.Clock) *NMIRefundHandler {
+func NewNMIRefundHandler(d *db.DB, resolver money.NMIClientResolver, clock clockwork.Clock) *NMIRefundHandler {
 	return &NMIRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
-		Clients:            clients,
+		Resolver:           resolver,
 		Policy:             DefaultBackoff,
 	}
 }
@@ -213,9 +217,12 @@ func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.Openra
 }
 
 func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Rail)]
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil {
+		return Parked("nmi rail not armable (fail closed): " + err.Error())
+	}
 	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Rail))
+		return Parked(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
@@ -269,9 +276,9 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // transaction means the money moved (finalize + succeed); a clean read with
 // no such action means it definitively did not (the executor may retry).
 func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok := h.Clients[strings.ToLower(intent.Rail)]
-	if !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil || !ok || client == nil {
+		return Ambiguous(fmt.Sprintf("nmi rail not armed for provider %q; cannot verify", intent.Rail))
 	}
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
@@ -354,12 +361,12 @@ type stripeRefundAPI interface {
 type StripeRefundHandler struct {
 	refundReservations
 	Config *config.Config
-	Rails  config.RailMerchantAccountSet
+	Rails  railresolve.Source
 	Stripe stripeRefundAPI
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails config.RailMerchantAccountSet, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
@@ -386,7 +393,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	if _, _, err := subscriptions.RequireStripeSecretKey(h.Rails); err != nil {
+	if _, _, err := subscriptions.RequireStripeSecretKey(ctx, h.Rails); err != nil {
 		return Parked("stripe not configured: " + err.Error())
 	}
 
@@ -492,14 +499,20 @@ func ccbillDenialExhausted(attempts int32) bool {
 // probe live: real money). See ccbill.DataLinkClient.RefundTransaction.
 type CCBillRefundHandler struct {
 	refundReservations
-	Client *ccbill.DataLinkClient
-	Policy BackoffPolicy
+	Config *config.Config
+	// Rails arms the intent merchant's DataLink client from the armed rail
+	// state at drain time (#788).
+	Rails railresolve.Source
+	// DataLinkBaseURL overrides the DataLink endpoint (test seam).
+	DataLinkBaseURL string
+	Policy          BackoffPolicy
 }
 
-func NewCCBillRefundHandler(d *db.DB, client *ccbill.DataLinkClient, clock clockwork.Clock) *CCBillRefundHandler {
+func NewCCBillRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *CCBillRefundHandler {
 	return &CCBillRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
-		Client:             client,
+		Config:             cfg,
+		Rails:              rails,
 		Policy:             DefaultBackoff,
 	}
 }
@@ -517,10 +530,11 @@ func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	if h.Client == nil {
-		return Parked("ccbill datalink client not configured")
+	client, err := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	if err != nil {
+		return Parked("ccbill rail not armable (fail closed): " + err.Error())
 	}
-	if h.Client.ReadOnly {
+	if client.ReadOnly {
 		return Parked("ccbill provider writes blocked (mode=readonly)")
 	}
 	p, err := decodeRefundPayload(intent)
@@ -539,12 +553,12 @@ func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	// (attempts > 1) means a prior send MAY have reached CCBill. Pre-send verify
 	// via the per-subscription counters before sending again (verify-not-decline).
 	if intent.Attempts > 1 {
-		if proceed, out := h.preSendVerify(ctx, subscriptionID, transactionID); !proceed {
+		if proceed, out := h.preSendVerify(ctx, client, subscriptionID, transactionID); !proceed {
 			return out
 		}
 	}
 
-	res, err := h.Client.RefundTransaction(ctx, subscriptionID, transactionID, p.AmountCents)
+	res, err := client.RefundTransaction(ctx, subscriptionID, transactionID, p.AmountCents)
 	if err != nil {
 		switch {
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
@@ -590,14 +604,15 @@ func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 //     real refund) nor auto-resend (double refund). A producer-captured baseline
 //     would let "counter incremented" prove attribution (future enhancement).
 func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	if h.Client == nil {
-		return Ambiguous("ccbill datalink client not configured; cannot verify")
+	client, cerr := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	if cerr != nil {
+		return Ambiguous("ccbill rail not armable; cannot verify: " + cerr.Error())
 	}
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	total, known, err := h.refundCounters(ctx, strings.TrimSpace(p.ProviderTarget))
+	total, known, err := h.refundCounters(ctx, client, strings.TrimSpace(p.ProviderTarget))
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -611,8 +626,8 @@ func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 
 // preSendVerify reads the counters before a reclaimed resend. proceed=true ONLY
 // when the counters are KNOWN-ZERO (nothing refunded yet — safe to send again).
-func (h *CCBillRefundHandler) preSendVerify(ctx context.Context, subscriptionID, transactionID string) (proceed bool, out Outcome) {
-	total, known, err := h.refundCounters(ctx, subscriptionID)
+func (h *CCBillRefundHandler) preSendVerify(ctx context.Context, client *ccbill.DataLinkClient, subscriptionID, transactionID string) (proceed bool, out Outcome) {
+	total, known, err := h.refundCounters(ctx, client, subscriptionID)
 	if err != nil {
 		return false, Ambiguous("pre-send verification read failed: " + err.Error())
 	}
@@ -624,8 +639,8 @@ func (h *CCBillRefundHandler) preSendVerify(ctx context.Context, subscriptionID,
 		total, known, transactionID))
 }
 
-func (h *CCBillRefundHandler) refundCounters(ctx context.Context, subscriptionID string) (total int64, known bool, err error) {
-	status, err := h.Client.ViewSubscriptionStatus(ctx, subscriptionID)
+func (h *CCBillRefundHandler) refundCounters(ctx context.Context, client *ccbill.DataLinkClient, subscriptionID string) (total int64, known bool, err error) {
+	status, err := client.ViewSubscriptionStatus(ctx, subscriptionID)
 	if err != nil {
 		return 0, false, err
 	}

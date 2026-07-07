@@ -14,11 +14,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // CheckoutSessionStore is the exported alias of the checkout-session surface
@@ -66,11 +66,13 @@ type WebhookDispatcher struct {
 	ProfileRepo                  *identity.ProfileRepo
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
-	CCBillRESTClient             *ccbill.RESTClient
-	NMIClients                   map[string]*nmi.NMIClient
-	PurchaseRegistrar            stripePurchaseRegistrar
-	CheckoutSessionService       webhookCheckoutSessionStore
-	MoneyService                 *money.MoneyService
+	// RailConfigs resolves per-merchant armed rail credentials at dispatch
+	// time (Layer C, #788): the ONLY rail-credential source in this package.
+	// The merchant comes from ctx; an unarmed rail fails closed.
+	RailConfigs            railresolve.Source
+	PurchaseRegistrar      stripePurchaseRegistrar
+	CheckoutSessionService webhookCheckoutSessionStore
+	MoneyService           *money.MoneyService
 	// ConvergeEnqueuer (#684): schedules the coalesced fetch-and-converge job
 	// the slimmed Stripe/NMI subscription-state handlers enqueue.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
@@ -79,17 +81,11 @@ type WebhookDispatcher struct {
 // webhookRegistry resolves WebhookHandlers by rail. The dispatcher is fully
 // registry-driven: Process looks up the handler and calls Apply, so adding a
 // rail is "implement the WebhookHandler interface + register here" rather
-// than adding a branch (issue #296). The NMIWebhookHandler resolves its signing
-// secret per gateway alias from the dispatcher's NMI clients.
+// than adding a branch (issue #296).
 func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
 	reg.Register(StripeWebhookHandler{})
-	reg.Register(NMIWebhookHandler{SecretFor: func(rail string) string {
-		if c := d.NMIClients[rail]; c != nil {
-			return c.GetWebhookSecret()
-		}
-		return ""
-	}})
+	reg.Register(NMIWebhookHandler{})
 	reg.Register(CCBillWebhookHandler{})
 	return reg
 }
@@ -108,9 +104,22 @@ func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) 
 }
 
 // Apply builds the CCBill webhook service from the dispatcher and runs it.
+// The CCBill client is built PER MERCHANT at dispatch time from the armed
+// rail_merchant_accounts state (#788): the ctx merchant plus the routed
+// account id (empty = the active account) resolve through RailConfigs. An
+// unarmed rail or a resolution failure rejects the webhook — retryable, so
+// the provider redelivers once the rail is armed; never default-allow.
 func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, event *WebhookMessage) error {
-	if d.CCBillRESTClient == nil {
-		return fmt.Errorf("ccbill rest client not configured")
+	if d.RailConfigs == nil {
+		return fmt.Errorf("ccbill webhook rejected: rail resolution is not configured")
+	}
+	proc, err := d.RailConfigs.RailConfig(ctx, string(models.RailCCBill), event.RailMerchantAccountID)
+	if err != nil {
+		return fmt.Errorf("ccbill webhook rejected: %w", err)
+	}
+	ccbillConfig := proc.ToCCBillConfig()
+	if ccbillConfig.ClientAccNum == "" || ccbillConfig.ClientSubAcc == "" {
+		return fmt.Errorf("ccbill webhook rejected: armed account %q is not a valid clientAccnum-clientSubacc pair", proc.EffectiveAccountID())
 	}
 	data := CCBillWebhookEvent{
 		EventType: CCBillWebhookEventType(event.EventType),
@@ -119,7 +128,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 	service := CCBillWebhookService{
 		Data:                         data,
 		DB:                           d.DB,
-		CCBillClient:                 d.CCBillRESTClient,
+		CCBillClient:                 ccbill.NewRESTClient(ccbillConfig),
 		ProductService:               d.ProductService,
 		PriceService:                 d.PriceService,
 		NotificationService:          d.NotificationService,
@@ -140,16 +149,6 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook signature was not verified before processing"))
 	}
-	var client *nmi.NMIClient
-	if d.NMIClients != nil {
-		// #641: per-account client if routed, else the rail-key (primary) alias.
-		if event.RailMerchantAccountID != "" {
-			client = d.NMIClients[event.RailMerchantAccountID]
-		}
-		if client == nil {
-			client = d.NMIClients[event.Rail]
-		}
-	}
 	if err := h.Verify(event); err != nil {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi queued webhook signature verification failed: %w", err))
 	}
@@ -164,7 +163,6 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		ProductService:               d.ProductService,
 		Data:                         payload,
 		Rail:                         event.Rail,
-		NMIClient:                    client,
 		SubscriptionService:          d.SubscriptionService,
 		PaymentService:               d.PaymentService,
 		MoneyService:                 d.MoneyService,

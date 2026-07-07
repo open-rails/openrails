@@ -64,14 +64,14 @@ func (s *Service) ReconcileStripe(ctx context.Context, opts StripeReconcileOptio
 		return nil, fmt.Errorf("billing service: config unavailable for stripe reconcile")
 	}
 
-	subLister, err := subscriptions.NewStripeSubscriptionLister(rt.Rails)
+	subLister, err := subscriptions.NewStripeSubscriptionLister(ctx, rt.RailConfigs)
 	if err != nil {
 		return nil, fmt.Errorf("stripe subscription lister init failed: %w", err)
 	}
 
 	var chargeLister subscriptions.StripeChargeLister
 	if !opts.SkipPayments {
-		cl, err := subscriptions.NewStripeChargeLister(rt.Rails)
+		cl, err := subscriptions.NewStripeChargeLister(ctx, rt.RailConfigs)
 		if err != nil {
 			return nil, fmt.Errorf("stripe charge lister init failed: %w", err)
 		}

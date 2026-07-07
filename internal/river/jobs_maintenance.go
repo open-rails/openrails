@@ -54,7 +54,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 	}
 	priceService := catalog.NewPriceService(w.DB)
 	productService := catalog.NewProductService(w.DB)
-	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil, nil, nil)
+	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil)
 	lifecycleService := &subscriptions.SubscriptionLifecycleService{DB: w.DB}
 	localActive, err := subscriptionService.GetActiveSubscriptionsByRail(ctx, "ccbill")
 	if err != nil {

@@ -11,12 +11,12 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type ManagedStripeWebhookParams struct {
 	Config                *config.Config
-	Rails                 config.RailMerchantAccountSet
 	SecretStore           merchants.MerchantSecretStore
 	MerchantID            merchant.ID
 	MerchantSlug          string
@@ -111,12 +111,6 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 
 	if secretKey == "" {
-		if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
-			secretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
-			haveSecret = haveSecret || strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecret) != ""
-		}
-	}
-	if secretKey == "" {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
 	}
 
@@ -129,7 +123,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_source=manifest refuses managed stripe webhook registration without a declared webhook_signing_secret (a Stripe-minted secret cannot survive reboot, #723): declare secrets.webhook_signing_secret in the manifest and register the endpoint %s out-of-band, or run merchant_source=api", webhookURL)
 	}
 
-	rails := config.RailMerchantAccountSet{"stripe": &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
+	rails := railresolve.FixedSet{"stripe": &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
 		URL:           webhookURL,
@@ -151,13 +145,6 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		if _, err := p.SecretStore.Put(ctx, p.MerchantID, secretName, res.Secret); err != nil {
 			return ManagedStripeWebhookResult{}, fmt.Errorf("store stripe webhook secret: %w", err)
 		}
-		return out, nil
-	}
-	if stripeProc := p.Rails.GetStripeRail(); stripeProc != nil {
-		if stripeProc.Stripe == nil {
-			stripeProc.Stripe = &config.StripeRailConfig{}
-		}
-		stripeProc.Stripe.WebhookSigningSecret = res.Secret
 		return out, nil
 	}
 	return ManagedStripeWebhookResult{}, fmt.Errorf("stripe webhook secret destination not configured")

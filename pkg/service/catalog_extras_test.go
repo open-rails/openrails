@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -492,7 +493,7 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 	if key == "" {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
-	rails := config.RailMerchantAccountSet{
+	rails := railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 	}
 	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}

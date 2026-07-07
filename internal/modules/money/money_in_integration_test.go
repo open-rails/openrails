@@ -5,6 +5,7 @@ package money_test
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -254,17 +255,27 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 // topupHarness drives the #674 flow the AutoTopupWorker runs in production:
 // ListDueAutoTopups → EnqueueAndExecute(topup_charge) through a real intent
 // Runner over the real ledger, with a scripted Charger.
+// staticNMIResolver is a fixed money.NMIClientResolver (#788 test stand-in).
+type staticNMIResolver struct{ client *nmi.NMIClient }
+
+func (f staticNMIResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID) (*nmi.NMIClient, bool, error) {
+	if f.client == nil {
+		return nil, false, nil
+	}
+	return f.client, true, nil
+}
+
 type topupHarness struct {
 	svc    *money.MoneyService
 	runner *intents.Runner
 	ch     *fakeCharger
 }
 
-func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, clients map[string]*nmi.NMIClient, ch *fakeCharger) *topupHarness {
+func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, resolver money.NMIClientResolver, ch *fakeCharger) *topupHarness {
 	t.Helper()
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
-		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, clients, nil)),
+		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, resolver, nil)),
 	}
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
@@ -432,7 +443,7 @@ func TestAutoTopupIntent_ChargeThenCrashBeforeDeposit_NoDoubleCharge(t *testing.
 	client.QueryURL = srv.URL
 
 	ch := &fakeCharger{ambiguous: true} // first attempt: charge sent, response lost
-	h := newTopupHarness(t, dbi, svc, map[string]*nmi.NMIClient{string(models.RailNMI): client}, ch)
+	h := newTopupHarness(t, dbi, svc, staticNMIResolver{client: client}, ch)
 
 	done := h.runOnce(t, ctx, time.Hour)
 	require.Len(t, done, 1)
@@ -751,7 +762,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}
@@ -845,7 +856,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
 		},
 	}

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
@@ -67,11 +67,11 @@ type HTTPStripeLivenessProber struct {
 	BaseURL string
 }
 
-// NewStripeLivenessProber builds a prober from the OpenRails rail set, reusing
-// RequireStripeSecretKey for auth. Returns an error when Stripe is not
-// configured — callers skip the Stripe slice of the cohort in that case.
-func NewStripeLivenessProber(rails config.RailMerchantAccountSet) (*HTTPStripeLivenessProber, error) {
-	_, secretKey, err := RequireStripeSecretKey(rails)
+// NewStripeLivenessProber builds a prober from the ctx merchant's armed
+// Stripe account, reusing RequireStripeSecretKey for auth. Returns an error
+// when Stripe is not armed — callers skip the Stripe slice of the cohort.
+func NewStripeLivenessProber(ctx context.Context, src railresolve.Source) (*HTTPStripeLivenessProber, error) {
+	_, secretKey, err := RequireStripeSecretKey(ctx, src)
 	if err != nil {
 		return nil, err
 	}

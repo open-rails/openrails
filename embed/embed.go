@@ -79,14 +79,6 @@ var (
 	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
 )
 
-// PaymentProvider is one embedded payment-provider credential set (the
-// boot-config plane). It aliases pkg/embedded.PaymentProvider so hosts using
-// embed.New can configure multiple provider accounts without importing the
-// lower-level package. Hosts that seed provider accounts + secrets via the
-// merchant manifest (UpsertMerchantConfig) don't need it: checkout, webhooks
-// and provider pulls all arm per merchant from the secrets store (#699).
-type PaymentProvider = embedded.PaymentProvider
-
 // Runtime is the in-process OpenRails engine plus its SDK adapter. It is the
 // ONE entry point an embedding host needs: Client() for the unified interface,
 // Handler() to mount the embedded HTTP surface, RunWorkers/Close for lifecycle.

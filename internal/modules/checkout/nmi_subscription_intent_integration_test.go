@@ -161,15 +161,16 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	planID := "plan-" + uuid.NewString()[:8]
 	gateway, client := newFakeNMISubGateway(t, vaultID, planID)
 	clock := clockwork.NewRealClock()
-	clients := map[string]*nmi.NMIClient{"mobius": client}
-
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
 	paymentSvc := payments.NewPaymentService(dbi, clock)
 	entSvc := entitlements.NewEntitlementService(dbi, clock)
-	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clients, nil, clock)
+	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
 	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
-		nil, nil, &stubIdemStore{}, clients, nil, nil, nil, clock)
+		nil, nil, &stubIdemStore{}, nil, nil, nil, clock)
+	// #788: the scoped resolver is the ONLY NMI client source; the fixture
+	// overrides it with the fake-gateway client.
+	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
 
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),

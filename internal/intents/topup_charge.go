@@ -55,13 +55,15 @@ func topupWireRef(intentID uuid.UUID) string { return "topup:" + intentID.String
 type TopupChargeHandler struct {
 	DB      *db.DB
 	Charger money.Charger
-	Clients map[string]*nmi.NMIClient
-	Clock   clockwork.Clock
-	Policy  BackoffPolicy
+	// Resolver arms the intent merchant's NMI client from the armed rail
+	// state for verification reads (#788).
+	Resolver money.NMIClientResolver
+	Clock    clockwork.Clock
+	Policy   BackoffPolicy
 }
 
-func NewTopupChargeHandler(d *db.DB, charger money.Charger, clients map[string]*nmi.NMIClient, clock clockwork.Clock) *TopupChargeHandler {
-	return &TopupChargeHandler{DB: d, Charger: charger, Clients: clients, Clock: clock, Policy: DefaultBackoff}
+func NewTopupChargeHandler(d *db.DB, charger money.Charger, resolver money.NMIClientResolver, clock clockwork.Clock) *TopupChargeHandler {
+	return &TopupChargeHandler{DB: d, Charger: charger, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *TopupChargeHandler) Type() string                         { return TypeTopupCharge }
@@ -132,7 +134,7 @@ func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRa
 	// Money mover on a gateway without request idempotency (NMI): any
 	// re-execution verifies by reading before sending another charge.
 	if intent.Attempts > 1 && isNMIRail(rail) {
-		txnID, found, verr := h.findNMISale(rail, wireRef)
+		txnID, found, verr := h.findNMISale(ctx, intent, rail, wireRef)
 		if verr != nil {
 			return Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -211,7 +213,7 @@ func (h *TopupChargeHandler) Verify(ctx context.Context, intent gen.OpenrailsRai
 		return *outcome
 	}
 	if isNMIRail(rail) {
-		txnID, found, verr := h.findNMISale(rail, wireRef)
+		txnID, found, verr := h.findNMISale(ctx, intent, rail, wireRef)
 		if verr != nil {
 			return Ambiguous("provider read failed: " + verr.Error())
 		}
@@ -251,11 +253,14 @@ func (h *TopupChargeHandler) methodRail(ctx context.Context, p TopupChargePayloa
 }
 
 // findNMISale answers "did the charge land?" for an NMI-family rail via the
-// Query API order-id search.
-func (h *TopupChargeHandler) findNMISale(rail, wireRef string) (string, bool, error) {
-	client, ok := h.Clients[rail]
+// Query API order-id search, using the intent merchant's armed NMI client.
+func (h *TopupChargeHandler) findNMISale(ctx context.Context, intent gen.OpenrailsRailIntent, rail, wireRef string) (string, bool, error) {
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil {
+		return "", false, err
+	}
 	if !ok || client == nil {
-		return "", false, fmt.Errorf("nmi client not configured for rail %q", rail)
+		return "", false, fmt.Errorf("nmi rail %q is not armed for this merchant", rail)
 	}
 	return client.FindSuccessfulSaleByOrderID(wireRef)
 }

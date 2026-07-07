@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	openrailsdb "github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -44,8 +43,9 @@ type UserSubscriptionService struct {
 	PaymentService      *payments.PaymentService
 	NotificationService *NotificationService
 	EntitlementService  *entitlements.EntitlementService
-	NMIClients          map[string]*nmi.NMIClient
-	clock               clockwork.Clock
+	// NMIResolver arms store-scoped NMI clients per merchant (#788).
+	NMIResolver NMIClientSource
+	clock       clockwork.Clock
 
 	// deferDelete enqueues a deferred NMI delete_subscription job (issue 216).
 	// When nil, NMI cancellations fall back to deleting inline immediately. It is
@@ -513,7 +513,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			// Immediate delete with NMI (no scheduled job).
 			subscription.DeletionScheduledAt = nil
 			if subscription.RailSubscriptionID != "" {
-				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
+				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
 				if err != nil {
 					return fmt.Errorf("resolve subscription provider account: %w", err)
 				}
@@ -563,7 +563,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := openrailsdb.NewWithPgxTx(tx)
-		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
+		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
 		if err := txSubSvc.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription status: %w", err)
 		}
@@ -683,11 +683,11 @@ func NewUserSubscriptionService(
 	paymentService *payments.PaymentService,
 	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
-	nmiClients map[string]*nmi.NMIClient,
+	nmiResolver NMIClientSource,
 	clocks ...clockwork.Clock,
 ) *UserSubscriptionService {
 	return &UserSubscriptionService{
-		NMIClients:          nmiClients,
+		NMIResolver:         nmiResolver,
 		SubscriptionService: subscriptionService,
 		ProductService:      productService,
 		PriceService:        priceService,

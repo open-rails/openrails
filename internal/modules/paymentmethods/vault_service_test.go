@@ -112,7 +112,6 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		MerchantSecrets:      store,
 		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:               vaultTestConfig(true),
-		Rails:                vaultTestRails(""),
 		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
 			client, err := nmi.NewClient(provider, cfg, testMode)
 			if err != nil {
@@ -157,16 +156,17 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	require.Equal(t, "Ada Lovelace", pm.Metadata["name_on_card"])
 }
 
-func TestVaultFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
+// #788: the boot-config plane is gone — a vault create with no armed rail
+// account fails closed instead of falling back to a static client.
+func TestVaultWithoutArmedRailAccountFailsClosed(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &VaultService{
 		Config: vaultTestConfig(true),
-		Rails:  vaultTestRails("static-mobius-key"),
 	}
 
-	client, _, err := svc.resolveNMIClient(ctx, "nmi")
-	require.NoError(t, err)
-	require.Equal(t, "static-mobius-key", client.SecurityKey)
+	_, _, err := svc.resolveNMIClient(ctx, "nmi")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing client")
 }
 
 func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
@@ -175,7 +175,6 @@ func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClie
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 		ProviderSecrets: vaultMissingProviderSecretResolver{},
 		Config:          vaultTestConfig(true),
-		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
 	_, _, err := svc.resolveNMIClient(ctx, "nmi")
@@ -200,7 +199,6 @@ func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 		MerchantSecrets: vaultUnavailableSecretStore{},
 		ProviderSecrets: vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:          vaultTestConfig(true),
-		Rails:           vaultTestRails("static-mobius-key"),
 	}
 
 	_, _, err := svc.resolveNMIClient(ctx, "nmi")
@@ -228,7 +226,6 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 			merchantB: "mobius-b",
 		},
 		Config: vaultTestConfig(true),
-		Rails:  vaultTestRails(""),
 	}
 
 	clientA, _, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "nmi")
@@ -298,15 +295,6 @@ func vaultTestConfig(testMode bool) *config.Config {
 	}
 }
 
-func vaultTestRails(mobiusKey string) config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
-		"mobius": {
-			Rail: models.RailNMI,
-			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},
-		},
-	}
-}
-
 // --- DeleteVault durable-intent producer branching (#674 tail) ---
 
 type deleteVaultNoSubs struct{}
@@ -327,17 +315,26 @@ func (f *fakeVaultDeleteExecutor) ExecuteVaultDelete(context.Context, *models.Pa
 }
 
 func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.PaymentMethod) {
-	client, _ := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	// #788: the NMI client arms from the scoped merchant secret store.
+	store := merchants.NewMemorySecretStore()
+	name, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	if err != nil {
+		panic(err)
+	}
+	if _, err := store.Put(context.Background(), dbtest.TestMerchantID, name, "k"); err != nil {
+		panic(err)
+	}
 	svc := &VaultService{
 		SubscriptionService: deleteVaultNoSubs{},
-		NMIClients:          map[string]*nmi.NMIClient{"mobius": client},
 		Config:              vaultTestConfig(true),
 		DeleteIntents:       exec,
+		MerchantSecrets:     store,
+		ProviderSecrets:     vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 	}
 	pm := &models.PaymentMethod{
 		ID:              uuid.New(),
 		CustomerID:      uuid.New(),
-		Rail:            "mobius",
+		Rail:            models.RailNMI,
 		RailCustomerRef: "vault-1",
 		RailMethodRef:   "bill-1",
 	}
@@ -348,7 +345,7 @@ func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.Pa
 // contract: Done ⇒ nil, Terminal ⇒ error with the reason, anything still
 // resolving ⇒ ErrVaultDeleteProcessing (the ledger finishes out-of-band).
 func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
-	ctx := context.Background()
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
 	exec := &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Done: true}}
 	svc, pm := deleteVaultTestService(exec)
@@ -368,7 +365,7 @@ func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
 
 func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {
 	svc, pm := deleteVaultTestService(nil)
-	err := svc.DeleteVault(context.Background(), pm)
+	err := svc.DeleteVault(merchant.WithID(context.Background(), dbtest.TestMerchantID), pm)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not wired")
 }

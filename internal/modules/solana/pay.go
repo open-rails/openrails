@@ -18,6 +18,7 @@ import (
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -98,7 +99,7 @@ type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
 	cfg                *config.Config
-	rails              config.RailMerchantAccountSet
+	rails              railresolve.Source
 	clock              clockwork.Clock
 	priceService       *catalog.PriceService
 	productService     *catalog.ProductService
@@ -112,7 +113,7 @@ func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	railSet config.RailMerchantAccountSet,
+	railSet railresolve.Source,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,
@@ -203,7 +204,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc, err := RequireSolanaRailConfig(s.rails)
+	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +295,7 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc, err := RequireSolanaRailConfig(s.rails)
+	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}

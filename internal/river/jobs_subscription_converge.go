@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"strings"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -120,10 +120,12 @@ type SubscriptionConvergeWorker struct {
 	river.WorkerDefaults[SubscriptionConvergeArgs]
 	DB     *db.DB
 	Config *config.Config
-	Rails  config.RailMerchantAccountSet
+	Rails  railresolve.Source
 	Clock  clockwork.Clock
 
-	NMIClients map[string]*nmi.NMIClient
+	// NMIResolver arms the args merchant's NMI client from the armed rail
+	// state (#788).
+	NMIResolver money.NMIClientResolver
 	// StripeProber overrides the config-built prober (tests). Nil = build from Rails.
 	StripeProber subscriptions.StripeLivenessProber
 
@@ -200,7 +202,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 	case args.Rail == string(models.RailStripe):
 		prober := w.StripeProber
 		if prober == nil {
-			p, err := subscriptions.NewStripeLivenessProber(w.Rails)
+			p, err := subscriptions.NewStripeLivenessProber(ctx, w.Rails)
 			if err != nil {
 				return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
 			}
@@ -223,11 +225,14 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 		return svc.Converge(ctx, args.SubscriptionReference)
 
 	case rails.IsNMI(models.Rail(args.Rail)):
-		client := w.NMIClients[args.Rail]
-		if client == nil {
-			client = w.NMIClients[string(models.RailNMI)]
+		if w.NMIResolver == nil {
+			return uuid.Nil, fmt.Errorf("%s (nmi rail %q)", subscriptionConvergeMissingClient, args.Rail)
 		}
-		if client == nil {
+		client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, args.MerchantID, nil)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("%s (nmi rail %q): %w", subscriptionConvergeMissingClient, args.Rail, err)
+		}
+		if !ok || client == nil {
 			return uuid.Nil, fmt.Errorf("%s (nmi rail %q)", subscriptionConvergeMissingClient, args.Rail)
 		}
 		svc := &webhooks.NMIConvergeService{

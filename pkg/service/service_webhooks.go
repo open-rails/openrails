@@ -11,14 +11,18 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
-	"github.com/riverqueue/river"
 )
 
 // HandleWebhook processes an incoming webhook from a payment rail.
-// It validates the signature, parses the payload, and enqueues a job for async processing.
+// It validates the signature, parses the payload, and dispatches SYNCHRONOUSLY
+// through the same registry-driven dispatcher as the HTTP surfaces (#788):
+// credentials resolve from the ctx merchant's armed rail state at dispatch
+// time. A retryable processing failure returns an error (the host answers
+// non-2xx and the provider redelivers); a non-retryable (poison) event is
+// accepted so the provider stops retrying.
 func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
 	_, err := s.requireWebhookRuntime()
 	if err != nil {
@@ -59,15 +63,28 @@ var serviceWebhookIngress = map[models.Rail]func(s *Service, ctx context.Context
 func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {
 	providerKey := webhookutil.CanonicalRail(provider)
 
-	client, ok := s.rt.NMIClients[providerKey]
-	if !ok || client == nil {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    fmt.Sprintf("unknown nmi provider '%s'", providerKey),
-		}, nil
+	// #788: the signing secret comes from the ctx merchant's armed rail
+	// state — an alias other than the bare rail name pins that declared
+	// account; an unarmed rail rejects the webhook (fail closed).
+	accountPin := ""
+	if providerKey != string(models.RailNMI) {
+		accountPin = providerKey
+	}
+	var signingSecret string
+	if s.rt != nil && s.rt.RailConfigs != nil {
+		proc, rerr := s.rt.RailConfigs.RailConfig(ctx, string(models.RailNMI), accountPin)
+		if rerr != nil {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    fmt.Sprintf("nmi rail is not armed for provider '%s'", providerKey),
+			}, nil
+		}
+		if proc.NMI != nil {
+			signingSecret = proc.NMI.WebhookSigningSecret
+		}
 	}
 
-	prepared, err := webhookutil.PrepareNMI(providerKey, req.Body, client.GetWebhookSecret(), getHeaderValue(req.Headers, "Webhook-Signature"))
+	prepared, err := webhookutil.PrepareNMI(providerKey, req.Body, signingSecret, getHeaderValue(req.Headers, "Webhook-Signature"))
 	if err != nil {
 		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
@@ -104,11 +121,9 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	args := prepared.QueueArgs(req.ClientIP)
-
-	if err := s.enqueueWebhookJob(ctx, args); err != nil {
-		log.WithError(err).Error("failed to enqueue NMI webhook")
-		return nil, fmt.Errorf("failed to enqueue webhook: %w", err)
+	if err := s.dispatchWebhook(ctx, prepared, req.ClientIP); err != nil {
+		log.WithError(err).Error("nmi webhook processing failed")
+		return nil, fmt.Errorf("webhook processing failed: %w", err)
 	}
 
 	return &WebhookResult{
@@ -174,11 +189,9 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 			Error:    "invalid webhook payload",
 		}, nil
 	}
-	args := prepared.QueueArgs(req.ClientIP)
-
-	if err := s.enqueueWebhookJob(ctx, args); err != nil {
-		log.WithError(err).Error("failed to enqueue CCBill webhook")
-		return nil, fmt.Errorf("failed to enqueue webhook: %w", err)
+	if err := s.dispatchWebhook(ctx, prepared, req.ClientIP); err != nil {
+		log.WithError(err).Error("ccbill webhook processing failed")
+		return nil, fmt.Errorf("webhook processing failed: %w", err)
 	}
 
 	return &WebhookResult{
@@ -192,9 +205,9 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 		return nil, err
 	}
 	secret := ""
-	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
-			secret = stripeProc.Stripe.WebhookSigningSecret
+	if s.rt != nil && s.rt.RailConfigs != nil {
+		if proc, rerr := s.rt.RailConfigs.RailConfig(ctx, string(models.RailStripe), ""); rerr == nil && proc.Stripe != nil {
+			secret = proc.Stripe.WebhookSigningSecret
 		}
 	}
 
@@ -223,11 +236,9 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 			Error:    "invalid webhook payload",
 		}, nil
 	}
-	args := prepared.QueueArgs(req.ClientIP)
-
-	if err := s.enqueueWebhookJob(ctx, args); err != nil {
-		log.WithError(err).Error("failed to enqueue Stripe webhook")
-		return nil, fmt.Errorf("failed to enqueue webhook: %w", err)
+	if err := s.dispatchWebhook(ctx, prepared, req.ClientIP); err != nil {
+		log.WithError(err).Error("stripe webhook processing failed")
+		return nil, fmt.Errorf("webhook processing failed: %w", err)
 	}
 
 	return &WebhookResult{
@@ -237,20 +248,38 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 	}, nil
 }
 
-func (s *Service) enqueueWebhookJob(ctx context.Context, args riverjobs.WebhookProcessArgs) error {
+// dispatchWebhook runs the prepared event through the runtime dispatcher
+// synchronously. Non-retryable (poison) errors are swallowed — accepted so
+// the provider stops retrying; retryable errors surface to the caller.
+func (s *Service) dispatchWebhook(ctx context.Context, prepared webhookutil.Prepared, clientIP string) error {
 	rt, err := s.requireWebhookRuntime()
 	if err != nil {
 		return err
 	}
-
-	opts := &river.InsertOpts{
-		Queue: riverjobs.QueueWebhooks,
-		UniqueOpts: river.UniqueOpts{
-			ByArgs:  true,
-			ByQueue: true,
-		},
+	if rt.WebhookDispatcher == nil {
+		return fmt.Errorf("webhook dispatcher unavailable")
 	}
-
-	_, err = rt.RiverProducer.Insert(ctx, args, opts)
-	return err
+	msg := &webhooks.WebhookMessage{
+		Rail:       prepared.Rail,
+		EventID:    prepared.EventID,
+		EventType:  prepared.EventType,
+		Payload:    prepared.Body,
+		IPAddress:  clientIP,
+		Signature:  prepared.Signature,
+		ReceivedAt: time.Now(),
+	}
+	if prepared.SignatureVerified {
+		verified := true
+		msg.SignatureValid = &verified
+	}
+	if err := rt.WebhookDispatcher.Process(ctx, msg); err != nil {
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"rail": prepared.Rail, "event_id": prepared.EventID,
+			}).Warn("webhook non-retryable error; acking to stop retries")
+			return nil
+		}
+		return err
+	}
+	return nil
 }

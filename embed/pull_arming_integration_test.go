@@ -97,13 +97,9 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	// loop: manifest-seeded credentials arm fetchers AND probers (the
 	// unknown-cohort resolution inputs) with no boot-config rails.
 	armed := reconcile.MerchantFetcherBuilder{
-		Config:         runtime.Config,
-		Rails:          runtime.Rails,
-		Merchants:      runtime.Merchants,
-		DB:             runtime.DB,
-		NMIClients:     runtime.NMIClients,
-		CCBillDataLink: runtime.CCBillDataLink,
-		SolanaRPC:      runtime.SolanaRPC,
+		Config:    runtime.Config,
+		Merchants: runtime.Merchants,
+		DB:        runtime.DB,
 	}.Build(merchant.WithID(ctx, id), id)
 
 	require.Contains(t, armed.Fetchers, reconcile.ProviderNMI, "NMI fetcher armed from manifest secrets")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
@@ -45,10 +45,10 @@ type HTTPStripeSubscriptionLister struct {
 	HTTPClient *http.Client
 }
 
-// NewStripeSubscriptionLister builds a lister from the OpenRails rail set,
-// reusing RequireStripeSecretKey for auth.
-func NewStripeSubscriptionLister(rails config.RailMerchantAccountSet) (*HTTPStripeSubscriptionLister, error) {
-	_, secretKey, err := RequireStripeSecretKey(rails)
+// NewStripeSubscriptionLister builds a lister from the ctx merchant's armed
+// Stripe account, reusing RequireStripeSecretKey for auth.
+func NewStripeSubscriptionLister(ctx context.Context, src railresolve.Source) (*HTTPStripeSubscriptionLister, error) {
+	_, secretKey, err := RequireStripeSecretKey(ctx, src)
 	if err != nil {
 		return nil, err
 	}
@@ -237,10 +237,10 @@ type HTTPStripeChargeLister struct {
 	HTTPClient *http.Client
 }
 
-// NewStripeChargeLister builds a charge lister from the OpenRails rail set,
-// reusing RequireStripeSecretKey for auth.
-func NewStripeChargeLister(rails config.RailMerchantAccountSet) (*HTTPStripeChargeLister, error) {
-	_, secretKey, err := RequireStripeSecretKey(rails)
+// NewStripeChargeLister builds a charge lister from the ctx merchant's armed
+// Stripe account, reusing RequireStripeSecretKey for auth.
+func NewStripeChargeLister(ctx context.Context, src railresolve.Source) (*HTTPStripeChargeLister, error) {
+	_, secretKey, err := RequireStripeSecretKey(ctx, src)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -22,6 +23,7 @@ import (
 type SolanaTransactionService struct {
 	db           *db.DB
 	rpc          *solanarpc.RPCClient
+	rpcBuilder   *MerchantRPCBuilder
 	cfg          *config.Config
 	priceService *catalog.PriceService
 	fxProvider   fx.Provider
@@ -48,6 +50,35 @@ func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *confi
 	}
 }
 
+// SetMerchantRPC installs the store-aware per-merchant RPC builder (#728/#788):
+// transaction builds/verifies arm from the ctx merchant's declared account.
+func (s *SolanaTransactionService) SetMerchantRPC(b *MerchantRPCBuilder) {
+	if b != nil {
+		s.rpcBuilder = b
+	}
+}
+
+// rpcClient resolves the RPC client for this call: the injected test client
+// when set, else the ctx merchant's armed client. nil = not armed (callers
+// fail closed with their existing "not configured" errors).
+func (s *SolanaTransactionService) rpcClient(ctx context.Context) *solanarpc.RPCClient {
+	if s.rpc != nil {
+		return s.rpc
+	}
+	if s.rpcBuilder == nil {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil
+	}
+	client, err := s.rpcBuilder.Resolve(ctx, mid)
+	if err != nil {
+		return nil
+	}
+	return client
+}
+
 func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
@@ -70,7 +101,8 @@ func (s *SolanaTransactionService) Clock() clockwork.Clock {
 
 // BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a checkout session.
 func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.Context, req *PaymentTransactionBuildRequest) (*TransactionBuildResponse, error) {
-	if s.rpc == nil {
+	rpc := s.rpcClient(ctx)
+	if rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
 	if req == nil {
@@ -102,7 +134,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		referenceStr = strings.TrimSpace(*req.Reference)
 	}
 
-	txResp, err := s.rpc.BuildTransferTransaction(ctx, solanarpc.TransferRequest{
+	txResp, err := rpc.BuildTransferTransaction(ctx, solanarpc.TransferRequest{
 		FromWallet:  strings.TrimSpace(req.UserWallet),
 		ToWallet:    strings.TrimSpace(req.Recipient),
 		TokenSymbol: strings.TrimSpace(req.TokenSymbol),
@@ -145,7 +177,8 @@ func isNativeTokenSymbol(symbol string) bool {
 // recipient, amount, and reference. expectedMemoLocalID (uuid.Nil = skip)
 // additionally checks any #713 purchase memo: mismatch fails, absence passes.
 func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
-	if s.rpc == nil {
+	rpc := s.rpcClient(ctx)
+	if rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
 	}
 	if expectedAmount == 0 {
@@ -163,7 +196,7 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		return fmt.Errorf("expected reference is required")
 	}
 
-	return s.rpc.VerifyTransfer(ctx, solanarpc.VerifyTransferRequest{
+	return rpc.VerifyTransfer(ctx, solanarpc.VerifyTransferRequest{
 		Signature:           strings.TrimSpace(signature),
 		ExpectedAmount:      expectedAmount,
 		ExpectedRecipient:   strings.TrimSpace(expectedRecipient),
@@ -179,8 +212,9 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 // (#651), or nil when the RPC reports none — the truthful settlement time used to
 // stamp the recorded Solana payment instead of poller-observation time.
 func (s *SolanaTransactionService) TransactionBlockTime(ctx context.Context, signature string) (*time.Time, error) {
-	if s.rpc == nil {
+	rpc := s.rpcClient(ctx)
+	if rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
-	return s.rpc.GetConfirmedBlockTime(ctx, signature)
+	return rpc.GetConfirmedBlockTime(ctx, signature)
 }

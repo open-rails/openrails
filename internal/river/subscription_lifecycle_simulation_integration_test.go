@@ -325,7 +325,7 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 
 	worker := &DunningWorker{
 		DB: dbi, Clock: clock,
-		NMIClients: map[string]*nmi.NMIClient{string(models.RailNMI): client},
+		NMIResolver: fakeDunningNMIResolver{client: client},
 	}
 
 	engine := converge.NewConvergeEngine(dbi)

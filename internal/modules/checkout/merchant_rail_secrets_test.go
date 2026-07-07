@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/url"
 	"testing"
 
@@ -114,13 +115,16 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	require.Contains(t, fakeKV.data, "secret/openrails/merchants/cozy-art/rail_merchant_accounts/nmi/live/mobius-account/security_key")
 }
 
-func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
+// #788: the boot-config plane is gone — with no scoped merchant secret store
+// wired, NMI client resolution fails closed instead of falling back to a
+// static client.
+func TestCheckoutWithoutScopedResolutionFailsClosed(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 
-	client, err := svc.resolveNMIClient(ctx, "nmi")
-	require.NoError(t, err)
-	require.Equal(t, "static-mobius-key", client.SecurityKey)
+	_, err := svc.resolveNMIClient(ctx, "nmi")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not configured")
 }
 
 func TestCheckoutRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
@@ -245,8 +249,8 @@ func checkoutRailConfig(testMode bool) *config.Config {
 	}
 }
 
-func checkoutRailSet(mobiusKey string) config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func checkoutRailSet(mobiusKey string) railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"mobius": {
 			Rail: models.RailNMI,
 			NMI:  &config.NMIRailConfig{SecurityKey: mobiusKey},

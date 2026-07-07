@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
 	"time"
 
@@ -304,8 +305,8 @@ func testSolanaCheckoutConfig() *config.Config {
 	}
 }
 
-func testSolanaCheckoutRails() config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func testSolanaCheckoutRails() railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"solana": {
 			Rail: models.RailSolana,
 			Solana: &config.SolanaRailConfig{

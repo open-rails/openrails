@@ -235,7 +235,7 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 	if stripePriceID == "" {
 		return
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	a := active
 	_ = stripeSvc.UpdatePrice(ctx, stripePriceID, catalog.UpdatePriceParams{Active: &a})
 }
@@ -584,7 +584,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	}
 
 	// Push OpenRails values to Stripe: name, description, and the active flag.
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	name := strings.TrimSpace(local.DisplayName)
 	desc := strings.TrimSpace(local.Description)
 	active := local.IsPurchasable()
@@ -620,7 +620,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 // upstream (create-new + archive-old), never an in-place re-mint+transfer.
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
 	priceContentKey := openRailsPriceContentKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays())
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	unitAmountCents, err := moneyutil.MicrosToCentsExact(local.Amount)
 	if err != nil {
 		return "", err

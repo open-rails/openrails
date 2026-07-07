@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -103,36 +102,16 @@ func TestProviderRefreshSchedulerFanOut(t *testing.T) {
 	require.Equal(t, map[time.Duration]bool{0: true, 10 * time.Minute: true}, offsets)
 }
 
-// Any boot-config fallback plane can arm every merchant, so the accounts
-// predicate must not run (and nobody is skipped).
-func TestProviderRefreshSchedulerBootPlaneSkipsPredicate(t *testing.T) {
-	a, b := uuid.New(), uuid.New()
-	ins := &fakeRefreshInserter{}
-	w := &ProviderRefreshSchedulerWorker{
-		CCBillDataLink: &ccbill.DataLinkClient{},
-		Inserter:       ins,
-		ListMerchants: func(context.Context) ([]uuid.UUID, error) {
-			return []uuid.UUID{a, b}, nil
-		},
-		HasRailAccounts: func(context.Context, uuid.UUID) (bool, error) {
-			t.Fatal("accounts predicate must not run when a boot plane exists")
-			return false, nil
-		},
-	}
-	require.NoError(t, w.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
-	require.Equal(t, map[uuid.UUID]bool{a: true, b: true}, ins.merchantSet())
-}
-
 // Embedded hosts route the kind onto their existing billing queue.
 func TestProviderRefreshSchedulerMerchantQueueOverride(t *testing.T) {
 	ins := &fakeRefreshInserter{}
 	w := &ProviderRefreshSchedulerWorker{
 		MerchantQueue: QueueBilling,
 		Inserter:      ins,
-		Rails:         config.RailMerchantAccountSet{"nmi": nil},
 		ListMerchants: func(context.Context) ([]uuid.UUID, error) {
 			return []uuid.UUID{uuid.New()}, nil
 		},
+		HasRailAccounts: func(context.Context, uuid.UUID) (bool, error) { return true, nil },
 	}
 	require.NoError(t, w.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
 	require.Len(t, ins.inserts, 1)
@@ -162,11 +141,11 @@ func TestProviderRefreshSchedulerDedupeAndErrors(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	ins := &fakeRefreshInserter{dup: map[uuid.UUID]bool{a: true}}
 	w := &ProviderRefreshSchedulerWorker{
-		Rails:    config.RailMerchantAccountSet{"nmi": nil},
 		Inserter: ins,
 		ListMerchants: func(context.Context) ([]uuid.UUID, error) {
 			return []uuid.UUID{a, b}, nil
 		},
+		HasRailAccounts: func(context.Context, uuid.UUID) (bool, error) { return true, nil },
 	}
 	require.NoError(t, w.Work(context.Background(), &river.Job[ProviderRefreshArgs]{}))
 	require.Equal(t, map[uuid.UUID]bool{a: true, b: true}, ins.merchantSet())

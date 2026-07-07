@@ -48,7 +48,7 @@ type StripeProductFeature struct {
 // lookup_key. Stripe requires a name; callers pass the entitlement string (or a
 // friendlier display name). Returns the feature id.
 func (s *StripeCatalogService) CreateFeature(ctx context.Context, lookupKey, name string) (string, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")
 	}
@@ -74,7 +74,7 @@ func (s *StripeCatalogService) CreateFeature(ctx context.Context, lookupKey, nam
 // ListFeatures returns every entitlement Feature in the account (paginated).
 // Used to find-or-create by lookup_key and to know which features OpenRails owns.
 func (s *StripeCatalogService) ListFeatures(ctx context.Context) ([]StripeFeature, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -110,7 +110,7 @@ func (s *StripeCatalogService) ListFeatures(ctx context.Context) ([]StripeFeatur
 
 // ListProductFeatures returns the features attached to a Stripe Product (paginated).
 func (s *StripeCatalogService) ListProductFeatures(ctx context.Context, stripeProductID string) ([]StripeProductFeature, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -151,7 +151,7 @@ func (s *StripeCatalogService) ListProductFeatures(ctx context.Context, stripePr
 // AttachFeatureToProduct attaches a Feature to a Stripe Product. Returns the
 // product-feature id.
 func (s *StripeCatalogService) AttachFeatureToProduct(ctx context.Context, stripeProductID, featureID string) (string, error) {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")
 	}
@@ -173,7 +173,7 @@ func (s *StripeCatalogService) AttachFeatureToProduct(ctx context.Context, strip
 // DetachProductFeature removes a feature attachment from a Stripe Product. A 404
 // is treated as success (already gone).
 func (s *StripeCatalogService) DetachProductFeature(ctx context.Context, stripeProductID, productFeatureID string) error {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}
@@ -206,7 +206,7 @@ func (s *StripeCatalogService) DetachProductFeature(ctx context.Context, stripeP
 // An empty desired set is valid and means "detach all OpenRails-managed features"
 // (e.g. a product whose last entitlement was removed).
 func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripeProductID string, desiredKeys []string) error {
-	stripeProc := s.stripeRail()
+	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}

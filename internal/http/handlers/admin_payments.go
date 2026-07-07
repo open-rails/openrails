@@ -267,9 +267,14 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		}
 		stripeRefundTargetID = refundTargetID
 	case rails.IsNMI(payment.Rail):
-		providerName := strings.ToLower(string(payment.Rail))
-		client, ok := r.State.NMIClients[providerName]
-		if !ok {
+		// #788: arm the ctx merchant's NMI client from the armed rail state
+		// (the payment's stamped provenance account when present).
+		mid, merr := merchant.Require(ctx)
+		if merr != nil {
+			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
+		}
+		client, ok, cerr := r.State.CollectionResolver.ResolveNMIClient(ctx, mid.UUID(), payment.RailMerchantAccountID)
+		if cerr != nil || !ok || client == nil {
 			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
 		}
 		nmiClient = client

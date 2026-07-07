@@ -464,7 +464,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	}
 	// Pre-flight: resolve the rail read-only so misconfiguration surfaces
 	// immediately (the intent handler re-resolves at execution time).
-	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.DB, s.rt.NMIClients, sub); err != nil {
+	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.CollectionResolver, sub); err != nil {
 		return nil, fmt.Errorf("resolve subscription provider account: %w", err)
 	} else if !ok {
 		return nil, fmt.Errorf("payment rail not available")
@@ -877,10 +877,13 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 		return nil, err
 	}
 	var solanaProc *config.RailMerchantAccountConfig
-	if s.rt != nil {
-		solanaProc = s.rt.Rails.GetSolanaRail()
+	if s.rt != nil && s.rt.RailConfigs != nil {
+		proc, err := s.rt.RailConfigs.RailConfig(ctx, string(models.RailSolana), "")
+		if err == nil {
+			solanaProc = proc
+		}
 	}
-	if solanaProc == nil {
+	if solanaProc == nil || solanaProc.Solana == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
 
@@ -932,7 +935,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("return_url required")
 	}
 
-	service := &subscriptions.StripePortalService{Config: rt.Config, Rails: rt.Rails}
+	service := &subscriptions.StripePortalService{Config: rt.Config, Rails: rt.RailConfigs}
 	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
 	if err != nil {
 		return nil, err
