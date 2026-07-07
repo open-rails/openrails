@@ -79,10 +79,65 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
+    -- #787: an inline auto_fixed transition (the only resolution this upsert
+    -- itself can produce; fixed/ignored come via the separate admin/auto-
+    -- resolve statements below) is a resolution — clear the notify linkage so
+    -- a future reopen of this identity notifies again.
+    notified_at = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_at
+        WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
+        ELSE openrails.reconciliation_findings.notified_at
+    END,
+    notified_severity = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_severity
+        WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
+        ELSE openrails.reconciliation_findings.notified_severity
+    END,
     last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *;
+
+-- name: MarkReconciliationFindingNotified :execrows
+-- #787: dedupe linkage for the immediate notify path — set once a finding
+-- pushes an operator notification, cleared by every resolution statement below
+-- so a reopened finding notifies again.
+UPDATE openrails.reconciliation_findings
+SET notified_at = sqlc.arg(notified_at)::timestamptz,
+    notified_severity = sqlc.arg(severity)::text
+WHERE id = sqlc.arg(id);
+
+-- name: ListArmedFindingsDigestMerchants :many
+-- #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
+-- low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
+SELECT DISTINCT merchant_id FROM openrails.reconciliation_findings
+WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
+
+-- name: CountLowSeverityFindingsPendingDigest :one
+SELECT count(*) FROM openrails.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
+
+-- name: MarkLowSeverityFindingsDigested :execrows
+UPDATE openrails.reconciliation_findings
+SET notified_at = sqlc.arg(notified_at)::timestamptz, notified_severity = 'low'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
+
+-- name: GetFindingDigestWatermark :one
+-- Scalar subquery (not a plain SELECT ... WHERE) so a merchant with no digest
+-- row yet returns one row with NULL rather than :one erroring on zero rows.
+SELECT (
+    SELECT last_digested_at FROM openrails.finding_digest_state
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+) AS last_digested_at;
+
+-- name: TouchFindingDigestWatermark :exec
+INSERT INTO openrails.finding_digest_state (merchant_id, last_digested_at, updated_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(last_digested_at)::timestamptz, now())
+ON CONFLICT (merchant_id) DO UPDATE SET
+    last_digested_at = EXCLUDED.last_digested_at,
+    updated_at = now();
 
 -- name: GetReconciliationFinding :one
 SELECT * FROM openrails.reconciliation_findings WHERE id = $1;
@@ -108,6 +163,7 @@ UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE evidence->>'provider' = sqlc.arg(provider)
   AND status IN ('reconcile_required', 'requires_review')
@@ -123,6 +179,7 @@ UPDATE openrails.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
@@ -140,6 +197,7 @@ UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
@@ -149,6 +207,7 @@ SET status = 'auto_fixed',
     resolution = 'enforced',
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true),
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
@@ -158,6 +217,7 @@ SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
 
@@ -167,6 +227,7 @@ SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
@@ -218,6 +279,7 @@ SET status = 'fixed',
         ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true)
     END,
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
@@ -231,6 +293,7 @@ SET status = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
     resolved_by = sqlc.arg(resolved_by),
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 

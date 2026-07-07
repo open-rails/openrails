@@ -573,7 +573,7 @@ func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRai
 }
 
 const getReconciliationFindingByIdentity = `-- name: GetReconciliationFindingByIdentity :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
 WHERE merchant_id = $1::uuid
   AND finding_type = $2
   AND subject_key = $3
@@ -608,6 +608,8 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 		&i.UpdatedAt,
 		&i.Evidence,
 		&i.ResolvedBy,
+		&i.NotifiedAt,
+		&i.NotifiedSeverity,
 	)
 	return i, err
 }

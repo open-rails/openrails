@@ -83,6 +83,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		SolanaRPC:           r.SolanaRPC,
 		DeferDelete:         r.DeferredDeletes,
 		NotificationService: r.NotificationService,
+		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
@@ -121,6 +122,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		DB:     r.DB,
 		Config: r.Config,
 		Clock:  clock,
+		Alerts: r.AlertService, // #787: requires_review findings -> operator notifications
 	}); err != nil {
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
@@ -280,6 +282,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Clock:  clock,
 	}); err != nil {
 		return fmt.Errorf("add alert eval worker: %w", err)
+	}
+	// Low-severity reconciliation-findings digest (#787): a SEPARATE
+	// notification source from the rule evaluator above — findings are
+	// event-sourced, not a metric-threshold rule.
+	if err := addTrackedWorker(r, workers, &riverjobs.FindingsDigestWorker{
+		DB:     r.DB,
+		Alerts: r.AlertService,
+	}); err != nil {
+		return fmt.Errorf("add findings digest worker: %w", err)
 	}
 	// Worker health checker (#689): evaluates per-kind health rows written by the
 	// WorkerHealthMiddleware and raises repair alerts for never-succeeded /
@@ -686,6 +697,21 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.AlertEvalArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: low-severity reconciliation-findings digest (#787). The
+	// outer tick is cheap (indexed armed-merchant scan); the daily cadence gate
+	// lives inside DigestFindings, same shape as the payment_methods_expiring
+	// digest above.
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.FindingsDigestArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}

@@ -236,6 +236,61 @@ func (s *store) countPaymentMethodsExpiring(ctx context.Context, now time.Time, 
 	})
 }
 
+// --- #787 reconciliation-findings notifications -----------------------------
+
+// markFindingNotified stamps the finding's dedupe linkage after a successful
+// (or attempted — fire-and-forget, matching the rule evaluator's posture)
+// notification push.
+func (s *store) markFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity string) error {
+	_, err := s.db.Gen(ctx).MarkReconciliationFindingNotified(ctx, gen.MarkReconciliationFindingNotifiedParams{
+		ID: id, NotifiedAt: at, Severity: severity,
+	})
+	return err
+}
+
+// listArmedFindingsDigestMerchants: merchants with at least one undigested
+// low-severity requires_review finding — the digest sweep's work set.
+// CROSS-MERCHANT (base pool), same posture as listArmedMerchants.
+func (s *store) listArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
+	return s.db.GenGlobal().ListArmedFindingsDigestMerchants(ctx)
+}
+
+func (s *store) getFindingDigestWatermark(ctx context.Context) (*time.Time, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.db.Gen(ctx).GetFindingDigestWatermark(ctx, mid.UUID())
+}
+
+func (s *store) touchFindingDigestWatermark(ctx context.Context, at time.Time) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return s.db.Gen(ctx).TouchFindingDigestWatermark(ctx, gen.TouchFindingDigestWatermarkParams{
+		MerchantID: mid.UUID(), LastDigestedAt: at,
+	})
+}
+
+func (s *store) countLowSeverityFindingsPendingDigest(ctx context.Context) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.db.Gen(ctx).CountLowSeverityFindingsPendingDigest(ctx, mid.UUID())
+}
+
+func (s *store) markLowSeverityFindingsDigested(ctx context.Context, at time.Time) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.db.Gen(ctx).MarkLowSeverityFindingsDigested(ctx, gen.MarkLowSeverityFindingsDigestedParams{
+		MerchantID: mid.UUID(), NotifiedAt: at,
+	})
+}
+
 // webhookExpectedRails implements templateEvalDeps for the #786 webhook_silence
 // expectation gate: armed rails with billable subscriptions (rail -> count).
 func (s *store) webhookExpectedRails(ctx context.Context) (map[string]int64, error) {

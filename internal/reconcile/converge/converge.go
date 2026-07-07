@@ -8,10 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -117,6 +119,13 @@ type ConvergeEngine struct {
 	// converge); side-effect deps are intentionally nil.
 	lifecycle *subscriptions.SubscriptionLifecycleService
 	passes    []Pass
+
+	// Notifier bridges persisted findings into the #736 operator notification
+	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
+	// alerting service wired). Set directly on the constructed engine, same as
+	// Now — reconcile.FindingNotifier lives in the parent package, which
+	// converge already imports (the LIFE pass's decider).
+	Notifier reconcile.FindingNotifier
 }
 
 // NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes (each
@@ -198,8 +207,15 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 		if err != nil {
 			return res, err
 		}
-		if perr := e.persist(ctx, q, scope, run.ID, collected[i], status); perr != nil {
+		row, perr := e.persist(ctx, q, scope, run.ID, collected[i], status)
+		if perr != nil {
 			return res, perr
+		}
+		if e.Notifier != nil {
+			if nerr := e.Notifier.NotifyFinding(ctx, reconcile.FindingRecordFromRow(row)); nerr != nil {
+				log.WithContext(ctx).WithError(nerr).WithField("finding_id", row.ID).
+					Warn("converge: finding notification failed; continuing")
+			}
 		}
 		res.Findings++
 		switch status {
@@ -261,9 +277,10 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 	}
 }
 
-// persist upserts a finding into the shared ledger. finding_type is the
+// persist upserts a finding into the shared ledger, returning the upserted row
+// so the caller can feed it to a FindingNotifier (#787). finding_type is the
 // self-describing qualified slug; shape/class + finding details ride in evidence.
-func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) error {
+func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) (gen.OpenrailsReconciliationFinding, error) {
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),
 	}
@@ -279,13 +296,13 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 	}
 	evidence, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
+		return gen.OpenrailsReconciliationFinding{}, fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
 	}
 	var recommended *string
 	if f.RecommendedAction != "" {
 		recommended = &f.RecommendedAction
 	}
-	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+	row, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        scope.Merchant.UUID(),
 		FindingType:       f.Type,
 		SubjectKey:        f.SubjectKey,
@@ -296,7 +313,7 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 		RunID:             &runID,
 	})
 	if err != nil {
-		return fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)
+		return gen.OpenrailsReconciliationFinding{}, fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)
 	}
-	return nil
+	return row, nil
 }

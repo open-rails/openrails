@@ -18,6 +18,7 @@ SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = $1,
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed')
 `
@@ -42,6 +43,7 @@ SET status = 'ignored',
     operator_notes = $1,
     resolved_by = $2,
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $3 AND status IN ('reconcile_required', 'requires_review')
 `
@@ -65,7 +67,7 @@ func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg Admi
 
 const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
 
-SELECT f.id, f.merchant_id, f.finding_type, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, count(*) OVER () AS total_count
+SELECT f.id, f.merchant_id, f.finding_type, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, count(*) OVER () AS total_count
 FROM openrails.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid
   AND (CASE
@@ -135,6 +137,8 @@ func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg Admin
 			&i.OpenrailsReconciliationFinding.UpdatedAt,
 			&i.OpenrailsReconciliationFinding.Evidence,
 			&i.OpenrailsReconciliationFinding.ResolvedBy,
+			&i.OpenrailsReconciliationFinding.NotifiedAt,
+			&i.OpenrailsReconciliationFinding.NotifiedSeverity,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err
@@ -158,6 +162,7 @@ SET status = 'fixed',
         ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $3::jsonb, true)
     END,
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $4 AND status IN ('reconcile_required', 'requires_review')
 `
@@ -216,6 +221,7 @@ UPDATE openrails.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE f.merchant_id = $1::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
@@ -252,6 +258,7 @@ UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE evidence->>'provider' = $1
   AND status IN ('reconcile_required', 'requires_review')
@@ -325,6 +332,19 @@ func (q *Queries) CountErrorEpisodeTotals(ctx context.Context, merchantID uuid.U
 		&i.OrphanedDays,
 	)
 	return i, err
+}
+
+const countLowSeverityFindingsPendingDigest = `-- name: CountLowSeverityFindingsPendingDigest :one
+SELECT count(*) FROM openrails.reconciliation_findings
+WHERE merchant_id = $1::uuid
+  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
+`
+
+func (q *Queries) CountLowSeverityFindingsPendingDigest(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLowSeverityFindingsPendingDigest, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countOpenReconciliationFindingsByTypeSeverity = `-- name: CountOpenReconciliationFindingsByTypeSeverity :many
@@ -454,6 +474,7 @@ SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = $1,
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed')
 `
@@ -500,6 +521,22 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 	return result.RowsAffected(), nil
 }
 
+const getFindingDigestWatermark = `-- name: GetFindingDigestWatermark :one
+SELECT (
+    SELECT last_digested_at FROM openrails.finding_digest_state
+    WHERE merchant_id = $1::uuid
+) AS last_digested_at
+`
+
+// Scalar subquery (not a plain SELECT ... WHERE) so a merchant with no digest
+// row yet returns one row with NULL rather than :one erroring on zero rows.
+func (q *Queries) GetFindingDigestWatermark(ctx context.Context, merchantID uuid.UUID) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, getFindingDigestWatermark, merchantID)
+	var last_digested_at *time.Time
+	err := row.Scan(&last_digested_at)
+	return last_digested_at, err
+}
+
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
 SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
@@ -526,7 +563,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
@@ -550,6 +587,8 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 		&i.UpdatedAt,
 		&i.Evidence,
 		&i.ResolvedBy,
+		&i.NotifiedAt,
+		&i.NotifiedSeverity,
 	)
 	return i, err
 }
@@ -653,7 +692,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 }
 
 const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
 WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key
 `
@@ -685,6 +724,8 @@ func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Con
 			&i.UpdatedAt,
 			&i.Evidence,
 			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
 		); err != nil {
 			return nil, err
 		}
@@ -820,6 +861,33 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArmedFindingsDigestMerchants = `-- name: ListArmedFindingsDigestMerchants :many
+SELECT DISTINCT merchant_id FROM openrails.reconciliation_findings
+WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
+`
+
+// #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
+// low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
+func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listArmedFindingsDigestMerchants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1051,7 +1119,7 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR evidence->>'provider' = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
@@ -1103,6 +1171,8 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 			&i.UpdatedAt,
 			&i.Evidence,
 			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
 		); err != nil {
 			return nil, err
 		}
@@ -1403,12 +1473,33 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 	return items, nil
 }
 
+const markLowSeverityFindingsDigested = `-- name: MarkLowSeverityFindingsDigested :execrows
+UPDATE openrails.reconciliation_findings
+SET notified_at = $1::timestamptz, notified_severity = 'low'
+WHERE merchant_id = $2::uuid
+  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
+`
+
+type MarkLowSeverityFindingsDigestedParams struct {
+	NotifiedAt time.Time
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) MarkLowSeverityFindingsDigested(ctx context.Context, arg MarkLowSeverityFindingsDigestedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markLowSeverityFindingsDigested, arg.NotifiedAt, arg.MerchantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
     resolution = 'enforced',
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $1::jsonb, true),
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
 `
@@ -1426,11 +1517,36 @@ func (q *Queries) MarkReconciliationFindingAutoFixed(ctx context.Context, arg Ma
 	return result.RowsAffected(), nil
 }
 
+const markReconciliationFindingNotified = `-- name: MarkReconciliationFindingNotified :execrows
+UPDATE openrails.reconciliation_findings
+SET notified_at = $1::timestamptz,
+    notified_severity = $2::text
+WHERE id = $3
+`
+
+type MarkReconciliationFindingNotifiedParams struct {
+	NotifiedAt time.Time
+	Severity   string
+	ID         uuid.UUID
+}
+
+// #787: dedupe linkage for the immediate notify path — set once a finding
+// pushes an operator notification, cleared by every resolution statement below
+// so a reopened finding notifies again.
+func (q *Queries) MarkReconciliationFindingNotified(ctx context.Context, arg MarkReconciliationFindingNotifiedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markReconciliationFindingNotified, arg.NotifiedAt, arg.Severity, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markReconciliationFindingVanished = `-- name: MarkReconciliationFindingVanished :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = $1 AND status IN ('reconcile_required', 'requires_review')
 `
@@ -2035,6 +2151,24 @@ func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscript
 	return result.RowsAffected(), nil
 }
 
+const touchFindingDigestWatermark = `-- name: TouchFindingDigestWatermark :exec
+INSERT INTO openrails.finding_digest_state (merchant_id, last_digested_at, updated_at)
+VALUES ($1::uuid, $2::timestamptz, now())
+ON CONFLICT (merchant_id) DO UPDATE SET
+    last_digested_at = EXCLUDED.last_digested_at,
+    updated_at = now()
+`
+
+type TouchFindingDigestWatermarkParams struct {
+	MerchantID     uuid.UUID
+	LastDigestedAt time.Time
+}
+
+func (q *Queries) TouchFindingDigestWatermark(ctx context.Context, arg TouchFindingDigestWatermarkParams) error {
+	_, err := q.db.Exec(ctx, touchFindingDigestWatermark, arg.MerchantID, arg.LastDigestedAt)
+	return err
+}
+
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 
 INSERT INTO openrails.reconciliation_findings (
@@ -2070,10 +2204,24 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
+    -- #787: an inline auto_fixed transition (the only resolution this upsert
+    -- itself can produce; fixed/ignored come via the separate admin/auto-
+    -- resolve statements below) is a resolution — clear the notify linkage so
+    -- a future reopen of this identity notifies again.
+    notified_at = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_at
+        WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
+        ELSE openrails.reconciliation_findings.notified_at
+    END,
+    notified_severity = CASE
+        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_severity
+        WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
+        ELSE openrails.reconciliation_findings.notified_severity
+    END,
     last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by
+RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity
 `
 
 type UpsertReconciliationFindingParams struct {
@@ -2124,6 +2272,8 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.UpdatedAt,
 		&i.Evidence,
 		&i.ResolvedBy,
+		&i.NotifiedAt,
+		&i.NotifiedSeverity,
 	)
 	return i, err
 }

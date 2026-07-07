@@ -41,6 +41,12 @@ type Engine struct {
 	// unavailable history source is NEVER a run error.
 	History HistoryEventSource
 
+	// Notifier bridges persisted findings into the #736 operator notification
+	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
+	// alerting service wired). Best-effort: a notify failure is logged, never
+	// fails the run — the finding is already durably persisted.
+	Notifier FindingNotifier
+
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
 
@@ -392,6 +398,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			return rep, records, planned, appliedChanges, fmt.Errorf("persist finding %s/%s: %w", f.Type, f.SubjectKey, err)
 		}
 		records = append(records, rec)
+		if e.Notifier != nil {
+			if nerr := e.Notifier.NotifyFinding(ctx, rec); nerr != nil {
+				log.WithContext(ctx).WithError(nerr).WithField("finding_id", rec.ID).
+					Warn("reconcile: finding notification failed; continuing")
+			}
+		}
 		if f.Apply != nil {
 			planned = append(planned, mutationRecordsForFinding(provider, rec.ID, f, nil, "planned")...)
 		}
