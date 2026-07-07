@@ -382,11 +382,11 @@ type LLMConfig struct {
 
 	// CatalogDraftingEnabled additionally arms the #779 Phase 2 draft_* tools
 	// inside the catalog copilot loop (draft_price_change / draft_catalog_diff
-	// — proposals only, never a mutation). MUST stay false until #781 (server-
-	// side notice-window enforcement) ships: the copilot's safety story is
-	// "the API refuses what the wizard would refuse", which depends on that
-	// enforcement existing. Flip this only after both #779 and #781 have
-	// merged. Default false (fail-closed). Env: LLM_CATALOG_DRAFTING_ENABLED.
+	// — proposals only, never a mutation). Safe to enable since #781 shipped
+	// (2026-07-07): the server-side notice-window enforcement the copilot's
+	// safety story depends on ("the API refuses what the wizard would refuse")
+	// is live. Stays an explicit per-deployment consent like AskEnabled.
+	// Default false (fail-closed). Env: LLM_CATALOG_DRAFTING_ENABLED.
 	CatalogDraftingEnabled bool `koanf:"catalog_drafting_enabled,omitempty"`
 }
 

@@ -314,7 +314,7 @@ need cross-product migration (moving subscribers onto a different, pre-existing
 product — #778, explicitly deferred) is refused with a typed reason and the
 archive-and-grandfather workaround, never drafted.
 
-**`catalog_drafting_enabled` MUST stay false until #781 ships** (server-side
+**`catalog_drafting_enabled` explicit per-deployment consent; safe to enable (#781 shipped 2026-07-07)
 notice-window enforcement for scheduled price increases) — the copilot's safety story
 is "the API refuses what the wizard would refuse", which depends on that enforcement
 existing. Flag-off means the `draft_*` tools are entirely ABSENT from the tool list
