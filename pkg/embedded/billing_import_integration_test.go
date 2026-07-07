@@ -39,8 +39,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	day := 24 * time.Hour
 
 	cust := func() uuid.UUID { return uuid.New() }
-	cRunway, cDunning, cLapsed, cUser, cChargeback, cParked, cIncr := cust(), cust(), cust(), cust(), cust(), cust(), cust()
-	allCust := []uuid.UUID{cRunway, cDunning, cLapsed, cUser, cChargeback, cParked, cIncr}
+	cRunway, cDunning, cLapsed, cUser, cUserNMI, cChargeback, cParked, cIncr := cust(), cust(), cust(), cust(), cust(), cust(), cust(), cust()
+	allCust := []uuid.UUID{cRunway, cDunning, cLapsed, cUser, cUserNMI, cChargeback, cParked, cIncr}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, e := appDB.Qx(ctx).Exec(ctx,
@@ -81,8 +81,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	book := DeclaredBilling{
 		AsOf: asOf,
 		Customers: []DeclaredCustomer{
-			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed},
-			{Customer: cUser}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
+			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed}, {Customer: cUser},
+			{Customer: cUserNMI}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
 		},
 		PaymentMethods: []DeclaredPaymentMethod{{
 			Customer: cDunning, Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
@@ -109,6 +109,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				SourceID: "usercancel", Customer: cUser, Price: price, Rail: "ccbill",
 				RailSubscriptionID: "sub-user-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
 				Cancel: CancelEvidence{Kind: "user_cancelled", At: userCancelAt},
+			},
+			{
+				// Explicit user cancel on NMI whose legacy schedule was NOT
+				// confirmed dead at AsOf: the import must arm the marker AND
+				// enqueue the real delete intent (no boot-sweep reliance).
+				SourceID: "usercancel-nmi-live", Customer: cUserNMI, Price: price, Rail: "nmi",
+				RailSubscriptionID: "sub-user-nmi-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
+				Cancel: CancelEvidence{Kind: "user_cancelled", At: userCancelAt, ScheduleLive: true},
 			},
 			{
 				SourceID: "chargeback", Customer: cChargeback, Price: price, Rail: "nmi",
@@ -142,7 +150,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, res.Blocked, "no blocks expected: %v", res.Reasons)
-	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked", "incremental"}, res.Imported)
+	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res.Imported)
 
 	type subRow struct {
 		status, cancelType             string
@@ -207,6 +215,27 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.NotNil(t, r.endedAt)
 		require.True(t, r.endedAt.Equal(userPaidThrough), "cancel-with-runway keeps the paid-through end")
 
+		// 4b) Declared user cancel on NMI with a live legacy schedule: marker
+		// stamped at AsOf AND the real delete intent enqueued atomically.
+		// The ccbill twin above gets NEITHER (no remote delete on that rail).
+		r = load(ctx, "sub-user-nmi-"+sfx)
+		require.Equal(t, "cancelled", r.status)
+		require.Equal(t, "user", r.cancelType, "declared kind stays faithful — marker never rewrites history")
+		require.NotNil(t, r.deletionScheduledAt, "ScheduleLive arms the deferred-delete marker")
+		require.True(t, r.deletionScheduledAt.Equal(asOf))
+		var nmiSubID uuid.UUID
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT id FROM openrails.subscriptions WHERE rail_subscription_id=$1`, "sub-user-nmi-"+sfx).Scan(&nmiSubID))
+		var declStatus, declOrigin string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status, origin FROM openrails.rail_intents
+			 WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, nmiSubID).
+			Scan(&declStatus, &declOrigin))
+		require.Equal(t, "pending", declStatus)
+		require.Equal(t, "user", declOrigin)
+		r = load(ctx, "sub-user-"+sfx)
+		require.Nil(t, r.deletionScheduledAt, "ccbill cancel: no remote-delete marker")
+
 		// 5) Chargeback: faithful type.
 		r = load(ctx, "sub-cb-"+sfx)
 		require.Equal(t, "cancelled", r.status)
@@ -237,7 +266,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res2.Imported)
 	require.Empty(t, res2.Blocked, "re-import blocks: %v", res2.Reasons)
-	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked", "incremental"}, res2.Skipped)
+	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res2.Skipped)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int

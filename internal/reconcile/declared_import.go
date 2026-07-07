@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -55,6 +56,7 @@ type DeclaredSubscriptionFact struct {
 	PaidThrough           *time.Time // last paid-through evidence (legacy expiration)
 	CancelKind            DeclaredCancelKind
 	CancelAt              time.Time // required when CancelKind != none
+	CancelScheduleLive    bool      // provider-side recurring schedule NOT confirmed dead at AsOf
 	DunningLive           bool      // legacy dunning schedule still live at AsOf
 	DunningRetries        int       // legacy retry count → retry_attempts (forensics)
 	DunningLastRetryAt    *time.Time
@@ -89,6 +91,7 @@ func ImportDeclaredSubscriptions(
 	ctx context.Context,
 	database *db.DB,
 	lc *subscriptions.SubscriptionLifecycleService,
+	deferDelete subscriptions.DeferredDeleteScheduler,
 	merchantID uuid.UUID,
 	facts []DeclaredSubscriptionFact,
 	txns []RemoteTransaction,
@@ -256,6 +259,25 @@ func ImportDeclaredSubscriptions(
 			// pass, but money truth still lands.
 			if _, err := backfillSubscriptionPayments(ctx, q, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
+			}
+			// Declared cancelled but the provider-side schedule was not confirmed
+			// dead at AsOf: record the owed remote delete exactly like the runtime
+			// producers — DeletionScheduledAt marker + nmi_delete intent in ONE
+			// transaction (no crash window, no out-of-band healing needed).
+			if f.CancelScheduleLive && deferDelete != nil &&
+				rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail)) {
+				if err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+					if _, err := tx.Exec(ctx,
+						`UPDATE openrails.subscriptions
+						 SET deletion_scheduled_at = $1, updated_at = $1
+						 WHERE id = $2 AND deletion_scheduled_at IS NULL`,
+						asOf, subID); err != nil {
+						return err
+					}
+					return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)
+				}); err != nil {
+					return out, fmt.Errorf("declared import: schedule remote delete for %s: %w", f.SourceID, err)
+				}
 			}
 		} else {
 			// Fresh ambiguous rows AND every pre-existing row (incremental

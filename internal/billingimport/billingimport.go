@@ -69,6 +69,11 @@ type PaymentMethodRef struct {
 type CancelEvidence struct {
 	Kind string    `json:"kind,omitempty"`
 	At   time.Time `json:"at,omitempty"`
+	// ScheduleLive: the provider-side recurring schedule was NOT confirmed dead
+	// at AsOf (e.g. a legacy NMI schedule that may keep rebilling after the
+	// cancel). For rails with RemoteDeleteOnTerminalCancel the import stamps
+	// DeletionScheduledAt and enqueues the deferred delete intent atomically.
+	ScheduleLive bool `json:"schedule_live,omitempty"`
 }
 
 // DunningEvidence is the host's legacy dunning state at AsOf.
@@ -181,12 +186,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	// Lifecycle clock pinned at AsOf: every lifecycle write (ended_at, grace,
 	// updated_at) is dated at the horizon — deterministic re-runs.
 	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
-	// A terminal cancel through the decider (ResolveCancelledRemoteAlive) must
-	// durably record the owed remote NMI delete. Enqueue the real ledger intent
-	// inline, same as the runtime producers — user-origin (these are the source
-	// system's user cancellations; system-origin would park under mode=limited),
-	// no rate ceiling (batch declaration of settled facts, not self-service).
-	lc.SetDeferredDeleteScheduler(intents.NewNMIDeleteScheduler(database, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive"))
+	// A terminal cancel — through the decider (ResolveCancelledRemoteAlive) or
+	// declared explicitly with a live remote schedule — must durably record the
+	// owed remote NMI delete. Enqueue the real ledger intent inline, same as the
+	// runtime producers — user-origin (these are the source system's user
+	// cancellations; system-origin would park under mode=limited), no rate
+	// ceiling (batch declaration of settled facts, not self-service).
+	deferDelete := intents.NewNMIDeleteScheduler(database, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
+	lc.SetDeferredDeleteScheduler(deferDelete)
 
 	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		qx := database.Qx(ctx)
@@ -289,6 +296,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				PaidThrough:           s.PaidThrough,
 				CancelKind:            reconcile.DeclaredCancelKind(s.Cancel.Kind),
 				CancelAt:              s.Cancel.At,
+				CancelScheduleLive:    s.Cancel.ScheduleLive,
 				Evidence:              s.Evidence,
 			}
 			if s.Dunning != nil {
@@ -321,7 +329,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			facts = append(facts, f)
 		}
 
-		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, database, lc, merchantID.UUID(), facts, txns, opts.Book.SubscriptionsExhaustive, asOf)
+		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, database, lc, deferDelete, merchantID.UUID(), facts, txns, opts.Book.SubscriptionsExhaustive, asOf)
 		if err != nil {
 			return err
 		}
