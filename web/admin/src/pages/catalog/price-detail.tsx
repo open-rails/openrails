@@ -1,0 +1,217 @@
+import * as React from "react"
+import { ArrowLeftIcon } from "lucide-react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { toast } from "sonner"
+
+import { Fact } from "@/components/fact-card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { useApiData } from "@/hooks/use-api-data"
+import {
+  cancelReprice,
+  getPrice,
+  getPriceKeyHistory,
+  getProduct,
+  listRepriceBatchesByKey,
+  listReprices,
+} from "@/lib/api/endpoints"
+import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { toastApiError } from "@/lib/toast"
+import { priceIntervalLabel } from "@/pages/catalog/price-format"
+import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
+
+// PriceDetailPage (#777): the version chain (from the #774 pointer-movement
+// log, with dates) and any pending scheduled migration (progress + cancel)
+// for one price key — the wizard's Step 1 entry point ("Change price") also
+// lives here alongside the catalog list row.
+export function PriceDetailPage() {
+  const { id = "" } = useParams()
+  const navigate = useNavigate()
+  const { data: price, loading, error, reload } = useApiData(() => getPrice(id), [id])
+  const { data: product } = useApiData(
+    () => (price ? getProduct(price.product_id) : Promise.resolve(null)),
+    [price?.product_id],
+  )
+  const { data: history, reload: reloadHistory } = useApiData(
+    () => (price ? getPriceKeyHistory(price.key) : Promise.resolve(null)),
+    [price?.key],
+  )
+  const { data: batches, reload: reloadBatches } = useApiData(
+    () => (price ? listRepriceBatchesByKey(price.key, 5) : Promise.resolve(null)),
+    [price?.key],
+  )
+  const latestBatch = batches?.items?.[0]
+  const {
+    data: batchReprices,
+    reload: reloadBatchReprices,
+  } = useApiData(
+    () =>
+      latestBatch
+        ? listReprices({ reprice_batch_id: latestBatch.id }, 1000)
+        : Promise.resolve(null),
+    [latestBatch?.id],
+  )
+
+  React.useEffect(() => {
+    if (error) toastApiError(error, "Load price")
+  }, [error])
+
+  const reloadAll = () => {
+    reload()
+    reloadHistory()
+    reloadBatches()
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (!price) return <p className="text-sm text-muted-foreground">Price not found.</p>
+
+  const scheduled = batchReprices?.items?.filter((r) => r.status === "scheduled") ?? []
+  const applied = batchReprices?.items?.filter((r) => r.status === "applied") ?? []
+  const isPending = !!latestBatch && scheduled.length > 0
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
+          <ArrowLeftIcon className="size-4" />
+        </Button>
+        <div>
+          <h2 className="flex items-center gap-2 font-mono text-sm">
+            {price.key}
+            {price.archived && <Badge variant="secondary">archived</Badge>}
+          </h2>
+          <p className="text-xs text-muted-foreground">{shortId(price.id, 16)}</p>
+        </div>
+        <div className="ml-auto">
+          <PriceChangeWizard price={price} productName={product?.display_name ?? "…"} onDone={reloadAll} />
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Fact label="Product">
+          <Link className="underline-offset-2 hover:underline" to={`/catalog`}>
+            {product?.display_name ?? shortId(price.product_id, 13)}
+          </Link>
+        </Fact>
+        <Fact label="Amount">{formatMicros(price.unit_amount, price.currency)}</Fact>
+        <Fact label="Currency · interval">
+          {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
+        </Fact>
+        <Fact label="Created">{formatDate(price.created_at)}</Fact>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Version chain</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!history?.items?.length ? (
+            <p className="text-sm text-muted-foreground">No history yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Since</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Price</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {history.items.map((entry) => (
+                  <TableRow key={`${entry.price.id}-${entry.effective_at}`}>
+                    <TableCell>{formatMicros(entry.price.unit_amount, entry.price.currency)}</TableCell>
+                    <TableCell>{formatDate(entry.effective_at)}</TableCell>
+                    <TableCell>
+                      {entry.price.archived ? (
+                        <Badge variant="secondary">grandfathered</Badge>
+                      ) : (
+                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">current</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        className="font-mono text-xs underline-offset-2 hover:underline"
+                        to={`/catalog/prices/${entry.price.id}`}
+                      >
+                        {shortId(entry.price.id, 13)}
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {latestBatch && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="text-sm">
+              {isPending ? "Pending migration" : "Last migration"}
+            </CardTitle>
+            {isPending && (
+              <CancelMigrationButton
+                repriceIds={scheduled.map((r) => r.id)}
+                onDone={() => {
+                  reloadBatchReprices()
+                  reloadAll()
+                }}
+              />
+            )}
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            <p>
+              {applied.length} of {latestBatch.subscriptions_scheduled} migrated
+              {scheduled.length > 0 && ` · ${scheduled.length} still scheduled`}
+              {" · effective "}
+              {formatDate(latestBatch.effective_at)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {latestBatch.subscriptions_skipped > 0 &&
+                `${latestBatch.subscriptions_skipped} subscription(s) were skipped (constraint violation or existing schedule conflict) at schedule time. `}
+              Progress is computed live from individual reprice rows (up to 1,000 fetched per batch).
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function CancelMigrationButton({ repriceIds, onDone }: { repriceIds: string[]; onDone: () => void }) {
+  const [busy, setBusy] = React.useState(false)
+  return (
+    <Button
+      variant="destructive"
+      size="sm"
+      disabled={busy || !repriceIds.length}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await Promise.all(repriceIds.map((id) => cancelReprice(id)))
+          toast.success(
+            `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`,
+          )
+          onDone()
+        } catch (err) {
+          toastApiError(err, "Cancel migration")
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? "Canceling…" : "Cancel migration"}
+    </Button>
+  )
+}

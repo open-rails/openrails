@@ -1,5 +1,6 @@
 import * as React from "react"
 import { PlusIcon, RefreshCwIcon, UploadIcon } from "lucide-react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
 import { StatusBadge } from "@/components/status-badge"
@@ -45,6 +46,8 @@ import {
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { priceIntervalLabel } from "@/pages/catalog/price-format"
+import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 
 export function CatalogPage() {
   return (
@@ -328,16 +331,14 @@ function PriceRow({
   }
   return (
     <TableRow className={price.archived ? "opacity-60" : undefined}>
-      <TableCell className="font-mono text-xs">{shortId(price.id, 13)}</TableCell>
+      <TableCell className="font-mono text-xs">
+        <Link className="underline-offset-2 hover:underline" to={`/catalog/prices/${price.id}`}>
+          {shortId(price.id, 13)}
+        </Link>
+      </TableCell>
       <TableCell>{productName}</TableCell>
       <TableCell>{formatMicros(price.unit_amount, price.currency)}</TableCell>
-      <TableCell>
-        {price.auto_renew
-          ? `every ${price.access_duration_hours ?? "?"}h`
-          : price.access_duration_hours
-            ? `${price.access_duration_hours}h once`
-            : "one-time"}
-      </TableCell>
+      <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
           {Object.entries(price.providers ?? {}).map(([rail, state]) => (
@@ -354,9 +355,12 @@ function PriceRow({
       </TableCell>
       <TableCell>{price.archived ? <Badge variant="secondary">archived</Badge> : <StatusBadge status="active" />}</TableCell>
       <TableCell className="text-right">
-        <Button variant="outline" size="sm" disabled={busy} onClick={toggle}>
-          {price.archived ? "Activate" : "Deactivate"}
-        </Button>
+        <div className="flex justify-end gap-2">
+          <PriceChangeWizard price={price} productName={productName} onDone={onDone} />
+          <Button variant="outline" size="sm" disabled={busy} onClick={toggle}>
+            {price.archived ? "Activate" : "Deactivate"}
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   )

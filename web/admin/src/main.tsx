@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { AppLayout } from "@/layouts/app-layout"
 import { AuthProvider } from "@/lib/auth"
 import { CatalogPage } from "@/pages/catalog"
+import { PriceDetailPage } from "@/pages/catalog/price-detail"
 import { CustomersPage } from "@/pages/customers"
 import { CustomerDetailPage } from "@/pages/customers/detail"
 import { DashboardPage } from "@/pages/dashboard"
@@ -34,6 +35,7 @@ const router = createBrowserRouter(
         { path: "payments", element: <PaymentsPage /> },
         { path: "payments/:id", element: <PaymentDetailPage /> },
         { path: "catalog", element: <CatalogPage /> },
+        { path: "catalog/prices/:id", element: <PriceDetailPage /> },
         { path: "ops", element: <OpsPage /> },
         { path: "settings", element: <SettingsPage /> },
       ],

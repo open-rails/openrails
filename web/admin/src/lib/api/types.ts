@@ -42,11 +42,20 @@ export interface RawSubscription {
   updated_at: string
 }
 
+// RawPrice mirrors internal/db/models.Price verbatim — the shape embedded on
+// subscription responses (distinct from CatalogPrice, the catalog
+// endpoints' own view: NOTE the field is "amount" here, not "unit_amount").
 export interface RawPrice {
   id: string
   product_id?: string
-  unit_amount?: number
+  amount?: number
   currency?: string
+  archived?: boolean
+  // Key (#774): the durable, movable-pointer handle for this price's
+  // version chain — see CatalogPrice.key.
+  key?: string
+  access_duration_hours?: number
+  auto_renew?: boolean
   [k: string]: unknown
 }
 
@@ -189,6 +198,12 @@ export interface CatalogProviderState {
 
 export interface CatalogPrice {
   id: string
+  // Key (#774): the durable, per-merchant-unique MOVABLE POINTER to this
+  // price's substance-version chain — stable across amount edits, unlike id
+  // (which stays the immutable substance UUID). The wizard bumps the amount
+  // under the SAME key; archived predecessors keep the key as a
+  // back-reference to the chain they belong to.
+  key: string
   product_id: string
   archived: boolean
   unit_amount: number
@@ -201,6 +216,72 @@ export interface CatalogPrice {
   updated_at: string
   providers?: Record<string, CatalogProviderState>
   pending_manual_actions?: { provider: string; action: string; hint: string }[]
+}
+
+// --- Price repricing / migration (#773 primitive, #777 console wizard) ---
+
+// PriceKeyHistoryEntry is one entry of a price key's version chain, resolved
+// from the #774 pointer-movement log — GET .../prices/by-key/{key}/history.
+// Most-recent-first.
+export interface PriceKeyHistoryEntry {
+  price: CatalogPrice
+  effective_at: string
+}
+
+export type RepriceStatus = "scheduled" | "applied" | "canceled"
+
+// SubscriptionReprice mirrors internal/db/models.SubscriptionReprice.
+export interface SubscriptionReprice {
+  id: string
+  subscription_id: string
+  from_price_id: string
+  to_price_id: string
+  effective_at: string
+  status: RepriceStatus
+  reprice_batch_id?: string
+  created_at: string
+  applied_at?: string
+  canceled_at?: string
+}
+
+// RepriceBatch mirrors internal/db/models.RepriceBatch — the header row for
+// one bulk reprice_all_prior_versions call. Counts are frozen at schedule
+// time (subscriptions_scheduled is the migration's denominator; query
+// SubscriptionReprice rows by reprice_batch_id + status for live progress).
+export interface RepriceBatch {
+  id: string
+  price_key?: string
+  to_price_id: string
+  effective_at: string
+  subscriptions_matched: number
+  subscriptions_scheduled: number
+  subscriptions_skipped: number
+  created_at: string
+}
+
+// RepriceOutcome is one subscription's result within a bulk reprice call.
+export interface RepriceOutcome {
+  subscription_id: string
+  reprice_id?: string
+  reason?: string
+}
+
+// RepriceBatchResult is the response of POST .../reprice-all-prior-versions.
+export interface RepriceBatchResult {
+  batch_id: string
+  to_price_id: string
+  matched: number
+  scheduled: RepriceOutcome[]
+  skipped: RepriceOutcome[]
+}
+
+// RepricePreviewResult is the response of the #777 read-only GET
+// .../reprice-all-prior-versions/preview dry-run — the wizard's Step 2
+// affected-count preview, called BEFORE the price edit lands.
+export interface RepricePreviewResult {
+  price_key: string
+  to_price_id: string
+  matched: number
 }
 
 export interface CatalogDriftEvent {

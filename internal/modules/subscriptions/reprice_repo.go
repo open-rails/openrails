@@ -149,6 +149,27 @@ func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// ListBatchesByPriceKey lists a key's bulk reprice operations, most recent
+// first (#777: the console's price page needs "is there a pending migration
+// for this price key" without already knowing a batch id).
+func (r *RepriceRepo) ListBatchesByPriceKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
+	rows, err := r.db.Gen(ctx).ListRepriceBatchesByPriceKey(ctx, gen.ListRepriceBatchesByPriceKeyParams{
+		PriceKey:   priceKey,
+		PageLimit:  limit32,
+		PageOffset: offset32,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.RepriceBatch, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, models.RepriceBatchFromGen(row))
+	}
+	return out, nil
+}
+
 // ListActiveSubscriptionsByPriceIDs returns every ACTIVE subscription pinned
 // to one of the given price rows — reprice_all_prior_versions' match set.
 func (r *RepriceRepo) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceIDs []uuid.UUID) ([]*models.Subscription, error) {

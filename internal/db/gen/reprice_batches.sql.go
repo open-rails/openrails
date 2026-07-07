@@ -121,3 +121,49 @@ func (q *Queries) ListRepriceBatches(ctx context.Context, arg ListRepriceBatches
 	}
 	return items, nil
 }
+
+const listRepriceBatchesByPriceKey = `-- name: ListRepriceBatchesByPriceKey :many
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at FROM openrails.reprice_batches
+WHERE price_key = $1::text
+ORDER BY created_at DESC
+LIMIT $3::int OFFSET $2::int
+`
+
+type ListRepriceBatchesByPriceKeyParams struct {
+	PriceKey   string
+	PageOffset int32
+	PageLimit  int32
+}
+
+// #777: the console's price page needs "is there a pending migration for this
+// price key" without already knowing a batch id — list a key's bulk reprice
+// operations, most recent first.
+func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]OpenrailsRepriceBatch, error) {
+	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey, arg.PriceKey, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRepriceBatch
+	for rows.Next() {
+		var i OpenrailsRepriceBatch
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.PriceKey,
+			&i.ToPriceID,
+			&i.EffectiveAt,
+			&i.SubscriptionsMatched,
+			&i.SubscriptionsScheduled,
+			&i.SubscriptionsSkipped,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

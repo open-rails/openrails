@@ -49,10 +49,12 @@ GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/by-key/{key}
+GET /v1/merchant/catalog/prices/by-key/{key}/history
 GET /v1/merchant/catalog/prices/{id}
 GET /v1/merchant/catalog/products
 GET /v1/merchant/catalog/products/by-key/{key}
 GET /v1/merchant/catalog/products/{id}
+GET /v1/merchant/catalog/reprice-all-prior-versions/preview
 GET /v1/merchant/credit-limit
 GET /v1/merchant/credits/balance
 GET /v1/merchant/customers
@@ -74,6 +76,7 @@ GET /v1/merchant/payments
 GET /v1/merchant/payments/{id}
 GET /v1/merchant/repair-alerts
 GET /v1/merchant/reprices
+GET /v1/merchant/reprices/batches
 GET /v1/merchant/reprices/{id}
 GET /v1/merchant/settings
 GET /v1/merchant/subscriptions

@@ -130,6 +130,53 @@ func (s *Service) SetPriceKey(ctx context.Context, priceID uuid.UUID, key string
 	return priceToCatalogPrice(current), nil
 }
 
+// PriceKeyHistoryEntry is one entry of a price key's version chain, resolved
+// from the #774 pointer-movement log — the #777 console price page's
+// "version chain with dates" surface. Most-recent-first (mirrors
+// ListKeyMovements).
+type PriceKeyHistoryEntry struct {
+	Price       CatalogPrice `json:"price"`
+	EffectiveAt time.Time    `json:"effective_at"`
+}
+
+// GetPriceKeyHistory resolves a key's full pointer-movement history log into
+// the priced rows it named at each effective date — NOT built by #774 (which
+// exposed only the key-resolution + per-price read surface), added here
+// because the #777 console needs it to render "key's history with dates"
+// rather than approximating from each price row's own created_at (which is
+// wrong for a REACTIVATED row: its created_at is its ORIGINAL creation, not
+// the date it most recently became current again).
+func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKeyHistoryEntry, error) {
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, fmt.Errorf("key required")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	movements, err := prices.ListKeyMovements(ctx, tid.UUID(), key)
+	if err != nil {
+		return nil, err
+	}
+	if len(movements) == 0 {
+		return nil, fmt.Errorf("price key %q not found", key)
+	}
+	out := make([]PriceKeyHistoryEntry, 0, len(movements))
+	for _, m := range movements {
+		p, err := prices.GetByID(ctx, m.PriceID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, key, err)
+		}
+		out = append(out, PriceKeyHistoryEntry{Price: *priceToCatalogPrice(p), EffectiveAt: m.EffectiveAt})
+	}
+	return out, nil
+}
+
 // ResolvePriceReference resolves a caller-supplied price identifier that may
 // be either a price UUID or a #774 price_key. Tries the UUID parse first
 // (the common, cheap case); falls back to a key lookup only when the string
