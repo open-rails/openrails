@@ -383,17 +383,18 @@ func PriceKeyMovementsFromGen(rows []gen.OpenrailsPriceKeyMovement) []*PriceKeyM
 // SubscriptionRepriceFromGen maps a generated subscription_reprices row (#773).
 func SubscriptionRepriceFromGen(r gen.OpenrailsSubscriptionReprice) *SubscriptionReprice {
 	return &SubscriptionReprice{
-		ID:             r.ID,
-		MerchantID:     r.MerchantID,
-		SubscriptionID: r.SubscriptionID,
-		FromPriceID:    r.FromPriceID,
-		ToPriceID:      r.ToPriceID,
-		EffectiveAt:    r.EffectiveAt,
-		Status:         RepriceStatus(r.Status),
-		RepriceBatchID: r.RepriceBatchID,
-		CreatedAt:      r.CreatedAt,
-		AppliedAt:      r.AppliedAt,
-		CanceledAt:     r.CanceledAt,
+		ID:                      r.ID,
+		MerchantID:              r.MerchantID,
+		SubscriptionID:          r.SubscriptionID,
+		FromPriceID:             r.FromPriceID,
+		ToPriceID:               r.ToPriceID,
+		EffectiveAt:             r.EffectiveAt,
+		Status:                  RepriceStatus(r.Status),
+		RepriceBatchID:          r.RepriceBatchID,
+		CreatedAt:               r.CreatedAt,
+		AppliedAt:               r.AppliedAt,
+		CanceledAt:              r.CanceledAt,
+		AcknowledgedShortNotice: r.AcknowledgedShortNotice,
 	}
 }
 

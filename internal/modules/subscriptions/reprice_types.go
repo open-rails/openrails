@@ -36,7 +36,21 @@ var (
 	// Surfaced by both Cancel (cancel-before-effective) and the renewal-boundary
 	// pickup (safe to retry).
 	ErrRepriceNotScheduled = errors.New("reprice: not in scheduled status")
+
+	// ErrRepriceNoticeWindowViolation (#781): an INCREASE reprice (to_price
+	// amount > from_price amount) whose effective_at is nearer than the
+	// merchant's configured notice window (default DefaultRepriceNoticeWindowDays).
+	// Decreases are exempt. Bypassed only by an explicit
+	// AcknowledgeShortNotice on the request — never silently coerced.
+	ErrRepriceNoticeWindowViolation = errors.New("reprice: effective_at is inside the merchant's configured notice window for a price increase")
 )
+
+// DefaultRepriceNoticeWindowDays (#781) is the notice window used when a
+// merchant has no explicit openrails.merchant_configurations override — card
+// networks and consumer-protection law generally require advance notice for
+// recurring-amount increases; 30 days is the console's own long-standing UX
+// default (#777's price-wizard-logic.ts), now also the server-side floor.
+const DefaultRepriceNoticeWindowDays = 30
 
 // RepriceConstraintError carries the offending ids for a refused reprice.
 type RepriceConstraintError struct {
@@ -62,6 +76,13 @@ type RepriceRequest struct {
 	SubscriptionID uuid.UUID
 	ToPriceID      uuid.UUID
 	EffectiveAt    time.Time
+	// AcknowledgeShortNotice (#781) explicitly bypasses the merchant's
+	// notice-window constraint on an INCREASE whose effective_at is nearer
+	// than the window — the support/emergency escape hatch. Recorded on the
+	// scheduled row (AcknowledgedShortNotice) and logged; never silent. No
+	// effect when the window is already satisfied or the reprice is a
+	// decrease.
+	AcknowledgeShortNotice bool
 }
 
 // RepriceAllPriorVersionsRequest is the bulk reprice_all_prior_versions(key,
@@ -71,6 +92,12 @@ type RepriceRequest struct {
 type RepriceAllPriorVersionsRequest struct {
 	PriceKey    string
 	EffectiveAt time.Time
+	// AcknowledgeShortNotice (#781): see RepriceRequest. Applies uniformly to
+	// every subscription in the batch — a per-subscription override isn't
+	// exposed at v1 (matches the constraint set's existing skip-not-abort
+	// granularity: subscriptions violating the window are individually
+	// skipped, with a reason, when this is false).
+	AcknowledgeShortNotice bool
 }
 
 // RepriceBatchResult summarizes a bulk reprice_all_prior_versions call. JSON
@@ -89,6 +116,11 @@ type RepriceOutcome struct {
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 	RepriceID      uuid.UUID `json:"reprice_id,omitempty"` // zero when Skipped
 	Reason         string    `json:"reason,omitempty"`     // set when skipped (constraint violation)
+	// AcknowledgedShortNotice (#781) is true when this scheduled item's
+	// effective_at was inside the merchant's notice window and was scheduled
+	// anyway via the batch's AcknowledgeShortNotice override — audit evidence
+	// alongside the persisted row.
+	AcknowledgedShortNotice bool `json:"acknowledged_short_notice,omitempty"`
 }
 
 // RepricePreviewResult is the #777 read-only "affected-count preview": how

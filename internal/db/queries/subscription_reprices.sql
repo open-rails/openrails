@@ -3,10 +3,11 @@
 
 -- name: CreateSubscriptionReprice :one
 INSERT INTO openrails.subscription_reprices (
-    merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id
+    merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, acknowledged_short_notice
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(from_price_id)::uuid,
-    sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz, sqlc.narg(reprice_batch_id)::uuid
+    sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz, sqlc.narg(reprice_batch_id)::uuid,
+    sqlc.arg(acknowledged_short_notice)::bool
 )
 RETURNING *;
 

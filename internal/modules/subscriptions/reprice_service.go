@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -32,16 +33,18 @@ type RepriceService struct {
 	prices        *catalog.PriceService
 	subscriptions *SubscriptionService
 	notifications *NotificationService
+	config        *merchantconfig.Store
 	clock         clockwork.Clock
 }
 
-func NewRepriceService(d *db.DB, repo *RepriceRepo, prices *catalog.PriceService, subscriptions *SubscriptionService, notifications *NotificationService, clock clockwork.Clock) *RepriceService {
+func NewRepriceService(d *db.DB, repo *RepriceRepo, prices *catalog.PriceService, subscriptions *SubscriptionService, notifications *NotificationService, config *merchantconfig.Store, clock clockwork.Clock) *RepriceService {
 	return &RepriceService{
 		db:            d,
 		repo:          repo,
 		prices:        prices,
 		subscriptions: subscriptions,
 		notifications: notifications,
+		config:        config,
 		clock:         timeutil.FirstClock(clock),
 	}
 }
@@ -68,6 +71,43 @@ func validateRepriceConstraints(subscriptionID uuid.UUID, from, to *models.Price
 		return &RepriceConstraintError{Sentinel: ErrRepriceCrossCurrency, SubscriptionID: subscriptionID, FromPriceID: from.ID, ToPriceID: to.ID}
 	}
 	return nil
+}
+
+// noticeWindowDays (#781) resolves the merchant's configured minimum notice
+// window for a price-increase reprice, falling back to
+// DefaultRepriceNoticeWindowDays when the merchant has no override (or no
+// config store is wired at all, e.g. some lightweight test fixtures).
+func (s *RepriceService) noticeWindowDays(ctx context.Context) (int, error) {
+	if s.config == nil {
+		return DefaultRepriceNoticeWindowDays, nil
+	}
+	cfg, _, err := s.config.Get(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("reprice: load merchant notice-window config: %w", err)
+	}
+	if cfg.RepriceNoticeWindowDays != nil {
+		return *cfg.RepriceNoticeWindowDays, nil
+	}
+	return DefaultRepriceNoticeWindowDays, nil
+}
+
+// checkNoticeWindow (#781) is the fail-closed notice-window gate: an INCREASE
+// (to.Amount > from.Amount) whose effectiveAt is nearer than the merchant's
+// configured window violates. Decreases never violate — card-network/
+// consumer-protection advance-notice requirements apply to increases only.
+func (s *RepriceService) checkNoticeWindow(ctx context.Context, from, to *models.Price, effectiveAt time.Time) (violates bool, err error) {
+	if to.Amount <= from.Amount {
+		return false, nil
+	}
+	days, err := s.noticeWindowDays(ctx)
+	if err != nil {
+		return false, err
+	}
+	if days <= 0 {
+		return false, nil
+	}
+	minEffective := s.now().Add(time.Duration(days) * 24 * time.Hour)
+	return effectiveAt.Before(minEffective), nil
 }
 
 // scheduledConflict returns ErrRepriceAlreadyScheduled if the subscription
@@ -108,8 +148,24 @@ func (s *RepriceService) Reprice(ctx context.Context, req RepriceRequest) (*mode
 	if err := s.scheduledConflict(ctx, req.SubscriptionID); err != nil {
 		return nil, err
 	}
+	violatesNotice, err := s.checkNoticeWindow(ctx, fromPrice, toPrice, req.EffectiveAt)
+	if err != nil {
+		return nil, err
+	}
+	if violatesNotice && !req.AcknowledgeShortNotice {
+		return nil, &RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: req.SubscriptionID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}
+	}
+	acknowledgedShortNotice := violatesNotice && req.AcknowledgeShortNotice
+	if acknowledgedShortNotice {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": req.SubscriptionID,
+			"from_price_id":   fromPrice.ID,
+			"to_price_id":     toPrice.ID,
+			"effective_at":    req.EffectiveAt,
+		}).Warn("reprice: short-notice override acknowledged for a price increase inside the merchant's notice window")
+	}
 
-	rr, err := s.repo.CreateSubscriptionReprice(ctx, req.SubscriptionID, fromPrice.ID, toPrice.ID, req.EffectiveAt, nil)
+	rr, err := s.repo.CreateSubscriptionReprice(ctx, req.SubscriptionID, fromPrice.ID, toPrice.ID, req.EffectiveAt, nil, acknowledgedShortNotice)
 	if err != nil {
 		return nil, fmt.Errorf("reprice: schedule: %w", err)
 	}
@@ -160,12 +216,14 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 	}
 
 	type toSchedule struct {
-		sub  *models.Subscription
-		from *models.Price
+		sub                     *models.Subscription
+		from                    *models.Price
+		acknowledgedShortNotice bool
 	}
 	var (
-		schedule []toSchedule
-		skipped  []RepriceOutcome
+		schedule          []toSchedule
+		skipped           []RepriceOutcome
+		acknowledgedCount int
 	)
 	for _, sub := range subs {
 		fromPrice := priorByID[sub.PriceID]
@@ -182,21 +240,48 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 			skipped = append(skipped, RepriceOutcome{SubscriptionID: sub.ID, Reason: err.Error()})
 			continue
 		}
-		schedule = append(schedule, toSchedule{sub: sub, from: fromPrice})
+		// #781: per-subscription, since a bulk call's prior versions can carry
+		// different amounts (some higher, some lower than the target) — the
+		// notice window only ever gates the subset that are true increases.
+		violatesNotice, err := s.checkNoticeWindow(ctx, fromPrice, toPrice, req.EffectiveAt)
+		if err != nil {
+			return nil, fmt.Errorf("reprice_all_prior_versions: check notice window for subscription %s: %w", sub.ID, err)
+		}
+		if violatesNotice && !req.AcknowledgeShortNotice {
+			skipped = append(skipped, RepriceOutcome{
+				SubscriptionID: sub.ID,
+				Reason:         (&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}).Error(),
+			})
+			continue
+		}
+		acknowledged := violatesNotice && req.AcknowledgeShortNotice
+		if acknowledged {
+			acknowledgedCount++
+		}
+		schedule = append(schedule, toSchedule{sub: sub, from: fromPrice, acknowledgedShortNotice: acknowledged})
 	}
 
 	batch, err := s.repo.CreateBatch(ctx, &key, toPrice.ID, req.EffectiveAt, len(subs), len(schedule), len(skipped))
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions: create batch: %w", err)
 	}
+	if acknowledgedCount > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"batch_id":           batch.ID,
+			"price_key":          key,
+			"to_price_id":        toPrice.ID,
+			"effective_at":       req.EffectiveAt,
+			"acknowledged_count": acknowledgedCount,
+		}).Warn("reprice_all_prior_versions: short-notice override acknowledged for a price increase inside the merchant's notice window")
+	}
 	result := &RepriceBatchResult{BatchID: batch.ID, ToPriceID: toPrice.ID, Matched: len(subs), Skipped: skipped}
 	batchID := batch.ID
 	for _, item := range schedule {
-		rr, err := s.repo.CreateSubscriptionReprice(ctx, item.sub.ID, item.from.ID, toPrice.ID, req.EffectiveAt, &batchID)
+		rr, err := s.repo.CreateSubscriptionReprice(ctx, item.sub.ID, item.from.ID, toPrice.ID, req.EffectiveAt, &batchID, item.acknowledgedShortNotice)
 		if err != nil {
 			return nil, fmt.Errorf("reprice_all_prior_versions: schedule subscription %s: %w", item.sub.ID, err)
 		}
-		result.Scheduled = append(result.Scheduled, RepriceOutcome{SubscriptionID: item.sub.ID, RepriceID: rr.ID})
+		result.Scheduled = append(result.Scheduled, RepriceOutcome{SubscriptionID: item.sub.ID, RepriceID: rr.ID, AcknowledgedShortNotice: item.acknowledgedShortNotice})
 		s.emitScheduledNotification(ctx, item.sub, item.from, toPrice, req.EffectiveAt)
 	}
 	return result, nil

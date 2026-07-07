@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -34,6 +35,7 @@ type repriceFixture struct {
 	lifecycle   *SubscriptionLifecycleService
 	repriceRepo *RepriceRepo
 	repriceSvc  *RepriceService
+	config      *merchantconfig.Store
 
 	merchantID              uuid.UUID
 	productID               uuid.UUID
@@ -92,11 +94,20 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil, clock)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, clock)
 	repriceRepo := NewRepriceRepo(dbi)
-	repriceSvc := NewRepriceService(dbi, repriceRepo, priceSvc, subSvc, notifSvc, clock)
+	configStore := merchantconfig.NewStore(dbi)
+	// #781: this fixture's low/high prices exist to test renewal-boundary,
+	// cancel, and constraint mechanics — NOT notice-window semantics — so
+	// disable the gate (an explicit merchant override of 0 days) here rather
+	// than making every existing case pick a 30-day-compliant effective_at
+	// (which would fight the fake clock's real-wall-clock ceiling, see above).
+	// The dedicated notice-window tests set their own window explicitly.
+	zeroWindow := 0
+	require.NoError(t, configStore.Upsert(ctx, models.MerchantConfiguration{RepriceNoticeWindowDays: &zeroWindow}))
+	repriceSvc := NewRepriceService(dbi, repriceRepo, priceSvc, subSvc, notifSvc, configStore, clock)
 
 	f := &repriceFixture{
 		dbi: dbi, pool: pool, clock: clock, priceSvc: priceSvc, subSvc: subSvc,
-		lifecycle: lifecycle, repriceRepo: repriceRepo, repriceSvc: repriceSvc,
+		lifecycle: lifecycle, repriceRepo: repriceRepo, repriceSvc: repriceSvc, config: configStore,
 		merchantID: merchantID, productID: productID,
 		lowPriceID: lowPriceID, highPriceID: highPriceID,
 		otherProductPriceID: otherProductPriceID, otherCurrencyPriceID: otherCurrencyPriceID,
@@ -112,6 +123,15 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.products WHERE id IN ($1,$2)", productID, otherProductID)
 	})
 	return f
+}
+
+// setNoticeWindowDays (#781) overrides this fixture's merchant-configured
+// reprice notice window (the fixture defaults to 0 — disabled — so every
+// pre-existing non-notice-window test is unaffected; tests exercising the
+// window call this explicitly).
+func (f *repriceFixture) setNoticeWindowDays(t *testing.T, ctx context.Context, days int) {
+	t.Helper()
+	require.NoError(t, f.config.Upsert(ctx, models.MerchantConfiguration{RepriceNoticeWindowDays: &days}))
 }
 
 // createSubscription seeds an active subscription pinned to priceID, billing
@@ -332,6 +352,162 @@ func TestRepriceAllPriorVersions_BulkSchedulesOnlyPriorVersions(t *testing.T) {
 
 	_, err = f.repriceRepo.GetScheduledForSubscription(ctx, unrelated)
 	require.ErrorIs(t, err, pgx.ErrNoRows, "a subscription pinned to a DIFFERENT key/product must not be touched")
+}
+
+// TestReprice_NoticeWindow_IncreaseInsideWindow_Refused (#781): an INCREASE
+// whose effective_at is nearer than the merchant's configured notice window
+// is refused with a typed constraint error — the server-side gate #773 never
+// had (proven, pre-#781, by the wizard's own integration test accepting a
+// 1-day-out increase without complaint).
+func TestReprice_NoticeWindow_IncreaseInsideWindow_Refused(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 30)
+	subID, _ := f.createSubscription(t, ctx, f.lowPriceID)
+
+	_, err := f.repriceSvc.Reprice(ctx, RepriceRequest{
+		SubscriptionID: subID, ToPriceID: f.highPriceID, EffectiveAt: f.clock.Now().Add(24 * time.Hour),
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrRepriceNoticeWindowViolation)
+	var constraintErr *RepriceConstraintError
+	require.ErrorAs(t, err, &constraintErr)
+	require.Equal(t, subID, constraintErr.SubscriptionID)
+
+	// Fail-closed: nothing was scheduled.
+	_, err = f.repriceRepo.GetScheduledForSubscription(ctx, subID)
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+}
+
+// TestReprice_NoticeWindow_DecreaseExempt_EvenOneDayOut: decreases never need
+// advance notice, regardless of the configured window.
+func TestReprice_NoticeWindow_DecreaseExempt_EvenOneDayOut(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 30)
+	subID, _ := f.createSubscription(t, ctx, f.highPriceID)
+
+	rr, err := f.repriceSvc.Reprice(ctx, RepriceRequest{
+		SubscriptionID: subID, ToPriceID: f.lowPriceID, EffectiveAt: f.clock.Now().Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Equal(t, models.RepriceStatusScheduled, rr.Status)
+	require.False(t, rr.AcknowledgedShortNotice, "a decrease never needs the override")
+}
+
+// TestReprice_NoticeWindow_AcknowledgeShortNotice_OverridesAndAudits: the
+// explicit support/emergency escape hatch schedules the increase anyway and
+// leaves audit evidence on the persisted row — never silent.
+func TestReprice_NoticeWindow_AcknowledgeShortNotice_OverridesAndAudits(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 30)
+	subID, _ := f.createSubscription(t, ctx, f.lowPriceID)
+
+	rr, err := f.repriceSvc.Reprice(ctx, RepriceRequest{
+		SubscriptionID: subID, ToPriceID: f.highPriceID, EffectiveAt: f.clock.Now().Add(24 * time.Hour),
+		AcknowledgeShortNotice: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, models.RepriceStatusScheduled, rr.Status)
+	require.True(t, rr.AcknowledgedShortNotice, "the override must be recorded on the row, never silent")
+
+	// Re-fetch independently — the audit trail is durable, not just an
+	// in-memory echo of the request.
+	fetched, err := f.repriceRepo.GetByID(ctx, rr.ID)
+	require.NoError(t, err)
+	require.True(t, fetched.AcknowledgedShortNotice)
+}
+
+// TestReprice_NoticeWindow_MerchantConfiguredWindowRespected: a merchant that
+// configures a SHORTER window than the default gets that shorter window
+// enforced, with no override needed.
+func TestReprice_NoticeWindow_MerchantConfiguredWindowRespected(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 2)
+	subID, _ := f.createSubscription(t, ctx, f.lowPriceID)
+
+	// 3 days out would violate the DEFAULT (30d) window but satisfies this
+	// merchant's configured 2-day window.
+	rr, err := f.repriceSvc.Reprice(ctx, RepriceRequest{
+		SubscriptionID: subID, ToPriceID: f.highPriceID, EffectiveAt: f.clock.Now().Add(3 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.False(t, rr.AcknowledgedShortNotice, "no override needed — the configured window is satisfied")
+
+	// Tightening the window back up refuses a second subscription at the same
+	// (now non-compliant) notice.
+	f.setNoticeWindowDays(t, ctx, 10)
+	subID2, _ := f.createSubscription(t, ctx, f.lowPriceID)
+	_, err = f.repriceSvc.Reprice(ctx, RepriceRequest{
+		SubscriptionID: subID2, ToPriceID: f.highPriceID, EffectiveAt: f.clock.Now().Add(3 * 24 * time.Hour),
+	})
+	require.ErrorIs(t, err, ErrRepriceNoticeWindowViolation)
+}
+
+// TestRepriceAllPriorVersions_NoticeWindow_IncreaseInsideWindowSkipped: the
+// bulk operation's skip-not-abort semantics apply to the notice-window
+// constraint exactly like the others (cross-product/currency/inactive) —
+// matched but skipped, with a typed reason, never silently scheduled early.
+func TestRepriceAllPriorVersions_NoticeWindow_IncreaseInsideWindowSkipped(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 30)
+
+	key := "reprice-notice-bulk-key-" + uuid.NewString()[:8]
+	require.NoError(t, f.priceSvc.SetKey(ctx, f.lowPriceID, key))
+	require.NoError(t, f.priceSvc.SetArchived(ctx, f.lowPriceID, true))
+	require.NoError(t, f.priceSvc.SetKey(ctx, f.highPriceID, key))
+	require.NoError(t, f.priceSvc.RecordKeyMovement(ctx, f.merchantID, f.lowPriceID, key, f.clock.Now().Add(-time.Hour)))
+	require.NoError(t, f.priceSvc.RecordKeyMovement(ctx, f.merchantID, f.highPriceID, key, f.clock.Now()))
+
+	pinned, _ := f.createSubscription(t, ctx, f.lowPriceID)
+
+	result, err := f.repriceSvc.RepriceAllPriorVersions(ctx, RepriceAllPriorVersionsRequest{
+		PriceKey: key, EffectiveAt: f.clock.Now().Add(24 * time.Hour),
+	})
+	require.NoError(t, err, "bulk never aborts on a per-subscription constraint violation")
+	require.Equal(t, 1, result.Matched)
+	require.Empty(t, result.Scheduled)
+	require.Len(t, result.Skipped, 1)
+	require.Equal(t, pinned, result.Skipped[0].SubscriptionID)
+	require.Contains(t, result.Skipped[0].Reason, "notice window")
+
+	_, err = f.repriceRepo.GetScheduledForSubscription(ctx, pinned)
+	require.ErrorIs(t, err, pgx.ErrNoRows, "skipped, never scheduled")
+}
+
+// TestRepriceAllPriorVersions_NoticeWindow_AcknowledgeShortNotice: the bulk
+// override schedules the whole batch anyway, with audit evidence on both the
+// API response and the persisted rows.
+func TestRepriceAllPriorVersions_NoticeWindow_AcknowledgeShortNotice(t *testing.T) {
+	f := newRepriceFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	f.setNoticeWindowDays(t, ctx, 30)
+
+	key := "reprice-notice-bulk-ack-key-" + uuid.NewString()[:8]
+	require.NoError(t, f.priceSvc.SetKey(ctx, f.lowPriceID, key))
+	require.NoError(t, f.priceSvc.SetArchived(ctx, f.lowPriceID, true))
+	require.NoError(t, f.priceSvc.SetKey(ctx, f.highPriceID, key))
+	require.NoError(t, f.priceSvc.RecordKeyMovement(ctx, f.merchantID, f.lowPriceID, key, f.clock.Now().Add(-time.Hour)))
+	require.NoError(t, f.priceSvc.RecordKeyMovement(ctx, f.merchantID, f.highPriceID, key, f.clock.Now()))
+
+	pinned, _ := f.createSubscription(t, ctx, f.lowPriceID)
+
+	result, err := f.repriceSvc.RepriceAllPriorVersions(ctx, RepriceAllPriorVersionsRequest{
+		PriceKey: key, EffectiveAt: f.clock.Now().Add(24 * time.Hour), AcknowledgeShortNotice: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Matched)
+	require.Empty(t, result.Skipped)
+	require.Len(t, result.Scheduled, 1)
+	require.Equal(t, pinned, result.Scheduled[0].SubscriptionID)
+	require.True(t, result.Scheduled[0].AcknowledgedShortNotice, "audit evidence on the API response")
+
+	scheduled, err := f.repriceRepo.GetScheduledForSubscription(ctx, pinned)
+	require.NoError(t, err)
+	require.True(t, scheduled.AcknowledgedShortNotice, "audit evidence durably persisted on the row")
 }
 
 // fakeCharger captures the last charge.Request it received, so tests can

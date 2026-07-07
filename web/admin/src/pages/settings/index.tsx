@@ -88,7 +88,12 @@ function MerchantSettingsTab() {
     if (error) toastApiError(error, "Load settings")
   }, [error])
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  return <MerchantProfileForm initial={data?.profile} />
+  return (
+    <div className="grid gap-4">
+      <MerchantProfileForm initial={data?.profile} />
+      <RepriceNoticeWindowForm initial={data?.reprice_notice_window_days} />
+    </div>
+  )
 }
 
 function MerchantProfileForm({
@@ -135,6 +140,60 @@ function MerchantProfileForm({
                     logo_url: logoURL || undefined,
                   },
                 })
+                toast.success("Settings saved")
+              } catch (err) {
+                toastApiError(err, "Save settings")
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// RepriceNoticeWindowForm (#781): the merchant-configurable minimum advance
+// notice (days) a subscription price INCREASE must give existing
+// subscribers. The catalog price-change wizard reads this same value
+// (GET /v1/merchant/settings) for its own date-picker gate; the API enforces
+// it regardless of what the console shows.
+function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
+  const [days, setDays] = React.useState(String(initial ?? 30))
+  const [busy, setBusy] = React.useState(false)
+  const parsed = Number(days)
+  const valid = days.trim() !== "" && Number.isInteger(parsed) && parsed >= 0
+
+  return (
+    <Card className="max-w-xl">
+      <CardHeader>
+        <CardTitle className="text-sm">Price-increase notice window</CardTitle>
+        <CardDescription>
+          Minimum days' advance notice a scheduled subscription price INCREASE must give existing
+          subscribers before it takes effect. Decreases are never gated. Default 30 days.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <Field label="Notice window (days)" id="s-notice-window">
+          <Input
+            id="s-notice-window"
+            type="number"
+            step="1"
+            min="0"
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+          />
+        </Field>
+        <div>
+          <Button
+            disabled={busy || !valid}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await putMerchantSettings({ reprice_notice_window_days: parsed })
                 toast.success("Settings saved")
               } catch (err) {
                 toastApiError(err, "Save settings")

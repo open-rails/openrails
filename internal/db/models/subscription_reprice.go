@@ -32,6 +32,11 @@ type SubscriptionReprice struct {
 	CreatedAt      time.Time     `json:"created_at"`
 	AppliedAt      *time.Time    `json:"applied_at,omitempty"`
 	CanceledAt     *time.Time    `json:"canceled_at,omitempty"`
+	// AcknowledgedShortNotice (#781) is the audit trail for the escape hatch:
+	// true when this INCREASE reprice's effective_at was inside the
+	// merchant's configured notice window and was scheduled anyway via the
+	// request's explicit acknowledge_short_notice override.
+	AcknowledgedShortNotice bool `json:"acknowledged_short_notice"`
 }
 
 // IsDue reports whether this scheduled reprice should be applied at the
