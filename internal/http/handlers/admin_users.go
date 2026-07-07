@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -60,10 +61,20 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	customerID := identity.CustomerIDFromString(path.UserID)
+	if customerID.UUID() == uuid.Nil {
+		// CustomerIDFromString coerces empty/non-UUID input to the zero id, which
+		// this caller must reject (#784): otherwise a malformed customer_id path
+		// segment (e.g. "does-not-exist") returns a 200 empty profile coerced to
+		// the zero UUID instead of a 400. A well-formed but never-seen id is still
+		// a valid (empty) profile by design — customers are implicit.
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer id")
+		return
+	}
 	ctx := r.Request.Context()
 	now := time.Now()
 	profile := adminUserBillingProfile{
-		CustomerID:     identity.CustomerIDFromString(path.UserID).UUID().String(),
+		CustomerID:     customerID.UUID().String(),
 		Subscriptions:  []models.Subscription{},
 		Entitlements:   []models.Entitlement{},
 		Payments:       []*models.Payment{},

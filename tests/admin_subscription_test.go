@@ -133,3 +133,22 @@ func TestAdminCancelSubscriptionNotFound(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "no rows", "must not leak raw sql.ErrNoRows text")
 	assert.NotContains(t, w.Body.String(), "SQLSTATE", "must not leak raw postgres error text")
 }
+
+// TestAdminGetUserBillingProfileRejectsMalformedID pins the #784 fix: a
+// malformed customer_id path segment returns 400, not a 200 empty profile
+// coerced to the zero UUID. (A well-formed but unused id stays a valid empty
+// profile — covered by TestAdminGetUserBillingProfile — since customers are
+// implicit.)
+func TestAdminGetUserBillingProfileRejectsMalformedID(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b1010101-0101-4010-8010-101010101010",
+		[]string{controlplane.PermMerchantCustomerSettingsRead})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/v1/merchant/customers/does-not-exist", nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+	admin.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "malformed customer id must 400, not a coerced 200: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "00000000-0000-0000-0000-000000000000", "must not return a zero-UUID profile")
+}
