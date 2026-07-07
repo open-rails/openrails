@@ -521,12 +521,28 @@ func adminRefundMetadata(idempotencyKey string, req refundRequest, status string
 	return metadata
 }
 
+// adminPaymentsMaxLimit caps the admin payments list page size, mirroring
+// adminCustomersMaxLimit (#785).
+const adminPaymentsMaxLimit = 200
+
 func GetAdminPayments(r *httprequest.Request) {
 	queryOpts := query.QueryOptions[payments.GetPaymentsFilters]{Limit: 50, Offset: 0}
 	if err := r.ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	// #785: validate + clamp pagination like ListAdminCustomers. Without this a
+	// negative limit flows through to a 200 with an inconsistent
+	// {"limit":-1,"has_more":true,…} envelope.
+	if queryOpts.Limit <= 0 {
+		r.ErrorJSON(http.StatusBadRequest, "limit must be a positive integer")
+		return
+	}
+	if queryOpts.Offset < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "offset must be a non-negative integer")
+		return
+	}
+	queryOpts.Limit = min(queryOpts.Limit, adminPaymentsMaxLimit)
 	payments, total, err := r.State.PaymentService.GetPayments(r.Request.Context(), queryOpts)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())

@@ -896,3 +896,24 @@ func TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured(t *testing.T) {
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "pending", intentStatus, "the durable intent waits for the scheduled executor")
 }
+
+// TestAdminPaymentsListValidatesPagination pins the #785 fix: a negative limit
+// or offset returns 400 (mirroring ListAdminCustomers), instead of a 200 with
+// an inconsistent {"limit":-1,"has_more":true,…} envelope. A valid request
+// still succeeds.
+func TestAdminPaymentsListValidatesPagination(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	reader := adminPaymentsReader(t, suite)
+
+	do := func(query string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/v1/merchant/payments"+query, nil)
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+		reader.ServeHTTP(w, req)
+		return w
+	}
+
+	assert.Equal(t, http.StatusBadRequest, do("?limit=-1").Code, "negative limit must 400")
+	assert.Equal(t, http.StatusBadRequest, do("?offset=-1").Code, "negative offset must 400")
+	assert.Equal(t, http.StatusOK, do("").Code, "a valid list request still succeeds")
+}
