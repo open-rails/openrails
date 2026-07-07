@@ -68,20 +68,35 @@ type localClient struct {
 
 // merchantCtx replicates the transport's merchant pinning (transport.go) for
 // the transcribed path: live-read the bound merchant (provisioning may bind it
-// after New), fall back to a per-call ctx pin, and stamp it before any
-// merchant-owned DB access. Without this every store call fails
+// after New), fall back to a per-call ctx pin while unbound, and stamp it
+// before any merchant-owned DB access. Without this every store call fails
 // merchant.Require in embedded mode.
-func (c *localClient) merchantCtx(ctx context.Context) context.Context {
+//
+// #772: an explicit per-call pin (openrails.WithMerchant) that disagrees with
+// an already-bound merchant is refused rather than silently overridden by the
+// bound one — one embedded engine serves one merchant.
+func (c *localClient) merchantCtx(ctx context.Context) (context.Context, error) {
 	mid := c.rt.ConfiguredMerchant()
-	if mid.IsZero() {
-		if v, ok := merchant.FromContext(ctx); ok {
+	if v, ok := merchant.FromContext(ctx); ok {
+		if !mid.IsZero() && v != mid {
+			return ctx, openrails.NewStatusError(http.StatusConflict, "", merchantMismatchMsg(mid, v))
+		}
+		if mid.IsZero() {
 			mid = v
 		}
 	}
 	if !mid.IsZero() {
 		ctx = merchant.WithID(ctx, mid)
 	}
-	return ctx
+	return ctx, nil
+}
+
+// merchantMismatchMsg is the shared error text for both merchant-pinning
+// paths (transport.go RoundTrip and this file's merchantCtx): an engine bound
+// to one merchant received a call explicitly pinned (openrails.WithMerchant)
+// to a DIFFERENT merchant (#772).
+func merchantMismatchMsg(bound, pinned merchant.ID) string {
+	return fmt.Sprintf("openrails embed: call pinned to merchant %s but engine is bound to merchant %s; one embedded engine serves one merchant", pinned, bound)
 }
 
 // ClientOption configures Runtime.Client.
@@ -187,7 +202,11 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 	}
 	req.Currency = currency
 
-	res, err := c.svc.Admit(c.merchantCtx(ctx), admitInputFromSDK(req, payer))
+	mctx, err := c.merchantCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.svc.Admit(mctx, admitInputFromSDK(req, payer))
 	if err != nil {
 		return nil, wrapInternalErr("admission check failed", err)
 	}
@@ -261,7 +280,11 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 			Windows:  windows,
 		})
 	}
-	if err := c.svc.ReplaceInvokerSpendLimits(c.merchantCtx(ctx), payer, next); err != nil {
+	mctx, err := c.merchantCtx(ctx)
+	if err != nil {
+		return err
+	}
+	if err := c.svc.ReplaceInvokerSpendLimits(mctx, payer, next); err != nil {
 		return wrapInternalErr("set customer spend delegations failed", err)
 	}
 	return nil

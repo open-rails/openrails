@@ -2,6 +2,7 @@ package embed
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -58,8 +60,17 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	ctx := req.Context()
 	// Live read: EnsureMerchant/provisioning may bind the merchant after New.
 	mid := t.rt.ConfiguredMerchant()
-	if mid.IsZero() {
-		if v, ok := merchant.FromContext(ctx); ok {
+	if v, ok := merchant.FromContext(ctx); ok {
+		if !mid.IsZero() && v != mid {
+			// #772: an explicit per-call pin (openrails.WithMerchant) that
+			// disagrees with the bound merchant is refused rather than
+			// silently executed against the bound one. Synthesized as a
+			// response (not a RoundTrip error): an error here would surface
+			// via remote.go's doRaw as ErrUnreachable, which is wrong for a
+			// well-formed request the engine deliberately refuses.
+			return mismatchResponse(req, mid, v), nil
+		}
+		if mid.IsZero() {
 			mid = v // host pinned it per call via openrails.WithMerchant
 		}
 	}
@@ -75,6 +86,28 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	w := &bufferedResponse{header: make(http.Header)}
 	t.handler.ServeHTTP(w, req.Clone(ctx))
 	return w.response(req), nil
+}
+
+// mismatchResponse synthesizes a 409 response in the pkg/api Stripe error
+// envelope shape ({"error":{"type","code","message"}}) for a merchant-pin
+// mismatch (#772). remote.go's do/statusErrorFromBody parses this envelope
+// like any real non-2xx wire response, so the call surfaces as a StatusError
+// (ErrConflict) identically to every other in-process rejection.
+func mismatchResponse(req *http.Request, bound, pinned merchant.ID) *http.Response {
+	body, _ := json.Marshal(api.ConflictError(merchantMismatchMsg(bound, pinned)).ToResponse())
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	return &http.Response{
+		Status:        fmt.Sprintf("%d %s", http.StatusConflict, http.StatusText(http.StatusConflict)),
+		StatusCode:    http.StatusConflict,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+	}
 }
 
 // bufferedResponse is a minimal in-memory http.ResponseWriter for the
