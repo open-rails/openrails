@@ -1667,7 +1667,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 // status='failed' payments row (#733) inside the caller's tx. Best-effort:
 // a missing price is logged, never fails the dunning flow. Idempotent on the
 // synthetic per-attempt transaction id.
-func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Context, txDB *db.DB, priceService *catalog.PriceService, subscription *models.Subscription, params *FailMembershipParams, now time.Time) {
+func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Context, txDB *db.DB, priceService *catalog.PriceService, subscription *models.Subscription, params *FailMembershipParams, now time.Time, attemptNum int) {
 	price := subscription.Price
 	if price == nil && subscription.PriceID != uuid.Nil {
 		if p, err := priceService.GetByID(ctx, subscription.PriceID); err == nil {
@@ -1677,10 +1677,6 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 	if price == nil {
 		log.WithContext(ctx).WithField("subscription_id", subscription.ID).Warn("declined renewal not recorded as payment row: no price")
 		return
-	}
-	attemptNum := 1
-	if subscription.RetryAttempts != nil {
-		attemptNum = *subscription.RetryAttempts
 	}
 	kind := payments.AttemptRenewal
 	failed := &models.Payment{
@@ -1751,6 +1747,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		scheduleDeferredDelete = false // reset in case the tx is retried
 
 		now := s.now()
+
+		// Captured BEFORE either branch mutates subscription.RetryAttempts: the
+		// terminal branch below (either path) calls ClearRetrySchedule(), which
+		// zeroes RetryAttempts. recordFailedRenewalAttempt's idempotency key is
+		// keyed on the attempt ordinal, so reading it AFTER the clear would
+		// collapse every terminal attempt's key onto attempt 1 — silently
+		// dropping the terminal (most forensically important) decline's payment
+		// row as a false CreateIfNotExists replay of attempt 1's row.
+		failureAttemptNum := 1
+		if subscription.RetryAttempts != nil {
+			failureAttemptNum = *subscription.RetryAttempts + 1
+		}
 
 		// Hard declines (stolen card, do-not-honor, account closed, expired card,
 		// pickup card) terminate immediately: cancel now with no grace period and
@@ -1841,7 +1849,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// this same tx. Terminal-without-charge callers pass
 		// RecordFailedAttempt=false (no attempt happened).
 		if params.RecordFailedAttempt {
-			s.recordFailedRenewalAttempt(ctx, db, priceService, subscription, params, now)
+			s.recordFailedRenewalAttempt(ctx, db, priceService, subscription, params, now, failureAttemptNum)
 		}
 
 		// #344 follow-up: a terminal payment-failure cancellation of an
