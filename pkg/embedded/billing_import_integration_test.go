@@ -284,8 +284,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// decider's "roster_past_due_beyond_window" law lands TransitionCancel with
 	// RemoteGone=false (the remote NMI schedule may still be retrying), so
 	// ResolveCancelledRemoteAlive fires: terminal cancel dated at the NEW AsOf,
-	// entitlement window closed, and — #737 Task 1's marker-only scheduler —
-	// the DeletionScheduledAt marker durably armed for NMI's boot sweep.
+	// entitlement window closed, the DeletionScheduledAt marker stamped, and
+	// the real nmi_delete_subscription ledger intent enqueued inline.
 	var subIncrID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if err := appDB.Qx(ctx).QueryRow(ctx,
@@ -323,6 +323,16 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.True(t, r.endedAt.Equal(asOf2), "ended_at = the NEW import's AsOf, not the first")
 		require.NotNil(t, r.deletionScheduledAt, "NMI terminal cancel with remote possibly still alive arms the deferred-delete marker (#737 Task 1)")
 		require.True(t, r.deletionScheduledAt.Equal(asOf2))
+
+		// The import enqueues the real nmi_delete_subscription ledger intent
+		// inline (no reliance on the boot marker sweep).
+		var intentStatus, intentOrigin string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status, origin FROM openrails.rail_intents
+			 WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, subIncrID).
+			Scan(&intentStatus, &intentOrigin))
+		require.Equal(t, "pending", intentStatus)
+		require.Equal(t, "user", intentOrigin)
 
 		var revokedAt *time.Time
 		var revokeReason *string
