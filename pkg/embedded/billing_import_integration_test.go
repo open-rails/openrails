@@ -39,8 +39,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	day := 24 * time.Hour
 
 	cust := func() uuid.UUID { return uuid.New() }
-	cRunway, cDunning, cLapsed, cUser, cChargeback, cParked := cust(), cust(), cust(), cust(), cust(), cust()
-	allCust := []uuid.UUID{cRunway, cDunning, cLapsed, cUser, cChargeback, cParked}
+	cRunway, cDunning, cLapsed, cUser, cChargeback, cParked, cIncr := cust(), cust(), cust(), cust(), cust(), cust(), cust()
+	allCust := []uuid.UUID{cRunway, cDunning, cLapsed, cUser, cChargeback, cParked, cIncr}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, e := appDB.Qx(ctx).Exec(ctx,
@@ -76,12 +76,13 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	userPaidThrough := asOf.Add(5 * day)
 	chargebackAt := asOf.Add(-30 * day)
 	parkedPaid := asOf.Add(-3 * 365 * day)
+	paidIncr := asOf.Add(10 * day)
 
 	book := DeclaredBilling{
 		AsOf: asOf,
 		Customers: []DeclaredCustomer{
 			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed},
-			{Customer: cUser}, {Customer: cChargeback}, {Customer: cParked},
+			{Customer: cUser}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
 		},
 		PaymentMethods: []DeclaredPaymentMethod{{
 			Customer: cDunning, Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
@@ -118,6 +119,13 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				SourceID: "parked", Customer: cParked, Price: price, Rail: "nmi",
 				RailSubscriptionID: "sub-parked-" + sfx, StartedAt: asOf.Add(-4 * 365 * day), PaidThrough: &parkedPaid,
 			},
+			{
+				// Task 2 fixture: active-with-runway at import #1, re-declared
+				// stalled (no explicit cancel evidence) in a LATER import (below) —
+				// exercises the incremental re-import terminal cancel.
+				SourceID: "incremental", Customer: cIncr, Price: price, Rail: "nmi",
+				RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day), PaidThrough: &paidIncr,
+			},
 		},
 		Transactions: []DeclaredTransaction{
 			// Runway's opening charge: cents → micros pin (2300 → 23_000_000).
@@ -134,22 +142,23 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, res.Blocked, "no blocks expected: %v", res.Reasons)
-	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked"}, res.Imported)
+	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked", "incremental"}, res.Imported)
 
 	type subRow struct {
 		status, cancelType             string
 		cancelledAt, endedAt, graceEnd *time.Time
 		periodStart, periodEnd         *time.Time
 		pmLinked                       bool
+		deletionScheduledAt            *time.Time
 	}
 	load := func(ctx context.Context, railSubID string) subRow {
 		var r subRow
 		var ct *string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status::text, COALESCE(cancel_type::text,''), cancelled_at, ended_at, grace_ends_at,
-			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL
+			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at
 			 FROM openrails.subscriptions WHERE rail_subscription_id=$1`, railSubID).
-			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked))
+			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt))
 		if ct != nil {
 			r.cancelType = *ct
 		}
@@ -228,7 +237,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res2.Imported)
 	require.Empty(t, res2.Blocked, "re-import blocks: %v", res2.Reasons)
-	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked"}, res2.Skipped)
+	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "chargeback", "parked", "incremental"}, res2.Skipped)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
@@ -263,6 +272,66 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.Equal(t, "unknown", r.status, "blocked twin stays parked, never stomps the live owner")
 		r = load(ctx, "sub-runway-"+sfx)
 		require.Equal(t, "active", r.status)
+		return nil
+	}))
+
+	// 10) #737 Task 2: incremental re-import terminal cancel. Import #1 landed
+	// "incremental" active with runway (adopted, like "runway"); a pre-existing
+	// open entitlement window stands in for the access a real legacy customer
+	// would already carry. Import #2, at a NEWER AsOf, re-declares the SAME
+	// rail_subscription_id now stalled at the provider (roster past_due, still
+	// no explicit cancel evidence) far beyond the dunning window — the
+	// decider's "roster_past_due_beyond_window" law lands TransitionCancel with
+	// RemoteGone=false (the remote NMI schedule may still be retrying), so
+	// ResolveCancelledRemoteAlive fires: terminal cancel dated at the NEW AsOf,
+	// entitlement window closed, and — #737 Task 1's marker-only scheduler —
+	// the DeletionScheduledAt marker durably armed for NMI's boot sweep.
+	var subIncrID uuid.UUID
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		if err := appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT id FROM openrails.subscriptions WHERE rail_subscription_id=$1`, "sub-incr-"+sfx).Scan(&subIncrID); err != nil {
+			return err
+		}
+		_, err := appDB.Qx(ctx).Exec(ctx,
+			`INSERT INTO openrails.entitlements (entitlement, start_at, end_at, source_id, source_type, merchant_id, customer_id)
+			 VALUES ('premium', $1, NULL, $2, 'subscription', $3, $4)`,
+			asOf.Add(-60*day), subIncrID, merchantID, cIncr)
+		return err
+	}))
+
+	asOf2 := asOf.Add(40 * day) // 30d past paidIncr — beyond DefaultDunningWindow (14d)
+	restalled := DeclaredBilling{
+		AsOf: asOf2,
+		Subscriptions: []DeclaredSubscription{{
+			SourceID: "incremental-restalled", Customer: cIncr, Price: price, Rail: "nmi",
+			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
+			Dunning: &DunningEvidence{ScheduleLive: true},
+		}},
+	}
+	res4, err := ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: restalled,
+	})
+	require.NoError(t, err)
+	require.Empty(t, res4.Blocked, "no blocks expected: %v", res4.Reasons)
+	require.Equal(t, []string{"incremental-restalled"}, res4.Skipped, "existing row: converged in place, not (re)created")
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		r := load(ctx, "sub-incr-"+sfx)
+		require.Equal(t, "cancelled", r.status)
+		require.Equal(t, "expired", r.cancelType)
+		require.NotNil(t, r.endedAt)
+		require.True(t, r.endedAt.Equal(asOf2), "ended_at = the NEW import's AsOf, not the first")
+		require.NotNil(t, r.deletionScheduledAt, "NMI terminal cancel with remote possibly still alive arms the deferred-delete marker (#737 Task 1)")
+		require.True(t, r.deletionScheduledAt.Equal(asOf2))
+
+		var revokedAt *time.Time
+		var revokeReason *string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT revoked_at, revoke_reason FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
+			subIncrID).Scan(&revokedAt, &revokeReason))
+		require.NotNil(t, revokedAt, "entitlement window closed on terminal cancel")
+		require.NotNil(t, revokeReason)
+		require.Equal(t, "dunning_failed", *revokeReason)
 		return nil
 	}))
 }
