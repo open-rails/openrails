@@ -1502,9 +1502,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 		fb := "cancelled at provider (converged from unknown)"
 		// #679 queue-always: the remote sub may still exist and keep retrying
 		// (stale decline, roster didn't confirm gone) — durably record the
-		// deferred NMI delete like FailMembership. Marker persists with the
-		// cancellation UPDATE; a failed enqueue is healed by the startup
-		// marker sweep (ConvertDeferredDeleteMarkersToIntents).
+		// deferred NMI delete like FailMembership.
 		scheduleDelete := false
 		if res == ResolveCancelledRemoteAlive {
 			fb = "renewal declined beyond dunning window (converged from unknown)"
@@ -1521,26 +1519,26 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 				}
 			}
 		}
-		if err := s.ApplyLocalCancellation(ctx, dbb, sub, LocalCancellation{
+		lcArgs := LocalCancellation{
 			EndedAt:       now,
 			CancelType:    models.CancelTypeExpired,
 			Feedback:      &fb,
 			RevokeReason:  models.EntitlementRevokeDunning,
 			RevokeAsOf:    asOf,
 			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		}); err != nil {
-			return err
 		}
-		if scheduleDelete {
-			if err := s.deferDelete.ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
-				// Marker committed with the cancellation keeps the pending
-				// delete discoverable (startup marker sweep) — log, don't fail.
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id": sub.ID,
-				}).Error("failed to enqueue deferred NMI delete for unknown-resolution cancel; startup marker sweep will convert the marker")
+		if !scheduleDelete {
+			return s.ApplyLocalCancellation(ctx, dbb, sub, lcArgs)
+		}
+		// Marker + intent commit atomically, same invariant as FailMembership:
+		// no crash window between the cancellation UPDATE and the enqueue.
+		return dbb.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := db.NewWithPgxTx(tx)
+			if err := s.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
+				return err
 			}
-		}
-		return nil
+			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now)
+		})
 	default:
 		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
 	}
