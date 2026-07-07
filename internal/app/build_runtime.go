@@ -37,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -396,6 +397,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
 		DashboardService:       serviceInstances.DashboardService,
+		CopilotService:         serviceInstances.CopilotService,
 		AlertService:           alertService,
 		MoneyCharger:           moneyCharger,
 		RailCustomerService:    serviceInstances.RailCustomerService,
@@ -812,6 +814,7 @@ type servicesInstances struct {
 	MoneyService           *money.MoneyService
 	MetricsService         *metrics.Service
 	DashboardService       *dashboard.Service
+	CopilotService         *copilot.Service
 	RailCustomerService    *payments.RailCustomerService
 }
 
@@ -935,6 +938,31 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	// (same-product, same-currency, active) price at their next renewal.
 	repriceRepo := subscriptions.NewRepriceRepo(database)
 	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database), clock)
+
+	// #779 catalog copilot: read-only Q&A always (gated on
+	// llm.catalog_copilot_enabled); the Phase 2 draft_* tools additionally on
+	// llm.catalog_drafting_enabled, which MUST stay off until #781 (server-
+	// side notice-window enforcement) ships — see config.go's field doc.
+	// Rides the SAME LLM client as the dashboard (one provider/model/key
+	// config for the whole deployment); its own Redis-backed rate limiter
+	// (own key namespace, never shares #756's budget).
+	var copilotLimiter copilot.AskLimiter
+	if redisClient != nil {
+		copilotLimiter = copilot.NewAskLimiter(redisClient, clock.Now)
+	} else {
+		copilotLimiter = copilot.NewAskLimiter(nil, clock.Now)
+	}
+	copilotService := copilot.NewService(copilot.Deps{
+		Products: productService,
+		Prices:   priceService,
+		Subs:     subscriptionService,
+		Reprices: repriceService,
+		LLM:      dashboardLLM,
+		Enabled:  cfg.LLM != nil && cfg.LLM.CatalogCopilotEnabled,
+		Drafting: cfg.LLM != nil && cfg.LLM.CatalogDraftingEnabled,
+		Limiter:  copilotLimiter,
+		Clock:    clock,
+	})
 
 	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
 	subscriptionService.VaultService = vaultService
@@ -1080,6 +1108,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
 		DashboardService:             dashboardService,
+		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
 	}
 }

@@ -284,3 +284,39 @@ the panel renders a pointed empty-state naming both knobs.
 External agents get the same power against the raw API (schema + query endpoints with
 a merchant API key) — see `docs/metrics-for-llms.md` for the two-endpoint recipe and a
 copy-paste tool definition.
+
+## Catalog copilot (#779)
+
+The catalog copilot extends the Ask pattern above from METRICS to the CATALOG: a panel
+on the Catalog page answers questions about products, prices, subscriber counts, and
+pending migrations via `POST /v1/merchant/catalog/ask`. Read-only tools (`list_catalog`,
+`get_price`, `price_history`, `list_reprice_batches`) run against the caller's
+RLS-pinned merchant; every listing carries its active-subscriber and grandfathered
+counts inline (no second call needed), and "0 results"/"no pending migrations" are
+stated explicitly. Same rate limit/cap doctrine as `/metrics/ask` (its own budget, never
+shared). Needs only `merchant:catalog:read` — Q&A never mutates.
+
+```yaml
+llm:
+  catalog_copilot_enabled: true    # aggregate catalog/subscriber data flows to the LLM
+  # catalog_drafting_enabled: false  # Phase 2 — see below; env LLM_CATALOG_DRAFTING_ENABLED
+```
+
+**The one safety principle:** the model NEVER mutates. When
+`llm.catalog_drafting_enabled` is armed, the loop gains two more tools —
+`draft_price_change` (a #777 wizard plan: new amount + migration mode + effective date,
+with the affected-subscriber count and review text already computed) and
+`draft_catalog_diff` (a new tier on an existing product) — but both only return a DRAFT
+payload. The console opens the draft, pre-filled, at the wizard's review step (or a
+plain create-price confirm for a new tier); nothing changes until a human clicks
+Confirm, which calls the exact same API the hand-typed flow does. A request that would
+need cross-product migration (moving subscribers onto a different, pre-existing
+product — #778, explicitly deferred) is refused with a typed reason and the
+archive-and-grandfather workaround, never drafted.
+
+**`catalog_drafting_enabled` MUST stay false until #781 ships** (server-side
+notice-window enforcement for scheduled price increases) — the copilot's safety story
+is "the API refuses what the wizard would refuse", which depends on that enforcement
+existing. Flag-off means the `draft_*` tools are entirely ABSENT from the tool list
+(the model cannot even attempt one), not present-but-erroring; flipping the flag on is
+the whole migration once #781 lands.

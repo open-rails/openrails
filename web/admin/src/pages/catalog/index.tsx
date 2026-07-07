@@ -29,6 +29,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useApiData } from "@/hooks/use-api-data"
+import { getBootstrap } from "@/lib/api/client"
 import {
   activatePrice,
   activateProduct,
@@ -46,27 +47,56 @@ import {
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 
+function catalogCopilotEnabled(): boolean {
+  try {
+    return getBootstrap().catalog_copilot_enabled
+  } catch {
+    return false
+  }
+}
+
+function catalogDraftingEnabled(): boolean {
+  try {
+    return getBootstrap().catalog_drafting_enabled
+  } catch {
+    return false
+  }
+}
+
 export function CatalogPage() {
+  // Bumped whenever a copilot draft is confirmed, so the Products/Prices
+  // tabs refetch and reflect the change — the SAME reload path a hand-typed
+  // edit already triggers via each tab's own onDone.
+  const [refreshKey, setRefreshKey] = React.useState(0)
+
   return (
-    <Tabs defaultValue="products" className="flex flex-col gap-4">
-      <TabsList>
-        <TabsTrigger value="products">Products</TabsTrigger>
-        <TabsTrigger value="prices">Prices</TabsTrigger>
-        <TabsTrigger value="drift">Drift</TabsTrigger>
-      </TabsList>
-      <TabsContent value="products">
-        <ProductsTab />
-      </TabsContent>
-      <TabsContent value="prices">
-        <PricesTab />
-      </TabsContent>
-      <TabsContent value="drift">
-        <DriftTab />
-      </TabsContent>
-    </Tabs>
+    <div className="flex flex-col gap-4">
+      <CatalogCopilotPanel
+        enabled={catalogCopilotEnabled()}
+        draftingEnabled={catalogDraftingEnabled()}
+        onCatalogChanged={() => setRefreshKey((k) => k + 1)}
+      />
+      <Tabs defaultValue="products" className="flex flex-col gap-4">
+        <TabsList>
+          <TabsTrigger value="products">Products</TabsTrigger>
+          <TabsTrigger value="prices">Prices</TabsTrigger>
+          <TabsTrigger value="drift">Drift</TabsTrigger>
+        </TabsList>
+        <TabsContent value="products">
+          <ProductsTab key={refreshKey} />
+        </TabsContent>
+        <TabsContent value="prices">
+          <PricesTab key={refreshKey} />
+        </TabsContent>
+        <TabsContent value="drift">
+          <DriftTab />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
 
