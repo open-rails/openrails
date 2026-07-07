@@ -18,10 +18,10 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// TestFullStackServesAndDrainsRiverAsOpenrailsApp proves #764: migration
-// 0007_openrails_app_grants must give the openrails_app role everything the
-// runtime actually needs on `public` (River) and `profiles` (AuthKit), not
-// just the `openrails` schema migration 0001 already covers.
+// TestFullStackServesAndDrainsRiverAsOpenrailsApp proves #764: the
+// 0001_schema.up.sql baseline's cross-schema grants section must give the
+// openrails_app role everything the runtime actually needs on `public`
+// (River) and `profiles` (AuthKit), not just the `openrails` schema grants.
 //
 // StartStandalone already connects as openrails_app (dbtest.SharedRLSPostgres's
 // app DSN) — that part is old news. WithWorkers is the new ingredient: no

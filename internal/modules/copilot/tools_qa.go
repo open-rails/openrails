@@ -19,8 +19,9 @@ import (
 // priceIntervalLabel mirrors pkg/service.PriceIntervalLabel (#774) exactly —
 // duplicated rather than imported because pkg/service transitively imports
 // internal/app, which imports this package (a cycle). Keep in sync with
-// pkg/service/price_key.go and migrations/postgres/0010_price_keys.up.sql's
-// backfill CASE if the interval buckets ever change.
+// pkg/service/price_key.go and migrations/postgres/0001_schema.up.sql's
+// trg_prices_default_key/prices_default_key backfill CASE if the interval
+// buckets ever change.
 func priceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
 	if !autoRenew || accessDurationHours == nil {
 		return "onetime"
