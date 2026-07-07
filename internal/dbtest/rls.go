@@ -55,11 +55,11 @@ func SharedRLSPostgres(t *testing.T) (superDSN, appDSN string) {
 // credentials out of band. The role keeps NOBYPASSRLS so RLS still enforces.
 //
 // Grants on public (River) / profiles (AuthKit) / public.migrations used to be
-// re-derived here in test-only code (#764) — that shape is now migration
-// 0007_openrails_app_grants, applied by migrate.RunPostgres like any other
-// migration (SharedPostgresDSN runs the full migration set before this is
-// ever called), so there is nothing left for this helper to grant beyond the
-// test-only login credential.
+// re-derived here in test-only code (#764) — that shape now lives in the
+// 0001_schema.up.sql baseline's cross-schema grants section, applied by
+// migrate.RunPostgres like any other migration (SharedPostgresDSN runs the
+// full migration set before this is ever called), so there is nothing left
+// for this helper to grant beyond the test-only login credential.
 func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 	sqlDB, err := sql.Open("pgx", superDSN)
 	if err != nil {

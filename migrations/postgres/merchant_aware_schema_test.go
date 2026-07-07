@@ -61,6 +61,20 @@ var merchantOwnedTables = []string{
 	"metered_rating_watermarks",
 	// #678 webhook dedup truth
 	"webhook_events",
+	// added by 0002-0014, folded into the 0001 baseline (2026-07-07 squash)
+	"imported_dunning_history",
+	"subscription_status_transitions",
+	"admission_denials_hourly",
+	"dashboard_configs",
+	"alert_rules",
+	"merchant_webhooks",
+	"merchant_notifications",
+	"price_key_movements",
+	"reprice_batches",
+	"subscription_reprices",
+	"finding_digest_state",
+	"webhook_health",
+	"webhook_health_daily",
 }
 
 func loadSchema001(t *testing.T) string {
