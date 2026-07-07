@@ -44,3 +44,28 @@ acquiring processor behind the gateway — via wire fields like `processor_id` a
 `transaction_was_declined_by_processor`. These keep the `processor` name because
 they mirror **NMI's external wire format** (we don't own it). They are a different
 concept from our rail and must not be renamed.
+
+## Rail arming & resolution — one seam
+
+A rail is usable for a merchant iff that merchant has an active provider
+account on it, resolved **per-merchant at request time** via
+`Runtime.Merchants.ActiveRailMerchantAccountScope` (rows in
+`rail_merchant_accounts`; secret values through the store interface, which
+serves manifest memory in MODE 1 and the Vault/DB secret store in MODE 2).
+Every consumer — checkout gating, webhook client construction, provider pulls,
+rebill charging — must resolve through this seam.
+
+Two orthogonal axes, easy to conflate:
+
+- **MODE 1 vs MODE 2** (`merchant_source: manifest` / `api`, #723/#724) is
+  *who owns rail config*: in MODE 1 the operator owns all data and secrets and
+  is the merchant (manifest-is-truth); MODE 2 is API-driven for true
+  multi-tenant untrusted boundaries (openrails-saas). See
+  `self-hosting-mode1.md`.
+- **Embedded vs standalone** is only *how the process/routes are hosted*.
+  Both modes run in either shape.
+
+`Runtime.Rails` (the boot-time `embedded.Options.PaymentProviders` bridge) is
+**not** a resolution source — it is empty on manifest hosts. Gating rail
+availability on it is the #775 bug class (checkout fixed there; don't
+reintroduce it elsewhere).
