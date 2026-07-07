@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"net/http"
 	"os"
 	"strings"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -81,7 +81,12 @@ type TestContainerSuite struct {
 // TestSuiteOption customizes an integration test suite before it boots.
 type TestSuiteOption func(*TestContainerSuite)
 
-const testNMIRailMerchantAccountID = "OpenRails Test Merchant <billing@test.example>"
+// testNMIRailMerchantAccountID is the suite's ONE active NMI provider
+// account (#788: the mobius gateway id from defaultSuiteRails — the harness
+// seeds it as the armed rail state every consumer resolves).
+func testNMIRailMerchantAccountID() string {
+	return envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145")
+}
 
 // WithSuiteClock injects the initial clock before the runtime, services,
 // workers, and seed helpers are created. On the shared suite this simply swaps
@@ -174,7 +179,9 @@ func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
 			// #711: the clientAccnum/clientSubacc pair derives from the account_id.
 			AccountID: "945280-0000",
 			CCBill: &config.CCBillRailConfig{
-				Salt: "test-salt",
+				Salt:             "test-salt",
+				DataLinkUsername: "dl-user",
+				DataLinkPassword: "dl-pass",
 			},
 		},
 		"solana": {
@@ -259,13 +266,9 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	// NMI follows deployment posture (#681): test_mode ⇒ environment=test rows.
-	nmiEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	suite.seedRailMerchantAccountWithEvidence(ctx, "nmi", nmiEnv, testNMIRailMerchantAccountID, `{"source":"test_fixture"}`)
-	nmiSecret, err := merchants.RailMerchantAccountSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID, "security_key")
-	require.NoError(suite.t, err)
-	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
-	require.NoError(suite.t, err)
+	// #788: the NMI account is seeded ONCE by the harness from
+	// defaultSuiteRails (the mobius gateway) — a second fixture row here would
+	// make active-account resolution nondeterministic.
 
 	// CCBill must be sandbox-posture (#668): the webhook IP-allowlist bypass is
 	// refused while ANY environment=live CCBill row exists, and the test_mode
@@ -345,41 +348,62 @@ func (suite *TestContainerSuite) ResetMutableRuntimeState() {
 
 func (suite *TestContainerSuite) resetNMIClients() {
 	suite.t.Helper()
+	// #788: NMI clients arm per charge from the armed rail state (the seeded
+	// rail_merchant_accounts rows + secrets); the only per-test mutable state
+	// is the endpoint override, which resets to the real sandbox endpoints.
+	suite.SetNMIGateway("")
+}
+
+// SetNMIGateway points every store-armed NMI charge/verify path at url (a
+// fake gateway; "" = real endpoints). Clients are built per charge, so the
+// override takes effect immediately; the intent plumbing is re-armed for the
+// #674 write-through paths.
+func (suite *TestContainerSuite) SetNMIGateway(url string) {
+	suite.t.Helper()
 	if suite == nil || suite.App == nil || suite.App.Runtime == nil {
 		return
 	}
-	clients := make(map[string]*nmi.NMIClient)
-	for _, proc := range suite.Rails.ByRail(models.RailNMI) {
-		accountID := proc.EffectiveAccountID()
-		settings := proc.ToNMIProviderSettings()
-		client, err := nmi.NewClient(accountID, settings, suite.Config.IsTestMode())
-		require.NoError(suite.t, err)
-		client.ReadOnly = suite.Config.IsProviderReadOnly()
-		// Keyed by account_id, with the active account aliased under the rail key
-		// "nmi" below (matching createNMIClients).
-		clients[accountID] = client
-	}
-	if _, active, err := suite.Rails.ActiveRailByType(models.RailNMI); err == nil && active != nil {
-		if c, ok := clients[active.EffectiveAccountID()]; ok {
-			clients[string(models.RailNMI)] = c
-		}
-	}
-
 	rt := suite.App.Runtime
-	rt.NMIClients = clients
-	if rt.SubscriptionService != nil {
-		rt.SubscriptionService.NMIClients = clients
-	}
-	if rt.VaultService != nil {
-		rt.VaultService.NMIClients = clients
+	if b, ok := rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder); ok {
+		b.Endpoints = money.CollectionEndpoints{NMIV5BaseURL: url, NMIDirectPostURL: url, NMIQueryURL: url}
 	}
 	if rt.CheckoutService != nil {
-		rt.CheckoutService.NMIClients = clients
-		if rt.CheckoutService.NMISaleService != nil {
-			rt.CheckoutService.NMISaleService.NMIClients = clients
-		}
+		rt.CheckoutService.NMIEndpointOverride = url
+	}
+	if rt.VaultService != nil {
+		rt.VaultService.NMIEndpointOverride = url
 	}
 	suite.RearmIntentPlumbing()
+}
+
+// SeedNMIProviderAccount declares (or re-keys) an NMI provider account in the
+// armed rail state — the #788 Layer-A write every consumer then resolves.
+// The account is removed again at test cleanup so the suite's shared merchant
+// keeps its default active account for later tests.
+func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID, securityKey string) {
+	t.Helper()
+	integrationharness.SeedRailMerchantAccounts(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.RailMerchantAccountSet{
+		accountID: {
+			Rail:      models.RailNMI,
+			AccountID: accountID,
+			NMI:       &config.NMIRailConfig{SecurityKey: securityKey},
+		},
+	})
+	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	rowID, _, _, _ := merchants.RailMerchantAccountNaturalKey(string(models.RailNMI), env, accountID)
+	t.Cleanup(func() {
+		ctx := dbtest.WithTestMerchant(context.Background())
+		if store := suite.App.Runtime.Merchants.Secrets(); store != nil {
+			for _, key := range []string{"security_key", "webhook_signing_secret"} {
+				if name, err := merchants.RailMerchantAccountSecretName(string(models.RailNMI), env, accountID, key); err == nil {
+					_ = store.Delete(ctx, dbtest.TestMerchantID, name)
+				}
+			}
+		}
+		// Archive (not delete): rows this test stamped (payments/subscriptions)
+		// hold FK references; archived accounts drop out of active resolution.
+		_, _ = suite.Pool.Exec(ctx, `UPDATE openrails.rail_merchant_accounts SET archived = true WHERE id = $1`, rowID)
+	})
 }
 
 // RearmIntentPlumbing rebuilds the inline intent runner + through-structs from

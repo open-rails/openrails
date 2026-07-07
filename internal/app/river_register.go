@@ -50,21 +50,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Rails: r.Rails, Clock: clock, NMIClients: r.NMIClients, NMIResolver: r.CollectionResolver, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
 	// fans out one per-merchant refresh job (staggered; unique per merchant),
-	// skipping merchants with no declared accounts when no boot rails exist.
+	// skipping merchants with no declared rail accounts.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshSchedulerWorker{
-		DB:             r.DB,
-		Config:         r.Config,
-		Clock:          clock,
-		Rails:          r.Rails,
-		NMIClients:     r.NMIClients,
-		CCBillDataLink: r.CCBillDataLink,
-		SolanaRPC:      r.SolanaRPC,
-		MerchantQueue:  merchantRefreshQueue,
+		DB:            r.DB,
+		Config:        r.Config,
+		Clock:         clock,
+		MerchantQueue: merchantRefreshQueue,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh scheduler worker: %w", err)
 	}
@@ -75,19 +71,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
 		DB:                  r.DB,
 		Config:              r.Config,
-		Rails:               r.Rails,
 		Clock:               clock,
-		Merchants:           r.Merchants, // #699: per-merchant store-armed pulls
-		NMIClients:          r.NMIClients,
-		CCBillDataLink:      r.CCBillDataLink,
-		SolanaRPC:           r.SolanaRPC,
+		Merchants:           r.Merchants, // #699/#788: per-merchant store-armed pulls
 		DeferDelete:         r.DeferredDeletes,
 		NotificationService: r.NotificationService,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
-	}
-	if err := addTrackedWorker(r, workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
-		return fmt.Errorf("add ccbill reconcile worker: %w", err)
 	}
 	// Webhook processing is now synchronous-only - no background workers needed.
 	// Payment rails (CCBill, NMI) retry failed webhooks from their end.
@@ -127,7 +116,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
-		Rails:                        r.Rails,
+		Rails:                        r.RailConfigs,
 		UserSubscriptionService:      r.UserSubscriptionService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
@@ -137,11 +126,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.ResumeSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
-		Rails:                        r.Rails,
+		Rails:                        r.RailConfigs,
 		EntitlementService:           r.EntitlementService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
-		NMIClients:                   r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add resume subscription worker: %w", err)
 	}
@@ -165,19 +153,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.WebhookProcessWorker{
-		Dispatcher: r.WebhookDispatcher,
-	}); err != nil {
-		return fmt.Errorf("add webhook process worker: %w", err)
-	}
 	// #684: webhook wake-ups — the coalesced per-subscription fetch-and-converge
 	// job the slimmed Stripe/NMI subscription-state handlers enqueue.
 	if err := addTrackedWorker(r, workers, &riverjobs.SubscriptionConvergeWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
-		Rails:                        r.Rails,
+		Rails:                        r.RailConfigs,
 		Clock:                        clock,
-		NMIClients:                   r.NMIClients,
+		NMIResolver:                  r.CollectionResolver,
 		PriceService:                 r.PriceService,
 		ProductService:               r.ProductService,
 		SubscriptionService:          r.SubscriptionService,
@@ -191,17 +174,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CatalogReconciliationPullWorker{
-		DB:         r.DB,
-		Config:     r.Config,
-		Rails:      r.Rails,
-		NMIClients: r.NMIClients,
+		DB:          r.DB,
+		Config:      r.Config,
+		Rails:       r.RailConfigs,
+		NMIResolver: r.CollectionResolver,
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.StripeWebhookReconcileWorker{
 		DB:        r.DB,
 		Config:    r.Config,
-		Rails:     r.Rails,
 		Merchants: r.Merchants,
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
@@ -258,7 +240,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// wallet is low on SOL. Alert-only, no auto-top-up.
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaGasAlertWorker{
 		DB:  r.DB,
-		RPC: r.SolanaRPC,
+		RPC: r.SolanaRPCResolver.ChainReader(),
 	}); err != nil {
 		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}
@@ -302,22 +284,24 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 // the #674 write-through kinds (checkout NMI sales, auto-top-up charges,
 // Solana recurring pulls).
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
-	// #730: manual rebills arm store-scoped NMI credentials at charge time
-	// through the ONE #725 builder; boot NMIClients stay the no-store-row
-	// fallback.
-	manualRebill := intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock)
-	manualRebill.SetNMIClientResolver(r.CollectionResolver)
+	// #730/#788: every provider intent arms per merchant from the armed rail
+	// state at drain time — NMI via the ONE #725 builder, CCBill DataLink and
+	// Stripe via the #788 rail resolution seam.
+	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 (unarmed rail parks)
+	ccbillCancel.DataLinkBaseURL = r.CCBillDataLinkEndpoint
+	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 refund (unarmed rail parks)
+	ccbillRefund.DataLinkBaseURL = r.CCBillDataLinkEndpoint
 	registry := intents.NewRegistry(
-		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
-		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.NMIClients, clock), // #674: payment-method swap
-		intents.NewCCBillCancelHandler(r.DB, r.CCBillDataLink, clock),       // #696 (nil client parks)
-		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
-		intents.NewStripeRefundHandler(r.DB, r.Config, r.Rails, clock),
-		intents.NewCCBillRefundHandler(r.DB, r.CCBillDataLink, clock), // #696 refund (nil client parks)
-		manualRebill,
-		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Rails, clock),
-		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Rails, clock),
-		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
+		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
+		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // #674: payment-method swap
+		ccbillCancel,
+		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
+		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock),
+		ccbillRefund,
+		intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock),
+		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock),
+		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock),
+		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),
 	)
 	// #674 write-through kinds live next to their domain services and register
 	// only when those services are wired (worker-only runtimes may lack them).
@@ -332,7 +316,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	if r.VaultService != nil {
 		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.VaultService))
 	}
-	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.NMIClients, clock))
+	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.CollectionResolver, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine
 	// with the pre-submit signature write-ahead + chain-read verification. The
 	// core worker here carries NO Intents runner (the handler IS the execution
@@ -349,10 +333,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	var solanaChain riverjobs.SolanaTxReader
 	if r.SolanaRPCResolver != nil {
 		// #728: the verify leg reads the chain with the intent's merchant-armed
-		// client (store settings win; boot fallback lives inside the resolver).
+		// client.
 		solanaChain = r.SolanaRPCResolver.ChainReader()
-	} else if r.SolanaRPC != nil {
-		solanaChain = r.SolanaRPC
 	}
 	registry.Register(riverjobs.NewSolanaPullIntentHandler(solanaPullCore, intents.NewStore(r.DB), solanaChain))
 	return registry

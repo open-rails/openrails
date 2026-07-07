@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -165,7 +166,7 @@ func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 func (fx refundFixture) refundRunner(client *nmi.NMIClient, cfg *config.Config) *Runner {
 	return &Runner{
 		Store:    fx.store,
-		Registry: NewRegistry(NewNMIRefundHandler(fx.db, map[string]*nmi.NMIClient{"nmi": client}, nil)),
+		Registry: NewRegistry(NewNMIRefundHandler(fx.db, fakeNMIResolver{client: client}, nil)),
 		Config:   cfg,
 	}
 }
@@ -313,6 +314,14 @@ func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
 // always returns the OVERLOADED denial code -7 (as CCBill did in the 2026-07-03
 // safe fail-probe against a too-old transaction), while viewSubscriptionStatus
 // returns known-zero counters so the pre-send verify lets each attempt proceed.
+// newCCBillRefundIntegrationHandler arms the handler from the armed rail
+// state (#788), pointing the built DataLink client at the fake server.
+func newCCBillRefundIntegrationHandler(db *db.DB, client *ccbill.DataLinkClient) *CCBillRefundHandler {
+	h := NewCCBillRefundHandler(db, nil, ccbillRefundTestRails(), nil)
+	h.DataLinkBaseURL = client.BaseURL
+	return h
+}
+
 func fakeDataLinkDenyRefund(t *testing.T) (*ccbill.DataLinkClient, *atomic.Int64) {
 	t.Helper()
 	var refundHits atomic.Int64
@@ -346,7 +355,7 @@ func TestCCBillRefundDenialBoundedRetryThenTerminal(t *testing.T) {
 
 	runner := &Runner{
 		Store:    fx.store,
-		Registry: NewRegistry(NewCCBillRefundHandler(fx.db, client, nil)),
+		Registry: NewRegistry(newCCBillRefundIntegrationHandler(fx.db, client)),
 		Config:   fullModeConfig(),
 	}
 	paymentID := fx.paymentID
@@ -500,8 +509,8 @@ func stripeIntegrationConfig(mode string) *config.Config {
 	}
 }
 
-func stripeIntegrationRails() config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func stripeIntegrationRails() railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"strings"
 	"time"
 
@@ -51,13 +53,18 @@ func CCBillCancelIdempotencyKey(subscriptionID uuid.UUID) string {
 //     ReadOnly transport gate is the backstop (parked, never failed).
 type CCBillCancelHandler struct {
 	DB     *db.DB
-	Client *ccbill.DataLinkClient
-	Clock  clockwork.Clock
-	Policy BackoffPolicy
+	Config *config.Config
+	// Rails arms the intent merchant's DataLink client from the armed rail
+	// state at drain time (#788).
+	Rails railresolve.Source
+	// DataLinkBaseURL overrides the DataLink endpoint (test seam).
+	DataLinkBaseURL string
+	Clock           clockwork.Clock
+	Policy          BackoffPolicy
 }
 
-func NewCCBillCancelHandler(d *db.DB, client *ccbill.DataLinkClient, clock clockwork.Clock) *CCBillCancelHandler {
-	return &CCBillCancelHandler{DB: d, Client: client, Clock: clock, Policy: DefaultBackoff}
+func NewCCBillCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *CCBillCancelHandler {
+	return &CCBillCancelHandler{DB: d, Config: cfg, Rails: rails, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *CCBillCancelHandler) Type() string { return TypeCCBillCancelSubscription }
@@ -82,10 +89,11 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	if h.Client == nil {
-		return Parked("ccbill datalink client not configured")
+	client, err := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	if err != nil {
+		return Parked("ccbill rail not armable (fail closed): " + err.Error())
 	}
-	if h.Client.ReadOnly {
+	if client.ReadOnly {
 		return Parked("ccbill datalink client is read-only (mode=readonly)")
 	}
 
@@ -100,7 +108,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	}
 
 	// Verify-then-execute: already not-rebilling = success.
-	rebilling, status, err := h.rebilling(ctx, psid)
+	rebilling, status, err := h.rebilling(ctx, client, psid)
 	if err != nil {
 		// Read failed cleanly — no write attempted. Covers auth failures and
 		// the (Phase-0-uncaptured) unknown-subscription answer: retried, never
@@ -111,7 +119,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		return Succeeded(verifiedEvidence(psid, status, false))
 	}
 
-	res, err := h.Client.CancelSubscription(ctx, psid)
+	res, err := client.CancelSubscription(ctx, psid)
 	if err != nil {
 		switch {
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
@@ -140,8 +148,9 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 // cancel (whenever it happened) is done; still-rebilling means it definitely
 // has not happened and the executor may retry.
 func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	if h.Client == nil {
-		return Ambiguous("ccbill datalink client not configured; cannot verify")
+	client, cerr := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	if cerr != nil {
+		return Ambiguous("ccbill rail not armable; cannot verify: " + cerr.Error())
 	}
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
@@ -151,7 +160,7 @@ func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	if psid == "" {
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
 	}
-	rebilling, status, err := h.rebilling(ctx, psid)
+	rebilling, status, err := h.rebilling(ctx, client, psid)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -163,8 +172,8 @@ func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 
 // rebilling reads the provider state. An unrecognized status vocabulary value
 // is an error (#651: undecidable, never guessed).
-func (h *CCBillCancelHandler) rebilling(ctx context.Context, psid string) (bool, ccbill.SubscriptionStatusResult, error) {
-	status, err := h.Client.ViewSubscriptionStatus(ctx, psid)
+func (h *CCBillCancelHandler) rebilling(ctx context.Context, client *ccbill.DataLinkClient, psid string) (bool, ccbill.SubscriptionStatusResult, error) {
+	status, err := client.ViewSubscriptionStatus(ctx, psid)
 	if err != nil {
 		return false, status, err
 	}

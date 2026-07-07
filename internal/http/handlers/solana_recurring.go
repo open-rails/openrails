@@ -196,7 +196,7 @@ type confirmSolanaCancelRequest struct {
 // "soft cancel": a signature that never confirms or reverted does NOT cancel. The
 // acting user must own the subscription.
 func ConfirmSolanaCancel(r *httprequest.Request) {
-	if r.State.SolanaRPC == nil {
+	if r.State.SolanaRPCResolver == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
@@ -247,7 +247,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		return
 	}
 
-	svc := recurring.NewConfirmCancelService(r.State.SolanaRPC, r.State.SubscriptionLifecycleService)
+	svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
 	if err := svc.Confirm(r.Request.Context(), subscriptionID, req.Signature); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -515,7 +515,7 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 // (upgrade => now + new period; downgrade => the old period end). Idempotent: a
 // re-confirm after a committed mirror returns the existing new subscription.
 func ConfirmSolanaTierChange(r *httprequest.Request) {
-	if r.State.SolanaRPC == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
+	if r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
@@ -566,15 +566,19 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	if user != nil && user.Email != nil {
 		email = *user.Email
 	}
+	// #788: network + token set resolve from the ctx merchant's armed solana
+	// rail account; chain reads arm per merchant through the #728 resolver.
 	network := ""
 	var tokens map[string]config.TokenConfig
-	if pc := r.State.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
-		network = pc.Solana.Network
-		tokens = pc.Solana.Tokens
+	if r.State.RailConfigs != nil {
+		if proc, cerr := r.State.RailConfigs.RailConfig(r.Request.Context(), string(models.RailSolana), ""); cerr == nil && proc.Solana != nil {
+			network = proc.Solana.Network
+			tokens = proc.Solana.Tokens
+		}
 	}
 
 	svc := recurring.NewConfirmTierChangeService(
-		r.State.SolanaRPC,
+		r.State.SolanaRPCResolver.ChainReader(),
 		r.State.SubscriptionLifecycleService,
 		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
 		network,

@@ -169,7 +169,7 @@ func (fx intentFixture) runner(client *nmi.NMIClient, cfg *config.Config) *Runne
 	return &Runner{
 		Store: fx.store,
 		Registry: NewRegistry(
-			NewNMIDeleteHandler(fx.db, cfg, map[string]*nmi.NMIClient{"mobius": client}, nil),
+			NewNMIDeleteHandler(fx.db, cfg, fakeNMIResolver{client: client}, nil),
 		),
 		Config: cfg,
 	}

@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,8 +22,8 @@ import (
 // the outbound form body. All requests flow through the stripeapi choke point
 // to a captured httptest server.
 
-func wirePinStripeRails() config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func wirePinStripeRails() railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_wirepin"}},
 	}
 }

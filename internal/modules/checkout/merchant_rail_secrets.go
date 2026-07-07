@@ -130,43 +130,42 @@ func (s *CheckoutService) stampRailMerchantAccount(ctx context.Context, rail str
 	return ctx
 }
 
+// resolveNMIClient arms the ctx merchant's NMI client from the armed rail
+// state (#788): the active scoped account's security_key. Fail closed — a
+// missing scope/secret errors; there is no boot-config fallback.
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
+	if s.ResolveNMIClientOverride != nil {
+		return s.ResolveNMIClientOverride(ctx, provider)
+	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return nil, errors.New("rail is required")
 	}
-
-	if rails.IsNMI(models.Rail(provider)) {
-		// Environment follows test_mode (#681), same as the CCBill leg.
-		if value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key"); err != nil {
-			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
-		} else if ok {
-			proc := cloneRailConfig(s.activeNMIConfig())
-			if proc == nil {
-				proc = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{}}
-			}
-			proc.Rail = models.RailNMI
-			if proc.NMI == nil {
-				proc.NMI = &config.NMIRailConfig{}
-			}
-			proc.NMI.SecurityKey = value
-			return nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
-		} else if s.scopedProviderSecretsEnabled() {
-			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
-		}
+	if !rails.IsNMI(models.Rail(provider)) {
+		return nil, fmt.Errorf("missing client")
 	}
-
-	if s != nil && s.NMIClients != nil {
-		if client := s.NMIClients[provider]; client != nil {
-			return client, nil
-		}
+	if !s.scopedProviderSecretsEnabled() {
+		return nil, fmt.Errorf("merchant rail resolution is not configured")
 	}
-	if rails.IsNMI(models.Rail(provider)) {
-		if proc := s.activeNMIConfig(); proc != nil {
-			return nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
-		}
+	// Environment follows test_mode (#681), same as the CCBill leg.
+	value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key")
+	if err != nil {
+		return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 	}
-	return nil, fmt.Errorf("missing client")
+	if !ok {
+		return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+	}
+	proc := &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
+	client, err := nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
+	if err != nil {
+		return nil, err
+	}
+	if s.NMIEndpointOverride != "" {
+		client.DirectPostURL = s.NMIEndpointOverride
+		client.QueryURL = s.NMIEndpointOverride
+		client.V5BaseURL = s.NMIEndpointOverride
+	}
+	return client, nil
 }
 
 func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {
@@ -178,26 +177,10 @@ func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 }
 
 func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {
-	baseProc := s.railConfig("ccbill")
-	var base *config.CCBillConfig
-	if baseProc != nil {
-		base = baseProc.ToCCBillConfig()
-	} else {
-		base = &config.CCBillConfig{}
+	if !s.scopedProviderSecretsEnabled() {
+		return nil, errors.New("merchant rail resolution is not configured")
 	}
-
-	if s.scopedProviderSecretsEnabled() {
-		cfg, err := s.resolveScopedCCBillConfig(ctx, base)
-		if err != nil {
-			return nil, err
-		}
-		return cfg, nil
-	}
-
-	if baseProc == nil {
-		return nil, errors.New("ccbill rail config is required")
-	}
-	return base, nil
+	return s.resolveScopedCCBillConfig(ctx, &config.CCBillConfig{})
 }
 
 func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
@@ -253,36 +236,4 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
 	}
 	return cfg, nil
-}
-
-func (s *CheckoutService) railConfig(name string) *config.RailMerchantAccountConfig {
-	if s == nil || s.Rails == nil {
-		return nil
-	}
-	return s.Rails.GetRail(name)
-}
-
-// activeNMIConfig returns the configured active NMI provider account, if any.
-func (s *CheckoutService) activeNMIConfig() *config.RailMerchantAccountConfig {
-	if s == nil || s.Rails == nil {
-		return nil
-	}
-	_, proc, _ := s.Rails.ActiveRailByType(models.RailNMI)
-	return proc
-}
-
-func cloneRailConfig(in *config.RailMerchantAccountConfig) *config.RailMerchantAccountConfig {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	if in.Solana != nil && in.Solana.Tokens != nil {
-		out.Solana = &config.SolanaRailConfig{}
-		*out.Solana = *in.Solana
-		out.Solana.Tokens = make(map[string]config.TokenConfig, len(in.Solana.Tokens))
-		for k, v := range in.Solana.Tokens {
-			out.Solana.Tokens[k] = v
-		}
-	}
-	return &out
 }

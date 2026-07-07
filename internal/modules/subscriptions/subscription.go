@@ -11,8 +11,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -43,8 +41,6 @@ type SubscriptionService struct {
 	clock                clockwork.Clock
 	PriceService         *catalog.PriceService
 	ProductService       *catalog.ProductService
-	CCBillRESTClient     *ccbill.RESTClient
-	NMIClients           map[string]*nmi.NMIClient
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	VaultService         *paymentmethods.VaultService
 }
@@ -165,8 +161,6 @@ func NewSubscriptionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	ccbillRESTClient *ccbill.RESTClient,
-	nmiClients map[string]*nmi.NMIClient,
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	clocks ...clockwork.Clock,
 ) *SubscriptionService {
@@ -177,8 +171,6 @@ func NewSubscriptionService(
 		clock:                timeutil.FirstClock(clocks...),
 		PriceService:         priceService,
 		ProductService:       productService,
-		CCBillRESTClient:     ccbillRESTClient,
-		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,
 	}
 }

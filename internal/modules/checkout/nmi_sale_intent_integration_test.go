@@ -168,7 +168,8 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 			nil,
 			clock,
 		),
-		NMIClients: map[string]*nmi.NMIClient{"mobius": client},
+		// #788: the scoped resolver is the ONLY NMI client source.
+		ResolveNMIClient: func(context.Context, string) (*nmi.NMIClient, error) { return client, nil },
 		// VaultService carries the DB handle finalize persists the #297
 		// stored-credential anchor through.
 		VaultService: &paymentmethods.VaultService{DB: dbi},

@@ -15,9 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -47,21 +45,7 @@ func newWiringService(t *testing.T, dbi *db.DB) *merchants.Service {
 	return svc
 }
 
-func bootNMIRails(t *testing.T, accountID, securityKey string) (config.RailMerchantAccountSet, map[string]*nmi.NMIClient) {
-	t.Helper()
-	rails := config.RailMerchantAccountSet{
-		"mobius": {
-			Rail:      models.RailNMI,
-			AccountID: accountID,
-			NMI:       &config.NMIRailConfig{SecurityKey: securityKey},
-		},
-	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, false)
-	require.NoError(t, err)
-	return rails, map[string]*nmi.NMIClient{accountID: client, "nmi": client}
-}
-
-func TestMerchantFetcherBuilder_StoreWinsOverBootWithWarn(t *testing.T) {
+func TestMerchantFetcherBuilder_StoreArmsDeclaredAccount(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newWiringService(t, dbi)
@@ -76,34 +60,21 @@ func TestMerchantFetcherBuilder_StoreWinsOverBootWithWarn(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	rails, clients := bootNMIRails(t, "8899"+sfx, "boot-key-"+sfx)
-
-	hook := logrustest.NewGlobal()
-	defer hook.Reset()
-
 	armed := MerchantFetcherBuilder{
-		Config:     &config.Config{Env: "dev"},
-		Rails:      rails,
-		Merchants:  svc,
-		DB:         dbi,
-		NMIClients: clients,
+		Config:    &config.Config{Env: "dev"},
+		Merchants: svc,
+		DB:        dbi,
 	}.Build(context.Background(), mid)
 
 	prober, ok := armed.Probers[ProviderNMI].(*NMISubscriptionProber)
 	require.True(t, ok, "NMI prober armed")
-	assert.Equal(t, storeKey, prober.Client.SecurityKey, "store credential wins over boot config")
+	assert.Equal(t, storeKey, prober.Client.SecurityKey, "the store credential arms the pull plane")
 	require.Contains(t, armed.Fetchers, ProviderNMI)
-
-	conflictWarned := false
-	for _, e := range hook.AllEntries() {
-		if e.Level == log.WarnLevel && strings.Contains(e.Message, "store wins") && e.Data["rail"] == "nmi" {
-			conflictWarned = true
-		}
-	}
-	assert.True(t, conflictWarned, "differing planes log the store-wins WARN")
 }
 
-func TestMerchantFetcherBuilder_BootFallbackWhenNoStoreRow(t *testing.T) {
+// #788: there is no boot-config plane — a merchant with no declared rail
+// accounts arms NOTHING (fail closed).
+func TestMerchantFetcherBuilder_NoDeclaredAccountsArmNothing(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newWiringService(t, dbi)
@@ -111,21 +82,14 @@ func TestMerchantFetcherBuilder_BootFallbackWhenNoStoreRow(t *testing.T) {
 	// Merchant declares NO rail accounts at all.
 	mid := newWiringMerchant(t, dbi, "wiring-boot-"+sfx)
 
-	bootKey := "boot-only-key-" + sfx
-	rails, clients := bootNMIRails(t, "8822"+sfx, bootKey)
-
 	armed := MerchantFetcherBuilder{
-		Config:     &config.Config{Env: "dev"},
-		Rails:      rails,
-		Merchants:  svc,
-		DB:         dbi,
-		NMIClients: clients,
+		Config:    &config.Config{Env: "dev"},
+		Merchants: svc,
+		DB:        dbi,
 	}.Build(context.Background(), mid)
 
-	prober, ok := armed.Probers[ProviderNMI].(*NMISubscriptionProber)
-	require.True(t, ok, "boot-config fallback arms the NMI prober")
-	assert.Equal(t, bootKey, prober.Client.SecurityKey)
-	require.Contains(t, armed.Fetchers, ProviderNMI)
+	assert.Empty(t, armed.Fetchers, "no declared accounts → no fetchers")
+	assert.Empty(t, armed.Probers, "no declared accounts → no probers")
 }
 
 func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *testing.T) {
@@ -142,20 +106,16 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 	})
 	require.NoError(t, err)
 
-	rails, clients := bootNMIRails(t, "8844"+sfx, "boot-key2-"+sfx)
-
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()
 
 	armed := MerchantFetcherBuilder{
-		Config:     &config.Config{Env: "dev"},
-		Rails:      rails,
-		Merchants:  svc,
-		DB:         dbi,
-		NMIClients: clients,
+		Config:    &config.Config{Env: "dev"},
+		Merchants: svc,
+		DB:        dbi,
 	}.Build(context.Background(), mid)
 
-	assert.NotContains(t, armed.Fetchers, ProviderNMI, "declared account with missing secret fails closed — no boot fallback")
+	assert.NotContains(t, armed.Fetchers, ProviderNMI, "declared account with missing secret fails closed — never another credential plane")
 	assert.NotContains(t, armed.Probers, ProviderNMI)
 
 	warned := false

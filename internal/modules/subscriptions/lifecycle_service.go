@@ -188,7 +188,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
 	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
 	notificationRepo := NewNotificationQueueRepo(dbb)
-	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil, s.Clock())
+	subService := NewSubscriptionService(dbb, priceService, productService, nil, s.Clock())
 
 	price, err := priceService.GetByID(ctx, params.PriceID)
 	if err != nil {
@@ -581,7 +581,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entitlementService := entitlements.NewEntitlementService(db, s.Clock())
 		paymentService := payments.NewPaymentService(db, s.Clock())
 		entitlementService.SetClock(s.Clock())
@@ -1001,7 +1001,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil, s.Clock())
+		subService := NewSubscriptionService(txdb, priceService, productService, nil, s.Clock())
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
@@ -1150,7 +1150,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 
 		// Use rail name for gateway lookup
 		// Find subscription
@@ -1588,7 +1588,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
@@ -1759,7 +1759,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 

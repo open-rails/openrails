@@ -5,6 +5,8 @@ package intents
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -137,10 +139,28 @@ func (fx ccbillFixture) userService() *subscriptions.UserSubscriptionService {
 	return usvc
 }
 
+// ccbillCancelTestRails is the armed rail state (#788) the cancel handler
+// resolves its DataLink client from (creds matching newFakeSMS's client).
+func ccbillCancelTestRails() railresolve.FixedSet {
+	return railresolve.FixedSet{"ccbill": {
+		Rail:      models.RailCCBill,
+		AccountID: "900100-0000",
+		CCBill:    &config.CCBillRailConfig{DataLinkUsername: "dluser", DataLinkPassword: "dlpass"},
+	}}
+}
+
+func newCCBillCancelTestHandler(db *db.DB, client *ccbill.DataLinkClient, cfg *config.Config) *CCBillCancelHandler {
+	h := NewCCBillCancelHandler(db, cfg, ccbillCancelTestRails(), nil)
+	if client != nil {
+		h.DataLinkBaseURL = client.BaseURL
+	}
+	return h
+}
+
 func (fx ccbillFixture) runner(client *ccbill.DataLinkClient, cfg *config.Config) *Runner {
 	return &Runner{
 		Store:    fx.store,
-		Registry: NewRegistry(NewCCBillCancelHandler(fx.db, client, nil)),
+		Registry: NewRegistry(newCCBillCancelTestHandler(fx.db, client, cfg)),
 		Config:   cfg,
 	}
 }
@@ -403,7 +423,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	fake, client := newFakeSMS(t, "2")
 	runner := &Runner{
 		Store:    store,
-		Registry: NewRegistry(NewCCBillCancelHandler(dbi, client, nil)),
+		Registry: NewRegistry(newCCBillCancelTestHandler(dbi, client, fullModeConfig())),
 		Config:   fullModeConfig(),
 		Breaker:  NewVolumeBreaker(dbi),
 	}

@@ -578,20 +578,16 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 	}
 
 	var stripeLister stripeProductLister
-	if s.rt != nil {
-		if stripeProc := s.rt.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe.SecretKey != "" {
-			stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.Rails}
-		}
+	if s.rt != nil && s.railArmed(ctx, string(models.RailStripe)) {
+		stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.RailConfigs}
 	}
 
 	var nmiLister nmiPlanLister
-	if s.rt != nil && s.rt.NMIClients != nil {
-		if client, ok := s.rt.NMIClients[string(models.RailNMI)]; ok && client != nil {
-			nmiLister = client
-		}
+	if client := s.resolveNMIClientForMerchant(ctx); client != nil {
+		nmiLister = client
 	}
 
-	solanaConfigured := s.rt != nil && s.rt.SolanaRPC != nil
+	solanaConfigured := s.rt != nil && s.railArmed(ctx, string(models.RailSolana))
 	if stripeLister == nil && nmiLister == nil && !solanaConfigured {
 		return nil, fmt.Errorf("no catalog provider (stripe/nmi/solana) is configured")
 	}
@@ -638,7 +634,7 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 	// Solana has no "list all plans" API, so its pass is a per-stored-price
 	// read-back (gated on a configured RPC). Reuses the solana provider adapter's
 	// Verify so the decode+diff logic lives in one place.
-	if s.rt != nil && s.rt.SolanaRPC != nil {
+	if s.rt != nil && s.railArmed(ctx, string(models.RailSolana)) {
 		solEvents, solScanned := s.computeSolanaCatalogDrift(ctx, snap, now)
 		scannedSolanaPlans = solScanned
 		desired = append(desired, solEvents...)

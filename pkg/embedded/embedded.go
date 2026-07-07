@@ -52,17 +52,6 @@ type Options struct {
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	Cache   cache.Cache
-	// PaymentProviders lets embedding hosts supply one or more payment-provider
-	// credential sets programmatically — the BOOT-CONFIG plane. Local provider
-	// names are optional selectors; durable provider-account identity is
-	// resolved from the provider itself.
-	//
-	// This is NOT the only way to arm providers (#699): a host that seeds
-	// provider accounts + secrets through the merchant manifest (the
-	// per-merchant secrets store) gets checkout, webhooks AND provider pulls
-	// (refresh/probes/unknown-resolution) armed per merchant from the store,
-	// with this boot plane as fallback. Store credentials win on conflict.
-	PaymentProviders []PaymentProvider
 	// ConsoleAssets is the HOST-BUILT admin console SPA (#754: go:embed cannot
 	// cross module boundaries, so whoever builds the binary owns the embed and
 	// hands the engine an fs.FS rooted at index.html). nil = no frontend bytes;
@@ -88,20 +77,16 @@ func New(opts Options) (*Embedded, error) {
 	if err := applyEmbeddedDefaults(opts.Config); err != nil {
 		return nil, err
 	}
-	rails, err := ApplyPaymentProviders(opts.PaymentProviders)
-	if err != nil {
-		return nil, err
-	}
-
 	// Build the application graph only; HTTP surfaces (StandaloneHandler /
 	// MountHandler) are constructed from this App on demand. (#711: the
 	// bootstrap.Options relay layer is gone — this calls the app composition
-	// root directly.)
+	// root directly.) Rail credentials are NEVER boot options (#788): rails
+	// arm per merchant through the manifest (MODE 1) or the management API
+	// (MODE 2) into rail_merchant_accounts + the merchant secret store.
 	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,
 		Cache:   opts.Cache,
-		Rails:   rails,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

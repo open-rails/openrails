@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +23,7 @@ import (
 func newStripeAdapterWithServer(serverURL string) *stripeAdapter {
 	svc := &Service{rt: &app.Runtime{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: config.RailMerchantAccountSet{
+		RailConfigs: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_wirepin"}},
 		},
 	}}

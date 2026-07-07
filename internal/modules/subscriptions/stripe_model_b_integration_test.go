@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -210,7 +211,7 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	//    params the checkout upgrade branch passes.
 	svc := &StripeService{
 		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
 		},
 	}

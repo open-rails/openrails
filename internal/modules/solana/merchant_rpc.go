@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"fmt"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -27,8 +28,6 @@ import (
 type MerchantRPCBuilder struct {
 	Config      *config.Config
 	MerchantsFn func() *merchants.Service
-	// Boot is the boot-plane client (nil in store-only deployments).
-	Boot *solanarpc.RPCClient
 	// Endpoint overrides store-armed clients' RPC endpoint — a test seam for
 	// fake RPC servers. Zero value = real endpoints.
 	Endpoint string
@@ -56,22 +55,19 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid merchant.ID) (*sol
 	}
 	svc := b.merchants()
 	if svc == nil {
-		return b.Boot, nil
+		return nil, nil // nothing arms without the merchants service (#788)
 	}
 	scope, ok, err := svc.PullRailMerchantAccountScope(ctx, mid, "solana", config.ExpectedProviderEnvironment(b.testMode()))
 	if err != nil {
 		return nil, fmt.Errorf("solana: resolve merchant %s rail account: %w", mid.String(), err)
 	}
 	if !ok {
-		return b.Boot, nil // no declared account → boot plane
+		return nil, nil // no declared solana account → not armed (#788)
 	}
 	settings, err := config.ParseSolanaAccountSettings(scope.Settings)
 	if err != nil {
 		// Fail loud: a declared account never falls back across planes (#699).
 		return nil, fmt.Errorf("solana: merchant %s account %s settings: %w", mid.String(), scope.AccountID, err)
-	}
-	if b.Boot != nil && settings.RPCProvider == "" && settings.RPCAPIKey == "" && b.Endpoint == "" {
-		return b.Boot, nil // declared account, no RPC knobs → deployment client
 	}
 	network := "mainnet"
 	if b.testMode() {
@@ -98,7 +94,8 @@ type MerchantChainReader struct {
 	builder *MerchantRPCBuilder
 }
 
-func (r *MerchantChainReader) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+// client resolves the ctx merchant's armed RPC client (fail closed on none).
+func (r *MerchantChainReader) client(ctx context.Context) (*solanarpc.RPCClient, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("solana chain read: %w", err)
@@ -110,5 +107,53 @@ func (r *MerchantChainReader) GetTransaction(ctx context.Context, signature sola
 	if client == nil {
 		return nil, fmt.Errorf("solana chain read: no RPC client armed for merchant %s (#728)", mid.String())
 	}
+	return client, nil
+}
+
+func (r *MerchantChainReader) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return client.GetTransaction(ctx, signature)
+}
+
+func (r *MerchantChainReader) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetAccountData(ctx, address)
+}
+
+func (r *MerchantChainReader) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return solanago.Hash{}, err
+	}
+	return client.GetLatestBlockhash(ctx)
+}
+
+func (r *MerchantChainReader) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return client.GetBalance(ctx, address)
+}
+
+func (r *MerchantChainReader) GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return client.GetTokenBalanceForMint(ctx, owner, mint)
+}
+
+func (r *MerchantChainReader) WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, timeout time.Duration) (*solanarpc.TransactionOutcome, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.WatchTransaction(ctx, sig, commitment, timeout)
 }

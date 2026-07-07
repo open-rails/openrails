@@ -3,6 +3,8 @@ package embedded
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"os"
 	"strings"
@@ -14,8 +16,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -203,11 +203,17 @@ func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...
 	rt := &app.Runtime{
 		DB:                 database,
 		Config:             cfg,
-		NMIClients:         catalogNMIClients(cfg, config.RailMerchantAccountSet{}, catalogPushUsesProvider(manifests, string(models.RailNMI))),
 		ProductService:     catalogmodule.NewProductService(database),
 		PriceService:       catalogmodule.NewPriceService(database),
 		MoneyService:       money.NewMoneyService(database),
 		EntitlementService: entitlements.NewEntitlementService(database),
+	}
+	// #788: catalog-push provider verification resolves the armed rail state
+	// through the ONE Layer-C seam; arming rides EnsureMerchantsService below
+	// (a host with no armed rails degrades to manual provider links).
+	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
+	if err := rt.EnsureMerchantsService(context.Background()); err != nil {
+		log.WithError(err).Warn("catalog push: merchants service arming failed; provider links degrade to manual")
 	}
 	cleanup := func() {
 		if closeErr := rt.Close(context.Background()); closeErr != nil {
@@ -329,27 +335,6 @@ func resolveMerchantBySlug(ctx context.Context, database *db.DB, merchantSlug st
 		return merchant.ID{}, err
 	}
 	return id, nil
-}
-
-func catalogNMIClients(cfg *config.Config, rails config.RailMerchantAccountSet, enabled bool) map[string]*nmi.NMIClient {
-	clients := make(map[string]*nmi.NMIClient)
-	if cfg == nil || !enabled {
-		return clients
-	}
-	for name, procConfig := range rails.ByRail(models.RailNMI) {
-		providerKey := strings.TrimSpace(strings.ToLower(name))
-		if providerKey == "" || procConfig == nil || procConfig.NMI == nil || strings.TrimSpace(procConfig.NMI.SecurityKey) == "" {
-			continue
-		}
-		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(), cfg.IsTestMode())
-		if err != nil {
-			log.WithError(err).WithField("provider", providerKey).Warn("NMI catalog client unavailable")
-			continue
-		}
-		client.ReadOnly = cfg.IsProviderReadOnly()
-		clients[providerKey] = client
-	}
-	return clients
 }
 
 func catalogPushUsesProvider(manifests []*catalog.Manifest, provider string) bool {

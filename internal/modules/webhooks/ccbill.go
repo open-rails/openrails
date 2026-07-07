@@ -864,7 +864,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		productService := catalog.NewProductService(txdb)
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		// Find subscription by the original rail subscription ID and then transition it.
 		subscription, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), originalSubscriptionID)
@@ -1224,7 +1224,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		// Find subscription by rail subscription ID
 		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
@@ -1281,7 +1281,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		// Find subscription by rail subscription ID
 		sub, err := subService.GetByRailSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
@@ -1410,7 +1410,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
@@ -1612,7 +1612,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 		paymentService := payments.NewPaymentService(txdb)
 
 		// Try to find subscription by rail subscription ID
@@ -1730,7 +1730,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
@@ -2071,7 +2071,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		entSvc.SetClock(s.Clock)
 

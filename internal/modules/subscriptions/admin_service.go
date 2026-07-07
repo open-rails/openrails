@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -37,9 +36,10 @@ type AdminSubscriptionService struct {
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService
-	NMIClients          map[string]*nmi.NMIClient
-	StripeService       *StripeService
-	clock               clockwork.Clock
+	// NMIResolver arms store-scoped NMI clients per merchant (#788).
+	NMIResolver   NMIClientSource
+	StripeService *StripeService
+	clock         clockwork.Clock
 	// No user directory enrichment; IdP subject is stored on subscription
 }
 
@@ -179,11 +179,11 @@ func (s *AdminSubscriptionService) cancelWithNMI(ctx context.Context, subscripti
 		return nil // Not an NMI-backed subscription, nothing to do
 	}
 
-	if s.NMIClients == nil || subscription.RailSubscriptionID == "" {
-		return nil // No NMI clients configured or no subscription ID
+	if s.NMIResolver == nil || subscription.RailSubscriptionID == "" {
+		return nil // No NMI resolver configured or no subscription ID
 	}
 
-	client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.SubscriptionService.Database(), s.NMIClients, subscription)
+	client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
 	if err != nil {
 		return fmt.Errorf("resolve subscription provider account: %w", err)
 	}
@@ -358,7 +358,7 @@ func NewAdminSubscriptionService(
 	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
 	paymentService *payments.PaymentService,
-	nmiClients map[string]*nmi.NMIClient,
+	nmiResolver NMIClientSource,
 	clocks ...clockwork.Clock,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{
@@ -368,7 +368,7 @@ func NewAdminSubscriptionService(
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
-		NMIClients:          nmiClients,
+		NMIResolver:         nmiResolver,
 		clock:               timeutil.FirstClock(clocks...),
 	}
 }

@@ -85,17 +85,17 @@ type SolanaSunsetPlanHandler struct {
 	Policy      BackoffPolicy
 }
 
-// NewSolanaSunsetPlanHandler wires the handler from runtime dependencies. rpc
-// and plans may be nil (Solana unconfigured) — intents then park until the
-// deployment grows the capability.
-func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, rpc *solanaint.RPCClient, _ clockwork.Clock) *SolanaSunsetPlanHandler {
+// NewSolanaSunsetPlanHandler wires the handler from runtime dependencies.
+// reader and plans may be nil (Solana unconfigured) — intents then park until
+// the deployment grows the capability. reader is typically the #728
+// merchant-resolving chain reader (solana.MerchantRPCBuilder.ChainReader()).
+func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, reader planAccountReader, _ clockwork.Clock) *SolanaSunsetPlanHandler {
 	h := &SolanaSunsetPlanHandler{
 		LoadCatalog: dbCatalogRowsLoader(d),
 		Policy:      DefaultBackoff,
 	}
-	// Guard the typed-nil-in-interface trap: only assign non-nil concretes.
-	if rpc != nil {
-		h.Reader = rpc
+	if reader != nil {
+		h.Reader = reader
 	}
 	if plans != nil {
 		h.Plans = plans

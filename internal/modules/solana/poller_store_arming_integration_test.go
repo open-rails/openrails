@@ -78,22 +78,22 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 		"rpc_api_key":  storeKey,
 	})
 
-	boot := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{RPCProvider: "public", Network: "mainnet", ReadOnly: true})
 	b := &MerchantRPCBuilder{
 		Config:      &config.Config{Env: "dev"},
 		MerchantsFn: func() *merchants.Service { return svc },
-		Boot:        boot,
 	}
 
 	client, err := b.Resolve(context.Background(), mid)
 	require.NoError(t, err)
 	require.NotNil(t, client)
-	assert.NotSame(t, boot, client, "declared RPC settings build a store-armed client")
 	assert.Contains(t, client.GetEndpoint(), "helius", "store rpc_provider wins")
 	assert.Contains(t, client.GetEndpoint(), storeKey, "store rpc_api_key wins")
 }
 
-func TestMerchantRPCBuilder_BootFallbackWhenNoStoreRow(t *testing.T) {
+// #788: there is no boot plane — a merchant with no declared solana account
+// resolves NO client (fail closed); a declared account without RPC knobs
+// arms the public-RPC default.
+func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newSolanaMerchantsService(t, dbi)
@@ -101,23 +101,21 @@ func TestMerchantRPCBuilder_BootFallbackWhenNoStoreRow(t *testing.T) {
 	// Merchant declares NO solana account at all.
 	mid := newSolanaTestMerchant(t, dbi, "sol-boot-"+sfx)
 
-	boot := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{RPCProvider: "public", Network: "mainnet", ReadOnly: true})
 	b := &MerchantRPCBuilder{
 		Config:      &config.Config{Env: "dev"},
 		MerchantsFn: func() *merchants.Service { return svc },
-		Boot:        boot,
 	}
 
 	client, err := b.Resolve(context.Background(), mid)
 	require.NoError(t, err)
-	assert.Same(t, boot, client, "no declared account → boot-plane client")
+	assert.Nil(t, client, "no declared account → not armed (fail closed)")
 
-	// A declared account WITHOUT rpc knobs also keeps the boot client.
+	// A declared account WITHOUT rpc knobs arms the public-RPC default.
 	mid2 := newSolanaTestMerchant(t, dbi, "sol-plain-"+sfx)
 	seedSolanaRailAccount(t, dbi, mid2, "WaLLet2"+sfx, map[string]any{"recipient_wallet": "W" + sfx})
 	client2, err := b.Resolve(context.Background(), mid2)
 	require.NoError(t, err)
-	assert.Same(t, boot, client2, "declared account with no RPC knobs → boot client")
+	require.NotNil(t, client2, "declared account with no RPC knobs → public default")
 }
 
 func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
@@ -128,11 +126,9 @@ func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
 	mid := newSolanaTestMerchant(t, dbi, "sol-bad-"+sfx)
 	seedSolanaRailAccount(t, dbi, mid, "WaLLet"+sfx, map[string]any{"rpc_provider": "bogus"})
 
-	boot := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{RPCProvider: "public", Network: "mainnet", ReadOnly: true})
 	b := &MerchantRPCBuilder{
 		Config:      &config.Config{Env: "dev"},
 		MerchantsFn: func() *merchants.Service { return svc },
-		Boot:        boot,
 	}
 
 	client, err := b.Resolve(context.Background(), mid)
@@ -181,8 +177,9 @@ func jsonID(id any) string {
 
 // TestSolanaPollerPass_PerMerchantStoreArming drives ONE poller pass over two
 // merchants' pending references: the STORE-ONLY merchant's reference is polled
-// against its store-armed RPC endpoint, the undeclared merchant's against the
-// boot client — per merchant, per pass, RLS-scoped.
+// against its store-armed RPC endpoint; the undeclared merchant's pass is
+// SKIPPED (fail closed — no boot plane exists, #788). Per merchant, per pass,
+// RLS-scoped.
 func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -193,9 +190,6 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 	storeFake := &fakeSolanaRPC{}
 	storeSrv := httptest.NewServer(storeFake.handler())
 	t.Cleanup(storeSrv.Close)
-	bootFake := &fakeSolanaRPC{}
-	bootSrv := httptest.NewServer(bootFake.handler())
-	t.Cleanup(bootSrv.Close)
 
 	// Merchant A: STORE-ONLY solana settings (rpc knobs declared on the account).
 	midStore := newSolanaTestMerchant(t, dbi, "sol-pass-store-"+sfx)
@@ -207,11 +201,9 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 	midBoot := newSolanaTestMerchant(t, dbi, "sol-pass-boot-"+sfx)
 
 	cfg := &config.Config{Env: "dev"}
-	bootClient := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{Endpoint: bootSrv.URL, Network: "mainnet"})
 	builder := &MerchantRPCBuilder{
 		Config:      cfg,
 		MerchantsFn: func() *merchants.Service { return svc },
-		Boot:        bootClient,
 		// Test seam: store-armed clients hit the fake endpoint.
 		Endpoint: storeSrv.URL,
 	}
@@ -261,7 +253,5 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 
 	assert.GreaterOrEqual(t, storeFake.count("getSignaturesForAddress"), 1,
 		"store-only merchant's pass polls with the STORE-armed client")
-	assert.GreaterOrEqual(t, bootFake.count("getSignaturesForAddress"), 1,
-		"undeclared merchant's pass polls with the BOOT client")
 	assert.Zero(t, storeFake.count(""), "no unparsed RPC bodies")
 }

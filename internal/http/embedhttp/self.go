@@ -82,26 +82,15 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
-// runtime's configured rails + probed capabilities (#661); an explicit override
-// wins; no runtime information means the permissive default.
-//
-// rt.Rails is the legacy boot-config bridge (only populated by
-// embedded.Options.PaymentProviders) — empty in every MODE-1 manifest host
-// (#775). When it's empty but a merchant is bound, derive the surface from
-// that merchant's DB-armed rail accounts instead of silently deriving "no
-// routes" from the empty bridge.
+// bound merchant's DB-armed rail accounts + probed capabilities (#661/#775/
+// #788 — the ONE armed-state seam); an explicit override wins; no runtime
+// information means the permissive default.
 func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
 	if override != nil {
 		return *override
 	}
 	if rt == nil {
 		return routesurface.AllProviderRoutes()
-	}
-	if len(rt.Rails) > 0 {
-		if caps := rt.RouteCapabilities; caps != nil {
-			return routesurface.ProviderRoutesFromRailsWithCapabilities(rt.Rails, *caps)
-		}
-		return routesurface.ProviderRoutesFromRails(rt.Rails)
 	}
 	if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
 		r := armedProviderRoutes(context.Background(), rt, mid)

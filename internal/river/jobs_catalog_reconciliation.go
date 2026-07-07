@@ -17,6 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -46,10 +48,12 @@ func (CatalogReconciliationPullArgs) Kind() string { return KindCatalogReconcili
 // unconfigured.
 type CatalogReconciliationPullWorker struct {
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
-	DB         *db.DB
-	Config     *config.Config
-	Rails      config.RailMerchantAccountSet
-	NMIClients map[string]*nmi.NMIClient
+	DB     *db.DB
+	Config *config.Config
+	// Rails resolves the ctx merchant's armed rail credentials (#788).
+	Rails railresolve.Source
+	// NMIResolver arms the ctx merchant's NMI client (#788).
+	NMIResolver money.NMIClientResolver
 }
 
 func (CatalogReconciliationPullWorker) Kind() string { return KindCatalogReconciliationPull }
@@ -77,8 +81,16 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	var desired []models.CatalogDriftEvent
 	scannedProducts, scannedPrices, scannedPlans := 0, 0, 0
 
-	// --- Stripe pass (skipped if unconfigured) ---
-	if stripeProc := w.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil && stripeProc.Stripe.SecretKey != "" {
+	// --- Stripe pass (skipped if unarmed) ---
+	stripeArmed := false
+	if w.Rails != nil {
+		armed, err := w.Rails.Armed(ctx, string(models.RailStripe))
+		if err != nil {
+			return fmt.Errorf("catalog reconciliation: resolve stripe rail: %w", err)
+		}
+		stripeArmed = armed
+	}
+	if stripeArmed {
 		stripeSvc := &catalog.StripeCatalogService{Config: w.Config, Rails: w.Rails}
 		products, err := listAllStripeProducts(ctx, stripeSvc)
 		if err != nil {
@@ -94,9 +106,21 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 		log.WithContext(ctx).Info("CatalogReconciliation: stripe not configured; skipping stripe pass")
 	}
 
-	// --- NMI pass (skipped if unconfigured) ---
-	if client, ok := w.NMIClients[string(models.RailNMI)]; ok && client != nil {
-		v5Plans, err := client.ListRecurringPlans()
+	// --- NMI pass (skipped if unarmed) ---
+	var nmiClient *nmi.NMIClient
+	if w.NMIResolver != nil {
+		if mid, err := merchant.Require(ctx); err == nil {
+			client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, mid.UUID(), nil)
+			if err != nil {
+				return fmt.Errorf("catalog reconciliation: resolve nmi rail: %w", err)
+			}
+			if ok {
+				nmiClient = client
+			}
+		}
+	}
+	if nmiClient != nil {
+		v5Plans, err := nmiClient.ListRecurringPlans()
 		if err != nil {
 			return fmt.Errorf("catalog reconciliation: list nmi recurring plans: %w", err)
 		}

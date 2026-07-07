@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,8 +20,8 @@ func testStripeConfig() *config.Config {
 	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
-func testStripeRails() config.RailMerchantAccountSet {
-	return config.RailMerchantAccountSet{
+func testStripeRails() railresolve.FixedSet {
+	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 	}
 }

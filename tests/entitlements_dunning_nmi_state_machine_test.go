@@ -127,7 +127,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		DB:                 rt.DB,
 		Config:             suite.Config,
 		Clock:              clock,
-		NMIClients:         rt.NMIClients,
+		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
 	}
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
@@ -222,7 +222,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		DB:                 rt.DB,
 		Config:             suite.Config,
 		Clock:              clock,
-		NMIClients:         rt.NMIClients,
+		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
 	}
 

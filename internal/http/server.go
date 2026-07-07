@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -256,9 +257,6 @@ func New(deps Dependencies) (*Server, error) {
 				SolanaCanSign: secretBackend.SolanaCanSign,
 				SecretWrite:   secretBackend.SecretWrite,
 			}
-			if !secretBackend.SolanaCanSign && deps.Runtime.Rails.GetSolanaRail() != nil {
-				log.Warn("solana: a Solana rail is configured but OpenRails cannot sign (no Vault connection and no local key); Solana signing routes are disabled — configure vault_transit or a local keypair")
-			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
 				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
@@ -281,31 +279,26 @@ func New(deps Dependencies) (*Server, error) {
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
 			solanaSigner := recurring.NewSignerFromRailMerchantAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
-			var submitter recurring.Submitter
-			if deps.Runtime.SolanaRPCResolver != nil {
-				submitter = recurring.NewSignerSubmitterWithResolver(solanaSigner, deps.Runtime.SolanaRPCResolver.Resolve)
-			} else {
-				submitter = recurring.NewSignerSubmitter(solanaSigner, deps.Runtime.SolanaRPC)
-			}
+			submitter := recurring.NewSignerSubmitterWithResolver(solanaSigner, deps.Runtime.SolanaRPCResolver.Resolve)
+			// #788: network derives from test_mode alone (#349); the token set
+			// is the network's curated default (a merchant's rail-account
+			// settings refine tokens at request-time resolution seams).
 			network := "mainnet"
-			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil && pc.Solana.Network != "" {
-				network = pc.Solana.Network
+			if s.cfg.IsTestMode() {
+				network = "devnet"
 			}
-			var solanaTokens map[string]config.TokenConfig
-			if pc := deps.Runtime.Rails.GetSolanaRail(); pc != nil && pc.Solana != nil {
-				solanaTokens = pc.Solana.Tokens
-			}
+			solanaTokens := solanatokens.ForNetwork(network)
 			cranker := recurring.NewCrankService(submitter)
 			deps.Runtime.SetSolanaCranker(cranker)
-			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
-			// the lifecycle (membership) + the on-chain subscription store — and a
-			// boot RPC client for its chain reads (request-plane; boot-gated as before).
-			if deps.Runtime.SolanaRPC != nil && deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
-				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network, solanaTokens)
+			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Chain
+			// reads arm PER MERCHANT through the #728 resolver at request time.
+			chainReader := deps.Runtime.SolanaRPCResolver.ChainReader()
+			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
+				planSvc := recurring.NewPlanServiceWithReader(submitter, chainReader, network, solanaTokens)
 				enrollSvc := recurring.NewEnrollService(
 					deps.Runtime.SubscriptionLifecycleService,
 					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
-					deps.Runtime.SolanaRPC,
+					chainReader,
 					submitter,
 					network,
 					solanaTokens,
@@ -317,7 +310,7 @@ func New(deps Dependencies) (*Server, error) {
 				// recurring subscription on-chain (additive to the soft cancel #264).
 				deps.Runtime.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
 					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
-					deps.Runtime.SolanaRPC,
+					chainReader,
 				))
 
 				// App-driven on-chain tier change (#272): the prepare/confirm pair.
@@ -327,7 +320,7 @@ func New(deps Dependencies) (*Server, error) {
 				// as the cranker, so the slot it pre-signs is the merchant's own key.
 				deps.Runtime.SetSolanaPrepareTierChangeService(recurring.NewPrepareTierChangeService(
 					solanaSigner,
-					deps.Runtime.SolanaRPC,
+					chainReader,
 					network,
 					solanaTokens,
 				))
@@ -341,7 +334,7 @@ func New(deps Dependencies) (*Server, error) {
 					// [subscribe + transfer(first period)]. The cranker pre-signs the
 					// transfer slot, so the prepare service takes the SAME signer + RPC +
 					// network as the cranker (the slot it pre-signs is the merchant's key).
-					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, deps.Runtime.SolanaRPC, network, solanaTokens)
+					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, chainReader, network, solanaTokens)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
 
 					// Cancel + tier-change as Solana Pay checkout modes: reuse the same
@@ -351,11 +344,11 @@ func New(deps Dependencies) (*Server, error) {
 					// solana_cancel / solana_tier_change modes — no parallel protocol.
 					solanaSubRepo := solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB)
 					confirmCancelSvc := recurring.NewConfirmCancelService(
-						deps.Runtime.SolanaRPC,
+						chainReader,
 						deps.Runtime.SubscriptionLifecycleService,
 					)
 					confirmTierChangeSvc := recurring.NewConfirmTierChangeService(
-						deps.Runtime.SolanaRPC,
+						chainReader,
 						deps.Runtime.SubscriptionLifecycleService,
 						solanaSubRepo,
 						network,

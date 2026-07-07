@@ -63,7 +63,6 @@ type BootstrapOptions struct {
 	Clock   clockwork.Clock
 
 	ConfiguredMerchant merchant.ID
-	Rails              config.RailMerchantAccountSet
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -111,12 +110,6 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		Clock: func() clockwork.Clock {
 			if opts != nil {
 				return opts.Clock
-			}
-			return nil
-		}(),
-		Rails: func() config.RailMerchantAccountSet {
-			if opts != nil {
-				return opts.Rails
 			}
 			return nil
 		}(),

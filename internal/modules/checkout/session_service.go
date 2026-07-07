@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -109,7 +110,7 @@ type CheckoutSessionService struct {
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
 	config                   *config.Config
-	rails                    config.RailMerchantAccountSet
+	rails                    railresolve.Source
 	clock                    clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
@@ -238,7 +239,7 @@ func NewCheckoutSessionService(
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
-	rails config.RailMerchantAccountSet,
+	rails railresolve.Source,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
@@ -674,7 +675,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return s.initializeSolanaSubscriptionSession(ctx, session, payment)
 	}
 
-	solanaProc, err := solanamodule.RequireSolanaRailConfig(s.rails)
+	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -1680,7 +1681,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := solanamodule.RequireSolanaRailConfig(s.rails)
+	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}

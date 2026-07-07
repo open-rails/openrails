@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
@@ -40,25 +39,6 @@ type Prepared struct {
 
 func (p Prepared) UniqueKey() string {
 	return ComputeUniqueKey(p.Rail, p.EventID, p.EventType, p.Body)
-}
-
-func (p Prepared) QueueArgs(clientIP string) riverjobs.WebhookProcessArgs {
-	var signatureValid *bool
-	if p.SignatureVerified {
-		truth := true
-		signatureValid = &truth
-	}
-
-	return riverjobs.WebhookProcessArgs{
-		Rail:           p.Rail,
-		EventID:        p.EventID,
-		EventType:      p.EventType,
-		Body:           p.Body,
-		ClientIP:       clientIP,
-		Signature:      p.Signature,
-		SignatureValid: signatureValid,
-		UniqueKey:      p.UniqueKey(),
-	}
 }
 
 // CanonicalRail normalizes a webhook URL's rail segment. The legacy "mobius"

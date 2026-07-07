@@ -10,11 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// fakeDunningNMIResolver is a static money.NMIClientResolver stand-in for the
+// #725 store-armed builder.
+type fakeDunningNMIResolver struct{ client *nmi.NMIClient }
+
+func (f fakeDunningNMIResolver) ResolveNMIClient(_ context.Context, _ uuid.UUID, _ *uuid.UUID) (*nmi.NMIClient, bool, error) {
+	if f.client == nil {
+		return nil, false, nil
+	}
+	return f.client, true, nil
+}
+
 func TestDunningWorkerSkipsPastDueWithoutPeriodEndWithoutPanic(t *testing.T) {
 	worker := &DunningWorker{
-		NMIClients: map[string]*nmi.NMIClient{
-			string(models.RailNMI): {},
-		},
+		NMIResolver: fakeDunningNMIResolver{client: &nmi.NMIClient{}},
 	}
 	sub := &models.Subscription{
 		ID:                 uuid.New(),

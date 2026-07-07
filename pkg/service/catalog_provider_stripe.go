@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -80,10 +80,10 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		out[models.RailKeyStripeProductID] = suppliedProductID
 	}
 
-	if !a.stripeConfigured() {
+	if !a.stripeConfigured(ctx) {
 		return out, nil
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.RailConfigs}
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -123,38 +123,37 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 	return out, nil
 }
 
-// stripeConfigured reports whether a usable Stripe secret key is available.
-func (a *stripeAdapter) stripeConfigured() bool {
+// stripeConfigured reports whether the ctx merchant's Stripe rail is armed.
+func (a *stripeAdapter) stripeConfigured(ctx context.Context) bool {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return false
 	}
-	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	return stripeProc != nil && stripeProc.Stripe != nil && strings.TrimSpace(stripeProc.Stripe.SecretKey) != ""
+	return a.svc.railArmed(ctx, string(models.RailStripe))
 }
 
 // stripeServiceFor builds the StripeCatalogService for a target account (#641):
-// empty → the rail's primary; an account_id → a service keyed to THAT account's
-// secret. ok=false when no usable Stripe credentials for the target.
-func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.StripeCatalogService, bool) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+// empty → the merchant's active account; an account_id → a service keyed to
+// THAT declared account's secret. ok=false when no usable Stripe credentials
+// arm for the target.
+func (a *stripeAdapter) stripeServiceFor(ctx context.Context, targetAccountID string) (*catalog.StripeCatalogService, bool) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil || a.svc.rt.RailConfigs == nil {
 		return nil, false
 	}
 	if strings.TrimSpace(targetAccountID) == "" {
-		proc := a.svc.rt.Rails.GetStripeRail()
-		if proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
+		if !a.svc.railArmed(ctx, string(models.RailStripe)) {
 			return nil, false
 		}
-		return &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails, BaseURL: a.testBaseURL}, true
+		return &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.RailConfigs, BaseURL: a.testBaseURL}, true
 	}
-	proc, ok := a.svc.rt.Rails.FindByAccountID(models.RailStripe, targetAccountID)
-	if !ok || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
+	proc, err := a.svc.rt.RailConfigs.RailConfig(ctx, string(models.RailStripe), targetAccountID)
+	if err != nil || proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
 		return nil, false
 	}
-	// Single-entry rail set with the target as the (implicit) primary, so the
+	// Single-entry fixed view pinned to the target account, so the
 	// StripeCatalogService resolves THAT account's secret key.
 	return &catalog.StripeCatalogService{
 		Config:  a.svc.rt.Config,
-		Rails:   config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
+		Rails:   railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: proc.Stripe}},
 		BaseURL: a.testBaseURL,
 	}, true
 }
@@ -179,7 +178,7 @@ func (a *stripeAdapter) stripeServiceFor(targetAccountID string) (*catalog.Strip
 //
 // Returns the canonical ids to persist on rails["stripe"].
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
-	stripeSvc, ok := a.stripeServiceFor(in.TargetAccountID)
+	stripeSvc, ok := a.stripeServiceFor(ctx, in.TargetAccountID)
 	if !ok {
 		// Same error string used by stripe_catalog.go so callers can detect
 		// the "not configured" case via substring (Verify, etc).
@@ -301,15 +300,14 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
-	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
+	if !a.stripeConfigured(ctx) {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
 	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
 	if priceID == "" {
 		return nil, false, fmt.Errorf("stripe price_id missing on local rails map")
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.RailConfigs}
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -354,15 +352,14 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, false, nil
 	}
-	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
+	if !a.stripeConfigured(ctx) {
 		return nil, false, false, nil
 	}
 	stripeProductID = strings.TrimSpace(stripeProductID)
 	if stripeProductID == "" {
 		return nil, false, true, fmt.Errorf("stripe_product_id required")
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.RailConfigs}
 	remote, err := stripeSvc.RetrieveProduct(ctx, stripeProductID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -402,15 +399,14 @@ func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutab
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil
 	}
-	stripeProc := a.svc.rt.Rails.GetStripeRail()
-	if stripeProc == nil || stripeProc.Stripe == nil || strings.TrimSpace(stripeProc.Stripe.SecretKey) == "" {
+	if !a.stripeConfigured(ctx) {
 		return nil
 	}
 	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
 	if priceID == "" {
 		return nil
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.Rails}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config, Rails: a.svc.rt.RailConfigs}
 	params := catalog.UpdatePriceParams{}
 	if mutable.IsActive != nil {
 		active := *mutable.IsActive

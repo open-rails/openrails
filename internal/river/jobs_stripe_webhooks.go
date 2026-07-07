@@ -25,7 +25,6 @@ type StripeWebhookReconcileWorker struct {
 	river.WorkerDefaults[StripeWebhookReconcileArgs]
 	DB        *db.DB
 	Config    *config.Config
-	Rails     config.RailMerchantAccountSet
 	Merchants *merchants.Service
 }
 
@@ -40,23 +39,10 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 		return fmt.Errorf("stripe webhook reconcile: config not configured")
 	}
 	if w.Merchants == nil || w.Merchants.Secrets() == nil {
-		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			Config:        w.Config,
-			Rails:         w.Rails,
-			EnabledEvents: webhooks.HandledStripeEventTypes,
-		})
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("StripeWebhookReconcile: config-rail reconcile failed")
-			return nil
-		}
-		if res.Skipped {
-			log.WithContext(ctx).WithField("reason", res.SkipReason).Info("StripeWebhookReconcile: config-rail reconcile skipped")
-			return nil
-		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"action":      res.Result.Action,
-			"endpoint_id": res.Result.EndpointID,
-		}).Info("StripeWebhookReconcile: config-rail reconciled")
+		// #788: managed webhook registration resolves ONLY from the armed
+		// rail state (rail_merchant_accounts + secret store); without an
+		// armed merchants service there is nothing to reconcile.
+		log.WithContext(ctx).Info("StripeWebhookReconcile: merchants service not armed; skipping")
 		return nil
 	}
 
@@ -89,7 +75,6 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
 			Config:                w.Config,
-			Rails:                 w.Rails,
 			SecretStore:           w.Merchants.Secrets(),
 			MerchantID:            id,
 			MerchantSlug:          slug,

@@ -3,13 +3,13 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -43,7 +43,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.RailMerchantAccountSet
+	Rails                        railresolve.Source
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -142,11 +142,10 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	Rails                        config.RailMerchantAccountSet
+	Rails                        railresolve.Source
 	EntitlementService           *entitlements.EntitlementService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	NMIClients                   map[string]*nmi.NMIClient
 }
 
 func (ResumeSubscriptionWorker) Kind() string { return KindSubscriptionResume }

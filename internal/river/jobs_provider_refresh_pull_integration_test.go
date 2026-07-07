@@ -302,10 +302,6 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 		assert.Equal(t, "0000", c.ClientSubAcc)
 	}
 
-	// No process-global credential state was needed to pull.
-	assert.Nil(t, worker.NMIClients)
-	assert.Nil(t, worker.CCBillDataLink)
-	assert.Nil(t, worker.Rails)
 }
 
 // One secret missing: that rail is absent for the merchant, with ONE WARN

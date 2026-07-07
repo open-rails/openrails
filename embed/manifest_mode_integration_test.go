@@ -217,7 +217,6 @@ func TestManifestMode_Loop(t *testing.T) {
 	runtime := rt1.Embedded().App().Runtime
 	armed := reconcile.MerchantFetcherBuilder{
 		Config:    runtime.Config,
-		Rails:     runtime.Rails,
 		Merchants: runtime.Merchants,
 		DB:        runtime.DB,
 	}.Build(merchant.WithID(ctx, id), id)
@@ -478,7 +477,6 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 	runtime := rt.Embedded().App().Runtime
 	armed := reconcile.MerchantFetcherBuilder{
 		Config:    runtime.Config,
-		Rails:     runtime.Rails,
 		Merchants: runtime.Merchants,
 		DB:        runtime.DB,
 	}.Build(merchant.WithID(ctx, id), id)
@@ -552,7 +550,6 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}
 	})
-	require.Empty(t, rt.Embedded().App().Runtime.Rails, "MODE-1 manifest host never populates the legacy Rails bridge")
 	return rt, id
 }
 

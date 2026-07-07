@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -38,7 +37,6 @@ type NMIWebhookService struct {
 	ProductService               *catalog.ProductService
 	Data                         NMIWebhookEvent
 	Rail                         string
-	NMIClient                    *nmi.NMIClient
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService

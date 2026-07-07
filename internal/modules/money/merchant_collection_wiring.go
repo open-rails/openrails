@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -17,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,6 +47,14 @@ type CollectionEndpoints struct {
 	NMIQueryURL      string
 }
 
+// CollectionPlane is the runtime-facing per-merchant credential resolver
+// surface (#725/#788): store-armed collection adapters plus raw NMI clients.
+// Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
+type CollectionPlane interface {
+	CollectionAdapterResolver
+	NMIClientResolver
+}
+
 // NMIClientResolver is the raw-client NMI leg of the #725 store resolver, for
 // charge paths that need the client itself (manual dunning rebills) rather
 // than a CollectionAdapter. Same contract: ok=false with nil err = merchant
@@ -61,7 +69,6 @@ type NMIClientResolver interface {
 // charger is constructed); a nil fn/service = boot plane only (#699).
 type MerchantCollectionAdapterBuilder struct {
 	Config      *config.Config
-	Rails       config.RailMerchantAccountSet
 	DB          *db.DB
 	MerchantsFn func() *merchants.Service
 	Endpoints   CollectionEndpoints
@@ -169,13 +176,12 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 	if err != nil {
 		return nil, err
 	}
-	if boot := b.Rails.GetStripeRail(); boot != nil && boot.Stripe != nil &&
-		boot.Stripe.SecretKey != "" && boot.Stripe.SecretKey != secretKey {
-		b.warnStoreOverridesBoot(ctx, mid, string(models.RailStripe))
-	}
 	service := &subscriptions.StripeService{
 		Config: b.Config,
-		Rails: config.RailMerchantAccountSet{
+		// The store-resolved account IS the source here; hand StripeService a
+		// fixed single-account view so its ctx-time resolution can't drift
+		// from the scope this adapter was armed for.
+		Rails: railresolve.FixedSet{
 			string(models.RailStripe): {
 				Rail:        models.RailStripe,
 				AccountID:   scope.AccountID,
@@ -225,10 +231,6 @@ func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, svc *m
 	if b.Endpoints.NMIQueryURL != "" {
 		client.QueryURL = b.Endpoints.NMIQueryURL
 	}
-	if _, boot, _ := b.Rails.ActiveRailByType(models.RailNMI); boot != nil && boot.NMI != nil &&
-		boot.NMI.SecurityKey != "" && boot.NMI.SecurityKey != securityKey {
-		b.warnStoreOverridesBoot(ctx, mid, string(models.RailNMI))
-	}
 	return client, nil
 }
 
@@ -268,10 +270,4 @@ func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, sv
 		return "", fmt.Errorf("merchant %s rail %s: secret %s missing (#725: a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
 	}
 	return value, nil
-}
-
-func (b *MerchantCollectionAdapterBuilder) warnStoreOverridesBoot(ctx context.Context, mid merchant.ID, rail string) {
-	log.WithContext(ctx).WithFields(log.Fields{
-		"merchant_id": mid.String(), "rail": rail,
-	}).Warn("invoice collection: merchant-store credentials differ from boot-config rails; store wins (#699/#725)")
 }

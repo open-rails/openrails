@@ -12,7 +12,6 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -127,18 +126,13 @@ func CreateCheckoutSession(r *httprequest.Request) {
 }
 
 // checkoutRailConfigured reports whether rail is usable for this request's
-// checkout. r.State.Rails is the legacy boot-config bridge (only populated by
-// embedded.Options.PaymentProviders) — empty in every MODE-1 manifest host, so
-// the fallback below (the same DB-armed-account pattern
-// effectiveSolanaRailConfig uses, #775) is the primary signal there: ANY rail
-// with an active manifest/DB-armed account for the request merchant +
-// environment is configured, not just NMI.
+// checkout: ANY rail with an active armed rail_merchant_accounts row for the
+// request merchant + environment (#775/#788 — the ONE resolution seam; how
+// the account was armed, manifest or API, is invisible here). Fail closed on
+// resolution errors.
 func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if r == nil || r.State == nil {
 		return false
-	}
-	if rails.IsConfigured(r.State.Rails, rail) {
-		return true
 	}
 	if r.State.Merchants == nil {
 		return false

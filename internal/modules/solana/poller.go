@@ -82,35 +82,17 @@ func NewSolanaPayPoller(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	rails config.RailMerchantAccountSet,
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
 	purchaseRegistrar purchaseRegistrar,
 	paymentLookup paymentLookup,
 	checkoutSessionService checkoutSessionMarker,
 ) *SolanaPayPoller {
-	var rpc *solanarpc.RPCClient
-	if solanaProc := rails.GetSolanaRail(); solanaProc != nil && solanaProc.Solana != nil {
-		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Solana.Network))
-		if solanaNetwork == "" {
-			solanaNetwork = "mainnet"
-			if cfg.IsTestMode() {
-				solanaNetwork = "devnet"
-			}
-		}
-		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-			RPCProvider: solanaProc.Solana.RPCProvider,
-			RPCAPIKey:   solanaProc.Solana.RPCAPIKey,
-			Network:     solanaNetwork,
-			ReadOnly:    cfg.IsProviderReadOnly(),
-		})
-	}
-
 	return &SolanaPayPoller{
 		db:                     db,
 		redis:                  redis,
 		cfg:                    cfg,
-		rpcBuilder:             &MerchantRPCBuilder{Config: cfg, Boot: rpc}, // boot plane only until SetMerchantRPC
+		rpcBuilder:             &MerchantRPCBuilder{Config: cfg}, // disarmed until SetMerchantRPC
 		solanaPayService:       solanaPayService,
 		solanaTransactionSvc:   solanaTransactionService,
 		purchaseRegistrar:      purchaseRegistrar,

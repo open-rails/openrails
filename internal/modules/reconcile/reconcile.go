@@ -248,7 +248,7 @@ func reconcileSubscriptions(
 		mapped[remote.ID] = m
 	}
 
-	subService := subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil, nil, nil)
+	subService := subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil)
 	localSubs, err := subService.GetActiveSubscriptionsByRail(ctx, stripeRailName)
 	if err != nil {
 		return fmt.Errorf("fetch local subscriptions failed: %w", err)
@@ -392,7 +392,7 @@ func reconcileCharges(
 		paymentService = payments.NewPaymentService(rt.DB, rt.Clock)
 	}
 	if subService == nil {
-		subService = subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil, nil, nil)
+		subService = subscriptions.NewSubscriptionService(rt.DB, nil, nil, nil)
 	}
 	if customers == nil {
 		customers = payments.NewRailCustomerService(rt.DB)

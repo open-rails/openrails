@@ -19,10 +19,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -44,6 +41,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -76,20 +74,12 @@ type Runtime struct {
 	// RemoteAddr/X-Forwarded-For itself.
 	TrustedProxies *iputil.TrustedProxies
 
-	// Rails is the temporary in-memory provider credential bridge for
-	// embedded/private construction. It is not loaded from config.yaml/.env.
-	Rails config.RailMerchantAccountSet
-
 	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
 	// actually do (#661), used to gate the provider route surface. Nil means
 	// unprobed → the surface stays permissive (no capability gating).
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
-	Clock            clockwork.Clock
-	CCBillClient     *ccbill.CCBillClient
-	CCBillRESTClient *ccbill.RESTClient
-	CCBillDataLink   *ccbill.DataLinkClient
-	NMIClients       map[string]*nmi.NMIClient
+	Clock clockwork.Clock
 	// RiverProducer is an enqueue-only River client. It should never be started.
 	RiverProducer     *river.Client[pgx.Tx]
 	riverProducerPool *pgxpool.Pool
@@ -153,17 +143,27 @@ type Runtime struct {
 	// liveness probe (e.g. MODE 1's in-memory manifest plane). Set by
 	// EnsureMerchantsService / the standalone server alongside Merchants.
 	MerchantSecretPing func(ctx context.Context) error
-	// CollectionResolver is the ONE #725 store-armed per-merchant credential
-	// builder (arrears/top-up adapters + #730 manual-rebill NMI clients).
-	CollectionResolver *money.MerchantCollectionAdapterBuilder
+	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
+	// credential resolver (arrears/top-up adapters + NMI clients for rebills,
+	// cancels, refunds and admin actions).
+	CollectionResolver money.CollectionPlane
+	// RailConfigs is the ONE Layer-C rail resolution seam (#788): every
+	// decision-time rail credential/armed-state read resolves the ctx
+	// merchant's rail_merchant_accounts row + scoped secrets through it.
+	RailConfigs railresolve.Source
+	// CCBillDataLinkEndpoint overrides the DataLink endpoint on store-armed
+	// CCBill intent clients (test seam; empty = real endpoint). Read at
+	// registry build time — IntentRunner() rebuilds per call, so mutation
+	// takes effect for synchronous ledger execution immediately.
+	CCBillDataLinkEndpoint string
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
-	SolanaRPC                *solana.RPCClient
-	// SolanaRPCResolver is the #728 store-armed per-merchant RPC builder for the
-	// process-wide Solana services (poller, crank, intent verify legs): merchant
-	// rail-account settings win, SolanaRPC is the boot fallback.
+	// SolanaRPCResolver is the #728/#788 store-armed per-merchant RPC builder
+	// for the process-wide Solana services (poller, crank, intent verify legs,
+	// request-plane chain reads): merchant rail-account settings are the ONLY
+	// credential plane.
 	SolanaRPCResolver   *solanamodule.MerchantRPCBuilder
 	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider          fx.Provider

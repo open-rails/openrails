@@ -4,6 +4,7 @@ package money_test
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
 
 	"github.com/google/uuid"
@@ -98,11 +99,11 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 
 	stripeSvc := &subscriptions.StripeService{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
-		Rails: config.RailMerchantAccountSet{
+		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccount, Stripe: &config.StripeRailConfig{SecretKey: creds.SecretKey}},
 		},
 	}
-	_, gateKey, err := subscriptions.RequireStripeSecretKey(stripeSvc.Rails)
+	_, gateKey, err := subscriptions.RequireStripeSecretKey(ctx, stripeSvc.Rails)
 	require.NoError(t, err)
 	require.Equal(t, stripeKey, gateKey, "the charge service must carry the store-resolved key")
 

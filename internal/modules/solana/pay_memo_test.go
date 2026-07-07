@@ -2,6 +2,7 @@ package solana
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
 
 	"github.com/google/uuid"
@@ -24,7 +25,7 @@ func TestTransferRequestURLIncludesPurchaseMemo(t *testing.T) {
 	)
 	sessionID := uuid.MustParse("0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42")
 
-	s := &SolanaPayService{rails: config.RailMerchantAccountSet{
+	s := &SolanaPayService{rails: railresolve.FixedSet{
 		"solana": {
 			Rail:      models.RailSolana,
 			AccountID: recipient,

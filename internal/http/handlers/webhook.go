@@ -19,11 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -78,7 +76,8 @@ func Webhook(r *httprequest.Request) {
 	// merchant to attribute this event to — fail closed with an explicit pointer
 	// to the per-merchant surface rather than letting a downstream merchant.Require
 	// surface a generic error (audit OR-API-C2).
-	if _, err := merchant.Require(r.Request.Context()); err != nil {
+	mid, err := merchant.Require(r.Request.Context())
+	if err != nil {
 		if handled, accepted := processRailMerchantAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 			if accepted {
 				r.SuccessJSON(map[string]string{"status": "accepted"})
@@ -90,36 +89,10 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no provider account could be resolved from the webhook")
 		return
 	}
-	ingress, ok := globalWebhookIngress[models.Rail(provider)]
-	if !ok {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid provider")
-		return
-	}
-	if ingress(r, provider, clientIP) {
-		r.SuccessJSON(map[string]string{"status": "accepted"})
-	}
-}
-
-// globalWebhookIngress is the global-surface routing TABLE (#669): which
-// enqueue path handles each rail. Posture gates (#668 CCBill IP allowlist) and
-// signature verification deliberately stay inside each rail's func. The
-// provider param is already CanonicalRail-normalized. Returns accepted.
-var globalWebhookIngress = map[models.Rail]func(r *httprequest.Request, provider, clientIP string) bool{
-	models.RailNMI: enqueueNMIWebhook,
-	models.RailCCBill: func(r *httprequest.Request, _ string, clientIP string) bool {
-		if !ccbillWebhookIPAllowed(r, clientIP) {
-			log.WithFields(log.Fields{"client_ip": clientIP, "rail": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
-			// CCBill's only authentication is the IP allowlist, so an IP reject
-			// IS its verification failure (#786).
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailCCBill)
-			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
-			return false
-		}
-		return enqueueCCBillWebhook(r, clientIP)
-	},
-	models.RailStripe: func(r *httprequest.Request, _ string, clientIP string) bool {
-		return enqueueStripeWebhook(r, clientIP)
-	},
+	// #788: ONE ingestion seam — the pinned-merchant global surface routes
+	// through the SAME verify/dispatch primitive as the merchant-scoped and
+	// Host-routed surfaces, resolving credentials from the armed rail state.
+	processResolvedMerchantWebhook(r, provider, mid, strings.TrimSpace(r.Param("account_id")))
 }
 
 func MerchantWebhook(r *httprequest.Request) {
@@ -252,6 +225,16 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		return
 	}
 	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
+	// Stripe "thin" event destinations deliver a minimal payload without the
+	// object. Hydrate it with the MERCHANT's secret key into the classic
+	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
+	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), prepared.Body); herr != nil {
+		log.WithError(herr).Error("failed to hydrate thin stripe event")
+		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
+		return
+	} else if hydrated != nil {
+		prepared.Body = hydrated
+	}
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return
@@ -550,116 +533,6 @@ func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accoun
 	return msg
 }
 
-func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
-	body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
-	if !ok {
-		return false
-	}
-	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
-	if err != nil {
-		switch {
-		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
-			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		case errors.Is(err, webhookutil.ErrWebhookEventTypeMissing):
-			r.ErrorJSON(http.StatusBadRequest, "Missing eventType parameter")
-		case errors.Is(err, webhookutil.ErrWebhookEventTypeMismatch):
-			r.ErrorJSON(http.StatusBadRequest, "Webhook event type mismatch")
-		default:
-			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		}
-		return false
-	}
-	// IP allowlist (CCBill's verification) already passed in the ingress table.
-	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailCCBill)
-	args := prepared.QueueArgs(clientIP)
-	if err := enqueueWebhookJob(r, args); err != nil {
-		log.WithError(err).Error("failed to enqueue CCBill webhook")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")
-		return false
-	}
-	return true
-}
-
-func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
-	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
-	if !ok {
-		return false
-	}
-	var secrets []string
-	stripeSecretKey := ""
-	if stripeProc := r.State.Rails.GetStripeRail(); stripeProc != nil && stripeProc.Stripe != nil {
-		stripeSecretKey = strings.TrimSpace(stripeProc.Stripe.SecretKey)
-		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecret); s != "" {
-			secrets = append(secrets, s)
-		}
-		if s := strings.TrimSpace(stripeProc.Stripe.WebhookSigningSecretThin); s != "" {
-			secrets = append(secrets, s)
-		}
-	}
-	prepared, err := prepareStripeMultiSecret(body, secrets, r.Request.Header.Get("Stripe-Signature"), 5*time.Minute)
-	if err != nil {
-		switch {
-		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
-			r.ErrorJSON(http.StatusUnauthorized, "Webhook signature required")
-		case errors.Is(err, webhookutil.ErrWebhookSignatureMissing):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
-			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
-		case errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
-			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
-		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
-			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		default:
-			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		}
-		return false
-	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
-	// Stripe "thin" event destinations deliver a minimal payload without the
-	// object. Hydrate it into the classic {data:{object}} shape so the River
-	// rail only ever sees snapshot-style events.
-	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), stripeSecretKey, prepared.Body); herr != nil {
-		log.WithError(herr).Error("failed to hydrate thin stripe event")
-		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
-		return false
-	} else if hydrated != nil {
-		prepared.Body = hydrated
-	}
-	// Process synchronously in-request: Stripe webhooks drive subscription and
-	// entitlement state, and we want that reflected immediately rather than after
-	// a River worker picks the job up. Stripe retries on a non-2xx, so a transient
-	// failure here is safe to surface as 500; a non-retryable (poison) event is
-	// acked so Stripe stops retrying.
-	if r.State.WebhookDispatcher == nil {
-		log.Error("webhook dispatcher unavailable")
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
-		return false
-	}
-	signatureVerified := true
-	msg := &webhooks.WebhookMessage{
-		Rail:           subscriptions.RailStripe,
-		EventID:        prepared.EventID,
-		EventType:      prepared.EventType,
-		Payload:        prepared.Body,
-		IPAddress:      clientIP,
-		Signature:      prepared.Signature,
-		SignatureValid: &signatureVerified,
-		ReceivedAt:     time.Now(),
-	}
-	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
-		fields := log.Fields{"event_id": prepared.EventID, "event_type": prepared.EventType}
-		if webhooks.IsWebhookErrorNonRetryable(err) {
-			log.WithError(err).WithFields(fields).Warn("stripe webhook non-retryable error; acking to stop retries")
-			return true
-		}
-		log.WithError(err).WithFields(fields).Error("stripe webhook processing failed")
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
-		return false
-	}
-	return true
-}
-
 // prepareStripeMultiSecret verifies the Stripe signature against each configured
 // secret, accepting the first that validates. Snapshot and thin Event
 // Destinations sign the same payload with their own secret, so a single endpoint
@@ -748,64 +621,6 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 	}{ID: envelope.ID, Type: envelope.Type}
 	synthesized.Data.Object = object
 	return json.Marshal(synthesized)
-}
-
-func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs) error {
-	if r.State == nil || r.State.RiverProducer == nil {
-		return fmt.Errorf("river producer is not configured")
-	}
-	opts := &river.InsertOpts{Queue: riverjobs.QueueWebhooks, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true}}
-	_, err := r.State.RiverProducer.Insert(r.Request.Context(), args, opts)
-	return err
-}
-
-func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string) bool {
-	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
-	if !ok {
-		return false
-	}
-	providerKey := webhookutil.CanonicalRail(provider)
-	client, ok := r.State.NMIClients[providerKey]
-	if !ok || client == nil {
-		r.ErrorJSON(http.StatusNotFound, fmt.Sprintf("unknown nmi provider '%s'", providerKey))
-		return false
-	}
-	signingKey := client.GetWebhookSecret()
-	prepared, err := webhookutil.PrepareNMI(providerKey, body, signingKey, firstPresentHeader(r.Request.Header, "Webhook-Signature", "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"))
-	if err != nil {
-		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
-			log.WithError(err).Error("Missing webhook signature for NMI webhook")
-			r.State.WebhookHealth.Rejected(r.Request.Context(), providerKey)
-			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
-			return false
-		}
-		if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) {
-			log.WithError(err).Error("NMI webhook signature verification failed")
-			r.State.WebhookHealth.Rejected(r.Request.Context(), providerKey)
-			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
-			return false
-		}
-		if errors.Is(err, webhookutil.ErrWebhookPayloadInvalid) {
-			log.WithError(err).Error("failed to parse NMI webhook JSON")
-			r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
-			return false
-		}
-		if errors.Is(err, webhookutil.ErrWebhookEventIDMissing) {
-			r.ErrorJSON(http.StatusBadRequest, "Missing event_id in payload")
-			return false
-		}
-		log.WithError(err).Error("failed to prepare NMI webhook")
-		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
-		return false
-	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), prepared.Rail)
-	args := prepared.QueueArgs(clientIP)
-	if err := enqueueWebhookJob(r, args); err != nil {
-		log.WithError(err).Error("failed to enqueue NMI webhook")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")
-		return false
-	}
-	return true
 }
 
 func nmiWebhookAccountID(body []byte) string {

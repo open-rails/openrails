@@ -121,7 +121,7 @@ func TestCCBillWebhookAccountIDIsDashJoined(t *testing.T) {
 }
 
 // #668: CCBill events carry no signature, so they must never claim
-// SignatureValid — on the direct-dispatch path or the River path.
+// SignatureValid.
 func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 	prepared, err := webhookutil.PrepareCCBill([]byte(`{"eventType":"NewSaleSuccess","clientAccnum":"900000","transactionId":"1"}`), "NewSaleSuccess")
 	require.NoError(t, err)
@@ -129,9 +129,6 @@ func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 	msg := ccbillWebhookMessage("64.38.212.5", prepared, "900000-0000")
 	require.Nil(t, msg.SignatureValid)
 	require.Equal(t, "900000-0000", msg.RailMerchantAccountID)
-
-	// River path: an unverified Prepared must enqueue with SignatureValid nil.
-	require.Nil(t, prepared.QueueArgs("64.38.212.5").SignatureValid)
 }
 
 // newCCBillWebhookRequestBehindProxy builds a webhook request that physically

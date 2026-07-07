@@ -112,7 +112,7 @@ func breakerRunner(dbi *db.DB, client *nmi.NMIClient) *Runner {
 	return &Runner{
 		Store: NewStore(dbi),
 		Registry: NewRegistry(
-			NewNMIDeleteHandler(dbi, fullModeConfig(), map[string]*nmi.NMIClient{"mobius": client}, nil),
+			NewNMIDeleteHandler(dbi, fullModeConfig(), fakeNMIResolver{client: client}, nil),
 		),
 		Config:  fullModeConfig(),
 		Breaker: NewVolumeBreaker(dbi),

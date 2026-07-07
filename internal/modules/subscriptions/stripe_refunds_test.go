@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		rails     config.RailMerchantAccountSet
+		rails     railresolve.FixedSet
 		params    RefundParams
 		wantError string
 	}{
@@ -31,13 +32,13 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		},
 		{
 			name:      "nil stripe config",
-			rails:     config.RailMerchantAccountSet{},
+			rails:     railresolve.FixedSet{},
 			params:    RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe configuration is not available",
 		},
 		{
 			name: "empty secret key",
-			rails: config.RailMerchantAccountSet{
+			rails: railresolve.FixedSet{
 				"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: ""}},
 			},
 			params:    RefundParams{ChargeID: "ch_123"},
@@ -45,7 +46,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		},
 		{
 			name: "empty charge ID",
-			rails: config.RailMerchantAccountSet{
+			rails: railresolve.FixedSet{
 				"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 			},
 			params:    RefundParams{ChargeID: ""},
@@ -71,7 +72,7 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		rails     config.RailMerchantAccountSet
+		rails     railresolve.FixedSet
 		refundID  string
 		wantError string
 	}{
@@ -83,7 +84,7 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 		},
 		{
 			name: "empty refund ID",
-			rails: config.RailMerchantAccountSet{
+			rails: railresolve.FixedSet{
 				"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}},
 			},
 			refundID:  "",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,11 +17,11 @@ import (
 
 type StripePortalService struct {
 	Config *config.Config
-	Rails  config.RailMerchantAccountSet
+	Rails  railresolve.Source
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Rails)
+	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err
 	}

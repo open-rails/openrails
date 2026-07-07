@@ -2,16 +2,16 @@ package intents
 
 import (
 	"context"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 )
 
 // #696 refund leg — handler classification + verify. WIRE PROVISIONAL: these
@@ -26,19 +26,24 @@ func ccbillRefundPayload() RefundPayload {
 	return p
 }
 
-func newCCBillRefundClient(baseURL string) *ccbill.DataLinkClient {
-	return &ccbill.DataLinkClient{
-		BaseURL:      baseURL,
-		ClientAccNum: "900100",
-		ClientSubAcc: "0000",
-		Username:     "dluser",
-		Password:     "dlpass",
-		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
-	}
+// ccbillRefundTestRails is the armed rail state (#788) the refund handler
+// resolves its DataLink client from.
+func ccbillRefundTestRails() railresolve.FixedSet {
+	return railresolve.FixedSet{"ccbill": {
+		Rail:      models.RailCCBill,
+		AccountID: "900100-0000",
+		CCBill:    &config.CCBillRailConfig{DataLinkUsername: "dluser", DataLinkPassword: "dlpass"},
+	}}
+}
+
+func newCCBillRefundHandler(baseURL string, cfg *config.Config) *CCBillRefundHandler {
+	h := NewCCBillRefundHandler(nil, cfg, ccbillRefundTestRails(), nil)
+	h.DataLinkBaseURL = baseURL
+	return h
 }
 
 // ccbillFakeSMS serves a scripted body and records hits.
-func ccbillFakeSMS(t *testing.T, body string) (*ccbill.DataLinkClient, *int) {
+func ccbillFakeSMS(t *testing.T, body string) (*CCBillRefundHandler, *int) {
 	t.Helper()
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -46,7 +51,7 @@ func ccbillFakeSMS(t *testing.T, body string) (*ccbill.DataLinkClient, *int) {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return newCCBillRefundClient(srv.URL), &hits
+	return newCCBillRefundHandler(srv.URL, nil), &hits
 }
 
 func TestCCBillRefundIdempotencyKey(t *testing.T) {
@@ -77,17 +82,16 @@ func TestRefundIntentForRoutesCCBill(t *testing.T) {
 func TestCCBillRefundExecuteParksBeforeProviderTraffic(t *testing.T) {
 	intent := refundIntent(t, TypeCCBillRefund, ccbillRefundPayload())
 
-	t.Run("nil client parks", func(t *testing.T) {
-		h := NewCCBillRefundHandler(nil, nil, nil)
+	t.Run("unarmed rail parks", func(t *testing.T) {
+		h := NewCCBillRefundHandler(nil, nil, nil, nil)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "not configured")
 	})
 
 	t.Run("read-only client parks", func(t *testing.T) {
-		client := newCCBillRefundClient("https://datalink.ccbill.com")
-		client.ReadOnly = true
-		h := NewCCBillRefundHandler(nil, client, nil)
+		cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox}
+		h := newCCBillRefundHandler("https://datalink.ccbill.com", cfg)
 		out := h.Execute(context.Background(), intent)
 		assert.Equal(t, OutcomeParked, out.Class)
 		assert.Contains(t, out.Reason, "mode=readonly")
@@ -95,8 +99,7 @@ func TestCCBillRefundExecuteParksBeforeProviderTraffic(t *testing.T) {
 }
 
 func TestCCBillRefundExecuteRequiresTransactionID(t *testing.T) {
-	client, _ := ccbillFakeSMS(t, `<results>1</results>`)
-	h := NewCCBillRefundHandler(nil, client, nil)
+	h, _ := ccbillFakeSMS(t, `<results>1</results>`)
 	payload := ccbillRefundPayload()
 	payload.ProviderTransactionID = ""
 	out := h.Execute(context.Background(), refundIntent(t, TypeCCBillRefund, payload))
@@ -117,8 +120,7 @@ func TestCCBillRefundExecuteClassification(t *testing.T) {
 	// -7 denial below the retry budget: BOUNDED retry (did not execute), NOT the
 	// old misleading "auth rejected" (verified: -7 also = not-refundable/too-old).
 	t.Run("denial (-7) below budget is bounded retry", func(t *testing.T) {
-		client, _ := ccbillFakeSMS(t, `<results>-7</results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, _ := ccbillFakeSMS(t, `<results>-7</results>`)
 		out := h.Execute(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeRetryable, out.Class)
 		assert.Contains(t, out.Reason, "denied (-7)")
@@ -128,8 +130,7 @@ func TestCCBillRefundExecuteClassification(t *testing.T) {
 
 	// Definite reject (results=0): may mean already-refunded -> verify, never decline.
 	t.Run("definite reject is ambiguous", func(t *testing.T) {
-		client, _ := ccbillFakeSMS(t, `<results>0</results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, _ := ccbillFakeSMS(t, `<results>0</results>`)
 		out := h.Execute(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
 		assert.Contains(t, out.Reason, "outcome unknown")
@@ -141,7 +142,7 @@ func TestCCBillRefundExecuteClassification(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 		}))
 		t.Cleanup(srv.Close)
-		h := NewCCBillRefundHandler(nil, newCCBillRefundClient(srv.URL), nil)
+		h := newCCBillRefundHandler(srv.URL, nil)
 		out := h.Execute(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
 	})
@@ -151,8 +152,7 @@ func TestCCBillRefundExecuteClassification(t *testing.T) {
 // to resend unless they are known-zero.
 func TestCCBillRefundExecuteReclaimPreSendVerify(t *testing.T) {
 	t.Run("counters nonzero -> do not resend (ambiguous)", func(t *testing.T) {
-		client, hits := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, hits := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
 		intent := refundIntent(t, TypeCCBillRefund, ccbillRefundPayload())
 		intent.Attempts = 2
 		out := h.Execute(context.Background(), intent)
@@ -166,7 +166,7 @@ func TestCCBillRefundExecuteReclaimPreSendVerify(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		t.Cleanup(srv.Close)
-		h := NewCCBillRefundHandler(nil, newCCBillRefundClient(srv.URL), nil)
+		h := newCCBillRefundHandler(srv.URL, nil)
 		intent := refundIntent(t, TypeCCBillRefund, ccbillRefundPayload())
 		intent.Attempts = 2
 		out := h.Execute(context.Background(), intent)
@@ -177,24 +177,21 @@ func TestCCBillRefundExecuteReclaimPreSendVerify(t *testing.T) {
 
 func TestCCBillRefundVerify(t *testing.T) {
 	t.Run("counters known-zero -> verified not executed (retryable)", func(t *testing.T) {
-		client, _ := ccbillFakeSMS(t, `<results><refundsIssued>0</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, _ := ccbillFakeSMS(t, `<results><refundsIssued>0</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
 		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeRetryable, out.Class)
 		assert.Contains(t, out.Reason, "verified not executed")
 	})
 
 	t.Run("counters nonzero -> cannot attribute (ambiguous, operator resolves)", func(t *testing.T) {
-		client, _ := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, _ := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
 		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
 		assert.Contains(t, out.Reason, "operator must confirm")
 	})
 
 	t.Run("counters unknown (omitted) -> ambiguous", func(t *testing.T) {
-		client, _ := ccbillFakeSMS(t, `<results><returnsIssued>1</returnsIssued><subscriptionStatus>0</subscriptionStatus></results>`)
-		h := NewCCBillRefundHandler(nil, client, nil)
+		h, _ := ccbillFakeSMS(t, `<results><returnsIssued>1</returnsIssued><subscriptionStatus>0</subscriptionStatus></results>`)
 		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
 	})
@@ -204,7 +201,7 @@ func TestCCBillRefundVerify(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		t.Cleanup(srv.Close)
-		h := NewCCBillRefundHandler(nil, newCCBillRefundClient(srv.URL), nil)
+		h := newCCBillRefundHandler(srv.URL, nil)
 		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
 		assert.Contains(t, out.Reason, "provider read failed")

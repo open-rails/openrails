@@ -136,7 +136,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 // Best-effort: any read/decode failure returns found=false so AutoCreate proceeds
 // to publish (a genuinely-occupied PDA then surfaces as a loud create_plan error).
 func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid merchant.ID, planID uint64, symbol string) (map[string]string, bool) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPC == nil {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false
 	}
 	merchant, err := plan.MerchantAddress(ctx, tid)
@@ -147,7 +147,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 	if err != nil {
 		return nil, false
 	}
-	data, err := a.svc.rt.SolanaRPC.GetAccountData(ctx, pda)
+	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pda)
 	if err != nil || len(data) == 0 {
 		return nil, false
 	}
@@ -192,7 +192,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 	}
 
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPC == nil {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		// No RPC to verify against: store the operator-owned handle as-is.
 		return out, nil
 	}
@@ -200,7 +200,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	if err != nil {
 		return nil, fmt.Errorf("invalid solana plan_pda %q: %w", pda, err)
 	}
-	data, err := a.svc.rt.SolanaRPC.GetAccountData(ctx, pubkey)
+	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pubkey)
 	if err != nil || len(data) == 0 {
 		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix provider_links.solana.plan_pda", pda)
 	}
@@ -248,7 +248,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 // shift); both are real drift the operator must resolve. RPC unavailable ->
 // sync_disabled (nil,false,nil). Account gone -> missing=true.
 func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]DriftField, bool, error) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPC == nil {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false, nil
 	}
 	pdaStr := strings.TrimSpace(ids[solanaKeyPlanPDA])
@@ -259,7 +259,7 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 	if err != nil {
 		return nil, false, fmt.Errorf("invalid solana plan_pda %q: %w", pdaStr, err)
 	}
-	data, err := a.svc.rt.SolanaRPC.GetAccountData(ctx, pda)
+	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pda)
 	if err != nil || len(data) == 0 {
 		return nil, true, nil // plan account gone from chain
 	}

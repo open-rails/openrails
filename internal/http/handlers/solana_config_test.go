@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,7 @@ func TestGetSolanaConfig(t *testing.T) {
 	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
 		runtime := &app.Runtime{
 			Config: &config.Config{},
-			Rails: config.RailMerchantAccountSet{
+			RailConfigs: railresolve.FixedSet{
 				"solana": {
 					Rail: models.RailSolana,
 					Solana: &config.SolanaRailConfig{
@@ -48,7 +49,7 @@ func TestGetSolanaConfig(t *testing.T) {
 
 	runtime := &app.Runtime{
 		Config: &config.Config{},
-		Rails: config.RailMerchantAccountSet{
+		RailConfigs: railresolve.FixedSet{
 			"solana": {
 				Rail: models.RailSolana,
 				Solana: &config.SolanaRailConfig{

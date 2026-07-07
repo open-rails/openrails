@@ -200,7 +200,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	vaultID := "vault-upg-" + sfx
 	planID := "plan-upg-" + sfx
 	gateway, client := newFakeNMIUpgradeGateway(t, vaultID, planID)
-	clients := map[string]*nmi.NMIClient{"nmi": client}
+
 	clock := clockwork.NewRealClock()
 
 	// Stored payment method the upgrade charges against.
@@ -242,9 +242,12 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	paymentSvc := payments.NewPaymentService(dbi, clock)
 	entSvc := entitlements.NewEntitlementService(dbi, clock)
 	pmSvc := paymentmethods.NewPaymentMethodService(dbi)
-	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clients, nil, clock)
+	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
 	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
-		pmSvc, nil, newStatefulIdemStub(), clients, nil, nil, nil, clock)
+		pmSvc, nil, newStatefulIdemStub(), nil, nil, nil, clock)
+	// #788: the scoped resolver is the ONLY NMI client source; the fixture
+	// overrides it with the fake-gateway client.
+	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
 
 	existingSub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, oldSubID)
 	require.NoError(t, err)

@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -64,25 +63,23 @@ func TestReconcileManagedStripeWebhookStoresRailMerchantAccountSecret(t *testing
 	require.Equal(t, "https://billing.example.com/v1/merchants/acme/webhooks/stripe/acct_123", fake.endpoints[res.Result.EndpointID].URL)
 }
 
-func TestReconcileManagedStripeWebhookStoresConfigRailSecret(t *testing.T) {
+// #788: the boot-config rail destination is gone — a minted signing secret
+// with no merchant secret-store destination is a hard error (fail closed),
+// never a secret silently dropped on the floor.
+func TestReconcileManagedStripeWebhookWithoutStoreDestinationFails(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	rail := &config.RailMerchantAccountConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}
-	rails := config.RailMerchantAccountSet{"stripe": rail}
 
-	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		// Mint+persist is mode-2 (api) behavior; manifest mode refuses (#723).
+	_, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
+		// Mint is mode-2 (api) behavior; manifest mode refuses (#723).
 		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
-		Rails:         rails,
+		SecretKey:     "sk_test_123",
 		EnabledEvents: []string{"invoice.paid"},
 		StripeBaseURL: svc.BaseURL,
 	})
-	require.NoError(t, err)
-	require.False(t, res.Skipped)
-	require.Equal(t, WebhookCreated, res.Result.Action)
-	require.Equal(t, "whsec_fake_0", rail.Stripe.WebhookSigningSecret)
-	require.Equal(t, "https://billing.example.com/v1/webhooks/stripe", fake.endpoints[res.Result.EndpointID].URL)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stripe webhook secret destination not configured")
 }
 
 // MODE 1 (#723): a managed CREATE would mint a signing secret that only seeds

@@ -119,7 +119,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 
 	// Pre-flight: resolve the rail read-only so misconfiguration surfaces as
 	// 503 immediately (the intent handler re-resolves at execution time).
-	_, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.DB, r.State.NMIClients, subscription)
+	_, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.CollectionResolver, subscription)
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI provider account for subscription")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to resolve payment rail")
