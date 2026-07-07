@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 )
@@ -114,7 +115,13 @@ func TestRenewalCharger_NMISandbox_SameAnchorAcrossReprice(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi)
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc)
-	repriceSvc := NewRepriceService(dbi, NewRepriceRepo(dbi), priceSvc, subSvc, notifSvc, nil)
+	// #781: this proof is about the stored-credential anchor surviving a
+	// reprice, not notice-window semantics — disable the gate explicitly
+	// (effective_at=now below would otherwise violate the 30-day default).
+	configStore := merchantconfig.NewStore(dbi)
+	zeroWindow := 0
+	require.NoError(t, configStore.Upsert(ctx, models.MerchantConfiguration{RepriceNoticeWindowDays: &zeroWindow}))
+	repriceSvc := NewRepriceService(dbi, NewRepriceRepo(dbi), priceSvc, subSvc, notifSvc, configStore, nil)
 	rc := &RenewalCharger{Charger: nmidirect.New(client), Reprice: repriceSvc, Lifecycle: lifecycle, DB: dbi}
 
 	loadPM := func() *models.PaymentMethod {

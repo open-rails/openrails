@@ -388,6 +388,10 @@ export interface MerchantSettings {
   // engine (service_admission.go). Unset ⇒ the email channel is inactive
   // (fail-soft to in_app + webhooks).
   alert_email?: string
+  // Minimum advance-notice window (days) a subscription price INCREASE's
+  // effective_at must give existing subscribers (#781). Unset ⇒ the server's
+  // DefaultRepriceNoticeWindowDays (30). Decreases are exempt.
+  reprice_notice_window_days?: number
 }
 
 export interface PaymentProviderConfig {

@@ -312,6 +312,12 @@ type MerchantConfiguration struct {
 	// AlertEmail is the merchant-operator alert destination (#736). A nil pointer
 	// preserves the stored value; a non-nil pointer sets it (empty string clears).
 	AlertEmail *string
+	// RepriceNoticeWindowDays (#781) is the merchant-configurable minimum
+	// advance-notice window (in days) for a subscription price INCREASE. A
+	// nil pointer preserves the stored value; a non-nil pointer sets it (the
+	// reprice service falls back to
+	// subscriptions.DefaultRepriceNoticeWindowDays when unset).
+	RepriceNoticeWindowDays *int
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -330,6 +336,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		InvoiceMonthlyFloor:                cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
 		AlertEmail:                         &alertEmail,
+		RepriceNoticeWindowDays:            cfg.RepriceNoticeWindowDays,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -381,6 +388,12 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	}
 	if in.AlertEmail != nil {
 		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
+	}
+	if in.RepriceNoticeWindowDays != nil {
+		if *in.RepriceNoticeWindowDays < 0 {
+			return fmt.Errorf("reprice_notice_window_days must be >= 0")
+		}
+		cfg.RepriceNoticeWindowDays = in.RepriceNoticeWindowDays
 	}
 	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {

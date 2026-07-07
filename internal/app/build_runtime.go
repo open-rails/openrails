@@ -934,7 +934,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 	// #773: reprice primitive — moving existing subscribers to a different
 	// (same-product, same-currency, active) price at their next renewal.
 	repriceRepo := subscriptions.NewRepriceRepo(database)
-	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, clock)
+	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database), clock)
 
 	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
 	subscriptionService.VaultService = vaultService

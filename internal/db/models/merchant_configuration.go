@@ -18,6 +18,12 @@ type MerchantConfiguration struct {
 	// AlertEmail is the merchant-operator address the #736 alerting engine sends
 	// critical alerts to. Unset ⇒ the email channel is inactive (fail-soft skip).
 	AlertEmail string `json:"alert_email,omitempty"`
+
+	// RepriceNoticeWindowDays (#781) is the minimum number of days' advance
+	// notice a subscription price INCREASE's effective_at must give existing
+	// subscribers. Decreases are exempt. Nil ⇒ DefaultRepriceNoticeWindowDays
+	// (30). Zero is a valid explicit merchant choice (no minimum enforced).
+	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 }
 
 // MerchantProfileConfiguration is merchant-owned public/communication metadata.

@@ -54,6 +54,8 @@ func repriceErrorCode(sentinel error) string {
 		return "reprice_cross_currency"
 	case errors.Is(sentinel, subscriptions.ErrRepriceInactivePrice):
 		return "reprice_inactive_price"
+	case errors.Is(sentinel, subscriptions.ErrRepriceNoticeWindowViolation):
+		return "reprice_notice_window_violation"
 	default:
 		return "reprice_constraint_violation"
 	}
@@ -63,6 +65,10 @@ type createSubscriptionRepriceRequest struct {
 	// ToPrice accepts either a price UUID/opaque id or a #774 price_key.
 	ToPrice     string    `json:"to_price"`
 	EffectiveAt time.Time `json:"effective_at"`
+	// AcknowledgeShortNotice (#781) explicitly bypasses the merchant's
+	// notice-window constraint on an INCREASE — the support/emergency
+	// escape hatch. Recorded on the row and logged; never silent.
+	AcknowledgeShortNotice bool `json:"acknowledge_short_notice,omitempty"`
 }
 
 // CreateSubscriptionReprice schedules subscription.PriceID -> to_price,
@@ -96,9 +102,10 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 		return
 	}
 	out, err := r.State.RepriceService.Reprice(ctx, subscriptions.RepriceRequest{
-		SubscriptionID: subscriptionID,
-		ToPriceID:      toPrice.ID,
-		EffectiveAt:    req.EffectiveAt,
+		SubscriptionID:         subscriptionID,
+		ToPriceID:              toPrice.ID,
+		EffectiveAt:            req.EffectiveAt,
+		AcknowledgeShortNotice: req.AcknowledgeShortNotice,
 	})
 	if err != nil {
 		writeRepriceError(r, err)
@@ -110,6 +117,9 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 type repriceAllPriorVersionsRequest struct {
 	PriceKey    string    `json:"price_key"`
 	EffectiveAt time.Time `json:"effective_at"`
+	// AcknowledgeShortNotice (#781): see createSubscriptionRepriceRequest.
+	// Applies uniformly to every subscription in the batch.
+	AcknowledgeShortNotice bool `json:"acknowledge_short_notice,omitempty"`
 }
 
 // RepriceAllPriorVersions bulk-schedules every active subscription pinned to
@@ -132,8 +142,9 @@ func RepriceAllPriorVersions(r *httprequest.Request) {
 		return
 	}
 	out, err := r.State.RepriceService.RepriceAllPriorVersions(r.Request.Context(), subscriptions.RepriceAllPriorVersionsRequest{
-		PriceKey:    req.PriceKey,
-		EffectiveAt: req.EffectiveAt,
+		PriceKey:               req.PriceKey,
+		EffectiveAt:            req.EffectiveAt,
+		AcknowledgeShortNotice: req.AcknowledgeShortNotice,
 	})
 	if err != nil {
 		writeRepriceError(r, err)

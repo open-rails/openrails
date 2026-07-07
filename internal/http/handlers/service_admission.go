@@ -337,11 +337,15 @@ type serviceMerchantConfigWindow struct {
 }
 
 type serviceMerchantSettingsRequest struct {
-	Profile                           *serviceMerchantProfileConfiguration  `json:"profile,omitempty"`
-	InvoiceCollectionThreshold        *int64                                `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor               *int64                                `json:"monthly_floor,omitempty"`
-	InvoiceBillingBoundary            string                                `json:"billing_period_boundary,omitempty"`
-	AlertEmail                        *string                               `json:"alert_email,omitempty"`
+	Profile                    *serviceMerchantProfileConfiguration `json:"profile,omitempty"`
+	InvoiceCollectionThreshold *int64                               `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor        *int64                               `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary     string                               `json:"billing_period_boundary,omitempty"`
+	AlertEmail                 *string                              `json:"alert_email,omitempty"`
+	// RepriceNoticeWindowDays (#781): the minimum advance-notice window (in
+	// days) a subscription price INCREASE's effective_at must give existing
+	// subscribers. Unset ⇒ subscriptions.DefaultRepriceNoticeWindowDays (30).
+	RepriceNoticeWindowDays           *int                                  `json:"reprice_notice_window_days,omitempty"`
 	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
 	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
@@ -377,6 +381,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		InvoiceMonthlyFloor:               cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
 		AlertEmail:                        cfg.AlertEmail,
+		RepriceNoticeWindowDays:           cfg.RepriceNoticeWindowDays,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -410,6 +415,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		InvoiceMonthlyFloor:                req.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		AlertEmail:                         req.AlertEmail,
+		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")

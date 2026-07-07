@@ -73,8 +73,20 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 		[]string{
 			controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate,
 			controlplane.PermMerchantSubscriptionsRead, controlplane.PermMerchantSubscriptionsUpdate,
+			controlplane.PermMerchantSettingsUpdate,
 		},
 	)
+
+	// #781: pin this merchant's notice window explicitly via the real settings
+	// endpoint rather than relying on the "unset ⇒ default 30d" fallback — the
+	// merchant row is shared across every integration package in this suite
+	// (dbtest.TestMerchantID), so a deterministic explicit value keeps this
+	// test's notice-window assertions below independent of what any other
+	// package's fixtures last wrote to it.
+	settingsStatus, settingsBody := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/settings", token, map[string]any{
+		"reprice_notice_window_days": 30,
+	})
+	require.Equal(t, http.StatusOK, settingsStatus, string(settingsBody))
 
 	productKey := "wizard-inc-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	priceKey := productKey + "-monthly"
@@ -147,12 +159,26 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	require.Equal(t, v1.ID, hist.Items[1].Price.ID)
 	require.True(t, hist.Items[0].EffectiveAt.After(hist.Items[1].EffectiveAt) || hist.Items[0].EffectiveAt.Equal(hist.Items[1].EffectiveAt))
 
-	// Now explicitly migrate (ending the grandfather window): notice-window is
-	// NOT enforced server-side (#773 never implemented it — pure console UX
-	// gate) — an effective_at only a day out for an INCREASE is accepted
-	// without complaint, proving there's no server-side minimum-notice check
-	// to rely on.
-	effectiveAt := time.Now().UTC().Add(24 * time.Hour)
+	// Now explicitly migrate (ending the grandfather window). #781: the
+	// server now enforces a notice window for INCREASE reprices — an
+	// effective_at only a day out is REFUSED (this used to be #777's
+	// gap-proving assertion: pre-#781, the backend accepted it without
+	// complaint). TestStandaloneMerchantRepriceNoticeWindowHTTP owns the full
+	// notice-window matrix (refusal/decrease-exemption/acknowledge-override/
+	// merchant-configured-window); here we just confirm the wizard's own flow
+	// hits the gate, then proceed with a compliant date so the rest of this
+	// end-to-end flow (batch listing, cancel) still exercises real data.
+	shortNoticeStatus, shortNoticeBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/reprice-all-prior-versions", token, map[string]any{
+		"price_key": priceKey, "effective_at": time.Now().UTC().Add(24 * time.Hour),
+	})
+	require.Equal(t, http.StatusCreated, shortNoticeStatus, string(shortNoticeBody), "bulk never aborts — the 1-day-out increase is SKIPPED, not a batch-level error")
+	var shortNoticeResult subscriptions.RepriceBatchResult
+	require.NoError(t, json.Unmarshal(shortNoticeBody, &shortNoticeResult))
+	require.Empty(t, shortNoticeResult.Scheduled, "a 1-day-out increase must not be scheduled")
+	require.Len(t, shortNoticeResult.Skipped, 1)
+	require.Contains(t, shortNoticeResult.Skipped[0].Reason, "notice window")
+
+	effectiveAt := time.Now().UTC().Add(31 * 24 * time.Hour)
 	bulkStatus, bulkBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/reprice-all-prior-versions", token, map[string]any{
 		"price_key": priceKey, "effective_at": effectiveAt,
 	})
@@ -165,16 +191,19 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	require.Equal(t, v2.ID, batchResult.ToPriceID)
 
 	// The price page's pending-migration lookup: find the batch by key
-	// without already knowing its id.
+	// without already knowing its id. Two batches exist now — the short-notice
+	// attempt above (fully skipped) and this one (fully scheduled) — most
+	// recent first.
 	batchesStatus, batchesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/reprices/batches?price_key="+priceKey, token, nil)
 	require.Equal(t, http.StatusOK, batchesStatus, string(batchesBody))
 	var batches struct {
 		Items []*models.RepriceBatch `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(batchesBody, &batches))
-	require.Len(t, batches.Items, 1)
-	require.Equal(t, batchResult.BatchID, batches.Items[0].ID)
+	require.Len(t, batches.Items, 2)
+	require.Equal(t, batchResult.BatchID, batches.Items[0].ID, "most recent (the successful migrate) first")
 	require.Equal(t, 1, batches.Items[0].SubscriptionsScheduled)
+	require.Equal(t, 0, batches.Items[1].SubscriptionsScheduled, "the short-notice attempt scheduled nothing")
 
 	// Inspect the scheduled row for this batch.
 	repricesStatus, repricesBody := requestJSON(t, http.MethodGet,

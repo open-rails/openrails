@@ -45,21 +45,23 @@ func (q *Queries) CancelSubscriptionReprice(ctx context.Context, id uuid.UUID) (
 const createSubscriptionReprice = `-- name: CreateSubscriptionReprice :one
 
 INSERT INTO openrails.subscription_reprices (
-    merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id
+    merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, acknowledged_short_notice
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
-    $4::uuid, $5::timestamptz, $6::uuid
+    $4::uuid, $5::timestamptz, $6::uuid,
+    $7::bool
 )
-RETURNING id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at
+RETURNING id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice
 `
 
 type CreateSubscriptionRepriceParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-	FromPriceID    uuid.UUID
-	ToPriceID      uuid.UUID
-	EffectiveAt    time.Time
-	RepriceBatchID *uuid.UUID
+	MerchantID              uuid.UUID
+	SubscriptionID          uuid.UUID
+	FromPriceID             uuid.UUID
+	ToPriceID               uuid.UUID
+	EffectiveAt             time.Time
+	RepriceBatchID          *uuid.UUID
+	AcknowledgedShortNotice bool
 }
 
 // openrails.subscription_reprices (#773): per-subscription scheduled/applied/
@@ -72,6 +74,7 @@ func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubsc
 		arg.ToPriceID,
 		arg.EffectiveAt,
 		arg.RepriceBatchID,
+		arg.AcknowledgedShortNotice,
 	)
 	var i OpenrailsSubscriptionReprice
 	err := row.Scan(
@@ -86,12 +89,13 @@ func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubsc
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.AcknowledgedShortNotice,
 	)
 	return i, err
 }
 
 const getScheduledRepriceForSubscription = `-- name: GetScheduledRepriceForSubscription :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at FROM openrails.subscription_reprices
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice FROM openrails.subscription_reprices
 WHERE subscription_id = $1::uuid AND status = 'scheduled'
 LIMIT 1
 `
@@ -115,12 +119,13 @@ func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, subscr
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.AcknowledgedShortNotice,
 	)
 	return i, err
 }
 
 const getSubscriptionRepriceByID = `-- name: GetSubscriptionRepriceByID :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at FROM openrails.subscription_reprices WHERE id = $1
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice FROM openrails.subscription_reprices WHERE id = $1
 `
 
 func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscriptionReprice, error) {
@@ -138,12 +143,13 @@ func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, id uuid.UUID) 
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.AcknowledgedShortNotice,
 	)
 	return i, err
 }
 
 const listSubscriptionReprices = `-- name: ListSubscriptionReprices :many
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at FROM openrails.subscription_reprices
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice FROM openrails.subscription_reprices
 WHERE ($1::uuid IS NULL OR subscription_id = $1::uuid)
   AND ($2::uuid IS NULL OR reprice_batch_id = $2::uuid)
   AND ($3::text IS NULL OR status = $3::text)
@@ -186,6 +192,7 @@ func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscrip
 			&i.CreatedAt,
 			&i.AppliedAt,
 			&i.CanceledAt,
+			&i.AcknowledgedShortNotice,
 		); err != nil {
 			return nil, err
 		}

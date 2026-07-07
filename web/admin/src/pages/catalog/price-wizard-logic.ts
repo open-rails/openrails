@@ -13,12 +13,15 @@ export function detectDirection(newAmount: number, currentAmount: number): Price
 
 export type MigrationMode = "grandfather" | "migrate"
 
-// #773 shipped NO merchant-configurable notice window and NO server-side
-// enforcement of one — this is a console-only UX guardrail on the date
-// picker for increase+migrate. See the #777 tracker note and #773's Progress
-// section: the engine only emits the reprice_scheduled disclosure event: it
-// never rejects an early effective_at.
-export const NOTICE_WINDOW_DAYS = 30
+// DEFAULT_NOTICE_WINDOW_DAYS is only a fallback for the brief window before
+// the merchant's configured value (GET /v1/merchant/settings,
+// reprice_notice_window_days) has loaded — it mirrors the server's own
+// default (subscriptions.DefaultRepriceNoticeWindowDays) so the UI never
+// under-gates while loading. #781: the server now ALSO enforces this
+// server-side (an INCREASE whose effective_at is inside the merchant's
+// configured window is refused, 422 reprice_notice_window_violation) — this
+// client-side gate is fail-fast UX, not the boundary.
+export const DEFAULT_NOTICE_WINDOW_DAYS = 30
 
 // defaultMigrationMode is the direction-aware Step 2 default: increases
 // default to grandfather (zero-risk — #774's existing behavior, no new
@@ -31,23 +34,23 @@ export function defaultMigrationMode(direction: PriceDirection): MigrationMode {
 // minEffectiveDate returns the earliest allowed migration date, or null when
 // there is no minimum (decreases may move everyone at next renewal starting
 // now — notice is optional goodwill, not a requirement).
-export function minEffectiveDate(direction: PriceDirection, now: Date): Date | null {
+export function minEffectiveDate(direction: PriceDirection, now: Date, noticeWindowDays: number): Date | null {
   if (direction !== "increase") return null
   const min = new Date(now)
-  min.setUTCDate(min.getUTCDate() + NOTICE_WINDOW_DAYS)
+  min.setUTCDate(min.getUTCDate() + noticeWindowDays)
   return min
 }
 
 // defaultEffectiveDate is Step 2's pre-filled migration date: the notice
 // window's floor for an increase, "now" for a decrease.
-export function defaultEffectiveDate(direction: PriceDirection, now: Date): Date {
-  return minEffectiveDate(direction, now) ?? now
+export function defaultEffectiveDate(direction: PriceDirection, now: Date, noticeWindowDays: number): Date {
+  return minEffectiveDate(direction, now, noticeWindowDays) ?? now
 }
 
 // isEffectiveDateValid enforces the console-side notice-window gate: an
 // increase+migrate plan may not pick a date inside the notice window.
-export function isEffectiveDateValid(direction: PriceDirection, effectiveAt: Date, now: Date): boolean {
-  const min = minEffectiveDate(direction, now)
+export function isEffectiveDateValid(direction: PriceDirection, effectiveAt: Date, now: Date, noticeWindowDays: number): boolean {
+  const min = minEffectiveDate(direction, now, noticeWindowDays)
   return !min || effectiveAt.getTime() >= min.getTime()
 }
 

@@ -55,19 +55,22 @@ func (r *RepriceRepo) GetBatchByID(ctx context.Context, id uuid.UUID) (*models.R
 }
 
 // CreateSubscriptionReprice schedules one subscription's price move.
-// batchID is nil for a single ad-hoc reprice() call.
-func (r *RepriceRepo) CreateSubscriptionReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID) (*models.SubscriptionReprice, error) {
+// batchID is nil for a single ad-hoc reprice() call. acknowledgedShortNotice
+// (#781) records whether this row's effective_at was inside the merchant's
+// configured notice window and was scheduled anyway via an explicit override.
+func (r *RepriceRepo) CreateSubscriptionReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID, acknowledgedShortNotice bool) (*models.SubscriptionReprice, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).CreateSubscriptionReprice(ctx, gen.CreateSubscriptionRepriceParams{
-		MerchantID:     tid.UUID(),
-		SubscriptionID: subscriptionID,
-		FromPriceID:    fromPriceID,
-		ToPriceID:      toPriceID,
-		EffectiveAt:    effectiveAt,
-		RepriceBatchID: batchID,
+		MerchantID:              tid.UUID(),
+		SubscriptionID:          subscriptionID,
+		FromPriceID:             fromPriceID,
+		ToPriceID:               toPriceID,
+		EffectiveAt:             effectiveAt,
+		RepriceBatchID:          batchID,
+		AcknowledgedShortNotice: acknowledgedShortNotice,
 	})
 	if err != nil {
 		return nil, err

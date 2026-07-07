@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createPrice, previewRepriceAllPriorVersions, repriceAllPriorVersions } from "@/lib/api/endpoints"
+import { createPrice, getMerchantSettings, previewRepriceAllPriorVersions, repriceAllPriorVersions } from "@/lib/api/endpoints"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -23,10 +23,10 @@ import {
   buildReviewText,
   defaultEffectiveDate,
   defaultMigrationMode,
+  DEFAULT_NOTICE_WINDOW_DAYS,
   detectDirection,
   isEffectiveDateValid,
   minEffectiveDate,
-  NOTICE_WINDOW_DAYS,
   type MigrationMode,
 } from "@/pages/catalog/price-wizard-logic"
 
@@ -54,6 +54,12 @@ export function PriceChangeWizard({
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [affectedCount, setAffectedCount] = React.useState<number | null>(null)
   const [busy, setBusy] = React.useState(false)
+  // #781: the merchant-configurable notice window, read from the API (the
+  // console used to hard-code 30 days here; the server is now the actual
+  // boundary — GET /v1/merchant/settings — this is only the fail-fast UX
+  // gate). DEFAULT_NOTICE_WINDOW_DAYS covers the brief window before the
+  // fetch resolves.
+  const [noticeWindowDays, setNoticeWindowDays] = React.useState(DEFAULT_NOTICE_WINDOW_DAYS)
 
   const [now] = React.useState(() => new Date())
   const newAmount = microsFromInput(amountInput) ?? price.unit_amount
@@ -68,13 +74,21 @@ export function PriceChangeWizard({
   }
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) reset()
+    if (!next) {
+      reset()
+    } else {
+      getMerchantSettings()
+        .then((settings) => setNoticeWindowDays(settings.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS))
+        .catch(() => {
+          /* fail-soft: keep the default fallback — the server enforces the real window regardless. */
+        })
+    }
     setOpen(next)
   }
 
   const enterStep2 = () => {
     setMode(defaultMigrationMode(direction))
-    setEffectiveAt(toDateInputValue(defaultEffectiveDate(direction, now)))
+    setEffectiveAt(toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays)))
     setStep(2)
     setPreviewLoading(true)
     setAffectedCount(null)
@@ -84,8 +98,9 @@ export function PriceChangeWizard({
       .finally(() => setPreviewLoading(false))
   }
 
-  const minDate = minEffectiveDate(direction, now)
-  const dateValid = mode !== "migrate" || (!!effectiveAt && isEffectiveDateValid(direction, new Date(effectiveAt), now))
+  const minDate = minEffectiveDate(direction, now, noticeWindowDays)
+  const dateValid =
+    mode !== "migrate" || (!!effectiveAt && isEffectiveDateValid(direction, new Date(effectiveAt), now, noticeWindowDays))
 
   // Archived (prior-version) rows are history, not the editable current
   // price — editing rides the key's CURRENT row (GET .../prices/by-key/:key
@@ -230,8 +245,8 @@ export function PriceChangeWizard({
                 />
                 {direction === "increase" ? (
                   <p className="text-xs text-muted-foreground">
-                    Must be at least {NOTICE_WINDOW_DAYS} days out (card-network advance-notice window for amount
-                    increases — enforced here in the console; not by the API).
+                    Must be at least {noticeWindowDays} days out (card-network advance-notice window for amount
+                    increases — configurable in Settings; enforced by the API).
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">

@@ -134,7 +134,11 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.3: Monthly EUR recurring
-					ID:                  uuid.MustParse("22222222-2222-2222-2222-222222222224"),
+					ID: uuid.MustParse("22222222-2222-2222-2222-222222222224"),
+					// Explicit key: same product+interval as price 1.1 (USD monthly)
+					// would otherwise both auto-derive "premium-monthly" and collide
+					// on uq_prices_merchant_key_current (#774).
+					Key:                 "premium-monthly-eur",
 					Amount:              8_990_000,
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
@@ -150,7 +154,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 1.4: Monthly JPY recurring
-					ID:                  uuid.MustParse("22222222-2222-2222-2222-222222222225"),
+					ID: uuid.MustParse("22222222-2222-2222-2222-222222222225"),
+					// Explicit key: see 1.3 — would otherwise also collide as "premium-monthly".
+					Key:                 "premium-monthly-jpy",
 					Amount:              1_200_000_000,
 					Currency:            "jpy",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
@@ -236,7 +242,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 2.3: Monthly EUR recurring
-					ID:                  uuid.MustParse("44444444-4444-4444-4444-444444444446"),
+					ID: uuid.MustParse("44444444-4444-4444-4444-444444444446"),
+					// Explicit key: same product+interval as price 2.1 (USD monthly)
+					// would otherwise both auto-derive "pro-monthly" and collide (#774).
+					Key:                 "pro-monthly-eur",
 					Amount:              17_990_000,
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
@@ -286,7 +295,10 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 3.2: One-time EUR purchase
-					ID:                  uuid.MustParse("66666666-6666-6666-6666-666666666667"),
+					ID: uuid.MustParse("66666666-6666-6666-6666-666666666667"),
+					// Explicit key: same product+interval as price 3.1 (USD one-time)
+					// would otherwise both auto-derive "lifetime-onetime" and collide (#774).
+					Key:                 "lifetime-onetime-eur",
 					Amount:              269_990_000,
 					Currency:            "eur",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
@@ -302,7 +314,9 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				},
 				{
 					// Price 3.3: One-time JPY purchase
-					ID:                  uuid.MustParse("66666666-6666-6666-6666-666666666668"),
+					ID: uuid.MustParse("66666666-6666-6666-6666-666666666668"),
+					// Explicit key: see 3.2 — would otherwise also collide as "lifetime-onetime".
+					Key:                 "lifetime-onetime-jpy",
 					Amount:              39_800_000_000,
 					Currency:            "jpy",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
@@ -395,18 +409,22 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 	require.NoError(suite.t, err, "Failed to seed product %s", p.Key)
 }
 
-// insertPriceIfAbsent inserts a price with ON CONFLICT (id) DO NOTHING.
+// insertPriceIfAbsent inserts a price with ON CONFLICT (id) DO NOTHING. Key is
+// included so fixtures that would otherwise collide on the #774
+// uq_prices_merchant_key_current partial index (same product + interval, e.g.
+// several same-product/duration prices differing only by currency) can supply
+// a distinct explicit key; a blank Key still auto-derives via the DB trigger.
 func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, archived, amount, currency, access_duration_hours, auto_renew,
-			rails, created_at, updated_at, merchant_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			rails, key, created_at, updated_at, merchant_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11, $12)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, price.Archived, price.Amount, price.Currency,
 		price.AccessDurationHours, price.AutoRenew,
-		suite.mustJSONB(price.Rails, len(price.Rails) == 0),
+		suite.mustJSONB(price.Rails, len(price.Rails) == 0), price.Key,
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
 }

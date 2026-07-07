@@ -1062,6 +1062,8 @@ type OpenrailsSubscriptionReprice struct {
 	CreatedAt      time.Time
 	AppliedAt      *time.Time
 	CanceledAt     *time.Time
+	// #781: true when this INCREASE reprice's effective_at was inside the merchant's configured notice window and was scheduled anyway via the explicit acknowledge_short_notice override on the request — the audit record for the support/emergency bypass path.
+	AcknowledgedShortNotice bool
 }
 
 // #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
