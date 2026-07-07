@@ -42,6 +42,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -131,6 +132,9 @@ type Runtime struct {
 	// AlertService is the #736 metric-threshold alerting engine (rules,
 	// webhooks, notifications, the evaluator).
 	AlertService *alerting.Service
+	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
+	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
+	WebhookHealth *webhookhealth.Recorder
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
 	AdmissionPolicyCache *admission.PolicyCache

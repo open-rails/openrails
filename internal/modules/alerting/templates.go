@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/metrics"
@@ -57,9 +58,13 @@ type evalContext struct {
 }
 
 // templateEvalDeps is the small non-metrics surface a template may need (the
-// digest hits payment_methods directly since #733 defers that measure).
+// digest hits payment_methods directly since #733 defers that measure; the
+// webhook_silence expectation gate reads rail_merchant_accounts+subscriptions).
 type templateEvalDeps interface {
 	countPaymentMethodsExpiring(ctx context.Context, now time.Time, daysAhead int) (int64, error)
+	// webhookExpectedRails: rails that are ARMED and have subscriptions projected
+	// to keep billing (rail -> billable count) — where webhook traffic is expected.
+	webhookExpectedRails(ctx context.Context) (map[string]int64, error)
 }
 
 // compiledRule is a rule's typed, validated parameters bound to its evaluation.
@@ -152,6 +157,46 @@ var templates = func() map[string]templateDef {
 					Description: "look-ahead horizon: count cards lapsing within this many days."},
 			},
 			compile: compilePaymentMethodsExpiring,
+		},
+		{
+			key:             "webhook_silence",
+			displayName:     "Webhook silence",
+			description:     "Fires when a rail that is armed AND has active auto-renewing subscriptions has received no signature-verified webhook for longer than window (wrong URL / dead endpoint). Rails with no expected traffic never fire.",
+			metric:          "webhook_silence_age_seconds",
+			defaultSeverity: SeverityCritical,
+			params: []ParamSpec{
+				{Name: "window", Type: "window", Default: "7d",
+					Description: "maximum tolerated silence before firing (e.g. 3d, 7d); size to the merchant's slowest natural webhook cadence."},
+			},
+			compile: compileWebhookSilence,
+		},
+		{
+			key:             "webhook_rejects",
+			displayName:     "Webhook signature rejects",
+			description:     "Fires when at least min_count inbound webhooks failed signature verification within window — webhooks are arriving but not verifying; almost always a wrong webhook signing secret.",
+			metric:          "webhook_rejects",
+			defaultSeverity: SeverityCritical,
+			params: []ParamSpec{
+				{Name: "min_count", Type: "integer", Required: true, Min: f64(1),
+					Description: "fire when this many rejects accumulate within the window."},
+				{Name: "window", Type: "window", Default: "1d",
+					Description: "trailing window the rejects are counted over (day-granular buckets)."},
+			},
+			compile: compileWebhookRejects,
+		},
+		{
+			key:             "webhook_drift",
+			displayName:     "Webhook drift (pull-discovered changes)",
+			description:     "Fires when at least min_count provider-state corrections arrived via the pull/reconcile path with no webhook having announced them within window — partial webhook breakage (e.g. an event type not subscribed) that silence detection cannot see.",
+			metric:          "webhook_drift_events",
+			defaultSeverity: SeverityWarning,
+			params: []ParamSpec{
+				{Name: "min_count", Type: "integer", Required: true, Min: f64(1),
+					Description: "fire when this many drift events accumulate within the window."},
+				{Name: "window", Type: "window", Default: "1d",
+					Description: "trailing window the drift events are counted over (day-granular buckets)."},
+			},
+			compile: compileWebhookDrift,
 		},
 	}
 	m := make(map[string]templateDef, len(defs))
@@ -349,6 +394,193 @@ func (r paymentMethodsExpiringRule) evaluate(ctx context.Context, ev *evalContex
 	return out, nil
 }
 
+// --- webhook health (#786) -----------------------------------------------------
+
+type webhookSilenceRule struct {
+	window string
+}
+
+func (r webhookSilenceRule) metric() string { return "webhook_silence_age_seconds" }
+
+func (r webhookSilenceRule) evaluate(ctx context.Context, ev *evalContext) (Outcome, error) {
+	out := Outcome{Unit: "seconds", Metric: r.metric()}
+	// Expectation gate: only rails that are armed AND carry billable subs.
+	expected, err := ev.deps.webhookExpectedRails(ctx)
+	if err != nil {
+		return Outcome{}, err
+	}
+	threshold := windowDuration(r.window)
+	out.Threshold = threshold.Seconds()
+	if len(expected) == 0 {
+		return out, nil // no expected webhook traffic anywhere: never fire
+	}
+	// Absolute range so the snapshot edge is exactly ev.now (fake-clock safe).
+	res, err := runQuery(ctx, ev, metrics.Query{
+		Measures: []string{"webhook_silence_age_seconds"},
+		By:       []string{"rail"},
+		Range:    rangeEndingNow(ev.now, threshold),
+	})
+	if err != nil {
+		return Outcome{}, err
+	}
+	ages := map[string]float64{}
+	for _, row := range res.Rows {
+		if len(row) < 2 {
+			continue
+		}
+		rail, _ := row[0].(string)
+		if age, ok := asFloat(row[len(row)-1]); ok {
+			ages[rail] = age
+		}
+	}
+	worst := -1.0
+	var worstRail string
+	offending := 0
+	for rail := range expected {
+		age, ok := ages[rail]
+		if !ok {
+			// No webhook_health row yet: tracking starts with the first pull or
+			// delivery, so there is no watermark to age. Skip rather than fire on
+			// a rail we have never observed.
+			continue
+		}
+		if age > threshold.Seconds() {
+			offending++
+			if age > worst {
+				worst, worstRail = age, rail
+			}
+		}
+	}
+	if offending == 0 {
+		return out, nil
+	}
+	out.Crossed = true
+	out.Value = worst
+	out.Dims = map[string]string{"rail": worstRail}
+	out.Summary = fmt.Sprintf("no verified webhook received on rail %s for %s (threshold %s) despite %d active auto-renewing subscription(s) — check the provider's webhook endpoint/URL configuration",
+		worstRail, durationf(time.Duration(worst)*time.Second), r.window, expected[worstRail])
+	if offending > 1 {
+		out.Summary += fmt.Sprintf("; %d rails silent past threshold", offending)
+	}
+	return out, nil
+}
+
+type webhookRejectsRule struct {
+	minCount float64
+	window   string
+}
+
+func (r webhookRejectsRule) metric() string { return "webhook_rejects" }
+
+func (r webhookRejectsRule) evaluate(ctx context.Context, ev *evalContext) (Outcome, error) {
+	worst, rail, err := worstRailCount(ctx, ev, "webhook_rejects", r.window)
+	if err != nil {
+		return Outcome{}, err
+	}
+	out := Outcome{
+		Value: worst, Threshold: r.minCount, Unit: "count", Metric: r.metric(),
+		Crossed: worst >= r.minCount,
+	}
+	if out.Crossed {
+		out.Dims = map[string]string{"rail": rail}
+		out.Summary = fmt.Sprintf("%.0f webhook(s) on rail %s failed signature verification in the last %s — webhooks are arriving but not verifying; check the rail's webhook signing secret",
+			worst, rail, r.window)
+	}
+	return out, nil
+}
+
+type webhookDriftRule struct {
+	minCount float64
+	window   string
+}
+
+func (r webhookDriftRule) metric() string { return "webhook_drift_events" }
+
+func (r webhookDriftRule) evaluate(ctx context.Context, ev *evalContext) (Outcome, error) {
+	worst, rail, err := worstRailCount(ctx, ev, "webhook_drift_events", r.window)
+	if err != nil {
+		return Outcome{}, err
+	}
+	out := Outcome{
+		Value: worst, Threshold: r.minCount, Unit: "count", Metric: r.metric(),
+		Crossed: worst >= r.minCount,
+	}
+	if out.Crossed {
+		out.Dims = map[string]string{"rail": rail}
+		out.Summary = fmt.Sprintf("%.0f provider-state correction(s) on rail %s arrived via pull with no announcing webhook in the last %s — webhook delivery may be partially broken (e.g. an event type not subscribed) even if the rail otherwise looks live",
+			worst, rail, r.window)
+	}
+	return out, nil
+}
+
+// worstRailCount sums a per-rail counter measure over the window and returns
+// the worst rail. Windows resolve against ev.now (fake-clock safe).
+func worstRailCount(ctx context.Context, ev *evalContext, measure, window string) (float64, string, error) {
+	res, err := runQuery(ctx, ev, metrics.Query{
+		Measures: []string{measure},
+		By:       []string{"rail"},
+		Range:    &metrics.QueryRange{Last: window},
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	worst := 0.0
+	var worstRail string
+	for _, row := range res.Rows {
+		if len(row) < 2 {
+			continue
+		}
+		rail, _ := row[0].(string)
+		if v, ok := asFloat(row[len(row)-1]); ok && v > worst {
+			worst, worstRail = v, rail
+		}
+	}
+	return worst, worstRail, nil
+}
+
+// rangeEndingNow builds an absolute [now-span, now) RFC3339 range so snapshot
+// measures evaluate at exactly now rather than a calendar-day edge.
+func rangeEndingNow(now time.Time, span time.Duration) *metrics.QueryRange {
+	if span <= 0 {
+		span = 24 * time.Hour
+	}
+	return &metrics.QueryRange{
+		From: now.Add(-span).UTC().Format(time.RFC3339),
+		To:   now.UTC().Format(time.RFC3339),
+	}
+}
+
+// windowDuration converts a validated window string (Nd/Nw/Nm/Ny) into a fixed
+// duration for threshold comparison (d=24h, w=7d, m=30d, y=365d).
+func windowDuration(window string) time.Duration {
+	if len(window) < 2 {
+		return 24 * time.Hour
+	}
+	n, err := strconv.Atoi(window[:len(window)-1])
+	if err != nil || n < 1 {
+		return 24 * time.Hour
+	}
+	day := 24 * time.Hour
+	switch window[len(window)-1] {
+	case 'd':
+		return time.Duration(n) * day
+	case 'w':
+		return time.Duration(n) * 7 * day
+	case 'm':
+		return time.Duration(n) * 30 * day
+	case 'y':
+		return time.Duration(n) * 365 * day
+	}
+	return day
+}
+
+func durationf(d time.Duration) string {
+	if d >= 48*time.Hour {
+		return fmt.Sprintf("%.1fd", d.Hours()/24)
+	}
+	return fmt.Sprintf("%.0fh", d.Hours())
+}
+
 // --- param compilers ---------------------------------------------------------
 
 func compileChargeback(raw map[string]any) (compiledRule, map[string]any, *ValidationError) {
@@ -402,10 +634,50 @@ func compilePaymentMethodsExpiring(raw map[string]any) (compiledRule, map[string
 	return paymentMethodsExpiringRule{daysAhead: days}, pr.out, nil
 }
 
+func compileWebhookSilence(raw map[string]any) (compiledRule, map[string]any, *ValidationError) {
+	pr := newParamReader(raw, "window")
+	window := pr.window("window", "7d")
+	if ve := pr.finish(); ve != nil {
+		return nil, nil, ve
+	}
+	if ve := validateStructural(metrics.Query{Measures: []string{"webhook_silence_age_seconds"}, By: []string{"rail"}, Range: &metrics.QueryRange{Last: window}}, "window"); ve != nil {
+		return nil, nil, ve
+	}
+	return webhookSilenceRule{window: window}, pr.out, nil
+}
+
+func compileWebhookRejects(raw map[string]any) (compiledRule, map[string]any, *ValidationError) {
+	pr := newParamReader(raw, "min_count", "window")
+	minCount := pr.integer("min_count", nil, f64(1), nil, true)
+	window := pr.window("window", "1d")
+	if ve := pr.finish(); ve != nil {
+		return nil, nil, ve
+	}
+	if ve := validateStructural(metrics.Query{Measures: []string{"webhook_rejects"}, By: []string{"rail"}, Range: &metrics.QueryRange{Last: window}}, "window"); ve != nil {
+		return nil, nil, ve
+	}
+	return webhookRejectsRule{minCount: float64(minCount), window: window}, pr.out, nil
+}
+
+func compileWebhookDrift(raw map[string]any) (compiledRule, map[string]any, *ValidationError) {
+	pr := newParamReader(raw, "min_count", "window")
+	minCount := pr.integer("min_count", nil, f64(1), nil, true)
+	window := pr.window("window", "1d")
+	if ve := pr.finish(); ve != nil {
+		return nil, nil, ve
+	}
+	if ve := validateStructural(metrics.Query{Measures: []string{"webhook_drift_events"}, By: []string{"rail"}, Range: &metrics.QueryRange{Last: window}}, "window"); ve != nil {
+		return nil, nil, ve
+	}
+	return webhookDriftRule{minCount: float64(minCount), window: window}, pr.out, nil
+}
+
 // --- metrics query helpers ---------------------------------------------------
 
 func runQuery(ctx context.Context, ev *evalContext, q metrics.Query) (*metrics.Result, error) {
-	plan, verr := metrics.Validate(&q)
+	// Relative windows resolve against the evaluator's clock, not the wall
+	// clock, so evaluation is deterministic under a pinned/fake clock.
+	plan, verr := metrics.ValidateAt(&q, ev.now)
 	if verr != nil {
 		return nil, fmt.Errorf("alerting: build metrics query: %s", verr.Error())
 	}

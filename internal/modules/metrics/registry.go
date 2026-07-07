@@ -32,6 +32,8 @@ const (
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over entitlements
 	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
 	FamDepletion      Family = "depletion"       // per-payer balance vs trailing-7d burn
+	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
+	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets (#786)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -54,7 +56,7 @@ type Measure struct {
 	Family      Family
 	Description string // one line, token-lean (rides in LLM context)
 	Formula     string // /schema formula text
-	Unit        string // "micros" | "count" | "ratio" | "days"
+	Unit        string // "micros" | "count" | "ratio" | "days" | "seconds"
 	// Expr is the aggregate SQL expression (flow + snapshot families).
 	Expr string
 	// Dims are the allowed group-by/filter dimensions (besides time).
@@ -289,6 +291,21 @@ var families = map[Family]familySpec{
 	FamDepletion: {
 		Kind: "depletion",
 	},
+	FamWebhookHealth: {
+		Kind: "snapshot",
+		From: `openrails.webhook_health wh`,
+		DimExprs: map[string]string{
+			"rail": `wh.rail`,
+		},
+	},
+	FamWebhookDaily: {
+		Kind:     "flow",
+		From:     `openrails.webhook_health_daily whd`,
+		TimeExpr: `whd.day_at`,
+		DimExprs: map[string]string{
+			"rail": `whd.rail`,
+		},
+	},
 }
 
 // depletionRiskDays: a payer is at depletion risk when their prepaid balance
@@ -493,6 +510,22 @@ var Measures = []Measure{
 		Description: "payers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",
 		Formula:     "COUNT(payers with balance / (7d burn / 7) <= 7 days)",
 		Dims:        []string{}},
+	// --- webhook health (#786) --------------------------------------------------------
+	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds",
+		Description: "seconds since the last signature-VERIFIED inbound webhook per rail at t (since tracking began when none was ever accepted); rejects never advance it",
+		Formula:     "t - COALESCE(last_accepted_at, created_at) per (merchant, rail)",
+		Expr:        `MAX(GREATEST(EXTRACT(EPOCH FROM (edge.bucket - COALESCE(wh.last_accepted_at, wh.created_at))), 0))::float8`,
+		Dims:        []string{"rail"}},
+	{Name: "webhook_rejects", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count",
+		Description: "inbound webhooks that FAILED verification (bad signature / disallowed source), UTC-day buckets — a spike means webhooks arrive but the signing secret is wrong",
+		Formula:     "SUM(daily rejected counters)",
+		Expr:        `COALESCE(SUM(whd.rejected), 0)::bigint`,
+		Dims:        []string{"rail"}},
+	{Name: "webhook_drift_events", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count",
+		Description: "provider-state corrections that arrived by PULL with no webhook accepted since the previous pull (partial webhook breakage), UTC-day buckets",
+		Formula:     "SUM(daily drift counters)",
+		Expr:        `COALESCE(SUM(whd.drift), 0)::bigint`,
+		Dims:        []string{"rail"}},
 }
 
 // DerivedFormula documents a DERIVED-tier metric: /schema-only, composed

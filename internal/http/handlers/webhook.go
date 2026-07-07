@@ -109,6 +109,9 @@ var globalWebhookIngress = map[models.Rail]func(r *httprequest.Request, provider
 	models.RailCCBill: func(r *httprequest.Request, _ string, clientIP string) bool {
 		if !ccbillWebhookIPAllowed(r, clientIP) {
 			log.WithFields(log.Fields{"client_ip": clientIP, "rail": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
+			// CCBill's only authentication is the IP allowlist, so an IP reject
+			// IS its verification failure (#786).
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailCCBill)
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return false
 		}
@@ -178,6 +181,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	if provider == subscriptions.RailCCBill {
 		clientIP := r.ClientIP()
 		if !ccbillWebhookIPAllowed(r, clientIP) {
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailCCBill)
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return
 		}
@@ -240,12 +244,14 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired),
 			errors.Is(err, webhookutil.ErrWebhookSignatureMissing),
 			errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		default:
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		}
 		return
 	}
+	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return
@@ -427,8 +433,10 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
 			errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), string(models.RailNMI))
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 		case errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), string(models.RailNMI))
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
 			r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
@@ -439,6 +447,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		}
 		return false
 	}
+	r.State.WebhookHealth.Accepted(r.Request.Context(), prepared.Rail)
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
@@ -503,6 +512,8 @@ func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (web
 }
 
 func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP string, prepared webhookutil.Prepared, accountID string) bool {
+	// CCBill has no HMAC: IP-allowlisted + well-formed IS its verified-accepted.
+	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailCCBill)
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
@@ -558,6 +569,8 @@ func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 		}
 		return false
 	}
+	// IP allowlist (CCBill's verification) already passed in the ingress table.
+	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailCCBill)
 	args := prepared.QueueArgs(clientIP)
 	if err := enqueueWebhookJob(r, args); err != nil {
 		log.WithError(err).Error("failed to enqueue CCBill webhook")
@@ -587,10 +600,13 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
 			r.ErrorJSON(http.StatusUnauthorized, "Webhook signature required")
 		case errors.Is(err, webhookutil.ErrWebhookSignatureMissing):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 		case errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
@@ -599,6 +615,7 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 		}
 		return false
 	}
+	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it into the classic {data:{object}} shape so the River
 	// rail only ever sees snapshot-style events.
@@ -758,11 +775,13 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 	if err != nil {
 		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
+			r.State.WebhookHealth.Rejected(r.Request.Context(), providerKey)
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 			return false
 		}
 		if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) {
 			log.WithError(err).Error("NMI webhook signature verification failed")
+			r.State.WebhookHealth.Rejected(r.Request.Context(), providerKey)
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 			return false
 		}
@@ -779,6 +798,7 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		return false
 	}
+	r.State.WebhookHealth.Accepted(r.Request.Context(), prepared.Rail)
 	args := prepared.QueueArgs(clientIP)
 	if err := enqueueWebhookJob(r, args); err != nil {
 		log.WithError(err).Error("failed to enqueue NMI webhook")

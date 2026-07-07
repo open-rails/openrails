@@ -64,6 +64,7 @@ func TestRegistry_CoreTierComplete(t *testing.T) {
 		"repeat_topup_rate", "realized_revenue_per_customer", "avg_membership_duration_days",
 		"mrr", "subscriptions", "billable_subscriptions", "entitled_customers",
 		"payers_at_depletion_risk", "outstanding_credit_liability", "outstanding_owed",
+		"webhook_silence_age_seconds", "webhook_rejects", "webhook_drift_events",
 	}
 	got := PublicMeasureNames()
 	for _, w := range want {

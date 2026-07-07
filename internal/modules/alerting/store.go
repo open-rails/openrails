@@ -236,6 +236,20 @@ func (s *store) countPaymentMethodsExpiring(ctx context.Context, now time.Time, 
 	})
 }
 
+// webhookExpectedRails implements templateEvalDeps for the #786 webhook_silence
+// expectation gate: armed rails with billable subscriptions (rail -> count).
+func (s *store) webhookExpectedRails(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.db.Gen(ctx).ListWebhookExpectedRails(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Rail] = row.Billable
+	}
+	return out, nil
+}
+
 // --- row mapping -------------------------------------------------------------
 
 func ruleFromRow(row gen.OpenrailsAlertRule) (Rule, error) {
