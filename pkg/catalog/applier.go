@@ -23,4 +23,7 @@ type Applier interface {
 	CreatePrice(ctx context.Context, req billingservice.CreatePriceRequest) (*billingservice.CatalogPrice, error)
 	ActivatePrice(ctx context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error)
 	DeactivatePrice(ctx context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error)
+	// SetPriceKey relabels a price's #774 key in place (a plain rename — never
+	// used to create/activate/archive a row).
+	SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error)
 }

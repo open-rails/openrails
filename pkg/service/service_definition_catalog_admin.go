@@ -2,14 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // maxCatalogPageSize bounds caller-supplied pagination so a single request can
@@ -236,6 +240,15 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 	_ = stripeSvc.UpdatePrice(ctx, stripePriceID, catalog.UpdatePriceParams{Active: &a})
 }
 
+// ActivatePrice un-archives a price. #774: for a price that was ARCHIVED, this
+// is exactly the flip-flop REACTIVATION path — re-declaring a previously-seen
+// substance (matched by matchPrice against the #662 deterministic id) finds
+// this archived row rather than minting a new one. Its key is already set
+// from creation, so activation repoints that key here: whatever OTHER row
+// currently holds it is archived first (the partial unique index on
+// (merchant_id, key) WHERE NOT archived allows only one live holder), then
+// this row is un-archived, then one pointer-movement log entry records the
+// move. Activating an already-active row is a no-op (no movement logged).
 func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -244,12 +257,41 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 	if priceID == uuid.Nil {
 		return nil, fmt.Errorf("price_id required")
 	}
+	current, err := prices.GetByID(ctx, priceID)
+	if err != nil {
+		return nil, err
+	}
+	wasArchived := current.Archived
+	if wasArchived {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), current.Key)
+		if dErr != nil && !errors.Is(dErr, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve current holder of price key %q: %w", current.Key, dErr)
+		}
+		if displaced != nil && displaced.ID != priceID {
+			if err := prices.SetArchived(ctx, displaced.ID, true); err != nil {
+				return nil, fmt.Errorf("archive displaced price %s for key %q: %w", displaced.ID, current.Key, err)
+			}
+		}
+	}
 	if err := prices.Activate(ctx, priceID); err != nil {
 		return nil, err
 	}
 	updated, err := prices.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, err
+	}
+	if wasArchived {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, updated.Key, time.Now().UTC()); err != nil {
+			return nil, fmt.Errorf("record key movement for %q -> %s: %w", updated.Key, priceID, err)
+		}
 	}
 	s.propagatePriceActiveToStripe(ctx, updated, true)
 	return priceToCatalogPrice(updated), nil

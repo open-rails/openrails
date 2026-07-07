@@ -22,6 +22,7 @@ type fakeApplier struct {
 	createdPrices    []billingservice.CreatePriceRequest
 	activatedPrices  []uuid.UUID
 	archivedPrices   []uuid.UUID
+	relabeledPrices  map[uuid.UUID]string
 }
 
 func newFakeApplier() *fakeApplier {
@@ -113,7 +114,7 @@ func (f *fakeApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID
 
 func (f *fakeApplier) CreatePrice(_ context.Context, req billingservice.CreatePriceRequest) (*billingservice.CatalogPrice, error) {
 	f.createdPrices = append(f.createdPrices, req)
-	return &billingservice.CatalogPrice{ID: uuid.New(), ProductID: req.ProductID, UnitAmount: req.UnitAmount, Currency: req.Currency, Archived: req.Archived}, nil
+	return &billingservice.CatalogPrice{ID: uuid.New(), Key: req.Key, ProductID: req.ProductID, UnitAmount: req.UnitAmount, Currency: req.Currency, Archived: req.Archived}, nil
 }
 
 func (f *fakeApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
@@ -124,6 +125,14 @@ func (f *fakeApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingse
 func (f *fakeApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
 	f.archivedPrices = append(f.archivedPrices, id)
 	return &billingservice.CatalogPrice{ID: id}, nil
+}
+
+func (f *fakeApplier) SetPriceKey(_ context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error) {
+	if f.relabeledPrices == nil {
+		f.relabeledPrices = map[uuid.UUID]string{}
+	}
+	f.relabeledPrices[id] = key
+	return &billingservice.CatalogPrice{ID: id, Key: key}, nil
 }
 
 var _ Applier = (*fakeApplier)(nil)

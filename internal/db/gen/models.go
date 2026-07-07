@@ -743,6 +743,18 @@ type OpenrailsPrice struct {
 	TrialUnitAmount *int64
 	// optional trial first-phase length in HOURS; NULL = no trial.
 	TrialDurationHours *int32
+	// #774: durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the #662 substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.
+	Key string
+}
+
+// #774: append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).
+type OpenrailsPriceKeyMovement struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Key         string
+	PriceID     uuid.UUID
+	EffectiveAt time.Time
+	CreatedAt   time.Time
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (rail, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
@@ -967,6 +979,19 @@ type OpenrailsReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
+// #773: header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.
+type OpenrailsRepriceBatch struct {
+	ID                     uuid.UUID
+	MerchantID             uuid.UUID
+	PriceKey               *string
+	ToPriceID              uuid.UUID
+	EffectiveAt            time.Time
+	SubscriptionsMatched   int32
+	SubscriptionsScheduled int32
+	SubscriptionsSkipped   int32
+	CreatedAt              time.Time
+}
+
 type OpenrailsSolanaSubscription struct {
 	ID                       uuid.UUID
 	MerchantID               uuid.UUID
@@ -1022,6 +1047,21 @@ type OpenrailsSubscription struct {
 	CustomerID          uuid.UUID
 	// Provider account that produced this remote subscription mirror row.
 	RailMerchantAccountID *uuid.UUID
+}
+
+// #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).
+type OpenrailsSubscriptionReprice struct {
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	FromPriceID    uuid.UUID
+	ToPriceID      uuid.UUID
+	EffectiveAt    time.Time
+	Status         string
+	RepriceBatchID *uuid.UUID
+	CreatedAt      time.Time
+	AppliedAt      *time.Time
+	CanceledAt     *time.Time
 }
 
 // #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.

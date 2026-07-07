@@ -370,11 +370,8 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
 	}
 
-	priceID, err := api.ParsePriceID(req.PriceID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid price_id", ErrCheckoutSessionValidation)
-	}
-	price, err := s.priceService.GetByID(ctx, priceID)
+	// #774: price_id accepts a price_key too.
+	price, err := catalog.ResolveReference(ctx, s.priceService, req.PriceID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
@@ -1287,11 +1284,8 @@ func (s *CheckoutSessionService) productDisplayName(ctx context.Context, product
 // within the tier group, and compute the Model-B prorated first charge for an
 // upgrade.
 func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, oldSub *models.Subscription, oldRow *models.SolanaSubscription, newPriceIDStr string) (*resolvedSolanaLifecycleTierChange, error) {
-	newPriceID, err := api.ParsePriceID(newPriceIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: new_price_id is required", ErrCheckoutSessionValidation)
-	}
-	newPrice, err := s.priceService.GetByID(ctx, newPriceID)
+	// #774: new_price_id accepts a price_key too.
+	newPrice, err := catalog.ResolveReference(ctx, s.priceService, newPriceIDStr)
 	if err != nil || newPrice == nil {
 		return nil, fmt.Errorf("%w: target price not found", ErrCheckoutSessionValidation)
 	}
@@ -1325,7 +1319,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 
 	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
 	out := &resolvedSolanaLifecycleTierChange{
-		newPriceID:      newPriceID,
+		newPriceID:      newPrice.ID,
 		oldRow:          oldRow,
 		newTerms:        newTerms,
 		isUpgrade:       isUpgrade,

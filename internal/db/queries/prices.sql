@@ -3,7 +3,7 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, key, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
@@ -11,6 +11,7 @@ INSERT INTO openrails.prices (
     sqlc.arg(archived)::boolean,
     $3, $4,
     sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(rails),
+    sqlc.arg(key)::text,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -115,5 +116,31 @@ UPDATE openrails.prices SET
     updated_at = now()
 WHERE id = sqlc.arg(id);
 
+-- #774: key is a mutable LABEL (the movable pointer), not financial substance —
+-- its own narrow query, same pattern as rails/archived above.
+-- name: UpdatePriceKey :execrows
+UPDATE openrails.prices SET
+    key = sqlc.arg(key)::text,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
 -- name: DeletePrice :execrows
 DELETE FROM openrails.prices WHERE id = $1;
+
+-- #774: the CURRENT (non-archived) row for a key, if any. At most one exists
+-- per (merchant, key) by uq_prices_merchant_key_current.
+-- name: GetCurrentPriceByKey :one
+SELECT * FROM openrails.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND NOT archived;
+
+-- All rows (archived + current) ever pointed at by this key — the version chain.
+-- name: ListPriceChainByKey :many
+SELECT * FROM openrails.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text
+ORDER BY created_at ASC;
+
+-- The archived members of a key's chain — #773's "all prior versions of key K".
+-- name: ListPriorVersionsByKey :many
+SELECT * FROM openrails.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND archived
+ORDER BY created_at ASC;

@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -332,7 +334,12 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
 type CatalogPrice struct {
-	ID                  uuid.UUID `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
+	// this price's substance-version chain — the stable name to check out
+	// against, reprice by, or reference in support conversations. ID stays the
+	// #662 immutable substance UUID.
+	Key                 string    `json:"key"`
 	ProductID           uuid.UUID `json:"product_id"`
 	Archived            bool      `json:"archived"`
 	UnitAmount          int64     `json:"unit_amount"`
@@ -370,7 +377,17 @@ type CatalogPrice struct {
 //     what to do.
 type CreatePriceRequest struct {
 	ProductID uuid.UUID `json:"product_id"`
-	// A price's identity IS its financial substance — the product key plus
+
+	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
+	// this price's substance-version chain — distinct from ID, which stays the
+	// #662 immutable substance UUID. Optional: auto-defaults to
+	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
+	// Declaring the SAME key with a DIFFERENT financial substance is a version
+	// bump: the new/reactivated substance row becomes the key's current
+	// target and the previously-current row is archived (grandfathered).
+	Key string `json:"key,omitempty"`
+
+	// A price's ROW IDENTITY IS its financial substance — the product key plus
 	// these immutable money terms. There is no price slug: the content-based
 	// provider keys are derived from (product_key, currency, unit_amount,
 	// access duration, renewal flag, and trial terms), so they are stable across
@@ -528,24 +545,85 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, err
 	}
 	now := time.Now().UTC()
-	price := &models.Price{
-		ID:                  priceID,
-		MerchantID:          tid.UUID(),
-		ProductID:           req.ProductID,
-		Archived:            req.Archived,
-		Amount:              req.UnitAmount,
-		Currency:            req.Currency,
-		AccessDurationHours: req.AccessDurationHours,
-		AutoRenew:           req.AutoRenew,
-		TrialUnitAmount:     req.TrialUnitAmount,
-		TrialDurationHours:  req.TrialDurationHours,
-		Rails:               rails,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+
+	// #774: resolve the price key (explicit or auto-default) and repoint it.
+	// A key names AT MOST one non-archived row per merchant
+	// (uq_prices_merchant_key_current) — so whatever OTHER row currently holds
+	// this key must be archived FIRST (never after), or the create/reactivate
+	// below would transiently double-hold the key and violate that index.
+	// Declaring the SAME key with a NEW substance is exactly the version-bump
+	// semantics: archive the displaced row, create-or-REACTIVATE the substance
+	// row (re-declaring a previously-seen substance finds its archived row via
+	// the #662 deterministic id and reactivates it — flip-flopping between two
+	// amounts forever yields exactly two rows, never a third), re-point the
+	// key. Skipped entirely when the caller creates the price pre-archived
+	// (never claims the "current" pointer for its key).
+	key := resolvePriceKey(product, req)
+	var displacedID uuid.UUID
+	if !req.Archived {
+		displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), key)
+		if dErr != nil && !errors.Is(dErr, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve current holder of price key %q: %w", key, dErr)
+		}
+		if displaced != nil && displaced.ID != priceID {
+			if err := prices.SetArchived(ctx, displaced.ID, true); err != nil {
+				return nil, fmt.Errorf("archive displaced price %s for key %q: %w", displaced.ID, key, err)
+			}
+			displacedID = displaced.ID
+		}
 	}
-	if err := prices.Create(ctx, price); err != nil {
-		return nil, err
+
+	existing, existErr := prices.GetByID(ctx, priceID)
+	reactivating := existErr == nil
+	// A true no-op: re-declaring the SAME substance under the SAME key with no
+	// archived-state change and no key displaced — nothing moved, so no
+	// movement-log entry (idempotent, as today).
+	trueNoOp := reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
+
+	var price *models.Price
+	if reactivating {
+		if existing.Archived != req.Archived {
+			if err := prices.SetArchived(ctx, priceID, req.Archived); err != nil {
+				return nil, fmt.Errorf("reactivate price %s: %w", priceID, err)
+			}
+		}
+		if existing.Key != key {
+			if err := prices.SetKey(ctx, priceID, key); err != nil {
+				return nil, fmt.Errorf("relabel price %s to key %q: %w", priceID, key, err)
+			}
+		}
+		existing.Archived = req.Archived
+		existing.Key = key
+		price = existing
+	} else {
+		price = &models.Price{
+			ID:                  priceID,
+			MerchantID:          tid.UUID(),
+			ProductID:           req.ProductID,
+			Archived:            req.Archived,
+			Amount:              req.UnitAmount,
+			Currency:            req.Currency,
+			AccessDurationHours: req.AccessDurationHours,
+			AutoRenew:           req.AutoRenew,
+			TrialUnitAmount:     req.TrialUnitAmount,
+			TrialDurationHours:  req.TrialDurationHours,
+			Rails:               rails,
+			Key:                 key,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		if err := prices.Create(ctx, price); err != nil {
+			return nil, err
+		}
 	}
+
+	if !req.Archived && !trueNoOp {
+		// #774 pointer-movement log: key's current pointer moved to priceID.
+		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, now); err != nil {
+			return nil, fmt.Errorf("record key movement for %q -> %s: %w", key, priceID, err)
+		}
+	}
+
 	// Created-as-archived: the providers were auto-created active above, so
 	// propagate active=false to match the archived lifecycle (best-effort; drift
 	// surfaces on next verify if a provider rejects it).
@@ -698,6 +776,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
 		ID:                  p.ID,
+		Key:                 p.Key,
 		ProductID:           p.ProductID,
 		Archived:            p.Archived,
 		UnitAmount:          p.Amount,

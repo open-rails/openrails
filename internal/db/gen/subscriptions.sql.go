@@ -866,6 +866,65 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, custome
 	return items, nil
 }
 
+const listActiveSubscriptionsByPriceIDs = `-- name: ListActiveSubscriptionsByPriceIDs :many
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
+WHERE sub.price_id = ANY($1::uuid[]) AND sub.status = 'active'
+`
+
+// #773: every active subscription pinned to one of a set of price rows — the
+// reprice_all_prior_versions(key, ...) match set (a key's prior-version price
+// ids). Uses idx_subscriptions_price_id.
+func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceIds []uuid.UUID) ([]OpenrailsSubscription, error) {
+	rows, err := q.db.Query(ctx, listActiveSubscriptionsByPriceIDs, priceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsSubscription
+	for rows.Next() {
+		var i OpenrailsSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.RailSubscriptionID,
+			&i.UserEmail,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.ScheduledPriceID,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CancelledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.RailMerchantAccountID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveSubscriptionsByRail = `-- name: ListActiveSubscriptionsByRail :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.status = 'active'

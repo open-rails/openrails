@@ -113,11 +113,22 @@ func (p Product) tierRank() int {
 	return *p.TierRank
 }
 
-// Price is a declared price. It has NO slug: a price's identity is its
-// financial substance (currency, unit_amount, duration, auto_renew).
+// Price is a declared price. Its ROW IDENTITY is still its financial
+// substance (currency, unit_amount, duration, auto_renew) — there is no price
+// slug for THAT. Key (#774) is a separate, orthogonal concept: a durable,
+// merchant-unique movable-pointer handle naming this price's substance-
+// version chain, independent of row identity.
 type Price struct {
 	Currency   string `json:"currency,omitempty" yaml:"currency,omitempty"`
 	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // micros (millionths of a major unit)
+
+	// Key (#774) is optional; when omitted it auto-defaults to
+	// "<product-key>-<interval>" (see billingservice.PriceIntervalLabel) as
+	// long as the product declares only ONE price at that interval. Two or
+	// more prices at the same interval (e.g. a promo alongside the standard
+	// price) must each carry an explicit key — apply refuses the ambiguity
+	// loudly rather than silently colliding both onto the same default.
+	Key string `json:"key,omitempty" yaml:"key,omitempty"`
 
 	// Duration is the access window a purchase of this price grants (#622):
 	// a finite value (`3d`/`30d`/`90d`/`365d`) or `indefinite`. Optional;

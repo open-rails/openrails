@@ -1,0 +1,168 @@
+package subscriptions
+
+import (
+	"context"
+	"time"
+
+	safecast "github.com/ccoveille/go-safecast/v2"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+// RepriceRepo is the persistence layer for #773's reprice primitive:
+// reprice_batches (the header row for one bulk/ad-hoc operation) and
+// subscription_reprices (one scheduled/applied/canceled row per affected
+// subscription).
+type RepriceRepo struct {
+	db *db.DB
+}
+
+func NewRepriceRepo(d *db.DB) *RepriceRepo { return &RepriceRepo{db: d} }
+
+// CreateBatch records a bulk (or single ad-hoc) reprice operation's header.
+func (r *RepriceRepo) CreateBatch(ctx context.Context, priceKey *string, toPriceID uuid.UUID, effectiveAt time.Time, matched, scheduled, skipped int) (*models.RepriceBatch, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matched32, _ := safecast.Convert[int32](matched)
+	scheduled32, _ := safecast.Convert[int32](scheduled)
+	skipped32, _ := safecast.Convert[int32](skipped)
+	row, err := r.db.Gen(ctx).CreateRepriceBatch(ctx, gen.CreateRepriceBatchParams{
+		MerchantID:             tid.UUID(),
+		PriceKey:               priceKey,
+		ToPriceID:              toPriceID,
+		EffectiveAt:            effectiveAt,
+		SubscriptionsMatched:   matched32,
+		SubscriptionsScheduled: scheduled32,
+		SubscriptionsSkipped:   skipped32,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.RepriceBatchFromGen(row), nil
+}
+
+func (r *RepriceRepo) GetBatchByID(ctx context.Context, id uuid.UUID) (*models.RepriceBatch, error) {
+	row, err := r.db.Gen(ctx).GetRepriceBatchByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return models.RepriceBatchFromGen(row), nil
+}
+
+// CreateSubscriptionReprice schedules one subscription's price move.
+// batchID is nil for a single ad-hoc reprice() call.
+func (r *RepriceRepo) CreateSubscriptionReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID) (*models.SubscriptionReprice, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).CreateSubscriptionReprice(ctx, gen.CreateSubscriptionRepriceParams{
+		MerchantID:     tid.UUID(),
+		SubscriptionID: subscriptionID,
+		FromPriceID:    fromPriceID,
+		ToPriceID:      toPriceID,
+		EffectiveAt:    effectiveAt,
+		RepriceBatchID: batchID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepriceFromGen(row), nil
+}
+
+func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionRepriceByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepriceFromGen(row), nil
+}
+
+// GetScheduledForSubscription returns the subscription's current scheduled
+// reprice, or pgx.ErrNoRows if none exists. At most one can exist at a time
+// (uq_subscription_reprices_one_scheduled).
+func (r *RepriceRepo) GetScheduledForSubscription(ctx context.Context, subscriptionID uuid.UUID) (*models.SubscriptionReprice, error) {
+	row, err := r.db.Gen(ctx).GetScheduledRepriceForSubscription(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepriceFromGen(row), nil
+}
+
+type SubscriptionRepriceFilter struct {
+	SubscriptionID *uuid.UUID
+	RepriceBatchID *uuid.UUID
+	Status         *models.RepriceStatus
+}
+
+func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error) {
+	var status *string
+	if filter.Status != nil {
+		s := string(*filter.Status)
+		status = &s
+	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
+	rows, err := r.db.Gen(ctx).ListSubscriptionReprices(ctx, gen.ListSubscriptionRepricesParams{
+		SubscriptionID: filter.SubscriptionID,
+		RepriceBatchID: filter.RepriceBatchID,
+		Status:         status,
+		PageLimit:      limit32,
+		PageOffset:     offset32,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepricesFromGen(rows), nil
+}
+
+// Cancel cancels a scheduled reprice. Returns ErrRepriceNotScheduled if the
+// row is not (or is no longer) in status=scheduled — the cancel-before-
+// effective contract.
+func (r *RepriceRepo) Cancel(ctx context.Context, id uuid.UUID) error {
+	rows, err := r.db.Gen(ctx).CancelSubscriptionReprice(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return ErrRepriceNotScheduled
+	}
+	return nil
+}
+
+// Apply marks a scheduled reprice as applied. Returns ErrRepriceNotScheduled
+// if it was already applied/canceled by a concurrent caller — the renewal
+// boundary pickup is safe to retry.
+func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
+	rows, err := r.db.Gen(ctx).ApplySubscriptionReprice(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return ErrRepriceNotScheduled
+	}
+	return nil
+}
+
+// ListActiveSubscriptionsByPriceIDs returns every ACTIVE subscription pinned
+// to one of the given price rows — reprice_all_prior_versions' match set.
+func (r *RepriceRepo) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceIDs []uuid.UUID) ([]*models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByPriceIDs(ctx, priceIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.Subscription, 0, len(rows))
+	for _, row := range rows {
+		s, err := models.SubscriptionFromGen(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}

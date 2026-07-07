@@ -261,6 +261,103 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	require.Equal(t, productKey, product.Key)
 }
 
+// TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP is #774's MODE 1
+// YAML-edit+push round-trip through the FULL converge (POST .../catalog/
+// publish drives the identical catalog.Plan+catalog.ApplyWithOptions pipeline
+// the manifest CLI uses): an amount edit under the auto-defaulted key version-
+// bumps (new row, key re-pointed, old row archived), and flip-flopping back
+// to the original amount REACTIVATES the same original row rather than
+// minting a third.
+func TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+	token := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-price-key-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+
+	productKey := "price-key-bump-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	wantKey := productKey + "-monthly"
+	manifestAt := func(amount int64) catalog.Manifest {
+		return catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key:         productKey,
+				DisplayName: "Price Key Bump Product",
+				Prices: []catalog.Price{{
+					UnitAmount: amount,
+					Currency:   "usd",
+					Duration:   "30d",
+					AutoRenew:  true,
+				}},
+			}},
+		}
+	}
+	publish := func(m catalog.Manifest) *catalog.ApplyResult {
+		t.Helper()
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+			"catalog": m, "insert": true, "overwrite": true, "prune": true,
+		})
+		require.Equal(t, http.StatusOK, status, string(body))
+		var out struct {
+			Result *catalog.ApplyResult `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		require.NotNil(t, out.Result)
+		return out.Result
+	}
+	getByKey := func() billingservice.CatalogPrice {
+		t.Helper()
+		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/by-key/"+wantKey, token, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var p billingservice.CatalogPrice
+		require.NoError(t, json.Unmarshal(body, &p))
+		return p
+	}
+
+	// v1: create at $10/mo — auto-defaults to "<product-key>-monthly".
+	result := publish(manifestAt(1000000))
+	require.Equal(t, 1, result.ProductsCreated)
+	require.Equal(t, 1, result.PricesCreated)
+	original := getByKey()
+	require.Equal(t, wantKey, original.Key)
+	require.EqualValues(t, 1000000, original.UnitAmount)
+
+	// v2: amount edit under the SAME (auto-defaulted) key -> version bump.
+	result = publish(manifestAt(1200000))
+	require.Equal(t, 1, result.PricesCreated, "new substance -> new row")
+	require.Equal(t, 1, result.PricesArchived, "displaced row archived")
+	bumped := getByKey()
+	require.Equal(t, wantKey, bumped.Key)
+	require.EqualValues(t, 1200000, bumped.UnitAmount)
+	require.NotEqual(t, original.ID, bumped.ID)
+
+	oldStatus, oldBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/"+original.ID.String(), token, nil)
+	require.Equal(t, http.StatusOK, oldStatus, string(oldBody))
+	var oldRow billingservice.CatalogPrice
+	require.NoError(t, json.Unmarshal(oldBody, &oldRow))
+	require.True(t, oldRow.Archived, "displaced row is archived, not deleted")
+	require.Equal(t, wantKey, oldRow.Key, "archived predecessor keeps the key as a back-reference")
+
+	// v3: flip back to $10 -> REACTIVATES the original row (never a third).
+	result = publish(manifestAt(1000000))
+	require.Equal(t, 0, result.PricesCreated, "flip-flop must reactivate, not create")
+	require.Equal(t, 1, result.PricesActivated)
+	require.Equal(t, 1, result.PricesArchived)
+	reactivated := getByKey()
+	require.Equal(t, original.ID, reactivated.ID, "reactivated the SAME row (#662 deterministic id)")
+
+	pricesStatus, pricesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices?product_id="+bumped.ProductID.String(), token, nil)
+	require.Equal(t, http.StatusOK, pricesStatus, string(pricesBody))
+	var page struct {
+		Items []billingservice.CatalogPrice `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(pricesBody, &page))
+	require.Len(t, page.Items, 2, "flip-flopping forever yields exactly two rows total")
+}
+
 func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
@@ -1354,6 +1451,16 @@ func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*b
 	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/deactivate", a.token, nil)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("deactivate price: status %d: %s", status, string(body))
+	}
+	var out billingservice.CatalogPrice
+	require.NoError(a.t, json.Unmarshal(body, &out))
+	return &out, nil
+}
+
+func (a httpCatalogApplier) SetPriceKey(_ context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/key", a.token, map[string]string{"key": key})
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("set price key: status %d: %s", status, string(body))
 	}
 	var out billingservice.CatalogPrice
 	require.NoError(a.t, json.Unmarshal(body, &out))

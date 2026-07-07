@@ -101,6 +101,9 @@ type Runtime struct {
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	PaymentService       *payments.PaymentService
 	VaultService         *paymentmethods.VaultService
+	// RepriceService is the #773 reprice primitive (move subscribers to a
+	// different price at their next renewal).
+	RepriceService *subscriptions.RepriceService
 	// PaymentSourceUpdateIntents routes NMI payment-method swaps through the
 	// durable nmi_payment_source_update intent (#674 write-through). Set by the
 	// composition root alongside the other write-through producers.

@@ -381,6 +381,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		UserSubscriptionService:   serviceInstances.UserSubscriptionService,
 		PublicSubscriptionService: serviceInstances.PublicSubscriptionService,
 		AdminSubscriptionService:  serviceInstances.AdminSubscriptionService,
+		RepriceService:            serviceInstances.RepriceService,
 
 		EmailService:                 emailService,
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
@@ -795,6 +796,9 @@ type servicesInstances struct {
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService
 	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
+	// RepriceService is the #773 reprice primitive (move subscribers to a
+	// different price at their next renewal).
+	RepriceService *subscriptions.RepriceService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
@@ -926,6 +930,11 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		paymentMethodService,
 		clock,
 	)
+
+	// #773: reprice primitive — moving existing subscribers to a different
+	// (same-product, same-currency, active) price at their next renewal.
+	repriceRepo := subscriptions.NewRepriceRepo(database)
+	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, clock)
 
 	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, railSet, clock)
 	subscriptionService.VaultService = vaultService
@@ -1060,6 +1069,7 @@ func createServices(database *db.DB, cfg *config.Config, railSet config.RailMerc
 		UserSubscriptionService:      userSubscriptionService,
 		PublicSubscriptionService:    publicSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
+		RepriceService:               repriceService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		IdempotencyService:           idempotencyService,

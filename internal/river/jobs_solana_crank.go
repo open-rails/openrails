@@ -2,12 +2,14 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/billing/declinecode"
@@ -429,6 +431,26 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 	if err != nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: load subscription: %w", err)
 	}
+
+	// #773: pick up a due scheduled reprice BEFORE resolving the on-chain pull
+	// plan below, so a scheduled price change actually changes what gets
+	// pulled (Solana is engine-decided: unlike NMI/Stripe's own recurring
+	// engines, OpenRails itself picks the amount to withdraw on-chain).
+	repriceRepo := subscriptions.NewRepriceRepo(w.DB)
+	scheduledReprice, repriceErr := repriceRepo.GetScheduledForSubscription(ctx, sub.ID)
+	switch {
+	case repriceErr == nil && scheduledReprice.IsDue(w.now()):
+		sub.PriceID = scheduledReprice.ToPriceID
+		if err := subRepo.Update(ctx, sub); err != nil {
+			return resolvedPlan{}, fmt.Errorf("solana crank: re-pin repriced subscription: %w", err)
+		}
+		if err := repriceRepo.Apply(ctx, scheduledReprice.ID); err != nil && !errors.Is(err, subscriptions.ErrRepriceNotScheduled) {
+			return resolvedPlan{}, fmt.Errorf("solana crank: mark reprice applied: %w", err)
+		}
+	case repriceErr != nil && !errors.Is(repriceErr, pgx.ErrNoRows):
+		return resolvedPlan{}, fmt.Errorf("solana crank: check scheduled reprice: %w", repriceErr)
+	}
+
 	price, err := catalog.NewPriceService(w.DB).GetByID(ctx, sub.PriceID)
 	if err != nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: load price: %w", err)

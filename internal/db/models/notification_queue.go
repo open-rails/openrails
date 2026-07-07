@@ -30,6 +30,12 @@ const (
 	NotificationTranslationCompleted              NotificationEventType = "translation_completed"                // Voted translation completed (rate-limited)
 	NotificationTranslationCompletedPendingDigest NotificationEventType = "translation_completed_pending_digest" // queued for weekly digest
 	NotificationTranslationDigestSent             NotificationEventType = "translation_digest_sent"              // audit of digest sends
+
+	// #773: scheduling a subscription reprice fires this at SCHEDULE time (not
+	// at apply time) — the card-network-required advance notice of an upcoming
+	// recurring amount change (the disclosure hook #297 Phase A's MIT
+	// compliance rides on).
+	NotificationSubscriptionRepriceScheduled NotificationEventType = "subscription_reprice_scheduled"
 )
 
 // NotificationQueue stores in-app notification attempts

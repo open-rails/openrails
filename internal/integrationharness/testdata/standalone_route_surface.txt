@@ -48,6 +48,7 @@ GET /v1/merchant/alerts/templates
 GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
+GET /v1/merchant/catalog/prices/by-key/{key}
 GET /v1/merchant/catalog/prices/{id}
 GET /v1/merchant/catalog/products
 GET /v1/merchant/catalog/products/by-key/{key}
@@ -72,6 +73,8 @@ GET /v1/merchant/payment-providers/{provider}
 GET /v1/merchant/payments
 GET /v1/merchant/payments/{id}
 GET /v1/merchant/repair-alerts
+GET /v1/merchant/reprices
+GET /v1/merchant/reprices/{id}
 GET /v1/merchant/settings
 GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
@@ -123,10 +126,12 @@ POST /v1/merchant/catalog/drift/refresh
 POST /v1/merchant/catalog/prices
 POST /v1/merchant/catalog/prices/{id}/activate
 POST /v1/merchant/catalog/prices/{id}/deactivate
+POST /v1/merchant/catalog/prices/{id}/key
 POST /v1/merchant/catalog/products
 POST /v1/merchant/catalog/products/{id}/activate
 POST /v1/merchant/catalog/products/{id}/deactivate
 POST /v1/merchant/catalog/publish
+POST /v1/merchant/catalog/reprice-all-prior-versions
 POST /v1/merchant/credits/deposit
 POST /v1/merchant/customers/entitlements:batch
 POST /v1/merchant/customers/{customer_id}/entitlements
@@ -138,7 +143,9 @@ POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
 POST /v1/merchant/payments/{id}/refunds
+POST /v1/merchant/reprices/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/cancel
+POST /v1/merchant/subscriptions/{id}/reprice
 POST /v1/merchant/subscriptions/{id}/resume
 POST /v1/merchant/team/invites
 POST /v1/merchant/usage/resource-revenue

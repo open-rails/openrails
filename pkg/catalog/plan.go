@@ -82,6 +82,13 @@ type PricePlan struct {
 	// ExistingID is the matched OpenRails price (uuid.Nil when creating).
 	ExistingID uuid.UUID                         `json:"existing_id,omitempty"`
 	CreateReq  billingservice.CreatePriceRequest `json:"create_req,omitempty"`
+
+	// Key (#774) is this declared price's resolved key (explicit or
+	// auto-defaulted). For Action==PriceCreate it rides CreateReq.Key; for a
+	// MATCHED price (Unchanged/Activate/Archive) it is set ONLY when it
+	// differs from the matched row's current key — signaling apply must
+	// relabel (a plain key rename, no substance change) via SetPriceKey.
+	Key string `json:"key,omitempty"`
 }
 
 // Plan computes the convergence diff for a manifest against the catalog exposed
@@ -267,7 +274,39 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 
 	claimed := map[uuid.UUID]struct{}{}
 
-	for _, price := range product.Prices {
+	// #774: resolve every declared price's key (explicit or auto-defaulted
+	// "<product-key>-<interval>") up front, over the WHOLE declared set, so an
+	// ambiguity — two or more declared prices resolving to the identical key,
+	// almost always two undeclared prices sharing an interval (a promo
+	// alongside the standard price) — is refused loudly at PLAN time, before
+	// anything is written. Collision detection is a plan-time concern
+	// precisely because it needs the full declared set; the imperative
+	// CreatePrice API (billingservice.Service, MODE 2/console) sees one price
+	// at a time and always resolves a concrete key.
+	resolvedKeys := make([]string, len(product.Prices))
+	byResolvedKey := map[string][]string{}
+	for i, price := range product.Prices {
+		if price.Model != "" {
+			continue
+		}
+		accessDurationHours, err := normalizeDuration(price.Duration)
+		if err != nil {
+			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
+		}
+		key := strings.TrimSpace(price.Key)
+		if key == "" {
+			key = product.Key + "-" + billingservice.PriceIntervalLabel(accessDurationHours, price.AutoRenew)
+		}
+		resolvedKeys[i] = key
+		byResolvedKey[key] = append(byResolvedKey[key], PriceLabel(product.Key, price))
+	}
+	for key, labels := range byResolvedKey {
+		if len(labels) > 1 {
+			return fmt.Errorf("product %q: prices [%s] all resolve to price key %q — set an explicit `key:` on each price to disambiguate (#774)", product.Key, strings.Join(labels, ", "), key)
+		}
+	}
+
+	for i, price := range product.Prices {
 		if price.Model != "" {
 			continue
 		}
@@ -276,6 +315,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
 		}
 		label := PriceLabel(product.Key, price)
+		key := resolvedKeys[i]
 
 		// #622 trial first phase (a different first-phase price/length) is part
 		// of price identity, so normalize it up front and match on it too.
@@ -303,6 +343,12 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			default: // active desired but currently archived
 				plp.Action = PriceActivate
 			}
+			// #774: a substance-unchanged price declared under a DIFFERENT key
+			// is a plain rename — signal apply to relabel via SetPriceKey. Never
+			// set for an unchanged key (nothing to do).
+			if match.Key != key {
+				plp.Key = key
+			}
 			pp.Prices = append(pp.Prices, plp)
 			continue
 		}
@@ -311,6 +357,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		createReq := billingservice.CreatePriceRequest{
 			// ProductID is filled at apply time once the product exists.
 			ProductID:           productID(existing),
+			Key:                 key,
 			UnitAmount:          price.UnitAmount,
 			Currency:            price.Currency,
 			AccessDurationHours: accessDurationHours,
@@ -325,6 +372,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			Label:     label,
 			Action:    PriceCreate,
 			CreateReq: createReq,
+			Key:       key,
 		})
 	}
 
