@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -127,6 +126,13 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
+// checkoutRailConfigured reports whether rail is usable for this request's
+// checkout. r.State.Rails is the legacy boot-config bridge (only populated by
+// embedded.Options.PaymentProviders) — empty in every MODE-1 manifest host, so
+// the fallback below (the same DB-armed-account pattern
+// effectiveSolanaRailConfig uses, #775) is the primary signal there: ANY rail
+// with an active manifest/DB-armed account for the request merchant +
+// environment is configured, not just NMI.
 func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if r == nil || r.State == nil {
 		return false
@@ -134,7 +140,7 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	if rails.IsConfigured(r.State.Rails, rail) {
 		return true
 	}
-	if !rails.IsNMI(models.Rail(rail)) || r.State.Merchants == nil {
+	if r.State.Merchants == nil {
 		return false
 	}
 	mid, ok := merchant.FromContext(r.Request.Context())
@@ -143,7 +149,7 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	}
 	// Environment follows deployment posture (#681): test rows under test_mode.
 	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
-	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountSecretName(r.Request.Context(), mid, string(models.RailNMI), env, "security_key")
+	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountScope(r.Request.Context(), mid, rail, env)
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {

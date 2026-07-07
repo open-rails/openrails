@@ -1,6 +1,7 @@
 package embedhttp
 
 import (
+	"context"
 	"net/http"
 
 	redis "github.com/redis/go-redis/v9"
@@ -8,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -82,17 +84,55 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 // ProviderRoutesForRuntime derives provider-specific route gating from the
 // runtime's configured rails + probed capabilities (#661); an explicit override
 // wins; no runtime information means the permissive default.
+//
+// rt.Rails is the legacy boot-config bridge (only populated by
+// embedded.Options.PaymentProviders) — empty in every MODE-1 manifest host
+// (#775). When it's empty but a merchant is bound, derive the surface from
+// that merchant's DB-armed rail accounts instead of silently deriving "no
+// routes" from the empty bridge.
 func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
 	if override != nil {
 		return *override
 	}
-	if rt != nil {
-		if len(rt.Rails) > 0 || !rt.ConfiguredMerchant().IsZero() {
-			if caps := rt.RouteCapabilities; caps != nil {
-				return routesurface.ProviderRoutesFromRailsWithCapabilities(rt.Rails, *caps)
-			}
-			return routesurface.ProviderRoutesFromRails(rt.Rails)
+	if rt == nil {
+		return routesurface.AllProviderRoutes()
+	}
+	if len(rt.Rails) > 0 {
+		if caps := rt.RouteCapabilities; caps != nil {
+			return routesurface.ProviderRoutesFromRailsWithCapabilities(rt.Rails, *caps)
 		}
+		return routesurface.ProviderRoutesFromRails(rt.Rails)
+	}
+	if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
+		r := armedProviderRoutes(context.Background(), rt, mid)
+		if caps := rt.RouteCapabilities; caps != nil {
+			r.SolanaSigning = r.Solana && caps.SolanaCanSign
+			r.SecretWrite = caps.SecretWrite
+		} else {
+			r.SolanaSigning = r.Solana
+			r.SecretWrite = true
+		}
+		return r
 	}
 	return routesurface.AllProviderRoutes()
+}
+
+// armedProviderRoutes derives the route surface from mid's DB-armed rail
+// accounts (#775) — the mount-time analogue of the per-request DB fallback
+// checkoutRailConfigured / effectiveSolanaRailConfig use. This runs ONCE at
+// handler-assembly time (not per request), so one query per rail is not a hot
+// path concern.
+func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid merchant.ID) routesurface.ProviderRoutes {
+	env := config.ExpectedProviderEnvironment(rt.Config != nil && rt.Config.IsTestMode())
+	armed := func(rail string) bool {
+		_, ok, err := rt.Merchants.ActiveRailMerchantAccountScope(ctx, mid, rail, env)
+		return err == nil && ok
+	}
+	stripe := armed(string(models.RailStripe))
+	solana := armed(string(models.RailSolana))
+	return routesurface.ProviderRoutes{
+		StripePortal: stripe,
+		Solana:       solana,
+		Webhooks:     stripe || armed(string(models.RailNMI)) || armed(string(models.RailCCBill)),
+	}
 }
