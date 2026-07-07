@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -42,6 +43,9 @@ type ConvergeSweepWorker struct {
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
+	// Alerts bridges requires_review findings into the #736 operator
+	// notification store (#787). nil = no-op (no alerting service wired).
+	Alerts *alerting.Service
 }
 
 func (ConvergeSweepWorker) Kind() string { return KindConvergeSweep }
@@ -53,6 +57,12 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	}
 	engine := converge.NewConvergeEngine(w.DB)
 	engine.Now = func() time.Time { return clock.Now().UTC() }
+	if w.Alerts != nil {
+		// #787: nil-check before assigning to the interface field — a nil
+		// *alerting.Service boxed into a non-nil FindingNotifier interface
+		// would panic on first use.
+		engine.Notifier = w.Alerts
+	}
 	logger := log.WithContext(ctx).WithField("worker", KindConvergeSweep)
 
 	// Privileged (no-GUC) read of the control-plane merchant directory.

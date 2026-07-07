@@ -38,6 +38,13 @@ type FindingRecord struct {
 	Notes             string         `json:"operator_notes,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+	// NotifiedAt/NotifiedSeverity are the #787 operator-notification dedupe
+	// linkage: NotifiedAt nil means this open finding has not yet pushed a
+	// notification; NotifiedSeverity is the severity it was notified at, so a
+	// FindingNotifier can detect a genuine escalation vs mere re-observation.
+	// Cleared on every resolution (see the reconciliation.sql resolve queries).
+	NotifiedAt       *time.Time `json:"notified_at,omitempty"`
+	NotifiedSeverity string     `json:"notified_severity,omitempty"`
 }
 
 // RunRecord is a persisted reconciliation run.
@@ -65,6 +72,9 @@ type Store interface {
 	AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error)
 	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
 	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
+	// MarkFindingNotified stamps the #787 dedupe linkage after a FindingNotifier
+	// successfully pushes an operator notification for an OPEN finding.
+	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
 }
 
 // PGStore persists runs + findings via the sqlc layer on a merchant-pinned
@@ -180,7 +190,7 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if err != nil {
 		return FindingRecord{}, err
 	}
-	return findingRecordFromRow(row), nil
+	return FindingRecordFromRow(row), nil
 }
 
 func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
@@ -191,7 +201,7 @@ func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider
 	}
 	out := make([]FindingRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, findingRecordFromRow(row))
+		out = append(out, FindingRecordFromRow(row))
 	}
 	return out, nil
 }
@@ -218,6 +228,13 @@ func (s *PGStore) MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolu
 	_, err := s.DB.Gen(ctx).MarkReconciliationFindingAutoFixed(ctx, gen.MarkReconciliationFindingAutoFixedParams{
 		ID:                 id,
 		ResolutionEvidence: marshalEvidence(resolutionEvidence),
+	})
+	return err
+}
+
+func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error {
+	_, err := s.DB.Gen(ctx).MarkReconciliationFindingNotified(ctx, gen.MarkReconciliationFindingNotifiedParams{
+		ID: id, NotifiedAt: at, Severity: string(severity),
 	})
 	return err
 }
@@ -274,7 +291,7 @@ func (s *PGStore) GetFinding(ctx context.Context, id uuid.UUID) (FindingRecord, 
 	if err != nil {
 		return FindingRecord{}, err
 	}
-	return findingRecordFromRow(row), nil
+	return FindingRecordFromRow(row), nil
 }
 
 func (s *PGStore) ListFindings(ctx context.Context, filter FindingFilter) ([]FindingRecord, error) {
@@ -301,7 +318,7 @@ func (s *PGStore) ListFindings(ctx context.Context, filter FindingFilter) ([]Fin
 	}
 	out := make([]FindingRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, findingRecordFromRow(row))
+		out = append(out, FindingRecordFromRow(row))
 	}
 	return out, nil
 }
@@ -410,7 +427,7 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]
 	var total int64
 	for _, row := range rows {
 		total = row.TotalCount
-		out = append(out, findingRecordFromRow(row.OpenrailsReconciliationFinding))
+		out = append(out, FindingRecordFromRow(row.OpenrailsReconciliationFinding))
 	}
 	return out, total, nil
 }
@@ -575,7 +592,7 @@ func (s *PGStore) AppendFindingNotes(ctx context.Context, id uuid.UUID, note str
 	return err
 }
 
-func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
+func FindingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
 	evidence := unmarshalEvidence(row.Evidence)
 	provider, _ := evidence["provider"].(string)
 	requiresReview := row.Status == string(FindingStatusRequiresReview)
@@ -600,6 +617,7 @@ func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 		ResolvedAt:     row.ResolvedAt,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
+		NotifiedAt:     row.NotifiedAt,
 	}
 	if row.RecommendedAction != nil {
 		rec.RecommendedAction = *row.RecommendedAction
@@ -612,6 +630,9 @@ func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 	}
 	if row.OperatorNotes != nil {
 		rec.Notes = *row.OperatorNotes
+	}
+	if row.NotifiedSeverity != nil {
+		rec.NotifiedSeverity = *row.NotifiedSeverity
 	}
 	return rec
 }

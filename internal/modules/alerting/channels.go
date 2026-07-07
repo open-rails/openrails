@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -56,11 +57,24 @@ func newDeliverer(database *db.DB, st *store, email EmailSender, httpClient *htt
 
 // dispatch delivers the alert to every channel on the rule, in order.
 func (d *deliverer) dispatch(ctx context.Context, rule Rule, alert Alert) []DeliveryResult {
-	results := make([]DeliveryResult, 0, len(rule.Channels))
-	for _, ch := range rule.Channels {
+	return d.dispatchChannels(ctx, rule.Channels, &rule.ID, alert)
+}
+
+// dispatchFinding delivers an alert built from a reconciliation finding (#787)
+// through an explicit channel set rather than a rule — findings are not
+// metric-threshold rules, so there is no Rule row to carry channels; callers
+// pass the severity-based default set instead. The stored notification's
+// rule_id stays NULL (informational-only column; no rule produced this alert).
+func (d *deliverer) dispatchFinding(ctx context.Context, channels []ChannelRef, alert Alert) []DeliveryResult {
+	return d.dispatchChannels(ctx, channels, nil, alert)
+}
+
+func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef, ruleID *uuid.UUID, alert Alert) []DeliveryResult {
+	results := make([]DeliveryResult, 0, len(channels))
+	for _, ch := range channels {
 		switch ch.Type {
 		case ChannelInApp:
-			results = append(results, d.deliverInApp(ctx, rule, alert))
+			results = append(results, d.deliverInApp(ctx, ruleID, alert))
 		case ChannelEmail:
 			results = append(results, d.deliverEmail(ctx, alert))
 		case ChannelWebhook:
@@ -72,14 +86,13 @@ func (d *deliverer) dispatch(ctx context.Context, rule Rule, alert Alert) []Deli
 	return results
 }
 
-func (d *deliverer) deliverInApp(ctx context.Context, rule Rule, alert Alert) DeliveryResult {
-	ruleID := rule.ID
+func (d *deliverer) deliverInApp(ctx context.Context, ruleID *uuid.UUID, alert Alert) DeliveryResult {
 	_, err := d.store.createNotification(ctx, Notification{
 		Severity: alert.Severity,
 		Title:    alertTitle(alert),
 		Body:     alert.Summary,
 		Link:     alert.DashboardLink,
-		RuleID:   &ruleID,
+		RuleID:   ruleID,
 		Data:     alert,
 	})
 	if err != nil {

@@ -58,7 +58,7 @@ func RenderRunTable(w io.Writer, run RunRecord, findings []FindingRecord) error 
 	sorted := make([]FindingRecord, len(findings))
 	copy(sorted, findings)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		if a, b := severityRank(sorted[i].Severity), severityRank(sorted[j].Severity); a != b {
+		if a, b := SeverityRank(sorted[i].Severity), SeverityRank(sorted[j].Severity); a != b {
 			return a < b
 		}
 		if sorted[i].Type != sorted[j].Type {

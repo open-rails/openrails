@@ -205,6 +205,8 @@ func (s *memStore) AutoResolveVanished(ctx context.Context, provider Provider, r
 		rec.Status = FindingStatusFixed
 		rec.Resolution = "auto_vanished"
 		rec.ResolvedAt = &now
+		rec.NotifiedAt = nil
+		rec.NotifiedSeverity = ""
 		n++
 	}
 	return n, nil
@@ -221,6 +223,21 @@ func (s *memStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error 
 	rec.Status = FindingStatusFixed
 	rec.Resolution = "auto_vanished"
 	rec.ResolvedAt = &now
+	rec.NotifiedAt = nil
+	rec.NotifiedSeverity = ""
+	return nil
+}
+
+func (s *memStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byID[id]
+	if !ok {
+		return fmt.Errorf("no finding %s", id)
+	}
+	t := at
+	rec.NotifiedAt = &t
+	rec.NotifiedSeverity = string(severity)
 	return nil
 }
 
@@ -236,6 +253,8 @@ func (s *memStore) MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, evide
 	rec.Resolution = "enforced"
 	rec.ResolutionEvid = evidence
 	rec.ResolvedAt = &now
+	rec.NotifiedAt = nil
+	rec.NotifiedSeverity = ""
 	return nil
 }
 

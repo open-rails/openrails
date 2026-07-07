@@ -315,6 +315,13 @@ type OpenrailsEntitlement struct {
 	GrantID    *uuid.UUID
 }
 
+// #787: one row per merchant recording when the low-severity reconciliation-findings digest last fired.
+type OpenrailsFindingDigestState struct {
+	MerchantID     uuid.UUID
+	LastDigestedAt *time.Time
+	UpdatedAt      time.Time
+}
+
 // #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
 type OpenrailsFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
@@ -952,6 +959,10 @@ type OpenrailsReconciliationFinding struct {
 	Evidence []byte
 	// Authenticated admin identity stamped on manual resolution (approve/ignore via the findings queue, #692); NULL for automatic resolutions.
 	ResolvedBy *string
+	// #787: last time this OPEN finding pushed an operator notification; NULL = not yet notified this open episode. Cleared to NULL on every resolution so a reopened finding notifies again.
+	NotifiedAt *time.Time
+	// #787: severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
+	NotifiedSeverity *string
 }
 
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report.

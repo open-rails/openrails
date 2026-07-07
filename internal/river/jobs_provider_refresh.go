@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -244,6 +245,9 @@ type ProviderRefreshWorker struct {
 	Merchants           *merchants.Service
 	DeferDelete         subscriptions.DeferredDeleteScheduler
 	NotificationService *subscriptions.NotificationService
+	// Alerts bridges requires_review findings into the #736 operator
+	// notification store (#787). nil = no-op (no alerting service wired).
+	Alerts *alerting.Service
 
 	// PullEndpoints overrides provider base URLs on store-armed clients
 	// (fake-provider test seam).
@@ -403,6 +407,12 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUID) error {
 	engine := converge.NewConvergeEngine(w.DB)
 	engine.Now = func() time.Time { return w.now() }
+	if w.Alerts != nil {
+		// #787: nil-check before assigning to the interface field — a nil
+		// *alerting.Service boxed into a non-nil FindingNotifier interface
+		// would panic on first use.
+		engine.Notifier = w.Alerts
+	}
 	_, err := engine.Converge(ctx, converge.Scope{Merchant: merchant.ID(mid)})
 	return err
 }
@@ -462,6 +472,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 
 	engine := reconcile.NewEngine(w.DB, w.Config, fetchers)
 	engine.Now = func() time.Time { return now }
+	if w.Alerts != nil {
+		engine.Notifier = w.Alerts // #787: nil-check, see runConvergence
+	}
 	if w.DeferDelete != nil {
 		// #679: a decider stale-decline cancel from the pull path must durably
 		// queue the deferred NMI delete, same as unknown-resolution.

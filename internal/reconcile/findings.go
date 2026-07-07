@@ -246,7 +246,10 @@ var stateRosterFindingTypes = []FindingType{
 	FindingDuplicateSubscriptions,
 }
 
-func severityRank(s Severity) int {
+// SeverityRank orders severities worst-first (critical=0 .. low=3) for sorting
+// and escalation comparisons (a #787 FindingNotifier re-fires only when the
+// rank strictly decreases — a genuine escalation).
+func SeverityRank(s Severity) int {
 	switch s {
 	case SeverityCritical:
 		return 0
