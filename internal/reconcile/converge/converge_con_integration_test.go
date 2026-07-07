@@ -47,7 +47,9 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "entitlement:"+entID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+				merchantID, []string{"entitlement:" + entID.String(), "customer:" + customer.String()})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
 			return nil
 		})
@@ -56,9 +58,11 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
-		require.Equal(t, 1, res.Findings)
+		// 2 findings: the dangling reference + the #789 NOTIFY access-ended row
+		// (the fixture window closed an hour ago — a real recent lapse).
+		require.Equal(t, 2, res.Findings)
 		require.Equal(t, 1, res.RequiresReview, "dangling reference is surfaced for review, not auto-fixed")
-		require.Equal(t, 0, res.AutoFixed)
+		require.Equal(t, 1, res.AutoFixed)
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,

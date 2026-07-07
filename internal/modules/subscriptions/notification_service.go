@@ -121,16 +121,38 @@ func (s *NotificationService) CreateAndDeliver(ctx context.Context, notification
 }
 
 func (s *NotificationService) deliverExternalNotifications(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := s.sendEmailNotification(ctx, notification); err != nil {
+	if err := s.DeliverEmail(ctx, notification); err != nil {
 		return fmt.Errorf("failed to send email notification: %w", err)
 	}
 
 	return nil
 }
 
-// DeliverEmail sends the appropriate email for an already-created notification.
+// EmailEnabled reports whether an armed email service is attached.
+func (s *NotificationService) EmailEnabled() bool {
+	return s.emailService.IsEnabled()
+}
+
+// DeliverEmail sends the appropriate email for an already-created notification
+// and stamps emailed_at on success (#789). No armed email service ⇒ the row is
+// left undelivered (emailed_at NULL) so the sweep retries once email is wired;
+// a rendered no-op (unsupported type, user without email) still stamps so the
+// sweep never rescans it.
 func (s *NotificationService) DeliverEmail(ctx context.Context, notification *models.NotificationQueue) error {
-	return s.sendEmailNotification(ctx, notification)
+	if !s.EmailEnabled() {
+		log.WithContext(ctx).Debug("email service not available - leaving notification undelivered")
+		return nil
+	}
+	if err := s.sendEmailNotification(ctx, notification); err != nil {
+		return err
+	}
+	if err := s.repo.MarkEmailed(ctx, notification.ID, time.Now().UTC()); err != nil {
+		// The email already went out; a failed stamp means at most one duplicate
+		// on the next sweep. Log, don't fail the delivery.
+		log.WithContext(ctx).WithError(err).WithField("notification_id", notification.ID).
+			Error("failed to stamp notification emailed_at")
+	}
+	return nil
 }
 
 func (s *NotificationService) sendEmailNotification(ctx context.Context, notification *models.NotificationQueue) error {
@@ -150,6 +172,16 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 			if r, ok := notification.Data["reason"].(string); ok {
 				reason = ParsePremiumEndReason(r)
 			}
+		}
+		if reason == PremiumEndReasonAccessEnded {
+			// #789: subscription-row-free path; ended_at rides in the row data.
+			endedAt := time.Now().UTC()
+			if raw, ok := notification.Data["ended_at"].(string); ok {
+				if t, err := time.Parse(time.RFC3339, raw); err == nil {
+					endedAt = t
+				}
+			}
+			return s.emailService.SendAccessEnded(ctx, notification.CustomerID.String(), endedAt)
 		}
 		return s.emailService.SendPremiumEnded(ctx, notification.CustomerID.String(), reason)
 	case models.NotificationPaymentMethodFailed:

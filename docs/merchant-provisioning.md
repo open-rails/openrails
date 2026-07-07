@@ -144,6 +144,7 @@ merchants:
       logo_url: https://doujins.example/logo.png
       from_email: billing@doujins.example
       support_url: https://doujins.example/support
+      signup_url: https://doujins.example/premium
     accounts:
       mobius:
         nmi:

@@ -16,7 +16,11 @@ const (
 	PremiumEndReasonRefund     PremiumEndReason = "refund"
 	PremiumEndReasonAdmin      PremiumEndReason = "admin"
 	PremiumEndReasonRail       PremiumEndReason = "rail_cancel"
-	PremiumEndReasonUnknown    PremiumEndReason = "unknown"
+	// PremiumEndReasonAccessEnded (#789): the converge NOTIFY pass detected the
+	// customer's last entitlement window closed with no transition-site email —
+	// neutral "access ended" copy, no charge/dunning language.
+	PremiumEndReasonAccessEnded PremiumEndReason = "access_ended"
+	PremiumEndReasonUnknown     PremiumEndReason = "unknown"
 )
 
 func ParsePremiumEndReason(value string) PremiumEndReason {
@@ -33,6 +37,8 @@ func ParsePremiumEndReason(value string) PremiumEndReason {
 		return PremiumEndReasonAdmin
 	case string(PremiumEndReasonRail):
 		return PremiumEndReasonRail
+	case string(PremiumEndReasonAccessEnded):
+		return PremiumEndReasonAccessEnded
 	default:
 		return PremiumEndReasonUnknown
 	}

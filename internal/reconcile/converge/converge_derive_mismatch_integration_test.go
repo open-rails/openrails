@@ -175,7 +175,8 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
-				merchantID, []string{"subscription:" + deadSub.String(), "subscription:" + unknownSub.String()})
+				merchantID, []string{"subscription:" + deadSub.String(), "subscription:" + unknownSub.String(), "customer:" + customer.String()})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{deadSub, unknownSub})
@@ -188,8 +189,10 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
-		require.Equal(t, 1, res.Findings, "only the terminally-dead sub is flagged")
-		require.Equal(t, 1, res.AutoFixed)
+		// 2 findings: the dead sub's mismatch + the #789 post-repair NOTIFY
+		// access-ended row for the window this very run just bounded.
+		require.Equal(t, 2, res.Findings, "dead-sub mismatch + access-ended notify; unknown sub untouched")
+		require.Equal(t, 2, res.AutoFixed)
 
 		// Repair = the missed #691 closure: the window is BOUNDED at the
 		// entitled bound (GREATEST(paid-through, ended_at)), not revoked.

@@ -115,6 +115,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
+	// Notification email sweep (#789): delivers undelivered notification_queue
+	// rows (emailed_at NULL) — including the converge NOTIFY pass's access-ended
+	// rows, which are created without inline delivery.
+	if err := addTrackedWorker(r, workers, &riverjobs.NotificationEmailSweepWorker{
+		DB:            r.DB,
+		Notifications: r.NotificationService,
+	}); err != nil {
+		return fmt.Errorf("add notification email sweep worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -670,6 +679,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
+	))
+
+	// Every 10 minutes: notification email sweep (#789) — retry undelivered
+	// notification emails (emailed_at NULL). Cheap no-op when nothing is queued
+	// or no email service is armed.
+	jobs = append(jobs, r.healthPeriodic(
+		10*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.NotificationEmailSweepArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 10 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Every 15 minutes: metric threshold alerting evaluation (#736). Slow

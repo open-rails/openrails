@@ -81,6 +81,30 @@ WHERE seen = true AND created_at < sqlc.arg(cutoff)::timestamptz;
 DELETE FROM openrails.notification_queue
 WHERE created_at < sqlc.arg(cutoff)::timestamptz;
 
+-- #789: dedupe guard for the converge NOTIFY pass — any premium_ended row
+-- created at/after the window close means the customer was already told.
+-- name: PremiumEndedNotificationExistsSince :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND nq.customer_id = sqlc.arg(customer_id)::uuid
+      AND nq.event_type = 'premium_ended'
+      AND nq.created_at >= sqlc.arg(since)::timestamptz
+)::boolean AS found;
+
+-- #789: undelivered rows for the notification email sweep (emailed_at NULL).
+-- name: ListUndeliveredNotifications :many
+SELECT * FROM openrails.notification_queue nq
+WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND nq.emailed_at IS NULL
+ORDER BY nq.created_at
+LIMIT sqlc.arg(page_limit)::int;
+
+-- name: MarkNotificationEmailed :execrows
+UPDATE openrails.notification_queue
+SET emailed_at = sqlc.arg(emailed_at)::timestamptz
+WHERE id = $1 AND emailed_at IS NULL;
+
 -- name: CountRepairAlerts :one
 SELECT count(*) FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1

@@ -297,6 +297,9 @@ func mergeMerchantProfileConfig(dst *MerchantProfileConfig, src MerchantProfileC
 	if strings.TrimSpace(src.SupportURL) != "" {
 		dst.SupportURL = src.SupportURL
 	}
+	if strings.TrimSpace(src.SignupURL) != "" {
+		dst.SignupURL = src.SignupURL
+	}
 }
 
 func mergeInvoiceConfig(dst, src *InvoiceConfig) {
@@ -433,6 +436,7 @@ type MerchantProfileConfig struct {
 	LogoURL     string `yaml:"logo_url,omitempty" koanf:"logo_url"`
 	FromEmail   string `yaml:"from_email,omitempty" koanf:"from_email"`
 	SupportURL  string `yaml:"support_url,omitempty" koanf:"support_url"`
+	SignupURL   string `yaml:"signup_url,omitempty" koanf:"signup_url"`
 }
 
 type RailMerchantAccountConfig map[string]ProviderRailAccountConfig
@@ -802,6 +806,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 				LogoURL:     strings.TrimSpace(mt.Profile.LogoURL),
 				FromEmail:   strings.TrimSpace(mt.Profile.FromEmail),
 				SupportURL:  strings.TrimSpace(mt.Profile.SupportURL),
+				SignupURL:   strings.TrimSpace(mt.Profile.SignupURL),
 			}
 			if conf.Profile.DisplayName == "" {
 				conf.Profile.DisplayName = strings.TrimSpace(mt.DisplayName)
@@ -917,7 +922,8 @@ func hasManifestProfile(p MerchantProfileConfig) bool {
 	return strings.TrimSpace(p.DisplayName) != "" ||
 		strings.TrimSpace(p.LogoURL) != "" ||
 		strings.TrimSpace(p.FromEmail) != "" ||
-		strings.TrimSpace(p.SupportURL) != ""
+		strings.TrimSpace(p.SupportURL) != "" ||
+		strings.TrimSpace(p.SignupURL) != ""
 }
 
 // resolvedManifestRailAccount is the store/DB-independent front half of a

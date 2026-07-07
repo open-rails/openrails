@@ -40,6 +40,9 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
 		}
+		if profileURL := strings.TrimSpace(t.Profile.SignupURL); profileURL != "" && !validHTTPURL(profileURL) {
+			return fmt.Errorf("merchant %q profile.signup_url must be an http or https URL", slug)
+		}
 		if t.RemoteApplication != nil {
 			if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {
 				return err

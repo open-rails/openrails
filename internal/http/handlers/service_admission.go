@@ -361,6 +361,7 @@ type serviceMerchantProfileConfiguration struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
+	SignupURL   string `json:"signup_url,omitempty"`
 }
 
 // ServiceGetMerchantSettings returns the merchant-owned policy-sync document.
@@ -454,6 +455,7 @@ func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.Merch
 		LogoURL:     strings.TrimSpace(in.LogoURL),
 		FromEmail:   strings.TrimSpace(in.FromEmail),
 		SupportURL:  strings.TrimSpace(in.SupportURL),
+		SignupURL:   strings.TrimSpace(in.SignupURL),
 	}
 }
 
@@ -474,6 +476,7 @@ func merchantProfileResponse(in *models.MerchantProfileConfiguration) serviceMer
 		LogoURL:     in.LogoURL,
 		FromEmail:   in.FromEmail,
 		SupportURL:  in.SupportURL,
+		SignupURL:   in.SignupURL,
 	}
 }
 

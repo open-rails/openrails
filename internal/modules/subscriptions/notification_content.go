@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -180,6 +181,50 @@ func RenderSubscriptionExpiredEmail(storeName, customerPortalURL string, data Su
 
 			The %s Team
 		`, data.Username, premiumName, periodEnd, strings.TrimSpace(linkText), storeName),
+	}
+}
+
+// RenderAccessEndedEmail (#789) tells a customer their premium access ended.
+// Neutral copy — these are often long-lapsed users, so no "we tried to charge
+// you" language. A non-empty signupURL renders a "Sign up again" CTA.
+func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.Time) EmailContent {
+	endedOn := endedAt.Format("Jan 2, 2006")
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	linkHTML := ""
+	linkText := ""
+	if signupURL != "" {
+		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Sign up again</a></p>`, signupURL)
+		linkText = fmt.Sprintf("Sign up again any time: %s", signupURL)
+	}
+
+	return EmailContent{
+		Subject: fmt.Sprintf("Your %s premium access has ended", storeName),
+		HTML: fmt.Sprintf(`
+			<h2>Your Premium Access Has Ended</h2>
+			<p>Hi %s,</p>
+			<p>Your %s premium access ended on <strong>%s</strong>.</p>
+			<p>To keep enjoying premium, sign up again — we'd love to have you back.</p>
+			%s
+			<p>If you have any questions, just reply to this email.</p>
+			<p>The %s Team</p>
+		`, name, storeName, endedOn, linkHTML, storeName),
+		Plain: fmt.Sprintf(`
+			Your Premium Access Has Ended
+
+			Hi %s,
+
+			Your %s premium access ended on %s.
+
+			To keep enjoying premium, sign up again — we'd love to have you back.
+
+			%s
+
+			If you have any questions, just reply to this email.
+			The %s Team
+		`, name, storeName, endedOn, linkText, storeName),
 	}
 }
 

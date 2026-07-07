@@ -147,6 +147,11 @@ func (s *EmailService) storeName(ctx context.Context) string {
 	return name
 }
 
+// signupURL is the merchant's winback/signup page (#789); "" when undeclared.
+func (s *EmailService) signupURL(ctx context.Context) string {
+	return strings.TrimSpace(s.merchantProfile(ctx).SignupURL)
+}
+
 func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data SubscriptionEmailData) error {
 	rendered := RenderSubscriptionConfirmationEmail(s.storeName(ctx), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
@@ -163,7 +168,7 @@ func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data Su
 }
 
 func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data SubscriptionEmailData) error {
-	rendered := RenderSubscriptionExpiredEmail(s.storeName(ctx), "", data)
+	rendered := RenderSubscriptionExpiredEmail(s.storeName(ctx), s.signupURL(ctx), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
@@ -374,6 +379,12 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 		return nil
 	}
 
+	// access_ended (#789) works for grant-only customers: no subscription row
+	// required, so it resolves the user directly instead of via getEmailData.
+	if reason == PremiumEndReasonAccessEnded {
+		return s.SendAccessEnded(ctx, userID, s.now())
+	}
+
 	emailData, err := s.getEmailData(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
@@ -395,6 +406,25 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	default:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
 	}
+}
+
+// SendAccessEnded (#789) sends the neutral access-ended notice. It never needs
+// a subscription row — grant-only customers get it too.
+func (s *EmailService) SendAccessEnded(ctx context.Context, userID string, endedAt time.Time) error {
+	if !s.IsEnabled() {
+		log.WithContext(ctx).Debug("email service not available - skipping access-ended email")
+		return nil
+	}
+	username, email, err := s.getUserEmail(ctx, userID)
+	if err != nil {
+		if errors.Is(err, errUserEmailUnavailable) {
+			log.WithContext(ctx).Debug("email unavailable - skipping access-ended email")
+			return nil
+		}
+		return fmt.Errorf("failed to get user profile: %w", err)
+	}
+	rendered := RenderAccessEndedEmail(s.storeName(ctx), s.signupURL(ctx), username, endedAt)
+	return s.SendEmail(ctx, email, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 // SendPaymentFailed sends a payment failure email

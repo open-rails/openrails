@@ -33,4 +33,7 @@ type MerchantProfileConfiguration struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
+	// SignupURL (#789) is the winback/signup page access-ended and expiry
+	// emails link to. "" ⇒ no CTA rendered.
+	SignupURL string `json:"signup_url,omitempty"`
 }

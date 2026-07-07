@@ -146,6 +146,12 @@ func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, use
 	return notificationsFromGen(rows)
 }
 
+// MarkEmailed stamps emailed_at once (#789); already-stamped rows are a no-op.
+func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, at time.Time) error {
+	_, err := r.db.Gen(ctx).MarkNotificationEmailed(ctx, gen.MarkNotificationEmailedParams{ID: id, EmailedAt: at})
+	return err
+}
+
 func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) error {
 	rows, err := r.db.Gen(ctx).MarkNotificationSeen(ctx, id)
 	if err != nil {

@@ -97,7 +97,8 @@ type ConvergeFinding struct {
 	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
 }
 
-// Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order.
+// Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order;
+// the NOTIFY stage (#789) runs after their repairs, on the converged state.
 type Pass interface {
 	Plane() string
 	Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error)
@@ -126,10 +127,15 @@ type ConvergeEngine struct {
 	// Now — reconcile.FindingNotifier lives in the parent package, which
 	// converge already imports (the LIFE pass's decider).
 	Notifier reconcile.FindingNotifier
+
+	// notify (#789) is NOT in passes: it detects on the state the plane repairs
+	// just left behind (a window DERIVE re-projected this run never emails), so
+	// Converge runs it after the remediation loop, not at collection time.
+	notify *notifyPass
 }
 
-// NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes (each
-// fleshed out across #511 Phase D).
+// NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes
+// (#511 Phase D) plus the post-repair NOTIFY stage (#789).
 func NewConvergeEngine(database *db.DB) *ConvergeEngine {
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return time.Now().UTC() }}
 	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
@@ -138,6 +144,7 @@ func NewConvergeEngine(database *db.DB) *ConvergeEngine {
 	// nil: convergence applies LOCAL state only — converge-not-replay.
 	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	e.passes = []Pass{&derivePass{e: e}, &lifePass{e: e}, &conPass{e: e}}
+	e.notify = &notifyPass{e: e}
 	return e
 }
 
@@ -168,8 +175,9 @@ func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID,
 	return NewConvergeEngine(database).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
 }
 
-// Converge runs every plane pass for the scope (DERIVE → LIFE → CON), then
-// persists + remediates each finding. It must be called inside a merchant-scoped
+// Converge runs every plane pass for the scope (DERIVE → LIFE → CON), persists
+// + remediates each finding, then runs the post-repair NOTIFY stage (#789) on
+// the converged state. It must be called inside a merchant-scoped
 // connection (RunInMerchantConn) so RLS + the gen queries resolve to the merchant.
 // When the scope is clean (no findings) it does no writes at all — the idempotent
 // no-op that keeps the inline hot path cheap.
@@ -187,57 +195,79 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 		}
 		collected = append(collected, fs...)
 	}
-	if len(collected) == 0 {
-		return res, nil // converged: no run, no writes
-	}
 
 	q := e.DB.Gen(ctx)
 	// A run stamps first_seen_run/last_seen_run on the findings (and drives
 	// auto-vanish). Created lazily — only when there is something to persist.
-	run, err := q.CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		MerchantID: scope.Merchant.UUID(), Mode: "enforce", Rails: []string{"self"},
-	})
-	if err != nil {
-		return res, fmt.Errorf("converge: create run: %w", err)
-	}
-	res.RunID = &run.ID
-
-	for i := range collected {
-		status, err := e.remediate(ctx, scope, collected[i])
-		if err != nil {
-			return res, err
+	var runID *uuid.UUID
+	apply := func(findings []ConvergeFinding) error {
+		if len(findings) == 0 {
+			return nil
 		}
-		row, perr := e.persist(ctx, q, scope, run.ID, collected[i], status)
-		if perr != nil {
-			return res, perr
+		if runID == nil {
+			run, err := q.CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
+				MerchantID: scope.Merchant.UUID(), Mode: "enforce", Rails: []string{"self"},
+			})
+			if err != nil {
+				return fmt.Errorf("converge: create run: %w", err)
+			}
+			runID = &run.ID
+			res.RunID = runID
 		}
-		if e.Notifier != nil {
-			if nerr := e.Notifier.NotifyFinding(ctx, reconcile.FindingRecordFromRow(row)); nerr != nil {
-				log.WithContext(ctx).WithError(nerr).WithField("finding_id", row.ID).
-					Warn("converge: finding notification failed; continuing")
+		for i := range findings {
+			status, err := e.remediate(ctx, scope, findings[i])
+			if err != nil {
+				return err
+			}
+			row, perr := e.persist(ctx, q, scope, *runID, findings[i], status)
+			if perr != nil {
+				return perr
+			}
+			if e.Notifier != nil {
+				if nerr := e.Notifier.NotifyFinding(ctx, reconcile.FindingRecordFromRow(row)); nerr != nil {
+					log.WithContext(ctx).WithError(nerr).WithField("finding_id", row.ID).
+						Warn("converge: finding notification failed; continuing")
+				}
+			}
+			res.Findings++
+			switch status {
+			case "auto_fixed":
+				res.AutoFixed++
+			case "reconcile_required":
+				res.ReconcileRequired++
+			case "requires_review":
+				res.RequiresReview++
+				res.AdminRequired++
+			}
+			if findings[i].Class == ClassOperator {
+				res.Operator++
 			}
 		}
-		res.Findings++
-		switch status {
-		case "auto_fixed":
-			res.AutoFixed++
-		case "reconcile_required":
-			res.ReconcileRequired++
-		case "requires_review":
-			res.RequiresReview++
-			res.AdminRequired++
-		}
-		if collected[i].Class == ClassOperator {
-			res.Operator++
-		}
+		return nil
+	}
+	if err := apply(collected); err != nil {
+		return res, err
 	}
 
+	// NOTIFY (#789) detects on the state the repairs above just converged, so a
+	// window DERIVE re-projected in this very run never emails "access ended".
+	notifyFindings, err := e.notify.Run(ctx, scope)
+	if err != nil {
+		return res, fmt.Errorf("converge %s pass: %w", e.notify.Plane(), err)
+	}
+	if err := apply(notifyFindings); err != nil {
+		return res, err
+	}
+
+	if runID == nil {
+		return res, nil // converged: no run, no writes
+	}
 	summary, _ := json.Marshal(map[string]any{
 		"findings": res.Findings, "auto_fixed": res.AutoFixed,
 		"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
 	})
 	if _, err := q.FinishReconciliationRun(ctx, gen.FinishReconciliationRunParams{
-		ID: run.ID, Status: "completed", Summary: summary,
+		ID: *runID, Status: "completed", Summary: summary,
 	}); err != nil {
 		return res, fmt.Errorf("converge: finish run: %w", err)
 	}

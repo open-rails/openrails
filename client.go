@@ -372,6 +372,7 @@ type MerchantProfileInput struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
+	SignupURL   string `json:"signup_url,omitempty"`
 }
 
 // MerchantSettings is the merchant-owned admission/policy document installed by

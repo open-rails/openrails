@@ -1118,6 +1118,86 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 	return items, nil
 }
 
+const listRecentlyClosedLastEntitlementWindows = `-- name: ListRecentlyClosedLastEntitlementWindows :many
+SELECT DISTINCT ON (e.customer_id)
+       e.id, e.customer_id, e.entitlement,
+       LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
+       e.source_type, e.source_id
+FROM openrails.entitlements e
+WHERE e.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
+  AND e.deleted_at IS NULL
+  AND (e.end_at IS NOT NULL OR e.revoked_at IS NOT NULL)
+  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $3::timestamptz
+  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $4::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.entitlements live
+      WHERE live.merchant_id = e.merchant_id
+        AND live.customer_id = e.customer_id
+        AND live.entitlement = e.entitlement
+        AND live.deleted_at IS NULL AND live.revoked_at IS NULL
+        AND live.start_at <= $4::timestamptz
+        AND (live.end_at IS NULL OR live.end_at > $4::timestamptz)
+  )
+ORDER BY e.customer_id,
+         LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC
+`
+
+type ListRecentlyClosedLastEntitlementWindowsParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  *uuid.UUID
+	ClosedAfter time.Time
+	Now         time.Time
+}
+
+type ListRecentlyClosedLastEntitlementWindowsRow struct {
+	ID          uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	ClosedAt    *time.Time
+	SourceType  string
+	SourceID    uuid.UUID
+}
+
+// #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
+// window closed inside (closed_after, now] — the close instant is
+// LEAST(end_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
+// — with NO other live window for the same (customer, entitlement). One row per
+// customer (latest close) — one email per customer, whatever ended the access
+// (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
+// NULL = merchant-wide sweep.
+func (q *Queries) ListRecentlyClosedLastEntitlementWindows(ctx context.Context, arg ListRecentlyClosedLastEntitlementWindowsParams) ([]ListRecentlyClosedLastEntitlementWindowsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyClosedLastEntitlementWindows,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ClosedAfter,
+		arg.Now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentlyClosedLastEntitlementWindowsRow
+	for rows.Next() {
+		var i ListRecentlyClosedLastEntitlementWindowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.Entitlement,
+			&i.ClosedAt,
+			&i.SourceType,
+			&i.SourceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
 SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
