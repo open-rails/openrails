@@ -46,7 +46,7 @@ jobs:
         # never compile these files.
         run: go vet -tags integration ./...
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
 
   sqlc:
     runs-on: ubuntu-latest
@@ -118,7 +118,9 @@ jobs:
       - name: Download modules
         run: go mod download
       # Integration tests share one compose-backed Postgres/Garnet stack and
-      # run serially. Testcontainers remain capped fallbacks for direct
-      # package runs, not the normal CI path.
+      # run serially. The script expands ./... to only the packages carrying
+      # the `integration` build tag (#790) so the serial run doesn't repeat
+      # the build job's unit tests. Testcontainers remain capped fallbacks
+      # for direct package runs, not the normal CI path.
       - name: Integration test
         run: bash scripts/test_integration.sh ./...
