@@ -3,8 +3,10 @@ import { ArrowLeftIcon } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
+import { Fact } from "@/components/fact-card"
 import { StatusBadge } from "@/components/status-badge"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -41,12 +43,16 @@ import {
 } from "@/components/ui/table"
 import { useApiData } from "@/hooks/use-api-data"
 import {
+  cancelReprice,
   cancelSubscription,
   changeSubscriptionPaymentMethod,
   getCustomerPaymentMethods,
+  getPrice,
   getSubscription,
+  listReprices,
   resumeSubscription,
 } from "@/lib/api/endpoints"
+import type { SubscriptionReprice } from "@/lib/api/types"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 
@@ -54,6 +60,13 @@ export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
   const { data: sub, loading, error, reload } = useApiData(() => getSubscription(id), [id])
+  // #777: pending-reprice badge — at most one scheduled reprice can exist per
+  // subscription at a time.
+  const { data: scheduledReprices, reload: reloadReprices } = useApiData(
+    () => (id ? listReprices({ subscription_id: id, status: "scheduled" }) : Promise.resolve(null)),
+    [id],
+  )
+  const pendingReprice = scheduledReprices?.items?.[0]
   React.useEffect(() => {
     if (error) toastApiError(error, "Load subscription")
   }, [error])
@@ -106,9 +119,34 @@ export function SubscriptionDetailPage() {
           {formatDate(sub.current_period_starts_at)} → {formatDate(sub.current_period_ends_at)}
         </Fact>
         <Fact label="Price">
-          {sub.price?.unit_amount !== undefined && sub.price?.currency
-            ? formatMicros(sub.price.unit_amount, sub.price.currency)
-            : shortId(sub.price_id ?? "—", 13)}
+          <div className="flex flex-col gap-1">
+            <span className="flex items-center gap-2">
+              {sub.price?.amount !== undefined && sub.price?.currency ? (
+                <Link className="underline-offset-2 hover:underline" to={`/catalog/prices/${sub.price_id}`}>
+                  {formatMicros(sub.price.amount, sub.price.currency)}
+                </Link>
+              ) : (
+                <Link className="font-mono text-xs underline-offset-2 hover:underline" to={`/catalog/prices/${sub.price_id}`}>
+                  {shortId(sub.price_id ?? "—", 13)}
+                </Link>
+              )}
+              {sub.price?.archived && (
+                <Badge variant="secondary" title="Pinned to an archived (prior) version">
+                  prior version
+                </Badge>
+              )}
+            </span>
+            {sub.price?.key && <span className="font-mono text-xs text-muted-foreground">{sub.price.key}</span>}
+            {pendingReprice && (
+              <PendingRepriceBadge
+                reprice={pendingReprice}
+                onCancelled={() => {
+                  reloadReprices()
+                  reload()
+                }}
+              />
+            )}
+          </div>
         </Fact>
         <Fact label="Grace ends">{formatDate(sub.grace_ends_at)}</Fact>
         <Fact label="Retries">
@@ -155,17 +193,6 @@ export function SubscriptionDetailPage() {
         </CardContent>
       </Card>
     </div>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader className="pb-1">
-        <CardTitle className="text-xs font-normal text-muted-foreground uppercase">{label}</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm">{children}</CardContent>
-    </Card>
   )
 }
 
@@ -311,5 +338,43 @@ function ChangePaymentMethodDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// PendingRepriceBadge (#777) surfaces a subscription's scheduled price move
+// (from the #773 primitive, usually scheduled in bulk by the price-change
+// wizard) with an inline cancel — allowed until the effective date; an
+// already-applied reprice cannot reach this badge (it's filtered to
+// status=scheduled by the caller).
+function PendingRepriceBadge({ reprice, onCancelled }: { reprice: SubscriptionReprice; onCancelled: () => void }) {
+  const { data: toPrice } = useApiData(() => getPrice(reprice.to_price_id), [reprice.to_price_id])
+  const [busy, setBusy] = React.useState(false)
+  return (
+    <span className="flex items-center gap-1.5">
+      <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
+        moves to {toPrice ? formatMicros(toPrice.unit_amount, toPrice.currency) : shortId(reprice.to_price_id, 9)} on{" "}
+        {formatDate(reprice.effective_at)}
+      </Badge>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-5 px-1.5 text-xs"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          try {
+            await cancelReprice(reprice.id)
+            toast.success("Reprice canceled")
+            onCancelled()
+          } catch (err) {
+            toastApiError(err, "Cancel reprice")
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        cancel
+      </Button>
+    </span>
   )
 }

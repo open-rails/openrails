@@ -357,6 +357,33 @@ func AdminGetPriceByKey(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
+// AdminGetPriceKeyHistory returns a price key's full version chain resolved
+// from the #774 pointer-movement log (most-recent-first) — the #777 console
+// price page's "version chain with dates" surface. Not part of #774's
+// original HTTP surface (which only exposed by-key resolution + relabel).
+func AdminGetPriceKeyHistory(r *httprequest.Request) {
+	key := strings.TrimSpace(r.Param("key"))
+	if key == "" {
+		r.ErrorJSON(http.StatusBadRequest, "key required")
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	items, err := svc.GetPriceKeyHistory(r.Request.Context(), key)
+	if err != nil {
+		writeCatalogError(r, priceLookupErr(err))
+		return
+	}
+	r.JSON(http.StatusOK, paginatedResponse[billingservice.PriceKeyHistoryEntry]{
+		Items:  items,
+		Total:  int64(len(items)),
+		Limit:  len(items),
+		Offset: 0,
+	})
+}
+
 type setPriceKeyRequest struct {
 	Key string `json:"key"`
 }

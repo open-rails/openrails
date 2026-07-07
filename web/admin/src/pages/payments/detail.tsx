@@ -3,6 +3,7 @@ import { ArrowLeftIcon, Undo2Icon } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
+import { Fact } from "@/components/fact-card"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -137,17 +138,6 @@ export function PaymentDetailPage() {
         </CardContent>
       </Card>
     </div>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader className="pb-1">
-        <CardTitle className="text-xs font-normal text-muted-foreground uppercase">{label}</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm">{children}</CardContent>
-    </Card>
   )
 }
 

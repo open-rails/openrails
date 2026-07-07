@@ -73,18 +73,33 @@ type RepriceAllPriorVersionsRequest struct {
 	EffectiveAt time.Time
 }
 
-// RepriceBatchResult summarizes a bulk reprice_all_prior_versions call.
+// RepriceBatchResult summarizes a bulk reprice_all_prior_versions call. JSON
+// tags match the shape documented for #777 console consumers: {batch_id,
+// to_price_id, matched, scheduled:[...], skipped:[...]}.
 type RepriceBatchResult struct {
-	BatchID   uuid.UUID
-	ToPriceID uuid.UUID
-	Matched   int
-	Scheduled []RepriceOutcome
-	Skipped   []RepriceOutcome
+	BatchID   uuid.UUID        `json:"batch_id"`
+	ToPriceID uuid.UUID        `json:"to_price_id"`
+	Matched   int              `json:"matched"`
+	Scheduled []RepriceOutcome `json:"scheduled"`
+	Skipped   []RepriceOutcome `json:"skipped"`
 }
 
 // RepriceOutcome is one subscription's result within a bulk reprice.
 type RepriceOutcome struct {
-	SubscriptionID uuid.UUID
-	RepriceID      uuid.UUID // zero when Skipped
-	Reason         string    // set when skipped (constraint violation)
+	SubscriptionID uuid.UUID `json:"subscription_id"`
+	RepriceID      uuid.UUID `json:"reprice_id,omitempty"` // zero when Skipped
+	Reason         string    `json:"reason,omitempty"`     // set when skipped (constraint violation)
+}
+
+// RepricePreviewResult is the #777 read-only "affected-count preview": how
+// many active subscriptions would move if the wizard's migration step ran
+// right now, WITHOUT scheduling anything. Computed over the key's WHOLE
+// version chain (current + archived) rather than #773's "prior versions"
+// definition, because preview always runs BEFORE the price-edit step creates
+// the new version — at that moment every existing subscriber on the key is
+// still, by definition, a "prior version" candidate once the bump lands.
+type RepricePreviewResult struct {
+	PriceKey  string    `json:"price_key"`
+	ToPriceID uuid.UUID `json:"to_price_id"`
+	Matched   int       `json:"matched"`
 }

@@ -142,6 +142,57 @@ func RepriceAllPriorVersions(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
+// PreviewRepriceAllPriorVersions is #777's read-only dry-run counterpart to
+// RepriceAllPriorVersions: returns the affected-count WITHOUT scheduling
+// anything — the console wizard's Step 2 preview, called before the price
+// edit that would create the new version. Not part of #773's original
+// surface (which only exposed the mutating bulk call).
+func PreviewRepriceAllPriorVersions(r *httprequest.Request) {
+	key := strings.TrimSpace(r.Query("price_key"))
+	if key == "" {
+		r.ErrorJSON(http.StatusBadRequest, "price_key required")
+		return
+	}
+	if r.State.RepriceService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+		return
+	}
+	out, err := r.State.RepriceService.PreviewAllPriorVersions(r.Request.Context(), key)
+	if err != nil {
+		writeRepriceError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+// ListRepriceBatchesByKey lists a price key's bulk reprice operations, most
+// recent first — the #777 console price page's "is there a pending
+// migration for this key" surface (without already knowing a batch id).
+func ListRepriceBatchesByKey(r *httprequest.Request) {
+	key := strings.TrimSpace(r.Query("price_key"))
+	if key == "" {
+		r.ErrorJSON(http.StatusBadRequest, "price_key required")
+		return
+	}
+	if r.State.RepriceService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+		return
+	}
+	limit := parseIntDefault(r.Query("limit"), 20)
+	offset := parseIntDefault(r.Query("offset"), 0)
+	items, err := r.State.RepriceService.ListBatchesForKey(r.Request.Context(), key, limit, offset)
+	if err != nil {
+		writeRepriceError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, paginatedResponse[*models.RepriceBatch]{
+		Items:  items,
+		Total:  int64(len(items)),
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
 // ListSubscriptionReprices lists scheduled/applied/canceled reprices, filtered
 // by subscription_id / reprice_batch_id / status — the inspect-before-effect
 // surface the #777 console wizard needs.

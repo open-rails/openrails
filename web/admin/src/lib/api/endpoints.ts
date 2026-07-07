@@ -25,8 +25,14 @@ import type {
   PaymentMethodResponse,
   PaymentObject,
   PaymentProviderConfig,
+  PriceKeyHistoryEntry,
   RawEntitlement,
   RepairAlert,
+  RepriceBatch,
+  RepriceBatchResult,
+  RepricePreviewResult,
+  RepriceStatus,
+  SubscriptionReprice,
   TeamInvite,
   TeamInviteResult,
   TeamMember,
@@ -154,6 +160,8 @@ export const listProducts = (limit: number, offset: number, activeOnly?: boolean
     query: { limit, offset, active_only: activeOnly },
   })
 
+export const getProduct = (id: string) => api<CatalogProduct>(`/merchant/catalog/products/${id}`)
+
 export interface ProductRequest {
   key: string
   display_name: string
@@ -190,16 +198,77 @@ export interface PriceRequest {
   auto_renew?: boolean
   trial_unit_amount?: number
   trial_duration_hours?: number
+  // Key (#774): declaring the SAME key as an existing live price with a
+  // DIFFERENT amount is a version bump (the #777 wizard's whole mechanism) —
+  // omit to auto-default.
+  key?: string
+  // Providers to (re)attach — e.g. carried over from the price being
+  // replaced so the new version doesn't silently lose its Stripe/CCBill/NMI
+  // links. Empty/omitted = DB-only price.
+  providers?: string[]
 }
 
 export const createPrice = (body: PriceRequest) =>
   api<CatalogPrice>("/merchant/catalog/prices", { method: "POST", body })
+
+export const getPrice = (id: string) => api<CatalogPrice>(`/merchant/catalog/prices/${id}`)
+
+export const getPriceByKey = (key: string) =>
+  api<CatalogPrice>(`/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`)
 
 export const activatePrice = (id: string) =>
   api<CatalogPrice>(`/merchant/catalog/prices/${id}/activate`, { method: "POST" })
 
 export const deactivatePrice = (id: string) =>
   api<CatalogPrice>(`/merchant/catalog/prices/${id}/deactivate`, { method: "POST" })
+
+// getPriceKeyHistory returns a price key's version chain (most-recent-first),
+// resolved server-side from the #774 pointer-movement log — the price
+// detail page's "version chain with dates" (#777).
+export const getPriceKeyHistory = (key: string) =>
+  api<ItemsEnvelope<PriceKeyHistoryEntry>>(
+    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`,
+  )
+
+// --- Repricing / migration (#773 primitive, #777 console wizard) ---
+
+// previewRepriceAllPriorVersions is the wizard's Step 2 affected-count
+// preview: a READ-ONLY dry run, called BEFORE the price edit lands (so it
+// never mutates, unlike repriceAllPriorVersions below).
+export const previewRepriceAllPriorVersions = (priceKey: string) =>
+  api<RepricePreviewResult>("/merchant/catalog/reprice-all-prior-versions/preview", {
+    query: { price_key: priceKey },
+  })
+
+// repriceAllPriorVersions bulk-schedules every active subscription pinned to
+// a prior version of priceKey to move to its current price at effectiveAt.
+export const repriceAllPriorVersions = (priceKey: string, effectiveAt: string) =>
+  api<RepriceBatchResult>("/merchant/catalog/reprice-all-prior-versions", {
+    method: "POST",
+    body: { price_key: priceKey, effective_at: effectiveAt },
+  })
+
+// listRepriceBatchesByKey finds a price key's bulk reprice operations
+// (most recent first) — the price page's pending-migration lookup, without
+// already knowing a batch id.
+export const listRepriceBatchesByKey = (priceKey: string, limit = 20) =>
+  api<ItemsEnvelope<RepriceBatch>>("/merchant/reprices/batches", {
+    query: { price_key: priceKey, limit },
+  })
+
+export interface RepriceFilters {
+  subscription_id?: string
+  reprice_batch_id?: string
+  status?: RepriceStatus
+}
+
+export const listReprices = (filters: RepriceFilters, limit = 100, offset = 0) =>
+  api<ItemsEnvelope<SubscriptionReprice>>("/merchant/reprices", {
+    query: { ...filters, limit, offset },
+  })
+
+export const cancelReprice = (id: string) =>
+  api<{ message: string }>(`/merchant/reprices/${id}/cancel`, { method: "POST" })
 
 export const publishCatalog = (manifest: unknown, opts: { plan_only?: boolean; insert?: boolean; overwrite?: boolean; prune?: boolean }) =>
   api<{ plan: unknown; result?: unknown }>("/merchant/catalog/publish", {

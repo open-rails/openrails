@@ -618,6 +618,9 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	prices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice), writeMW...)
 	prices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices), readMW...)
 	prices.Handle(http.MethodGet, "/by-key/:key", h(httphandlers.AdminGetPriceByKey), readMW...)
+	// #777: the key's version chain resolved from the #774 pointer-movement
+	// log, most-recent-first — the console price page's "history with dates".
+	prices.Handle(http.MethodGet, "/by-key/:key/history", h(httphandlers.AdminGetPriceKeyHistory), readMW...)
 	prices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice), readMW...)
 	prices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice), writeMW...)
 	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice), writeMW...)
@@ -688,8 +691,16 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// the inspect (list/get) and cancel-before-effective surface the #777
 	// console wizard needs.
 	rr.Handle(http.MethodPost, "/catalog/reprice-all-prior-versions", h(httphandlers.RepriceAllPriorVersions), subWrite...)
+	// #777: read-only dry-run affected-count preview — the wizard's Step 2,
+	// called BEFORE the price edit that creates the new version (so never
+	// mutates, unlike the bulk call above).
+	rr.Handle(http.MethodGet, "/catalog/reprice-all-prior-versions/preview", h(httphandlers.PreviewRepriceAllPriorVersions), subRead...)
 	reprices := rr.Group("/reprices")
 	reprices.Handle(http.MethodGet, "", h(httphandlers.ListSubscriptionReprices), subRead...)
+	// #777: list a price key's bulk reprice batches (pending-migration display
+	// on the price page) — must be registered before "/:id" so "batches" is
+	// never captured as an id.
+	reprices.Handle(http.MethodGet, "/batches", h(httphandlers.ListRepriceBatchesByKey), subRead...)
 	reprices.Handle(http.MethodGet, "/:id", h(httphandlers.GetSubscriptionReprice), subRead...)
 	reprices.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.CancelSubscriptionReprice), subWrite...)
 

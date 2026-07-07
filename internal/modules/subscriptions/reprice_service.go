@@ -202,6 +202,56 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 	return result, nil
 }
 
+// PreviewAllPriorVersions is #777's read-only dry-run counterpart to
+// RepriceAllPriorVersions: same target-set resolution, but NEVER creates a
+// batch, schedules a reprice, or emits a notification. Used by the console
+// wizard's Step 2 affected-count preview, called BEFORE the price-edit step
+// creates the new version — so unlike the real bulk call (which targets the
+// key's ARCHIVED prior versions once the new one is current), this counts the
+// key's WHOLE chain (current + archived): every active subscriber on it today
+// is a "prior version" candidate the instant the pending edit lands.
+func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey string) (*RepricePreviewResult, error) {
+	key := strings.TrimSpace(priceKey)
+	if key == "" {
+		return nil, fmt.Errorf("reprice_all_prior_versions preview: price_key required")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	toPrice, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
+	if err != nil {
+		return nil, fmt.Errorf("reprice_all_prior_versions preview: price key %q has no current price: %w", key, err)
+	}
+	chain, err := s.prices.ListChainByKey(ctx, tid.UUID(), key)
+	if err != nil {
+		return nil, fmt.Errorf("reprice_all_prior_versions preview: list version chain: %w", err)
+	}
+	if len(chain) == 0 {
+		return &RepricePreviewResult{PriceKey: key, ToPriceID: toPrice.ID}, nil
+	}
+	chainIDs := make([]uuid.UUID, 0, len(chain))
+	for _, p := range chain {
+		chainIDs = append(chainIDs, p.ID)
+	}
+	subs, err := s.repo.ListActiveSubscriptionsByPriceIDs(ctx, chainIDs)
+	if err != nil {
+		return nil, fmt.Errorf("reprice_all_prior_versions preview: count affected subscriptions: %w", err)
+	}
+	return &RepricePreviewResult{PriceKey: key, ToPriceID: toPrice.ID, Matched: len(subs)}, nil
+}
+
+// ListBatchesForKey lists a price key's bulk reprice operations, most recent
+// first — the #777 console price page's "is there a pending migration"
+// surface.
+func (s *RepriceService) ListBatchesForKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
+	key := strings.TrimSpace(priceKey)
+	if key == "" {
+		return nil, fmt.Errorf("list reprice batches: price_key required")
+	}
+	return s.repo.ListBatchesByPriceKey(ctx, key, limit, offset)
+}
+
 func (s *RepriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
 	return s.repo.GetByID(ctx, id)
 }
