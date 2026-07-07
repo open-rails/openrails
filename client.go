@@ -41,7 +41,18 @@ const (
 // MerchantID is an OpenRails merchant identifier.
 type MerchantID = merchant.ID
 
-// WithMerchant pins merchant-scoped SDK calls to a merchant.
+// WithMerchant pins a per-call merchant onto ctx for merchant-scoped SDK
+// calls. Semantics differ by transport:
+//
+//   - REMOTE client (NewRemote): a no-op. Merchant identity comes from the
+//     service credential (the Bearer token), never the ctx.
+//   - EMBEDDED client (openrails/embed): the engine binds to ONE merchant no
+//     later than its first UpsertMerchantConfig. Before that bind, a
+//     WithMerchant pin is honored per call. Once bound, a ctx pin that agrees
+//     with the bound merchant is a no-op; a ctx pin naming a DIFFERENT
+//     merchant errors, naming both merchants (#772) — one embedded engine
+//     serves one merchant, so a mismatched pin is refused rather than
+//     silently executed against the bound merchant.
 func WithMerchant(ctx context.Context, id MerchantID) context.Context {
 	return merchant.WithID(ctx, id)
 }
