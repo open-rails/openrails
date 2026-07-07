@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -42,6 +43,7 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 		TrialUnitAmount:     price.TrialUnitAmount,
 		TrialDurationHours:  models.IntPtrTo32(price.TrialDurationHours),
 		Rails:               rails,
+		Key:                 price.Key,
 		CreatedAt:           price.CreatedAt,
 		UpdatedAt:           price.UpdatedAt,
 	})
@@ -289,4 +291,103 @@ func (s *PriceService) UpdateRails(ctx context.Context, id uuid.UUID, rails map[
 		return errors.New("no rows affected")
 	}
 	return nil
+}
+
+// #774: price keys — a durable, per-merchant-unique handle that is a MOVABLE
+// POINTER to the current row of a substance-version chain. Row identity stays
+// the #662 substance UUID; these methods manage the key label + the
+// pointer-movement history log, never the immutable financial columns.
+
+// SetKey relabels a price row's key in place. This is a pure label mutation
+// (like UpdateRails) — it never changes row identity. Used both when a
+// version bump repoints a NEW/reactivated row to a key, and when MODE 1's
+// YAML-is-truth converge detects a plain key rename on an otherwise-unchanged
+// price (the same substance, matched by matchPrice, now declared under a
+// different key string).
+func (s *PriceService) SetKey(ctx context.Context, id uuid.UUID, key string) error {
+	rows, err := s.db.Gen(ctx).UpdatePriceKey(ctx, gen.UpdatePriceKeyParams{
+		ID:  id,
+		Key: key,
+	})
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
+// GetCurrentByKey returns the CURRENT (non-archived) row for a key, or
+// pgx.ErrNoRows if the key names no live price. At most one such row can
+// exist per (merchant, key) — enforced by uq_prices_merchant_key_current.
+func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error) {
+	row, err := s.db.Gen(ctx).GetCurrentPriceByKey(ctx, gen.GetCurrentPriceByKeyParams{
+		MerchantID: merchantID,
+		Key:        key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.PriceFromGen(row)
+}
+
+// ListChainByKey returns every row (archived + current) that has ever been
+// named by this key — the version chain.
+func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
+	rows, err := s.db.Gen(ctx).ListPriceChainByKey(ctx, gen.ListPriceChainByKeyParams{
+		MerchantID: merchantID,
+		Key:        key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pricesFromGen(rows)
+}
+
+// ListPriorVersionsByKey returns the archived members of a key's chain —
+// #773's "all prior versions of key K", the reprice_all_prior_versions bulk
+// target set.
+func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
+	rows, err := s.db.Gen(ctx).ListPriorVersionsByKey(ctx, gen.ListPriorVersionsByKeyParams{
+		MerchantID: merchantID,
+		Key:        key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pricesFromGen(rows)
+}
+
+// RecordKeyMovement appends one entry to the pointer-movement history log:
+// key's current pointer moved to priceID at effectiveAt. Append-only — call
+// exactly once per genuine movement (new row, reactivation, or repoint), never
+// on a true no-op (same key, same already-current substance).
+func (s *PriceService) RecordKeyMovement(ctx context.Context, merchantID, priceID uuid.UUID, key string, effectiveAt time.Time) error {
+	rows, err := s.db.Gen(ctx).InsertPriceKeyMovement(ctx, gen.InsertPriceKeyMovementParams{
+		MerchantID:  merchantID,
+		Key:         key,
+		PriceID:     priceID,
+		EffectiveAt: effectiveAt,
+	})
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
+// ListKeyMovements returns the full movement history for a key, most-recent
+// first.
+func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.PriceKeyMovement, error) {
+	rows, err := s.db.Gen(ctx).ListPriceKeyMovements(ctx, gen.ListPriceKeyMovementsParams{
+		MerchantID: merchantID,
+		Key:        key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.PriceKeyMovementsFromGen(rows), nil
 }

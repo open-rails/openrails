@@ -156,7 +156,16 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 			}
 			res.PricesArchived++
 		case PriceUnchanged:
-			// nothing to do
+			// nothing to do beyond a possible key relabel below.
+		}
+		// #774: a substance-matched price declared under a renamed key (plp.Key
+		// set only when it differs from the matched row's current key) gets
+		// relabeled regardless of which match action fired above — a plain
+		// label edit, gated on Overwrite like any other price mutation.
+		if plp.Action != PriceCreate && plp.Key != "" && opts.Overwrite {
+			if _, err := applier.SetPriceKey(ctx, plp.ExistingID, plp.Key); err != nil {
+				return fmt.Errorf("relabel price %s to key %q: %w", plp.Label, plp.Key, err)
+			}
 		}
 	}
 	return nil

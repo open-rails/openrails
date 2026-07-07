@@ -617,10 +617,14 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	prices := catalog.Group("/prices")
 	prices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice), writeMW...)
 	prices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices), readMW...)
+	prices.Handle(http.MethodGet, "/by-key/:key", h(httphandlers.AdminGetPriceByKey), readMW...)
 	prices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice), readMW...)
 	prices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice), writeMW...)
 	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice), writeMW...)
 	prices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice), writeMW...)
+	// #774: relabel a price's key (a plain rename; version-bump repoint on
+	// collision) — mode-1-guarded like every other catalog write.
+	prices.Handle(http.MethodPost, "/:id/key", h(httphandlers.AdminSetPriceKey), writeMW...)
 
 	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift), readMW...)
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
@@ -676,6 +680,18 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.AdminCancelSubscription), subWrite...)
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
+	// #773 reprice: schedule a single subscription's price move at its next
+	// renewal on/after effective_at.
+	subs.Handle(http.MethodPost, "/:id/reprice", h(httphandlers.CreateSubscriptionReprice), subWrite...)
+
+	// #773 reprice: bulk reprice_all_prior_versions(key, effective_date), plus
+	// the inspect (list/get) and cancel-before-effective surface the #777
+	// console wizard needs.
+	rr.Handle(http.MethodPost, "/catalog/reprice-all-prior-versions", h(httphandlers.RepriceAllPriorVersions), subWrite...)
+	reprices := rr.Group("/reprices")
+	reprices.Handle(http.MethodGet, "", h(httphandlers.ListSubscriptionReprices), subRead...)
+	reprices.Handle(http.MethodGet, "/:id", h(httphandlers.GetSubscriptionReprice), subRead...)
+	reprices.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.CancelSubscriptionReprice), subWrite...)
 
 	// #733 PG-first metrics API (replaces the #735-deleted ClickHouse surface):
 	// one composable query endpoint + the registry/schema doc.

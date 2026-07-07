@@ -131,6 +131,13 @@ type Price struct {
 	Amount   int64  `json:"amount"`
 	Currency string `json:"currency"`
 
+	// Key (#774) is a durable, per-merchant-unique handle naming this price's
+	// substance-version chain — a movable pointer, unlike ID (which stays the
+	// #662 immutable substance UUID). At most one non-archived row per
+	// (merchant_id, key); archived predecessors keep their key as a
+	// back-reference to the chain they belonged to.
+	Key string `json:"key"`
+
 	// AccessDurationHours is the access window (#622) a purchase of this price
 	// grants, in HOURS (supports sub-day windows, e.g. a 12h rental). nil =
 	// indefinite/durable (perpetual ownership); a positive value = a finite window

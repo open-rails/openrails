@@ -126,6 +126,13 @@ ORDER BY sub.created_at DESC;
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.status = 'active';
 
+-- #773: every active subscription pinned to one of a set of price rows — the
+-- reprice_all_prior_versions(key, ...) match set (a key's prior-version price
+-- ids). Uses idx_subscriptions_price_id.
+-- name: ListActiveSubscriptionsByPriceIDs :many
+SELECT * FROM openrails.subscriptions sub
+WHERE sub.price_id = ANY(sqlc.arg(price_ids)::uuid[]) AND sub.status = 'active';
+
 -- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1;

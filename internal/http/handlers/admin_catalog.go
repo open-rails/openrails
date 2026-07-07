@@ -337,6 +337,55 @@ func AdminDeactivatePrice(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
+// AdminGetPriceByKey resolves a price by its #774 key — the CURRENT
+// (non-archived) row for that key.
+func AdminGetPriceByKey(r *httprequest.Request) {
+	key := strings.TrimSpace(r.Param("key"))
+	if key == "" {
+		r.ErrorJSON(http.StatusBadRequest, "key required")
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.GetPriceByKey(r.Request.Context(), key)
+	if err != nil {
+		writeCatalogError(r, priceLookupErr(err))
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+type setPriceKeyRequest struct {
+	Key string `json:"key"`
+}
+
+// AdminSetPriceKey relabels a price's #774 key in place (a plain rename; see
+// Service.SetPriceKey for the repoint semantics if the target key is already
+// held by another live row).
+func AdminSetPriceKey(r *httprequest.Request) {
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
+	if err != nil || id == uuid.Nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
+		return
+	}
+	var req setPriceKeyRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.SetPriceKey(r.Request.Context(), id, req.Key)
+	if err != nil {
+		writeCatalogError(r, priceLookupErr(err))
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
 // -- Helpers -----------------------------------------------------------------
 
 type paginatedResponse[T any] struct {

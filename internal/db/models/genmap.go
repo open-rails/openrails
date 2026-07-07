@@ -160,6 +160,7 @@ func PriceFromGen(p gen.OpenrailsPrice) (*Price, error) {
 		AutoRenew:           p.AutoRenew,
 		TrialUnitAmount:     p.TrialUnitAmount,
 		TrialDurationHours:  DerefIntPtr(p.TrialDurationHours),
+		Key:                 p.Key,
 		CreatedAt:           p.CreatedAt,
 		UpdatedAt:           p.UpdatedAt,
 	}
@@ -357,4 +358,66 @@ func NotificationFromGen(n gen.OpenrailsNotificationQueue) (*NotificationQueue, 
 		return nil, err
 	}
 	return m, nil
+}
+
+// PriceKeyMovementFromGen maps a generated price_key_movements row (#774).
+func PriceKeyMovementFromGen(r gen.OpenrailsPriceKeyMovement) *PriceKeyMovement {
+	return &PriceKeyMovement{
+		ID:          r.ID,
+		MerchantID:  r.MerchantID,
+		Key:         r.Key,
+		PriceID:     r.PriceID,
+		EffectiveAt: r.EffectiveAt,
+		CreatedAt:   r.CreatedAt,
+	}
+}
+
+func PriceKeyMovementsFromGen(rows []gen.OpenrailsPriceKeyMovement) []*PriceKeyMovement {
+	out := make([]*PriceKeyMovement, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PriceKeyMovementFromGen(r))
+	}
+	return out
+}
+
+// SubscriptionRepriceFromGen maps a generated subscription_reprices row (#773).
+func SubscriptionRepriceFromGen(r gen.OpenrailsSubscriptionReprice) *SubscriptionReprice {
+	return &SubscriptionReprice{
+		ID:             r.ID,
+		MerchantID:     r.MerchantID,
+		SubscriptionID: r.SubscriptionID,
+		FromPriceID:    r.FromPriceID,
+		ToPriceID:      r.ToPriceID,
+		EffectiveAt:    r.EffectiveAt,
+		Status:         RepriceStatus(r.Status),
+		RepriceBatchID: r.RepriceBatchID,
+		CreatedAt:      r.CreatedAt,
+		AppliedAt:      r.AppliedAt,
+		CanceledAt:     r.CanceledAt,
+	}
+}
+
+func SubscriptionRepricesFromGen(rows []gen.OpenrailsSubscriptionReprice) []*SubscriptionReprice {
+	out := make([]*SubscriptionReprice, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SubscriptionRepriceFromGen(r))
+	}
+	return out
+}
+
+// RepriceBatchFromGen maps a generated reprice_batches row (#773). The
+// int32->int widenings are always exact (Go's int is 64-bit on every
+// platform this project targets).
+func RepriceBatchFromGen(r gen.OpenrailsRepriceBatch) *RepriceBatch {
+	return &RepriceBatch{
+		ID:                     r.ID,
+		MerchantID:             r.MerchantID,
+		PriceKey:               r.PriceKey,
+		ToPriceID:              r.ToPriceID,
+		EffectiveAt:            r.EffectiveAt,
+		SubscriptionsMatched:   int(r.SubscriptionsMatched),
+		SubscriptionsScheduled: int(r.SubscriptionsScheduled),
+		SubscriptionsSkipped:   int(r.SubscriptionsSkipped),
+		CreatedAt:              r.CreatedAt,
+	}
 }

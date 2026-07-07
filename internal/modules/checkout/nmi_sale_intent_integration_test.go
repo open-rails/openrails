@@ -311,9 +311,11 @@ func TestNMISaleIntent_ChargedButRegistrationFails_VerifierRepairs(t *testing.T)
 	// Repair the world: create the missing price (same product family).
 	var productID uuid.UUID
 	require.NoError(t, pool.QueryRow(fx.ctx, "SELECT product_id FROM openrails.prices WHERE id = $1", realPriceID).Scan(&productID))
-	// A different amount dodges the (product, amount, window) uniqueness.
-	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
-		VALUES ($1, $2, 6000000, 'USD', $3)`, missingPriceID, productID, dbtest.TestMerchantID.UUID())
+	// A different amount dodges the (product, amount, window) uniqueness; an
+	// explicit #774 key dodges the auto-default "<product-key>-onetime"
+	// collision with the product's other active price.
+	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, key)
+		VALUES ($1, $2, 6000000, 'USD', $3, $4)`, missingPriceID, productID, dbtest.TestMerchantID.UUID(), "sale-repair-"+missingPriceID.String())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.prices WHERE id = $1", missingPriceID)

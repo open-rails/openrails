@@ -600,6 +600,36 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			return err
 		}
 
+		// #773: pick up a due scheduled reprice at the renewal boundary — v1's
+		// ONLY effective moment is "the subscription's first renewal on/after
+		// effective_at". Re-pin BEFORE the downgrade check below so the normal-
+		// renewal price resolution (the else branch) sees the repriced value.
+		// Idempotent: a scheduled row that already applied is gone, so a second
+		// RenewMembership call for the same renewal (e.g. a caller that also
+		// pre-resolves price before charging) just sees no due reprice here.
+		repriceRepo := NewRepriceRepo(db)
+		if scheduledReprice, repriceErr := repriceRepo.GetScheduledForSubscription(ctx, subscription.ID); repriceErr == nil {
+			if scheduledReprice.IsDue(s.now()) {
+				repricedTo, err := priceService.GetByID(ctx, scheduledReprice.ToPriceID)
+				if err != nil {
+					return fmt.Errorf("failed to get repriced price: %w", err)
+				}
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"reprice_id":      scheduledReprice.ID,
+					"old_price_id":    subscription.PriceID,
+					"new_price_id":    repricedTo.ID,
+				}).Info("Applying scheduled reprice on renewal")
+				// Same product by #773's constraint — no product/entitlements swap.
+				subscription.PriceID = repricedTo.ID
+				if err := repriceRepo.Apply(ctx, scheduledReprice.ID); err != nil && !errors.Is(err, ErrRepriceNotScheduled) {
+					return fmt.Errorf("failed to mark reprice applied: %w", err)
+				}
+			}
+		} else if !errors.Is(repriceErr, pgx.ErrNoRows) {
+			return fmt.Errorf("failed to check for scheduled reprice: %w", repriceErr)
+		}
+
 		// Check for scheduled downgrade
 		var price *models.Price
 		var oldProduct, newProduct *models.Product

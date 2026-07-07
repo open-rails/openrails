@@ -33,7 +33,10 @@ type CreditGrantSpecObject struct {
 
 // PriceObject represents a price resource
 type PriceObject struct {
-	ID         string         `json:"id"`
+	ID string `json:"id"`
+	// Key (#774) is the durable, merchant-unique movable-pointer handle for
+	// this price's substance-version chain — usable anywhere `id` is accepted.
+	Key        string         `json:"key,omitempty"`
 	Object     string         `json:"object"`      // Always "price"
 	UnitAmount int64          `json:"unit_amount"` // In the currency's smallest unit
 	Currency   string         `json:"currency"`

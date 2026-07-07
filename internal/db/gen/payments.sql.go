@@ -640,7 +640,7 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.rail_merchant_account_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, p.id, p.product_id, p.amount, p.currency, p.rails, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.rail_merchant_account_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, p.id, p.product_id, p.amount, p.currency, p.rails, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, p.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -697,6 +697,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPrice.AutoRenew,
 		&i.OpenrailsPrice.TrialUnitAmount,
 		&i.OpenrailsPrice.TrialDurationHours,
+		&i.OpenrailsPrice.Key,
 		&i.OpenrailsProduct.ID,
 		&i.OpenrailsProduct.Key,
 		&i.OpenrailsProduct.DisplayName,

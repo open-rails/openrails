@@ -240,13 +240,8 @@ func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID 
 
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
-	// Parse and validate price
-	priceID, err := api.ParsePriceID(req.PriceID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid price_id: %w", err)
-	}
-
-	price, err := s.PriceService.GetByID(ctx, priceID)
+	// #774: price_id accepts either a price UUID/opaque id or a price_key.
+	price, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
@@ -2366,13 +2361,8 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
-	// 1. Parse and validate price
-	priceID, err := api.ParsePriceID(req.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "invalid price_id"}
-	}
-
-	newPrice, err := s.PriceService.GetByID(ctx, priceID)
+	// 1. Parse and validate price (#774: price_id accepts a price_key too)
+	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "price not found"}
 	}
@@ -2471,11 +2461,8 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 // Stripe finalizes the exact proration per-second on its side. NMI/Solana charge
 // the local math exactly, so it is not an estimate there.
 func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
-	priceID, err := api.ParsePriceID(req.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "invalid price_id"}
-	}
-	newPrice, err := s.PriceService.GetByID(ctx, priceID)
+	// #774: price_id accepts a price_key too.
+	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "price not found"}
 	}
