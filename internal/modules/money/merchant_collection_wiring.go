@@ -20,19 +20,21 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #725: the arrears/top-up collection plane arms rail credentials PER MERCHANT
-// from the merchant-secrets store AT CHARGE TIME, under the #699 precedence
-// rule: merchant-store first, boot-config rails as fallback. A merchant that
-// declares a rail account resolves that rail from the store ONLY — missing or
-// unreadable secrets fail the charge CLOSED (loud error naming merchant, rail
-// and secret), never a cross-plane fallback. A rail with no store row falls
-// back to the boot-built adapter (embedded hosts' model). Nothing is cached:
-// adapters are cheap per-charge structs, so a rotated credential takes effect
-// on the next charge — same posture as checkout, webhooks and the pull plane.
+// #725/#788: the arrears/top-up collection plane arms rail credentials PER
+// MERCHANT from the merchant-secrets store AT CHARGE TIME — the ONE Layer-C
+// resolution seam (there is no boot-config plane anymore, #788). A merchant
+// that declares a rail account resolves that rail from the store ONLY —
+// missing or unreadable secrets fail the charge CLOSED (loud error naming
+// merchant, rail and secret). A rail with no store row simply has no
+// collection adapter (the charge fails closed with "no invoice collection
+// adapter configured"). Nothing is cached: adapters are cheap per-charge
+// structs, so a rotated credential takes effect on the next charge — same
+// posture as checkout, webhooks and the pull plane.
 
 // CollectionAdapterResolver arms the store-scoped adapter for one saved-method
 // charge. ok=false with nil err = the merchant declares no account on the rail
-// (boot-plane fallback); err = declared but not armable (fail closed).
+// (nothing to charge with — the charge fails closed, there is no fallback
+// plane); err = declared but not armable (fail closed).
 type CollectionAdapterResolver interface {
 	ResolveCollectionAdapter(ctx context.Context, method gen.OpenrailsPaymentMethod) (CollectionAdapter, bool, error)
 }
@@ -58,8 +60,8 @@ type CollectionPlane interface {
 // NMIClientResolver is the raw-client NMI leg of the #725 store resolver, for
 // charge paths that need the client itself (manual dunning rebills) rather
 // than a CollectionAdapter. Same contract: ok=false with nil err = merchant
-// declares no NMI account (boot fallback); err = declared but not armable
-// (fail closed).
+// declares no NMI account (fails closed — no fallback plane); err = declared
+// but not armable (fail closed).
 type NMIClientResolver interface {
 	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
 }
@@ -109,7 +111,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, nil // no declared account → boot-plane fallback
+		return nil, false, nil // no declared account → nothing armable for this rail
 	}
 	var adapter CollectionAdapter
 	if isStripe {
@@ -162,7 +164,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, nil // no declared NMI account → boot-plane fallback
+		return nil, false, nil // no declared NMI account → nothing armable
 	}
 	client, err := b.nmiClient(ctx, svc, mid, scope)
 	if err != nil {

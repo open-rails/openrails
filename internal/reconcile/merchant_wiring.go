@@ -94,7 +94,8 @@ func (b MerchantFetcherBuilder) environment() string {
 // resolveScope resolves the merchant's declared account row for a rail from
 // the store plane: the pinned account when AccountIDs names one, else the pull
 // scope (active for new work, else newest archived for drain — #655). ok=false
-// means the merchant declares NO account on the rail → boot-config fallback.
+// means the merchant declares NO account on the rail → nothing is armed for
+// this pass (no boot-config plane exists to fall back to, #788).
 func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.ID, provider Provider) (merchants.RailMerchantAccountScope, bool) {
 	if b.Merchants == nil {
 		return merchants.RailMerchantAccountScope{}, false

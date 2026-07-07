@@ -41,9 +41,10 @@ func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *S
 	return &ScopedCharger{db: database, adapters: cp}
 }
 
-// SetAdapterResolver arms per-merchant store resolution (#725). The resolver
-// gets first shot at every charge; the boot adapters map stays the fallback
-// for merchants with no declared account on the rail.
+// SetAdapterResolver arms per-merchant store resolution (#725/#788). The
+// resolver is the only source of collection adapters now — there is no
+// boot-config fallback plane; a merchant with no declared account on the
+// rail simply has nothing to charge with.
 func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
 	if c != nil {
 		c.resolver = r
@@ -92,7 +93,7 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	}
 
 	adapter := c.adapters[rail]
-	// #725: store-armed per-merchant credentials win over the boot-plane map;
+	// #725/#788: store-armed per-merchant credentials are the only source;
 	// a declared account that cannot arm fails the charge closed.
 	if c.resolver != nil {
 		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method)

@@ -60,6 +60,11 @@ type Service struct {
 	// test_mode, live otherwise. Scoped credential lookups resolve
 	// rail_merchant_accounts rows in THIS environment only.
 	providerEnvironment string
+	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the #348
+	// test_mode arm-time probe (refuseLiveNMIUnderTestMode) hits, so tests can
+	// point it at a fake gateway instead of the real NMI API. Empty in
+	// production — the probe uses nmi.NewClient's documented default.
+	nmiProbeV5BaseURL string
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
