@@ -180,6 +180,11 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	// Lifecycle clock pinned at AsOf: every lifecycle write (ended_at, grace,
 	// updated_at) is dated at the horizon — deterministic re-runs.
 	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
+	// The import seam has no River producer to enqueue an nmi_delete intent
+	// inline, but a terminal cancel through the decider (ResolveCancelledRemoteAlive)
+	// must still leave the DeletionScheduledAt marker durably — see
+	// markerOnlyDeferredDelete below.
+	lc.SetDeferredDeleteScheduler(markerOnlyDeferredDelete{})
 
 	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		qx := database.Qx(ctx)
@@ -335,6 +340,31 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		return nil
 	})
 	return res, err
+}
+
+// markerOnlyDeferredDelete implements subscriptions.DeferredDeleteScheduler
+// by doing nothing beyond letting the caller stamp DeletionScheduledAt: it
+// exists only so the `s.deferDelete != nil` gate in ResolveUnknownSubscription
+// passes, so a terminal import-time cancel where the remote NMI schedule may
+// still be retrying leaves the marker on disk instead of losing it to a WARN
+// log. There is no River producer in the import path to enqueue an
+// nmi_delete intent inline — the marker alone is enough: the host's boot
+// sweep (app.ConvertDeferredDeleteMarkersToIntents) already exists precisely
+// to pick up out-of-band markers (direct-DB imports, #391) and convert them
+// to durable intents on the next boot. Doctrine: the marker means "remote
+// schedule may still be live; dispose when armed", never "already deleted".
+type markerOnlyDeferredDelete struct{}
+
+func (markerOnlyDeferredDelete) ScheduleNMIDelete(context.Context, string, uuid.UUID, time.Time) error {
+	return nil
+}
+
+func (markerOnlyDeferredDelete) CancelNMIDelete(context.Context, string, uuid.UUID) error {
+	return nil
+}
+
+func (m markerOnlyDeferredDelete) WithTx(pgx.Tx) subscriptions.DeferredDeleteScheduler {
+	return m
 }
 
 // openDB wraps a caller pool (borrowed; Close is a no-op) or opens from config.
