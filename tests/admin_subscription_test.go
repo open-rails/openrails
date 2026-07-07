@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,4 +111,25 @@ func TestAdminListSubscriptions(t *testing.T) {
 	data, ok := response["data"].([]interface{})
 	require.True(t, ok, "paginated response should carry a data array: %s", w.Body.String())
 	assert.GreaterOrEqual(t, len(data), 1, "the seeded subscription should appear")
+}
+
+// TestAdminCancelSubscriptionNotFound pins the #783 fix: cancelling a
+// nonexistent subscription returns 404, not a 500 leaking the raw
+// "subscription not found: no rows in result set" (sql.ErrNoRows) text.
+func TestAdminCancelSubscriptionNotFound(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b7777777-7777-4777-8777-777777777777",
+		[]string{controlplane.PermMerchantSubscriptionsUpdate})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("/v1/merchant/subscriptions/%s/cancel", uuid.New().String()),
+		strings.NewReader(`{"reason":"regression check"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+	admin.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "missing subscription must 404, not 500: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "no rows", "must not leak raw sql.ErrNoRows text")
+	assert.NotContains(t, w.Body.String(), "SQLSTATE", "must not leak raw postgres error text")
 }

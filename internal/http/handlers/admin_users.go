@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -215,7 +216,23 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		return
 	}
 	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		// Map domain errors to stable status codes; never leak raw sql/pgx text
+		// to the client (#783). AdminSubscriptionService.CancelSubscription
+		// returns "subscription not found: <wrapped ErrNoRows>" for a missing
+		// id, "subscription is not active" for a bad state, and "cancel
+		// operation not supported for rail '<rail>'" for an ineligible rail.
+		msg := err.Error()
+		switch {
+		case strings.HasPrefix(msg, "subscription not found"):
+			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+		case strings.Contains(msg, "not active"):
+			r.ErrorJSON(http.StatusConflict, "subscription is not active")
+		case strings.Contains(msg, "not supported for rail"):
+			r.ErrorJSON(http.StatusBadRequest, msg)
+		default:
+			log.WithError(err).Error("admin cancel subscription failed")
+			r.ErrorJSON(http.StatusInternalServerError, "failed to cancel subscription")
+		}
 		return
 	}
 	r.SuccessJSONMessage("subscription cancelled successfully")

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -38,12 +39,21 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	switch {
 	case strings.Contains(msg, "not found"):
 		r.ErrorJSON(http.StatusNotFound, err.Error())
+	case strings.Contains(msg, "duplicate key"),
+		strings.Contains(msg, "already exists"):
+		// A unique-constraint collision is a client conflict, not a 500 — and the
+		// raw Postgres "… (SQLSTATE 23505)" text must never leak to the client (#783).
+		r.ErrorJSON(http.StatusConflict, "a resource with these attributes already exists")
 	case strings.Contains(msg, "required"),
 		strings.Contains(msg, "must be positive"),
+		strings.Contains(msg, "must be non-negative"),
 		strings.Contains(msg, "invalid"):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		// Never pass raw sql/pgx/SQLSTATE text to the client (#783): log the real
+		// error, return a generic message.
+		log.WithError(err).Error("catalog operation failed")
+		r.ErrorJSON(http.StatusInternalServerError, "internal error")
 	}
 }
 
