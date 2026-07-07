@@ -33,8 +33,11 @@ func TestHostedPostureIsCodeOnlyOptIn(t *testing.T) {
 	if cp.SelfHostedPosture() {
 		t.Fatal("hosted posture should not report self-hosted")
 	}
+	// Hosted groups derive from the live DefaultAPI surface; with no auth
+	// service wired the allow-list is empty — the mount registers nothing
+	// (fail closed), never AuthKit's implicit default surface.
 	if got := cp.MountedRouteGroups(); got != nil {
-		t.Fatalf("MountedRouteGroups() = %#v, want nil for AuthKit DefaultAPI", got)
+		t.Fatalf("MountedRouteGroups() = %#v, want nil without an auth service", got)
 	}
 	if got := registrationMode(false); got != authcore.RegistrationModeOpen {
 		t.Fatalf("registrationMode(false) = %q, want %q", got, authcore.RegistrationModeOpen)

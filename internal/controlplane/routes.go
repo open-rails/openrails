@@ -30,10 +30,11 @@ var IntentionalRouteGroups = []authhttp.RouteGroup{
 	authhttp.RoutePermissionGroups,
 }
 
-// MountedRouteGroups returns the AuthKit route groups this control plane mounts.
-// In locked-down mode it returns the intentional (non-DefaultAPI) subset; when
-// not locked down (hosted-SaaS posture) it returns nil to signal "mount the full
-// DefaultAPI surface" to the caller.
+// MountedRouteGroups returns the AuthKit route groups this control plane
+// mounts, always as an EXPLICIT allow-list (a nil MountOptions.Groups would
+// mount AuthKit's default surface plus browser OIDC). Locked-down mode returns
+// the intentional subset; hosted-SaaS posture returns the groups present in
+// AuthKit's DefaultAPI surface — still never browser OIDC or JWKS.
 func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 	if c == nil {
 		return nil
@@ -43,45 +44,51 @@ func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 		copy(out, IntentionalRouteGroups)
 		return out
 	}
-	// Hosted-SaaS posture: caller may choose to mount DefaultAPI. We still avoid
-	// returning DefaultAPI() implicitly here — see RouteSpecs.
-	return nil
+	if c.authSvc == nil {
+		return nil
+	}
+	var out []authhttp.RouteGroup
+	seen := map[authhttp.RouteGroup]bool{}
+	for _, spec := range c.authSvc.Routes().DefaultAPI() {
+		if !seen[spec.Group] {
+			seen[spec.Group] = true
+			out = append(out, spec.Group)
+		}
+	}
+	return out
 }
 
-// RouteSpecs returns the concrete AuthKit route specs to mount. In locked-down
-// mode this is ONLY the intentional groups (never DefaultAPI). When not locked
-// down it returns the full DefaultAPI surface.
+// RouteSpecs returns the concrete AuthKit route specs the control plane
+// serves (the posture's groups, lazy-customer-wrapped). The HTTP layer mounts
+// this exact surface via authhttp.MountHandler (#250) with the same
+// MountedRouteGroups + WrapAuthRoute inputs; the route-surface test pins the
+// two against each other.
 func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 	if c == nil || c.authSvc == nil {
 		return nil
 	}
-	routes := c.authSvc.Routes()
-	var specs []authhttp.RouteSpec
-	if c.SelfHostedPosture() {
-		specs = routes.Groups(IntentionalRouteGroups...)
-	} else {
-		specs = routes.DefaultAPI()
+	groups := c.MountedRouteGroups()
+	if len(groups) == 0 {
+		return nil
 	}
-	return c.withLazyCustomerGroups(specs)
-}
-
-// The gin mounting of these route specs lives in
-// internal/controlplane/ginroutes.MountAuthRoutes (#285): it consumes RouteSpecs
-// and adapts each net/http handler to gin, keeping this core gin-free.
-
-func (c *ControlPlane) withLazyCustomerGroups(specs []authhttp.RouteSpec) []authhttp.RouteSpec {
+	specs := c.authSvc.Routes().Groups(groups...)
 	out := make([]authhttp.RouteSpec, len(specs))
 	copy(out, specs)
 	for i := range out {
-		if out[i].Group != authhttp.RoutePermissionGroups {
-			continue
-		}
-		if !strings.HasPrefix(out[i].Path, "/"+CustomerType+"/{instance_slug}/") {
-			continue
-		}
-		out[i].Handler = c.lazyCustomerGroupHandler(out[i].Handler)
+		out[i].Handler = c.WrapAuthRoute(out[i], out[i].Handler)
 	}
 	return out
+}
+
+// WrapAuthRoute is the control plane's per-route mount decoration
+// (MountOptions.Wrap): declared customer group-management routes get the lazy
+// customer permission-group ensure; everything else passes through.
+func (c *ControlPlane) WrapAuthRoute(spec authhttp.RouteSpec, h http.Handler) http.Handler {
+	if c == nil || spec.Group != authhttp.RoutePermissionGroups ||
+		!strings.HasPrefix(spec.Path, "/"+CustomerType+"/{instance_slug}/") {
+		return h
+	}
+	return c.lazyCustomerGroupHandler(h)
 }
 
 func (c *ControlPlane) lazyCustomerGroupHandler(next http.Handler) http.Handler {
