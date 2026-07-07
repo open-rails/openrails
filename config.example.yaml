@@ -99,3 +99,10 @@ admin_console:
 #   ask_enabled: false       # #756 consent: /metrics/ask sends aggregate query RESULTS to the
 #                            # LLM provider (widget generation sends only the schema) — opt in
 #                            # explicitly; env LLM_ASK_ENABLED
+#   catalog_copilot_enabled: false   # #779 Phase 1 consent: /catalog/ask sends aggregate
+#                            # catalog/subscriber-count data to the LLM provider; env
+#                            # LLM_CATALOG_COPILOT_ENABLED
+#   catalog_drafting_enabled: false  # #779 Phase 2: arms the draft_price_change/draft_catalog_diff
+#                            # tools (proposals only, never a mutation). KEEP FALSE until #781
+#                            # (server-side notice-window enforcement) ships; env
+#                            # LLM_CATALOG_DRAFTING_ENABLED

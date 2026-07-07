@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -123,6 +124,10 @@ type Runtime struct {
 	// DashboardService is the #741 configurable dashboard (saved widgets +
 	// NL widget generation; nil-LLM = generation fail-closed).
 	DashboardService *dashboard.Service
+	// CopilotService is the #779 catalog copilot (read-only Q&A always; the
+	// Phase 2 draft_* tools are additionally gated on
+	// llm.catalog_drafting_enabled — see copilot.Service.DraftingConfigured).
+	CopilotService *copilot.Service
 	// AlertService is the #736 metric-threshold alerting engine (rules,
 	// webhooks, notifications, the evaluator).
 	AlertService *alerting.Service

@@ -33,6 +33,14 @@ type Config struct {
 	// endpoint would 501). Distinct consent from NLWidgetsEnabled because /ask
 	// sends aggregate query results to the LLM provider.
 	AskEnabled bool `json:"ask_enabled"`
+	// CatalogCopilotEnabled mirrors the #779 catalog copilot Q&A gate
+	// (llm.catalog_copilot_enabled AND an LLM key): false renders the catalog
+	// copilot panel as a pointed empty-state.
+	CatalogCopilotEnabled bool `json:"catalog_copilot_enabled"`
+	// CatalogDraftingEnabled mirrors the #779 Phase 2 gate
+	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
+	// the copilot panel stays Q&A-only. Stays false until #781 ships.
+	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
 }
 
 // Present reports whether assets hold a servable console build: a non-nil

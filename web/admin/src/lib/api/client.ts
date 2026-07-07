@@ -11,6 +11,13 @@ export interface BootstrapConfig {
   // #756 metrics Q&A gate (llm.ask_enabled AND an LLM key): false renders the
   // Ask panel as a pointed empty-state (the ask endpoint would answer 501).
   ask_enabled: boolean
+  // #779 catalog copilot Q&A gate (llm.catalog_copilot_enabled AND an LLM
+  // key): false renders the catalog copilot panel as a pointed empty-state.
+  catalog_copilot_enabled: boolean
+  // #779 Phase 2 gate (llm.catalog_drafting_enabled): false hides the
+  // drafting affordances — the copilot panel stays Q&A-only. Stays false
+  // until #781 (server-side notice-window enforcement) ships.
+  catalog_drafting_enabled: boolean
 }
 
 export interface TokenPair {

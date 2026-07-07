@@ -632,6 +632,20 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift), readMW...)
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
 	catalog.Handle(http.MethodPost, "/publish", h(httphandlers.MerchantPublishCatalog), writeMW...)
+
+	// #779 catalog copilot: read-only Q&A (+ flag-gated Phase 2 drafting,
+	// never a mutation) shares the catalog-read permission, like #756's
+	// metrics ask shares metrics-read — the LLM-cost axis is guarded by the
+	// service's own per-merchant rate limit + fail-closed consent flag. NOT
+	// manifest-guarded: it never mutates catalog rows, even when drafting.
+	catalog.Handle(http.MethodPost, "/ask", h(httphandlers.CatalogCopilotAsk), readMW...)
+	// The confirm-provenance log rides the catalog-WRITE permission (only a
+	// caller who could actually apply a price change should be able to log a
+	// draft as confirmed) but skips the mode-1 write guard: it never touches
+	// a catalog row, only an audit log entry, for a mutation that already
+	// happened via the normal catalog/reprice endpoints.
+	copilotConfirmMW := append([]router.Middleware{write}, dbMW...)
+	catalog.Handle(http.MethodPost, "/copilot/confirm", h(httphandlers.CatalogCopilotConfirmDraft), copilotConfirmMW...)
 }
 
 func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {

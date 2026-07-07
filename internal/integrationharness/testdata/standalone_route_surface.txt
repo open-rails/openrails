@@ -125,6 +125,8 @@ POST /v1/merchant/admissions/{id}/release
 POST /v1/merchant/alerts/rules
 POST /v1/merchant/alerts/rules/{id}/test
 POST /v1/merchant/api-keys
+POST /v1/merchant/catalog/ask
+POST /v1/merchant/catalog/copilot/confirm
 POST /v1/merchant/catalog/drift/refresh
 POST /v1/merchant/catalog/prices
 POST /v1/merchant/catalog/prices/{id}/activate

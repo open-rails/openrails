@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { confirmCopilotDraft, type PriceChangeDraft } from "@/lib/api/copilot"
 import { createPrice, getMerchantSettings, previewRepriceAllPriorVersions, repriceAllPriorVersions } from "@/lib/api/endpoints"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
@@ -37,22 +38,35 @@ const toDateInputValue = (d: Date) => d.toISOString().slice(0, 10)
 // plan (direction-aware defaults, live affected-count preview, notice-window
 // gate on increase+migrate) -> review in words, then confirm applies the
 // catalog price update followed (if migrating) by the reprice schedule.
+//
+// draft (#779): when the catalog copilot proposed this change, the dialog
+// opens PRE-FILLED straight at Step 3 (review) — the affected count already
+// rode in the draft, so no extra preview call is needed. Confirm behaves
+// EXACTLY as a hand-typed change (same createPrice/repriceAllPriorVersions
+// calls); the only addition is a best-effort audit-provenance log after
+// success, never before, never blocking the real confirm.
 export function PriceChangeWizard({
   price,
   productName,
+  draft,
   onDone,
 }: {
   price: CatalogPrice
   productName: string
+  draft?: PriceChangeDraft
   onDone: () => void
 }) {
-  const [open, setOpen] = React.useState(false)
-  const [step, setStep] = React.useState<1 | 2 | 3>(1)
-  const [amountInput, setAmountInput] = React.useState(() => String(price.unit_amount / 1_000_000))
-  const [mode, setMode] = React.useState<MigrationMode>("grandfather")
-  const [effectiveAt, setEffectiveAt] = React.useState("")
+  const [open, setOpen] = React.useState(() => !!draft)
+  const [step, setStep] = React.useState<1 | 2 | 3>(() => (draft ? 3 : 1))
+  const [amountInput, setAmountInput] = React.useState(() =>
+    String((draft?.new_amount ?? price.unit_amount) / 1_000_000),
+  )
+  const [mode, setMode] = React.useState<MigrationMode>(() => draft?.migration_mode ?? "grandfather")
+  const [effectiveAt, setEffectiveAt] = React.useState(() =>
+    draft?.reprice ? toDateInputValue(new Date(draft.reprice.effective_at)) : "",
+  )
   const [previewLoading, setPreviewLoading] = React.useState(false)
-  const [affectedCount, setAffectedCount] = React.useState<number | null>(null)
+  const [affectedCount, setAffectedCount] = React.useState<number | null>(draft?.affected_count ?? null)
   const [busy, setBusy] = React.useState(false)
   // #781: the merchant-configurable notice window, read from the API (the
   // console used to hard-code 30 days here; the server is now the actual
@@ -137,6 +151,11 @@ export function PriceChangeWizard({
       } else {
         toast.success(mode === "migrate" ? "Price updated and migration scheduled" : "Price updated")
       }
+      // Best-effort audit-provenance log: fires AFTER the real confirm above
+      // already succeeded, never blocks or affects it.
+      if (draft) {
+        confirmCopilotDraft(draft.draft_id, "price_change", price.key).catch(() => {})
+      }
       handleOpenChange(false)
       onDone()
     } catch (err) {
@@ -148,14 +167,19 @@ export function PriceChangeWizard({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          Change price
-        </Button>
-      </DialogTrigger>
+      {!draft && (
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm">
+            Change price
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Change price — {productName}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Change price — {productName}
+            {draft && <Badge variant="secondary">drafted by copilot</Badge>}
+          </DialogTitle>
           <DialogDescription>
             Step {step} of 3: {step === 1 ? "new amount" : step === 2 ? "migration plan" : "review"}
           </DialogDescription>

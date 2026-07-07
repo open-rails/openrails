@@ -23,10 +23,12 @@ func (s *Server) registerAdminConsoleRoutes(mux *http.ServeMux) error {
 			"or unset admin_console.enabled")
 	}
 	cfg := adminconsole.Config{
-		AuthBaseURL:      s.cfg.AdminConsole.AuthBaseURL,
-		APIBaseURL:       s.cfg.AdminConsole.APIBaseURL,
-		NLWidgetsEnabled: s.cfg.LLM.IsConfigured(),
-		AskEnabled:       s.cfg.LLM.AskConfigured(),
+		AuthBaseURL:            s.cfg.AdminConsole.AuthBaseURL,
+		APIBaseURL:             s.cfg.AdminConsole.APIBaseURL,
+		NLWidgetsEnabled:       s.cfg.LLM.IsConfigured(),
+		AskEnabled:             s.cfg.LLM.AskConfigured(),
+		CatalogCopilotEnabled:  s.cfg.LLM.CatalogCopilotConfigured(),
+		CatalogDraftingEnabled: s.cfg.LLM.CatalogDraftingConfigured(),
 	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = ControlPlaneAuthPrefix

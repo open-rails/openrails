@@ -372,6 +372,22 @@ type LLMConfig struct {
 	// sends aggregate query RESULTS too. Default false (fail-closed). Env:
 	// LLM_ASK_ENABLED.
 	AskEnabled bool `koanf:"ask_enabled,omitempty"`
+
+	// CatalogCopilotEnabled arms POST /v1/merchant/catalog/ask (#779 Phase 1):
+	// read-only catalog Q&A. Separate consent from AskEnabled/ask_enabled
+	// because the data flow is a distinct surface (aggregate catalog/
+	// subscriber-count data, not metrics). Default false (fail-closed). Env:
+	// LLM_CATALOG_COPILOT_ENABLED.
+	CatalogCopilotEnabled bool `koanf:"catalog_copilot_enabled,omitempty"`
+
+	// CatalogDraftingEnabled additionally arms the #779 Phase 2 draft_* tools
+	// inside the catalog copilot loop (draft_price_change / draft_catalog_diff
+	// — proposals only, never a mutation). MUST stay false until #781 (server-
+	// side notice-window enforcement) ships: the copilot's safety story is
+	// "the API refuses what the wizard would refuse", which depends on that
+	// enforcement existing. Flip this only after both #779 and #781 have
+	// merged. Default false (fail-closed). Env: LLM_CATALOG_DRAFTING_ENABLED.
+	CatalogDraftingEnabled bool `koanf:"catalog_drafting_enabled,omitempty"`
 }
 
 // IsConfigured reports whether NL widget generation can run (fail-closed on a
@@ -381,6 +397,19 @@ func (c *LLMConfig) IsConfigured() bool { return c != nil && strings.TrimSpace(c
 // AskConfigured reports whether metrics Q&A can run: a key AND the explicit
 // ask_enabled consent (results flow to the provider — never implied by the key).
 func (c *LLMConfig) AskConfigured() bool { return c.IsConfigured() && c.AskEnabled }
+
+// CatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
+// run: a key AND the explicit catalog_copilot_enabled consent.
+func (c *LLMConfig) CatalogCopilotConfigured() bool {
+	return c.IsConfigured() && c.CatalogCopilotEnabled
+}
+
+// CatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
+// are armed: catalog Q&A configured AND the explicit catalog_drafting_enabled
+// consent (see the field doc — stays false until #781 ships).
+func (c *LLMConfig) CatalogDraftingConfigured() bool {
+	return c.CatalogCopilotConfigured() && c.CatalogDraftingEnabled
+}
 
 // ResolvedProvider returns the effective provider name.
 func (c *LLMConfig) ResolvedProvider() string {
