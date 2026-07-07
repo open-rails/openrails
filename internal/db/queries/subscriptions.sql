@@ -254,15 +254,6 @@ WHERE id = $1
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz;
 
--- name: ListPendingDeletionScheduledSubscriptions :many
--- Boot rescan (#344 follow-up): cancelled subscriptions still carrying the
--- deletion_scheduled_at marker — their deferred rail-side delete never
--- finalized (the deletion kill switch skipped it, or the job was lost). The
--- worker-startup rescan re-enqueues these via the deferred-delete scheduler.
-SELECT * FROM openrails.subscriptions sub
-WHERE sub.status = 'cancelled'
-  AND sub.deletion_scheduled_at IS NOT NULL;
-
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1

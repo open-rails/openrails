@@ -82,67 +82,6 @@ func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.Deferred
 	return r
 }
 
-// TestMarkerConversionSweepEnqueuesIntents verifies the #358 startup sweep
-// that replaced the #344 boot rescan: cancelled subscriptions whose
-// DeletionScheduledAt marker survived (kill switch skipped the delete, or a
-// pre-ledger job was lost) get a durable nmi_delete_subscription intent
-// enqueued, due at max(now, deletion_scheduled_at). Idempotent via the intent
-// idempotency_key.
-func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-
-	products := suite.SeedProducts()
-	priceID := products[0].Prices[0].ID
-
-	now := time.Now().UTC()
-	futureDelete := now.Add(2 * time.Hour)
-	pastDelete := now.Add(-48 * time.Hour)
-
-	// Marker with a still-open undo window: the intent must be due AT the
-	// marker time (undo window honored).
-	futureSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:              uuid.New().String(),
-		PriceID:             priceID,
-		Status:              models.StatusCancelled,
-		Rail:                models.RailNMI,
-		DeletionScheduledAt: &futureDelete,
-	})
-
-	// Overdue marker (e.g. kill switch was on for two days): due at ~now.
-	pastSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:              uuid.New().String(),
-		PriceID:             priceID,
-		Status:              models.StatusCancelled,
-		Rail:                models.RailNMI,
-		DeletionScheduledAt: &pastDelete,
-	})
-
-	converted, err := suite.App.Runtime.ConvertDeferredDeleteMarkersToIntents(ctx)
-	require.NoError(t, err)
-	// Other tests in the shared suite may have left markers too.
-	assert.GreaterOrEqual(t, converted, 2, "both seeded markers should be converted")
-
-	// Future marker: one intent due at the marker time.
-	count, status, nextAt := queryNMIDeleteIntents(t, suite, futureSub.ID)
-	require.Equal(t, 1, count, "exactly one delete intent for the future-marker subscription")
-	assert.Equal(t, intents.StatusPending, status)
-	assert.WithinDuration(t, futureDelete, nextAt, time.Minute)
-
-	// Past marker: one intent due at ~now (clamped, never in the past).
-	count, _, nextAt = queryNMIDeleteIntents(t, suite, pastSub.ID)
-	require.GreaterOrEqual(t, count, 1, "a delete intent exists for the overdue-marker subscription")
-	assert.True(t, nextAt.After(pastDelete), "overdue delete is clamped to now, not the stale marker time")
-	assert.WithinDuration(t, now, nextAt, time.Minute)
-
-	// Idempotency: a second sweep must not stack a duplicate intent
-	// (idempotency_key conflict refreshes the pending row).
-	_, err = suite.App.Runtime.ConvertDeferredDeleteMarkersToIntents(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 1, countLiveNMIDeleteIntents(t, suite, futureSub.ID), "sweep is idempotent for pending intents")
-	assert.Equal(t, 1, countLiveNMIDeleteIntents(t, suite, pastSub.ID))
-}
-
 // TestFailMembershipDunningExhaustionSchedulesNMIDelete verifies the #344
 // follow-up webhook-path fix end-to-end via the runtime's shared lifecycle
 // service (the instance the NMI webhook handlers use): a past_due NMI-backed
