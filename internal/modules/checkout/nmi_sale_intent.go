@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -46,7 +49,12 @@ type NMISalePayload struct {
 	Description  string    `json:"description"`
 	UserID       string    `json:"user_id"`
 	PriceID      uuid.UUID `json:"price_id"`
-	E2ERunID     string    `json:"e2e_run_id,omitempty"`
+	// StoredCredentialRef is the instrument's unscheduled-sequence
+	// stored-credential anchor at enqueue (#297). "" = this charge is the
+	// sequence's initial CIT (indicator=stored) and finalize captures the
+	// returned transaction id as the anchor (write-once).
+	StoredCredentialRef string `json:"stored_credential_ref,omitempty"`
+	E2ERunID            string `json:"e2e_run_id,omitempty"`
 }
 
 // Evidence keys the producer reads back off a succeeded intent.
@@ -134,13 +142,20 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
 		if found {
-			return h.finalize(ctx, p, orderID, txnID, true)
+			return h.finalize(ctx, intent.MerchantID, p, orderID, txnID, true)
 		}
 	}
 
 	amountCents, err := moneyutil.MicrosToCentsExact(p.AmountMicros)
 	if err != nil {
 		return intents.Terminal("sale amount must be representable in whole cents: " + err.Error())
+	}
+	// #297: a checkout sale is a cardholder-initiated unscheduled CoF charge —
+	// the sequence's initial CIT when the instrument has no anchor yet, a
+	// reuse (indicator=used + initial_transaction_id) when it does.
+	citContext := charge.InitialOneTime()
+	if p.StoredCredentialRef != "" {
+		citContext = charge.OneTimeReuse(p.StoredCredentialRef)
 	}
 	saleResp, err := client.RunSale(nmi.SaleParams{
 		CustomerVaultID:  p.CustomerVaultID,
@@ -149,6 +164,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		Currency:         p.Currency,
 		OrderDescription: p.Description,
 		OrderID:          orderID,
+		StoredCredential: nmidirect.StoredCredentialFor(citContext),
 	})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
@@ -169,7 +185,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		// Request-level rejection (validation, config): nothing was charged.
 		return intents.Terminal("sale request rejected: " + err.Error())
 	}
-	return h.finalize(ctx, p, orderID, saleResp.TransactionID, false)
+	return h.finalize(ctx, intent.MerchantID, p, orderID, saleResp.TransactionID, false)
 }
 
 // Verify resolves an ambiguous sale via the Query API: a successful sale for
@@ -193,13 +209,20 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 	if !found {
 		return intents.Retryable("no successful sale found for order id; charge verified not executed")
 	}
-	return h.finalize(ctx, p, orderID, txnID, true)
+	return h.finalize(ctx, intent.MerchantID, p, orderID, txnID, true)
 }
 
 // finalize registers the confirmed charge locally (payment row, entitlements,
 // credits — RegisterPurchase is idempotent on (rail, transaction_id)) and
 // returns the evidence the producer builds its response from.
-func (h *NMISaleIntentHandler) finalize(ctx context.Context, p NMISalePayload, orderID, transactionID string, verified bool) intents.Outcome {
+func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISalePayload, orderID, transactionID string, verified bool) intents.Outcome {
+	// #297: an initial CIT anchors the instrument's unscheduled sequence —
+	// persist the returned transaction id write-once. Best-effort: the charge
+	// happened and registration must never fail on this.
+	if p.StoredCredentialRef == "" && strings.TrimSpace(transactionID) != "" {
+		h.captureStoredCredentialRef(ctx, merchantID, p, strings.TrimSpace(transactionID))
+	}
+
 	var metadata map[string]any
 	if p.E2ERunID != "" {
 		metadata = map[string]any{"e2e_run_id": p.E2ERunID, "order_id": orderID}
@@ -230,4 +253,26 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, p NMISalePayload, o
 		evidence["verified_existing"] = true
 	}
 	return intents.Succeeded(evidence)
+}
+
+// captureStoredCredentialRef persists the unscheduled-sequence anchor for the
+// charged instrument (#297), keyed by the rail handles the payload carries.
+// Best-effort by design: a miss just means the next successful charge
+// re-captures (the query is write-once either way).
+func (h *NMISaleIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISalePayload, transactionID string) {
+	if h.Sale == nil || h.Sale.VaultService == nil || h.Sale.VaultService.DB == nil {
+		log.WithContext(ctx).Warn("nmi sale finalize: no DB handle to persist stored-credential reference (#297)")
+		return
+	}
+	if _, err := h.Sale.VaultService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+		MerchantID:      merchantID,
+		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
+		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),
+		RailMethodRef:   strings.TrimSpace(p.BillingID),
+		Agreement:       string(charge.AgreementUnscheduled),
+		Ref:             transactionID,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("customer_vault_id", p.CustomerVaultID).
+			Warn("nmi sale finalize: failed to persist stored-credential reference (#297); next charge re-captures")
+	}
 }

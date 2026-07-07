@@ -260,6 +260,9 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 		ExpiryDate:            p.ExpiryDate,
 		CreatedAt:             p.CreatedAt,
 		UpdatedAt:             p.UpdatedAt,
+
+		StoredCredentialRecurringRef:   p.StoredCredentialRecurringRef,
+		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
 	}
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payment_methods.metadata"); err != nil {
 		return nil, err

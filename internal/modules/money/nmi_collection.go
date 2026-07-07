@@ -2,22 +2,26 @@ package money
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	log "github.com/sirupsen/logrus"
 )
 
 // NMICollectionAdapter collects invoices and top-ups from NMI customer
-// vault payment methods.
+// vault payment methods through the #297 charge seam: every collection is a
+// merchant-initiated unscheduled credential-on-file charge carrying the
+// instrument's stored-credential replay reference.
 type NMICollectionAdapter struct {
-	Client *nmi.NMIClient
+	Charger *nmidirect.Charger
 }
 
 func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
-	return &NMICollectionAdapter{Client: client}
+	return &NMICollectionAdapter{Charger: nmidirect.New(client)}
 }
 
 func NewNMICollectionAdapters(clients map[string]*nmi.NMIClient) map[string]CollectionAdapter {
@@ -32,12 +36,11 @@ func NewNMICollectionAdapters(clients map[string]*nmi.NMIClient) map[string]Coll
 	return adapters
 }
 
-func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
-	if a == nil || a.Client == nil {
+func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
+	if a == nil || a.Charger == nil {
 		return ChargeResult{}, fmt.Errorf("nmi collection adapter not initialized")
 	}
-	vaultID := strings.TrimSpace(method.RailCustomerRef)
-	if vaultID == "" {
+	if strings.TrimSpace(method.RailCustomerRef) == "" {
 		return ChargeResult{}, fmt.Errorf("nmi payment method missing customer vault id")
 	}
 	if req.AmountCents <= 0 {
@@ -53,31 +56,43 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 		description = "OpenRails invoice collection"
 	}
 
-	sale, err := a.Client.RunSale(nmi.SaleParams{
-		CustomerVaultID:  vaultID,
-		BillingID:        strings.TrimSpace(method.RailMethodRef),
-		Amount:           req.AmountCents,
-		Currency:         currency,
-		OrderDescription: description,
-		OrderID:          nmiWireOrderRef(req.IdempotencyKey),
+	// Legacy-instrument policy (#297): a stored card with no unscheduled
+	// replay reference charges reference-less (initiated_by=merchant +
+	// stored_credential_indicator=used, no initial_transaction_id) — the
+	// networks tolerate missing references on legacy credentials, and refusing
+	// would break collection for every pre-migration card. The success anchors
+	// the sequence: ScopedCharger persists Result.CapturedRef write-once.
+	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
+	if priorRef == "" {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"payment_method_id": method.ID,
+			"rail":              rail,
+		}).Warn("nmi collection: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+	}
+
+	res, err := a.Charger.Charge(ctx, charge.Request{
+		Instrument: charge.Instrument{
+			PaymentMethodID: method.ID,
+			Rail:            rail,
+			CustomerRef:     strings.TrimSpace(method.RailCustomerRef),
+			MethodRef:       strings.TrimSpace(method.RailMethodRef),
+		},
+		AmountMinor: req.AmountCents,
+		Currency:    currency,
+		Description: description,
+		OrderRef:    nmiWireOrderRef(req.IdempotencyKey),
+		Context:     charge.UnscheduledMIT(priorRef),
 	})
 	if err != nil {
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) && nmiCollectionHardDecline(vaultErr.ResponseCode) {
-			code := nmiFailureCode(vaultErr)
-			message := vaultErr.Error()
-			return ChargeResult{
-				Rail:           rail,
-				Declined:       true,
-				FailureCode:    &code,
-				FailureMessage: &message,
-			}, nil
-		}
 		return ChargeResult{}, err
 	}
 	return ChargeResult{
-		Rail:          rail,
-		TransactionID: strings.TrimSpace(sale.TransactionID),
+		Rail:                        rail,
+		TransactionID:               res.TransactionID,
+		Declined:                    res.Declined,
+		FailureCode:                 res.FailureCode,
+		FailureMessage:              res.FailureMessage,
+		CapturedStoredCredentialRef: res.CapturedRef,
 	}, nil
 }
 
@@ -86,26 +101,4 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.O
 // readable; the LOCAL idempotency identity is untouched.
 func nmiWireOrderRef(idempotencyKey string) string {
 	return strings.NewReplacer("invoice:", "inv:", ":attempt:", ":a").Replace(strings.TrimSpace(idempotencyKey))
-}
-
-func nmiFailureCode(err *nmi.CustomerVaultError) string {
-	if err == nil {
-		return "nmi_declined"
-	}
-	if code := strings.TrimSpace(err.LocalizationID); code != "" {
-		return code
-	}
-	if err.ResponseCode != 0 {
-		return fmt.Sprintf("nmi_response_%d", err.ResponseCode)
-	}
-	return "nmi_declined"
-}
-
-func nmiCollectionHardDecline(code int) bool {
-	switch code {
-	case 420, 421, 430:
-		return false
-	default:
-		return true
-	}
 }

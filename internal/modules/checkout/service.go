@@ -29,7 +29,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -663,10 +665,17 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
+	}
+	// #297: the instrument's recurring-sequence stored-credential anchor. ""
+	// (fresh vault or legacy instrument) makes this enrollment the sequence's
+	// initial CIT; the intent's finalize captures the first-charge txn id.
+	storedCredentialRef := ""
+	if resolvedMethod != nil {
+		storedCredentialRef = strings.TrimSpace(resolvedMethod.StoredCredentialRecurringRef)
 	}
 
 	// Determine start date for delayed start
@@ -678,14 +687,8 @@ func (s *CheckoutService) processNMISubscription(
 	// subscription id) wins — enqueue conflicts never overwrite the payload.
 	subscriptionID := uuidutil.NewV7()
 	var paymentMethodID *uuid.UUID
-	if createdPaymentMethod != nil {
-		paymentMethodID = &createdPaymentMethod.ID
-	} else if req.PaymentMethodID != "" {
-		if pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID); err == nil {
-			paymentMethodID = &pmID
-		} else {
-			log.WithError(err).Warn("failed to parse payment_method_id while preparing subscription attempt")
-		}
+	if resolvedMethod != nil {
+		paymentMethodID = &resolvedMethod.ID
 	}
 
 	if _, err := customerIDFromUser(user.ID); err != nil {
@@ -724,6 +727,7 @@ func (s *CheckoutService) processNMISubscription(
 			PaymentMethodID:        paymentMethodID,
 			StartDate:              startDate,
 			DelayedStart:           delayedStart,
+			StoredCredentialRef:    storedCredentialRef,
 			E2ERunID:               strings.TrimSpace(req.Metadata["e2e_run_id"]),
 			CheckoutIdempotencyKey: idempotencyKey,
 			FirstName:              ResolveCheckoutFirstName(req, user),
@@ -752,8 +756,8 @@ func (s *CheckoutService) processNMISubscription(
 		// Verified-clean decline/rejection. Direct best-effort cleanup of the
 		// vault created for THIS attempt, NOT an intent (#674 tail): it is
 		// referenced nowhere — harmless if lost.
-		if createdPaymentMethod != nil && s.VaultService != nil {
-			if cleanupErr := s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod); cleanupErr != nil {
+		if createdVault && resolvedMethod != nil && s.VaultService != nil {
+			if cleanupErr := s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod); cleanupErr != nil {
 				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
@@ -1804,10 +1808,25 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Get or create vault
-	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
+	}
+
+	// #297 CIT contexts for the two upgrade charges: the successor enrollment
+	// rides the RECURRING sequence, the proration sale the UNSCHEDULED one.
+	// An instrument without an anchor makes the charge that sequence's initial
+	// CIT; anchors are captured after success below.
+	recurringCtx := charge.InitialRecurring()
+	unscheduledCtx := charge.InitialOneTime()
+	if resolvedMethod != nil {
+		if ref := strings.TrimSpace(resolvedMethod.StoredCredentialRecurringRef); ref != "" {
+			recurringCtx = charge.RecurringReuse(ref)
+		}
+		if ref := strings.TrimSpace(resolvedMethod.StoredCredentialUnscheduledRef); ref != "" {
+			unscheduledCtx = charge.OneTimeReuse(ref)
+		}
 	}
 
 	// Step 1: Create the successor subscription at NMI before charging/cancelling.
@@ -1854,7 +1873,8 @@ func (s *CheckoutService) processUpgrade(
 			PONumber:        successorOrderID,
 			CustomerID:      user.ID,
 			// Start date uses day precision and must be strictly in the future for NMI.
-			StartDate: startDate,
+			StartDate:        startDate,
+			StoredCredential: nmidirect.StoredCredentialFor(recurringCtx),
 		}
 
 		created, err := client.AddRecurringSubscription(params)
@@ -1927,6 +1947,7 @@ func (s *CheckoutService) processUpgrade(
 				Currency:         newPrice.Currency,
 				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
 				OrderID:          prorationOrderID,
+				StoredCredential: nmidirect.StoredCredentialFor(unscheduledCtx),
 			})
 			switch {
 			case err == nil:
@@ -1949,8 +1970,8 @@ func (s *CheckoutService) processUpgrade(
 				// best-effort cleanup of the vault created for THIS attempt,
 				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
-				if createdPaymentMethod != nil && s.VaultService != nil {
-					_ = s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod)
+				if createdVault && resolvedMethod != nil && s.VaultService != nil {
+					_ = s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod)
 				}
 				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
@@ -1965,6 +1986,13 @@ func (s *CheckoutService) processUpgrade(
 			"rail":           provider,
 		}).Info("charged upgrade proration")
 	}
+
+	// #297: anchor captures (write-once, best-effort). The proration sale
+	// anchors the unscheduled sequence; the successor's first-charge txn (""
+	// under the delayed start used here — then the first dunning MIT anchors
+	// instead) the recurring one.
+	s.captureStoredCredentialRef(ctx, resolvedMethod, charge.AgreementUnscheduled, prorationTransactionID)
+	s.captureStoredCredentialRef(ctx, resolvedMethod, charge.AgreementRecurring, resp.TransactionID)
 
 	// Step 3: Update local database.
 	//
@@ -1997,14 +2025,8 @@ func (s *CheckoutService) processUpgrade(
 		CurrentPeriodEndsAt:   &newPeriodEnd,
 	}
 
-	if createdPaymentMethod != nil {
-		newSubscription.PaymentMethodID = &createdPaymentMethod.ID
-	} else if req.PaymentMethodID != "" {
-		if pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID); err == nil {
-			newSubscription.PaymentMethodID = &pmID
-		} else {
-			log.WithError(err).Warn("failed to parse payment_method_id while scheduling upgrade subscription")
-		}
+	if resolvedMethod != nil {
+		newSubscription.PaymentMethodID = &resolvedMethod.ID
 	}
 
 	// Persist the swap ATOMICALLY: the partial unique index
@@ -2973,4 +2995,32 @@ func requireNMIPlanForRail(price *models.Price, provider string) (string, error)
 		return "", fmt.Errorf("price %s is missing NMI plan configuration for rail %s", price.ID, provider)
 	}
 	return planID, nil
+}
+
+// captureStoredCredentialRef persists a stored-credential sequence anchor for
+// an instrument (#297), write-once and best-effort — a miss just means the
+// next successful charge on that agreement type re-captures.
+func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *models.PaymentMethod, agreement charge.Agreement, ref string) {
+	ref = strings.TrimSpace(ref)
+	if pm == nil || ref == "" {
+		return
+	}
+	if s.VaultService == nil || s.VaultService.DB == nil {
+		log.WithContext(ctx).Warn("checkout: no DB handle to persist stored-credential reference (#297)")
+		return
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("checkout: no merchant context to persist stored-credential reference (#297)")
+		return
+	}
+	if _, err := s.VaultService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+		MerchantID: tid.UUID(),
+		ID:         pm.ID,
+		Agreement:  string(agreement),
+		Ref:        ref,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("payment_method_id", pm.ID).
+			Warn("checkout: failed to persist stored-credential reference (#297); next charge re-captures")
+	}
 }

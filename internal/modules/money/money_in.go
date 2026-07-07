@@ -45,6 +45,11 @@ type ChargeResult struct {
 	Declined          bool // true = hard decline (don't keep retrying); false+err = transient
 	FailureCode       *string
 	FailureMessage    *string
+	// CapturedStoredCredentialRef is the rail-scoped stored-credential replay
+	// reference this charge established for the instrument's UNSCHEDULED
+	// agreement sequence (#297) — set when the instrument had none (first use
+	// or legacy). ScopedCharger persists it write-once; "" = nothing captured.
+	CapturedStoredCredentialRef string
 }
 
 // Alerter delivers a low-balance notification. Implemented by the notification

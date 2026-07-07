@@ -37,6 +37,16 @@ type PaymentMethod struct {
 	// which made an identity field load-bearing as a behavior flag.
 	RebillDriver string `json:"-"`
 
+	// Stored-credential (CIT/MIT) replay references (#297), one per card-network
+	// agreement type — the networks track separate credential-on-file sequences
+	// for recurring vs unscheduled charges and the references are not
+	// interchangeable. Rail-scoped value (NMI: the gateway transactionid of the
+	// sequence's initial CIT, replayed as initial_transaction_id on MITs).
+	// "" = not captured yet (legacy instrument, or no charge on that agreement
+	// type); captures are write-once (CaptureStoredCredentialRef).
+	StoredCredentialRecurringRef   string `json:"-"`
+	StoredCredentialUnscheduledRef string `json:"-"`
+
 	// Payment method metadata
 	LastFour   *string        `json:"last_four"`   // Last 4 digits of card
 	CardType   *string        `json:"card_type"`   // "Visa", "MasterCard", etc.

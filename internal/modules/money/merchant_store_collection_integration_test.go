@@ -4,7 +4,6 @@ package money_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -130,26 +129,23 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
 	seen := make(chan struct{}, 1)
+	// #297: store-armed collections are merchant-initiated stored-credential
+	// charges and ride classic Direct Post.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/payments/sale", r.URL.Path)
-		// The store-armed client authenticates with the STORE key (v5: the bare
-		// key is the whole Authorization header).
-		require.Equal(t, "store-only-security-key-"+sfx, r.Header.Get("Authorization"))
-		var req struct {
-			Amount        json.Number `json:"amount"`
-			CustomerVault struct {
-				ID string `json:"id"`
-			} `json:"customer_vault"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
-		require.Equal(t, "vault_"+pm.String(), req.CustomerVault.ID)
-		require.Equal(t, "0.05", req.Amount.String())
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "sale", r.Form.Get("type"))
+		// The store-armed client authenticates with the STORE key.
+		require.Equal(t, "store-only-security-key-"+sfx, r.Form.Get("security_key"))
+		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
+		require.Equal(t, "0.05", r.Form.Get("amount"))
+		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
+		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
 		seen <- struct{}{}
-		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_store_only_nmi","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_store_only_nmi&response_code=100"))
 	}))
 	t.Cleanup(server.Close)
 
-	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{NMIV5BaseURL: server.URL})
+	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{NMIDirectPostURL: server.URL})
 
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)

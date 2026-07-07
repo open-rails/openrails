@@ -10,8 +10,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 // CollectionAdapter charges a rail-specific saved payment method.
@@ -110,6 +112,20 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	}
 	if strings.TrimSpace(res.Rail) == "" {
 		res.Rail = rail
+	}
+	// #297: a successful charge on an instrument with no stored-credential
+	// replay reference anchors its unscheduled sequence — persist write-once.
+	// Best-effort: the charge itself succeeded and must never fail on this.
+	if ref := strings.TrimSpace(res.CapturedStoredCredentialRef); ref != "" && !res.Declined {
+		if _, cerr := c.db.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+			MerchantID: merchantID,
+			ID:         method.ID,
+			Agreement:  string(charge.AgreementUnscheduled),
+			Ref:        ref,
+		}); cerr != nil {
+			log.WithContext(ctx).WithError(cerr).WithField("payment_method_id", method.ID).
+				Warn("failed to persist captured stored-credential reference (#297); next charge re-captures")
+		}
 	}
 	return res, nil
 }

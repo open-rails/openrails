@@ -26,19 +26,24 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// fakeNMISaleGateway scripts the v5 sale endpoint + the classic query API the
-// verify leg reads: saleMode controls the sale outcome, charged whether the
-// query reports a landed sale for the searched order id.
+// fakeNMISaleGateway scripts the sale lanes (classic Direct Post — the #297
+// stored-credential lane every checkout sale rides now — plus the legacy v5
+// endpoint) and the classic query API the verify leg reads: saleMode controls
+// the sale outcome, charged whether the query reports a landed sale for the
+// searched order id. saleForm records the last classic sale's full form for
+// stored-credential wire assertions.
 type fakeNMISaleGateway struct {
 	saleCalls  atomic.Int64
 	queryCalls atomic.Int64
 	saleMode   atomic.Value // "approve" | "decline" | "ambiguous500"
 	charged    atomic.Bool
 	lastOrder  atomic.Value // string: order id of the last sale attempt
+	saleForm   atomic.Value // url.Values: last classic sale form
 	txnID      string
 }
 
@@ -71,8 +76,26 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 			}
 			return
 		}
-		// classic query.php transaction search
 		_ = r.ParseForm()
+		if r.Form.Get("type") == "sale" {
+			// Classic Direct Post sale — the #297 stored-credential lane.
+			f.saleCalls.Add(1)
+			f.saleForm.Store(r.Form)
+			f.lastOrder.Store(r.Form.Get("orderid"))
+			switch f.saleMode.Load().(string) {
+			case "decline":
+				fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
+			case "ambiguous500":
+				// The charge LANDED but the response was lost (5xx).
+				f.charged.Store(true)
+				w.WriteHeader(http.StatusBadGateway)
+			default:
+				f.charged.Store(true)
+				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&authcode=OK&transactionid=%s&response_code=100", f.txnID)
+			}
+			return
+		}
+		// classic query.php transaction search
 		f.queryCalls.Add(1)
 		orderID := r.Form.Get("order_id")
 		if f.charged.Load() {
@@ -146,6 +169,9 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 			clock,
 		),
 		NMIClients: map[string]*nmi.NMIClient{"mobius": client},
+		// VaultService carries the DB handle finalize persists the #297
+		// stored-credential anchor through.
+		VaultService: &paymentmethods.VaultService{DB: dbi},
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),

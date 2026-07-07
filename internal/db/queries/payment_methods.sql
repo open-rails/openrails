@@ -101,3 +101,57 @@ WHERE rail = $1
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)
   AND rail_customer_ref <> ''
   AND id <> sqlc.arg(exclude_id);
+
+-- name: GetPaymentMethodByRailInstrument :one
+-- #297: resolve the stored instrument for a charge that only knows the rail
+-- handles (checkout intents carry vault/billing ids, not the local row id).
+-- One-vault-per-card minting (#682) makes rail_customer_ref alone decisive for
+-- NMI; the method-ref predicate narrows within shared (imported) vaults and is
+-- skipped when either side has no billing id.
+SELECT * FROM openrails.payment_methods pm
+WHERE pm.merchant_id = sqlc.arg(merchant_id)
+  AND pm.rail = sqlc.arg(rail)
+  AND pm.rail_customer_ref = sqlc.arg(rail_customer_ref)
+  AND (pm.rail_method_ref = sqlc.arg(rail_method_ref)
+       OR sqlc.arg(rail_method_ref)::text = ''
+       OR pm.rail_method_ref = '')
+ORDER BY pm.created_at
+LIMIT 1;
+
+-- name: CaptureStoredCredentialRef :execrows
+-- #297: persist the rail-scoped stored-credential replay reference captured by
+-- a successful charge, WRITE-ONCE per agreement type — an existing non-empty
+-- reference is never overwritten (the sequence anchors on its first capture).
+UPDATE openrails.payment_methods SET
+    stored_credential_recurring_ref = CASE
+        WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
+        ELSE stored_credential_recurring_ref END,
+    stored_credential_unscheduled_ref = CASE
+        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN sqlc.arg(ref)::text
+        ELSE stored_credential_unscheduled_ref END,
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)
+  AND id = sqlc.arg(id)
+  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref = '')
+    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''));
+
+-- name: CaptureStoredCredentialRefByRailInstrument :execrows
+-- #297: instrument-handle variant of CaptureStoredCredentialRef for charge
+-- sites that never load the local row (checkout sale/subscription intents).
+-- Same write-once semantics.
+UPDATE openrails.payment_methods SET
+    stored_credential_recurring_ref = CASE
+        WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
+        ELSE stored_credential_recurring_ref END,
+    stored_credential_unscheduled_ref = CASE
+        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN sqlc.arg(ref)::text
+        ELSE stored_credential_unscheduled_ref END,
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)
+  AND rail = sqlc.arg(rail)
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)
+  AND (rail_method_ref = sqlc.arg(rail_method_ref)
+       OR sqlc.arg(rail_method_ref)::text = ''
+       OR rail_method_ref = '')
+  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref = '')
+    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''));
