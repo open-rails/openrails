@@ -21,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -183,7 +185,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 			return Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
 		if found {
-			if err := h.finalizeSuccess(ctx, p, txnID); err != nil {
+			if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
 				return Ambiguous("charge verified at provider, but local lifecycle repair failed: " + err.Error())
 			}
 			return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
@@ -203,12 +205,25 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		return TerminalWithEvidence("payment method unavailable for rebill", map[string]any{"declined": false})
 	}
 
+	// #297: a dunning retry is a merchant-initiated RECURRING charge — carry
+	// the credential-on-file indicators plus the recurring sequence anchor.
+	// Legacy instrument without an anchor: charge reference-less (networks
+	// tolerate it on legacy credentials) and back-fill from the success.
+	priorRef := strings.TrimSpace(pm.StoredCredentialRecurringRef)
+	if priorRef == "" {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"payment_method_id": pm.ID,
+			"subscription_id":   sub.ID,
+		}).Warn("manual rebill: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+	}
+
 	rebillResp, err := client.AttemptManualRebill(nmi.ManualRebillParams{
-		VaultID:        pm.RailCustomerRef,
-		BillingID:      pm.RailMethodRef,
-		SubscriptionID: sub.RailSubscriptionID,
-		OrderID:        p.OrderReference,
-		PONumber:       p.OrderReference,
+		VaultID:          pm.RailCustomerRef,
+		BillingID:        pm.RailMethodRef,
+		SubscriptionID:   sub.RailSubscriptionID,
+		OrderID:          p.OrderReference,
+		PONumber:         p.OrderReference,
+		StoredCredential: nmidirect.StoredCredentialFor(charge.RecurringMIT(priorRef)),
 	})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
@@ -233,7 +248,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		})
 	}
 
-	if err := h.finalizeSuccess(ctx, p, rebillResp.TransactionID); err != nil {
+	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, rebillResp.TransactionID); err != nil {
 		// The charge DID happen; route through the verifier so the lifecycle
 		// repair is retried (its read re-finds the sale by order reference).
 		return Ambiguous("rebill charged, but local lifecycle update failed: " + err.Error())
@@ -262,7 +277,7 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	if !found {
 		return Retryable("no successful sale found for order reference; charge verified not executed")
 	}
-	if err := h.finalizeSuccess(ctx, p, txnID); err != nil {
+	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
 		return Ambiguous("charge verified at provider, but local lifecycle repair failed: " + err.Error())
 	}
 	return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
@@ -282,12 +297,29 @@ func (h *ManualRebillHandler) findSuccessfulSale(client *nmi.NMIClient, p Manual
 // notifications) and grant per-renewal credits. Idempotent — a subscription
 // that already left past_due (the renewal applied, or a racing worker
 // repaired it) is left alone.
-func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebillPayload, transactionID string) error {
+func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uuid.UUID, p ManualRebillPayload, transactionID string) error {
 	subRepo := subscriptions.NewSubscriptionRepo(h.DB)
 	sub, err := subRepo.GetByID(ctx, p.SubscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription: %w", err)
 	}
+
+	// #297: a successful rebill on an instrument with no recurring
+	// stored-credential anchor establishes one — persist write-once,
+	// best-effort, BEFORE the past_due gate (a verified-existing success that
+	// already renewed still anchors the sequence).
+	if pm := sub.PaymentMethod; pm != nil && strings.TrimSpace(pm.StoredCredentialRecurringRef) == "" && strings.TrimSpace(transactionID) != "" {
+		if _, cerr := h.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+			MerchantID: merchantID,
+			ID:         pm.ID,
+			Agreement:  string(charge.AgreementRecurring),
+			Ref:        strings.TrimSpace(transactionID),
+		}); cerr != nil {
+			log.WithContext(ctx).WithError(cerr).WithField("payment_method_id", pm.ID).
+				Warn("manual rebill: failed to persist captured stored-credential reference (#297); next rebill re-captures")
+		}
+	}
+
 	if sub.Status != models.StatusPastDue ||
 		sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.UTC().Unix() != p.PeriodEnd.UTC().Unix() {
 		return nil

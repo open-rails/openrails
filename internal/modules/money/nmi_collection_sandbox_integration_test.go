@@ -128,5 +128,14 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	require.Equal(t, 1, settledCount)
 	require.Equal(t, string(models.RailNMI), rail)
 	require.NotEmpty(t, railPaymentID, "OpenRails must record the real NMI sandbox transaction id")
-	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; real transaction id = %s", inv.ID, railPaymentID)
+
+	// #297: the collection ran as a reference-less MIT on a legacy (unanchored)
+	// instrument, so the success must back-fill the unscheduled sequence anchor
+	// with the real sandbox transaction id.
+	var storedRef string
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1", pm).Scan(&storedRef))
+	require.Equal(t, railPaymentID, storedRef, "successful collection must anchor the stored-credential sequence (#297)")
+
+	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; real transaction id = %s (stored-credential anchor persisted)", inv.ID, railPaymentID)
 }

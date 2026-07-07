@@ -39,6 +39,12 @@ type RecurringPaymentData struct {
 	PONumber   string
 	CustomerID string
 	StartDate  string
+	// StoredCredential carries the CIT credential-on-file fields (#297) for the
+	// enrollment charge — the portal's recurring initial CIT "MUST INCLUDE"
+	// billing_method=recurring + initiated_by=customer +
+	// stored_credential_indicator=stored (billing_method is already always sent
+	// by this lane). nil preserves the legacy shape.
+	StoredCredential *StoredCredential
 }
 
 type QueryFilter struct {
@@ -67,6 +73,11 @@ type ManualRebillParams struct {
 	SubscriptionID string
 	OrderID        string
 	PONumber       string
+	// StoredCredential carries the recurring-MIT credential-on-file fields
+	// (#297): initiated_by=merchant + stored_credential_indicator=used +
+	// initial_transaction_id=<recurring sequence anchor> + billing_method=
+	// recurring. nil preserves the legacy shape.
+	StoredCredential *StoredCredential
 }
 
 type ManualRebillResponse struct {
@@ -94,6 +105,9 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	}
 	if data.CustomerVaultID == "" && data.PaymentToken == "" {
 		return nil, errors.New("either customer vault or payment token is required")
+	}
+	if err := data.StoredCredential.validate(); err != nil {
+		return nil, err
 	}
 
 	amtStr := strconv.FormatFloat(float64(data.Amount), 'f', 2, 64)
@@ -137,6 +151,9 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	if trimmed := strings.TrimSpace(data.StartDate); trimmed != "" {
 		values.Set("start_date", trimmed)
 	}
+	// billing_method=recurring is already stamped above; applyToForm re-setting
+	// it for a recurring-agreement StoredCredential is idempotent.
+	data.StoredCredential.applyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {
@@ -265,6 +282,9 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 		err := errors.New("vault ID, billing ID, and subscription ID are required")
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 	}
+	if err := params.StoredCredential.validate(); err != nil {
+		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
+	}
 
 	values := url.Values{
 		"type":              {"sale"},
@@ -281,6 +301,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 	if trimmed := strings.TrimSpace(params.PONumber); trimmed != "" {
 		values.Set("ponumber", trimmed)
 	}
+	params.StoredCredential.applyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {

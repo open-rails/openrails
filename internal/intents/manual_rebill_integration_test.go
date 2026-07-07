@@ -32,6 +32,7 @@ type fakeNMIRebillGateway struct {
 	saleCalls   atomic.Int64
 	queryCalls  atomic.Int64
 	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
+	saleForm    atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
 	txnID       string
 }
 
@@ -58,6 +59,7 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 		if r.Form.Get("type") == "sale" {
 			f.saleCalls.Add(1)
 			f.saleAuthKey.Store(r.Form.Get("security_key"))
+			f.saleForm.Store(r.Form)
 			if st := f.saleStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
 				return

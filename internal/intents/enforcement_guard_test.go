@@ -29,9 +29,9 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 	// with WHY they are allowed.
 	allowed := map[string]map[string]string{
 		".RunSale(": {
-			"internal/modules/checkout/nmi_sale_intent.go": "nmi_sale intent handler (the sanctioned executor)",
-			"internal/modules/checkout/service.go":         "upgrade proration: order id content-derived + pre/post verify (#674); full intent migration deferred",
-			"internal/modules/money/nmi_collection.go":     "CollectionAdapter choke: reached via the topup_charge intent handler and the arrears/invoice worker (attempt-count keys, #672/#673)",
+			"internal/modules/checkout/nmi_sale_intent.go":         "nmi_sale intent handler (the sanctioned executor)",
+			"internal/modules/checkout/service.go":                 "upgrade proration: order id content-derived + pre/post verify (#674); full intent migration deferred",
+			"internal/modules/payments/rails/nmidirect/charger.go": "#297 charge-seam implementation: the ONE seam wire call, reached only via the money CollectionAdapter choke (topup_charge intent handler + arrears/invoice worker attempt-count keys, #672/#673)",
 		},
 		".AddRecurringSubscription(": {
 			"internal/modules/checkout/nmi_subscription_intent.go": "nmi_subscription_create intent handler",

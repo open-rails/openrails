@@ -50,6 +50,7 @@ func (s *stubIdemStore) Complete(context.Context, string, string, json.RawMessag
 type fakeNMISubGateway struct {
 	createCalls atomic.Int64
 	createMode  atomic.Value // "approve" | "ambiguous500"
+	createForm  atomic.Value // url.Values: full form of the last create (#297 wire assertions)
 	// remote state
 	subExists atomic.Bool
 	vaultID   string
@@ -82,6 +83,7 @@ func newFakeNMISubGateway(t *testing.T, vaultID, planID string) (*fakeNMISubGate
 		_ = r.ParseForm()
 		if r.Form.Get("recurring") == "add_subscription" {
 			f.createCalls.Add(1)
+			f.createForm.Store(r.Form)
 			switch f.createMode.Load().(string) {
 			case "ambiguous500":
 				// The create LANDED but the response was lost.

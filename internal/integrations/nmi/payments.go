@@ -22,6 +22,10 @@ type SaleParams struct {
 	Currency         string
 	OrderDescription string
 	OrderID          string
+	// StoredCredential carries the CIT/MIT credential-on-file fields (#297).
+	// Non-nil routes the sale through classic Direct Post — the lane the NMI
+	// portal documents the fields on. nil preserves the legacy shape.
+	StoredCredential *StoredCredential
 }
 
 type SaleResponse struct {
@@ -76,9 +80,17 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	if len(params.OrderID) > 50 {
 		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
 	}
+	if err := params.StoredCredential.validate(); err != nil {
+		return nil, err
+	}
 
-	if billingID := strings.TrimSpace(params.BillingID); billingID != "" {
-		return c.runClassicTargetedSale(params, currency, orderDesc, billingID)
+	// Stored-credential (CIT/MIT) sales go classic DELIBERATELY (#297): the
+	// integration portal documents initiated_by / stored_credential_indicator /
+	// initial_transaction_id on the Direct Post variables (v5 nests them under
+	// cit_mit, but the classic vault-sale lane is the one already live-verified
+	// here — billing-targeted sales and dunning rebills ride it today).
+	if billingID := strings.TrimSpace(params.BillingID); billingID != "" || params.StoredCredential != nil {
+		return c.runClassicSale(params, currency, orderDesc, billingID)
 	}
 
 	req := v5PaymentRequest{
@@ -103,22 +115,26 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	}, nil
 }
 
-// runClassicTargetedSale charges ONE specific billing entry of a vault via
-// classic Direct Post (type=sale + customer_vault_id + billing_id) — see the
-// RunSale doc for why v5 cannot do this.
-func (c *NMIClient) runClassicTargetedSale(params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
+// runClassicSale charges a vault via classic Direct Post (type=sale +
+// customer_vault_id): billingID targets ONE specific billing entry (see the
+// RunSale doc for why v5 cannot do this); "" charges the priority-1 entry.
+// Stored-credential fields ride this lane (#297).
+func (c *NMIClient) runClassicSale(params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
 	values := url.Values{
 		"type":              {"sale"},
 		"security_key":      {c.SecurityKey},
 		"customer_vault_id": {params.CustomerVaultID},
-		"billing_id":        {billingID},
 		"amount":            {string(centsJSONAmount(params.Amount))},
 		"currency":          {currency},
 		"order_description": {orderDesc},
 	}
+	if billingID != "" {
+		values.Set("billing_id", billingID)
+	}
 	if params.OrderID != "" {
 		values.Set("orderid", params.OrderID)
 	}
+	params.StoredCredential.applyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {

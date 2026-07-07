@@ -4,7 +4,6 @@ package money_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -553,35 +552,28 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	seen := make(chan struct{}, 1)
+	// #297: collections are merchant-initiated stored-credential charges and
+	// ride classic Direct Post (the portal-documented CoF lane), not v5.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
-		require.Equal(t, "/payments/sale", r.URL.Path)
-		require.Equal(t, "test-security-key", r.Header.Get("Authorization"))
-		var req struct {
-			Amount        json.Number `json:"amount"`
-			Currency      string      `json:"currency"`
-			CustomerVault struct {
-				ID string `json:"id"`
-			} `json:"customer_vault"`
-			OrderDetails struct {
-				ID               string `json:"id"`
-				OrderDescription string `json:"order_description"`
-			} `json:"order_details"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
-		require.Equal(t, "vault_"+pm.String(), req.CustomerVault.ID)
-		require.Equal(t, "1.23", req.Amount.String())
-		require.Equal(t, money.DefaultCurrency, req.Currency)
-		require.Equal(t, "nmi-scope-ok", req.OrderDetails.ID)
-		require.Equal(t, "invoice", req.OrderDetails.OrderDescription)
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "sale", r.Form.Get("type"))
+		require.Equal(t, "test-security-key", r.Form.Get("security_key"))
+		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
+		require.Equal(t, "1.23", r.Form.Get("amount"))
+		require.Equal(t, money.DefaultCurrency, r.Form.Get("currency"))
+		require.Equal(t, "nmi-scope-ok", r.Form.Get("orderid"))
+		require.Equal(t, "invoice", r.Form.Get("order_description"))
+		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
+		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
 		seen <- struct{}{}
-		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_nmi_invoice_123","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_nmi_invoice_123&response_code=100"))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.V5BaseURL = server.URL
+	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
@@ -610,13 +602,13 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_declined","response":"2","response_text":"Do not honor","response_code":"201"}`))
+		_, _ = w.Write([]byte("response=2&responsetext=Do not honor&response_code=201"))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.V5BaseURL = server.URL
+	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
@@ -658,29 +650,24 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	require.NoError(t, err)
 
 	seen := make(chan struct{}, 1)
+	// #297: the invoice collection is a merchant-initiated stored-credential
+	// charge on classic Direct Post.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/payments/sale", r.URL.Path)
-		var req struct {
-			Amount        json.Number `json:"amount"`
-			CustomerVault struct {
-				ID string `json:"id"`
-			} `json:"customer_vault"`
-			OrderDetails struct {
-				ID string `json:"id"`
-			} `json:"order_details"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
-		require.Equal(t, "vault_"+pm.String(), req.CustomerVault.ID)
-		require.Equal(t, "0.05", req.Amount.String())
-		require.Equal(t, "inv:"+inv.ID.String()+":a0", req.OrderDetails.ID)
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "sale", r.Form.Get("type"))
+		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
+		require.Equal(t, "0.05", r.Form.Get("amount"))
+		require.Equal(t, "inv:"+inv.ID.String()+":a0", r.Form.Get("orderid"))
+		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
+		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
 		seen <- struct{}{}
-		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_nmi_invoice_settled","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_nmi_invoice_settled&response_code=100"))
 	}))
 	t.Cleanup(server.Close)
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
-	client.V5BaseURL = server.URL
+	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))

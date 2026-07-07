@@ -117,10 +117,17 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 	}
 
-	customerVaultID, vaultBillingID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
+	}
+	// #297: the instrument's unscheduled-sequence anchor. "" (fresh vault or
+	// legacy instrument) makes this charge the sequence's initial CIT
+	// (indicator=stored) and finalize captures the returned transaction id.
+	storedCredentialRef := ""
+	if resolvedMethod != nil {
+		storedCredentialRef = strings.TrimSpace(resolvedMethod.StoredCredentialUnscheduledRef)
 	}
 
 	tid, err := merchant.Require(ctx)
@@ -134,15 +141,16 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		IntentType: TypeNMISale,
 		PriceID:    &price.ID,
 		Payload: NMISalePayload{
-			Provider:        provider,
-			CustomerVaultID: customerVaultID,
-			BillingID:       vaultBillingID,
-			AmountMicros:    price.Amount,
-			Currency:        price.Currency,
-			Description:     fmt.Sprintf("Purchase: %s", product.DisplayName),
-			UserID:          user.ID,
-			PriceID:         price.ID,
-			E2ERunID:        strings.TrimSpace(req.Metadata["e2e_run_id"]),
+			Provider:            provider,
+			CustomerVaultID:     customerVaultID,
+			BillingID:           vaultBillingID,
+			AmountMicros:        price.Amount,
+			Currency:            price.Currency,
+			Description:         fmt.Sprintf("Purchase: %s", product.DisplayName),
+			UserID:              user.ID,
+			PriceID:             price.ID,
+			StoredCredentialRef: storedCredentialRef,
+			E2ERunID:            strings.TrimSpace(req.Metadata["e2e_run_id"]),
 		},
 		IdempotencyKey: NMISaleIdempotencyKey(idempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),
@@ -167,8 +175,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		// Verified-clean decline/rejection: no money moved. Direct best-effort
 		// cleanup, NOT an intent (#674 tail): the vault was created for THIS
 		// declined attempt and is referenced nowhere — harmless if lost.
-		if createdPaymentMethod != nil && s.VaultService != nil {
-			_ = s.VaultService.CleanupVaultBestEffort(ctx, createdPaymentMethod)
+		if createdVault && resolvedMethod != nil && s.VaultService != nil {
+			_ = s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod)
 		}
 		reason := "payment failed"
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {

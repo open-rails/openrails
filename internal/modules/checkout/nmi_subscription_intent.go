@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -54,7 +57,13 @@ type NMISubscriptionCreatePayload struct {
 	// nmiSubscriptionStartDate's coverage-derived delayed start.
 	StartDate    string     `json:"start_date,omitempty"`
 	DelayedStart *time.Time `json:"delayed_start,omitempty"`
-	E2ERunID     string     `json:"e2e_run_id,omitempty"`
+	// StoredCredentialRef is the instrument's RECURRING-sequence
+	// stored-credential anchor at enqueue (#297). "" = this enrollment is the
+	// sequence's initial CIT (indicator=stored) and finalize captures the
+	// first-charge transaction id as the anchor (delayed starts produce no
+	// first charge — the anchor then back-fills from the first dunning MIT).
+	StoredCredentialRef string `json:"stored_credential_ref,omitempty"`
+	E2ERunID            string `json:"e2e_run_id,omitempty"`
 	// CheckoutIdempotencyKey lets finalize complete the request-level
 	// idempotency record so a client replay gets the cached response.
 	CheckoutIdempotencyKey string `json:"checkout_idempotency_key"`
@@ -141,11 +150,19 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 
 	// Money mover + remote-resource creator: re-executions verify first.
 	if intent.Attempts > 1 {
-		if outcome, resolved := h.verifyAtProvider(ctx, client, p, orderID); resolved {
+		if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
 			return outcome
 		}
 	}
 
+	// #297: subscription enrollment is the cardholder-initiated RECURRING
+	// credential-on-file charge — the sequence's initial CIT when the
+	// instrument has no recurring anchor, a reuse when it does (a second
+	// subscription on an already-anchored card).
+	citContext := charge.InitialRecurring()
+	if p.StoredCredentialRef != "" {
+		citContext = charge.RecurringReuse(p.StoredCredentialRef)
+	}
 	resp, err := client.AddRecurringSubscription(nmi.RecurringPaymentData{
 		BillingID: p.BillingID,
 		CardUserData: nmi.CardUserData{
@@ -157,15 +174,16 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 			Zip:       p.Zip,
 			Country:   p.Country,
 		},
-		PlanID:          p.PlanID,
-		CustomerVaultID: p.CustomerVaultID,
-		Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(p.AmountMicros)),
-		Currency:        p.Currency,
-		Email:           p.Email,
-		OrderID:         orderID,
-		PONumber:        orderID,
-		CustomerID:      p.UserID,
-		StartDate:       p.StartDate,
+		PlanID:           p.PlanID,
+		CustomerVaultID:  p.CustomerVaultID,
+		Amount:           moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(p.AmountMicros)),
+		Currency:         p.Currency,
+		Email:            p.Email,
+		OrderID:          orderID,
+		PONumber:         orderID,
+		CustomerID:       p.UserID,
+		StartDate:        p.StartDate,
+		StoredCredential: nmidirect.StoredCredentialFor(citContext),
 	})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
@@ -185,7 +203,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		}
 		return intents.Terminal("subscription create request rejected: " + err.Error())
 	}
-	return h.finalize(ctx, p, orderID, resp.SubscriptionID, resp.TransactionID, false)
+	return h.finalize(ctx, intent.MerchantID, p, orderID, resp.SubscriptionID, resp.TransactionID, false)
 }
 
 // Verify resolves an ambiguous create via provider READS.
@@ -199,7 +217,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	if outcome, resolved := h.verifyAtProvider(ctx, client, p, orderID); resolved {
+	if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
 		return outcome
 	}
 	return intents.Retryable("no remote subscription or sale found for this intent; create verified not executed")
@@ -214,7 +232,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 //     crashed midway; re-finalize).
 //
 // resolved=false means "verified not executed" — the caller may (re)send.
-func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
+func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
 	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(orderID)
 	if err != nil {
 		return intents.Ambiguous("pre-send verification read failed: " + err.Error()), true
@@ -227,7 +245,7 @@ func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Contex
 
 	switch {
 	case len(candidates) == 1:
-		return h.finalize(ctx, p, orderID, candidates[0], txnID, true), true
+		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true), true
 	case len(candidates) > 1:
 		return intents.Ambiguous(fmt.Sprintf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required",
 			len(candidates), p.CustomerVaultID, p.PlanID)), true
@@ -309,9 +327,17 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // standard registration path (idempotent: existing rows are activated /
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
-func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) intents.Outcome {
+func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) intents.Outcome {
 	if strings.TrimSpace(providerSubscriptionID) == "" {
 		return intents.Ambiguous("remote subscription id unavailable; cannot register locally")
+	}
+
+	// #297: an initial recurring CIT anchors the instrument's recurring
+	// sequence with its first-charge transaction id. Delayed starts have no
+	// first charge (transactionID "") — the anchor then back-fills from the
+	// first successful dunning MIT instead. Best-effort, write-once.
+	if p.StoredCredentialRef == "" && strings.TrimSpace(transactionID) != "" {
+		h.captureStoredCredentialRef(ctx, merchantID, p, strings.TrimSpace(transactionID))
 	}
 	price, err := h.Checkout.PriceService.GetByID(ctx, p.PriceID)
 	if err != nil {
@@ -354,4 +380,25 @@ func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, p NMI
 		evidence["verified_existing"] = true
 	}
 	return intents.Succeeded(evidence)
+}
+
+// captureStoredCredentialRef persists the recurring-sequence anchor for the
+// enrolled instrument (#297), keyed by the rail handles the payload carries.
+// Best-effort: a miss means the next successful recurring charge re-captures.
+func (h *NMISubscriptionCreateIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, transactionID string) {
+	if h.Checkout == nil || h.Checkout.VaultService == nil || h.Checkout.VaultService.DB == nil {
+		log.WithContext(ctx).Warn("nmi subscription finalize: no DB handle to persist stored-credential reference (#297)")
+		return
+	}
+	if _, err := h.Checkout.VaultService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+		MerchantID:      merchantID,
+		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
+		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),
+		RailMethodRef:   strings.TrimSpace(p.BillingID),
+		Agreement:       string(charge.AgreementRecurring),
+		Ref:             transactionID,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("customer_vault_id", p.CustomerVaultID).
+			Warn("nmi subscription finalize: failed to persist stored-credential reference (#297); next recurring charge re-captures")
+	}
 }
