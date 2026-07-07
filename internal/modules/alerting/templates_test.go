@@ -80,7 +80,7 @@ func TestCompileRule_DunningAndDigestDefaults(t *testing.T) {
 }
 
 func TestTemplatesRegistryComplete(t *testing.T) {
-	want := []string{"chargeback_rate_by_rail_account", "dunning_spike", "payers_at_depletion_risk", "payment_methods_expiring"}
+	want := []string{"chargeback_rate_by_rail_account", "dunning_spike", "payers_at_depletion_risk", "payment_methods_expiring", "webhook_silence", "webhook_rejects", "webhook_drift"}
 	got := map[string]bool{}
 	for _, ti := range Templates() {
 		got[ti.Key] = true
@@ -88,6 +88,36 @@ func TestTemplatesRegistryComplete(t *testing.T) {
 	for _, w := range want {
 		if !got[w] {
 			t.Fatalf("template %q missing from registry", w)
+		}
+	}
+}
+
+func TestCompileRule_WebhookTemplates(t *testing.T) {
+	if _, norm, ve := compileRule("webhook_silence", map[string]any{}); ve != nil || norm["window"] != "7d" {
+		t.Fatalf("silence defaults: err=%v norm=%v", ve, norm)
+	}
+	if _, _, ve := compileRule("webhook_silence", map[string]any{"window": "0d"}); ve == nil || firstErr(ve).Code != "invalid_window" {
+		t.Fatalf("bad silence window should error, got %v", ve)
+	}
+	if _, _, ve := compileRule("webhook_rejects", map[string]any{}); ve == nil || firstErr(ve).Code != "required" {
+		t.Fatalf("missing min_count should be required, got %v", ve)
+	}
+	if _, norm, ve := compileRule("webhook_rejects", map[string]any{"min_count": 3}); ve != nil || norm["window"] != "1d" {
+		t.Fatalf("rejects defaults: err=%v norm=%v", ve, norm)
+	}
+	if _, _, ve := compileRule("webhook_drift", map[string]any{"min_count": 0}); ve == nil || firstErr(ve).Code != "out_of_range" {
+		t.Fatalf("min_count 0 should be out_of_range, got %v", ve)
+	}
+	if _, norm, ve := compileRule("webhook_drift", map[string]any{"min_count": 5, "window": "3d"}); ve != nil || norm["window"] != "3d" {
+		t.Fatalf("drift params: err=%v norm=%v", ve, norm)
+	}
+}
+
+func TestWindowDuration(t *testing.T) {
+	cases := map[string]int{"1d": 24, "2d": 48, "1w": 168, "1m": 720, "1y": 8760}
+	for in, hours := range cases {
+		if got := windowDuration(in); got.Hours() != float64(hours) {
+			t.Fatalf("windowDuration(%s) = %v, want %dh", in, got, hours)
 		}
 	}
 }

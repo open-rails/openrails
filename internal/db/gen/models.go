@@ -1126,6 +1126,33 @@ type OpenrailsWebhookEvent struct {
 	CompletedAt time.Time
 }
 
+// #786 per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.
+type OpenrailsWebhookHealth struct {
+	MerchantID uuid.UUID
+	Rail       string
+	// last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
+	LastAcceptedAt *time.Time
+	AcceptedCount  int64
+	LastRejectedAt *time.Time
+	RejectedCount  int64
+	LastDriftAt    *time.Time
+	// pull-derived corrections applied while last_accepted_at predated the previous pull — changes a webhook should have announced.
+	DriftCount int64
+	LastPullAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// #786 UTC-day webhook counter buckets backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
+type OpenrailsWebhookHealthDaily struct {
+	MerchantID uuid.UUID
+	Rail       string
+	DayAt      time.Time
+	Accepted   int64
+	Rejected   int64
+	Drift      int64
+}
+
 // #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table (no merchant scope, no RLS — see merchants).
 type OpenrailsWorkerHealth struct {
 	WorkerKind string

@@ -22,6 +22,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -528,12 +529,27 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		out.Proofs = res.PullProofs()
 		out.AppliedChanges += len(res.AppliedChanges)
 		out.Changed = out.Changed || len(res.AppliedChanges) > 0
+		// #786 drift: pull-applied corrections while the rail's accepted-webhook
+		// watermark predates the previous pull (gated in SQL) — changes a
+		// webhook should have announced. Best-effort telemetry.
+		if n := len(res.AppliedChanges); n > 0 {
+			if _, derr := webhookhealth.Drift(ctx, w.DB, string(provider), now, n); derr != nil {
+				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
+			}
+		}
 		if err := w.recordWatermarkSuccess(ctx, mid, provider, accountID, until, now); err != nil {
 			out.WatermarkErrors++
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
 		}
 		since = until
+	}
+	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
+	// gate compares against this pull.
+	if out.Windows > 0 {
+		if err := webhookhealth.StampPull(ctx, w.DB, string(provider), now); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: stamp webhook pull watermark failed")
+		}
 	}
 	return out
 }

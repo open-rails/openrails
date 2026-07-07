@@ -51,6 +51,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -399,6 +400,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		DashboardService:       serviceInstances.DashboardService,
 		CopilotService:         serviceInstances.CopilotService,
 		AlertService:           alertService,
+		WebhookHealth:          &webhookhealth.Recorder{DB: database, Clock: clock},
 		MoneyCharger:           moneyCharger,
 		RailCustomerService:    serviceInstances.RailCustomerService,
 	}
