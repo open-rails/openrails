@@ -652,17 +652,6 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
-// ListPendingDeletionScheduled returns cancelled subscriptions that still
-// carry a deletion_scheduled_at marker — their deferred rail-side delete
-// never finalized (#344 follow-up boot rescan). No relations attached.
-func (r *SubscriptionRepo) ListPendingDeletionScheduled(ctx context.Context) ([]*models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListPendingDeletionScheduledSubscriptions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return models.SubscriptionsFromGen(rows)
-}
-
 // GetLatestResumableCancelled returns the payer's most recent cancelled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.

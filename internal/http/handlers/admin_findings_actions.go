@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -230,8 +232,8 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 // lifecycle chokepoint; the remote side of NMI-backed rails rides the durable
 // nmi_delete_subscription intent (queue-always #679 — the breaker gates its
 // EXECUTION, never the enqueue). Mirrors the ResolveCancelledRemoteAlive
-// pattern: marker persists with the cancellation; the startup marker sweep
-// heals a missed enqueue.
+// pattern: cancellation UPDATE (with the marker) and intent enqueue commit in
+// ONE transaction.
 func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reason string, result map[string]any) error {
 	if r.State.SubscriptionService == nil || r.State.SubscriptionLifecycleService == nil {
 		return errors.New("subscription services unavailable")
@@ -257,27 +259,31 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		if scheduleDelete {
 			sub.DeletionScheduledAt = &now
 		}
-		if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, r.State.DB, sub, subscriptions.LocalCancellation{
+		lcArgs := subscriptions.LocalCancellation{
 			EndedAt:       now,
 			CancelType:    models.CancelTypeMerchant,
 			Feedback:      &feedback,
 			RevokeReason:  models.EntitlementRevokeAdmin,
 			RevokeAsOf:    now,
 			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		}); err != nil {
+		}
+		if scheduleDelete {
+			scheduler := intents.NewNMIDeleteScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason)
+			if err := r.State.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				txdb := db.NewWithPgxTx(tx)
+				if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
+					return err
+				}
+				return scheduler.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now)
+			}); err != nil {
+				return fmt.Errorf("cancel subscription %s: %w", subID, err)
+			}
+			result["delete_intent"] = "queued"
+		} else if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, r.State.DB, sub, lcArgs); err != nil {
 			return fmt.Errorf("cancel subscription %s: %w", subID, err)
 		}
 		result["cancel"] = "cancelled"
 		result["subscription_id"] = subID.String()
-		if scheduleDelete {
-			if err := intents.NewNMIDeleteScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason).
-				ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
-				// Marker committed with the cancellation keeps the delete
-				// discoverable (startup marker sweep converts it).
-				return fmt.Errorf("local cancel applied but delete intent enqueue failed (marker sweep will convert it): %w", err)
-			}
-			result["delete_intent"] = "queued"
-		}
 		return nil
 	case sub.Rail == models.RailCCBill:
 		// #696: local cancel + durable ccbill_cancel_subscription intent

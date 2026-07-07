@@ -1045,67 +1045,6 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 	return items, nil
 }
 
-const listPendingDeletionScheduledSubscriptions = `-- name: ListPendingDeletionScheduledSubscriptions :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
-WHERE sub.status = 'cancelled'
-  AND sub.deletion_scheduled_at IS NOT NULL
-`
-
-// Boot rescan (#344 follow-up): cancelled subscriptions still carrying the
-// deletion_scheduled_at marker — their deferred rail-side delete never
-// finalized (the deletion kill switch skipped it, or the job was lost). The
-// worker-startup rescan re-enqueues these via the deferred-delete scheduler.
-func (q *Queries) ListPendingDeletionScheduledSubscriptions(ctx context.Context) ([]OpenrailsSubscription, error) {
-	rows, err := q.db.Query(ctx, listPendingDeletionScheduledSubscriptions)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsSubscription
-	for rows.Next() {
-		var i OpenrailsSubscription
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.ProductID,
-			&i.Status,
-			&i.Rail,
-			&i.RailSubscriptionID,
-			&i.UserEmail,
-			&i.PaymentMethodID,
-			&i.CurrentPeriodStartsAt,
-			&i.CurrentPeriodEndsAt,
-			&i.StartedAt,
-			&i.EndedAt,
-			&i.GraceEndsAt,
-			&i.ScheduledPriceID,
-			&i.LastRetryAt,
-			&i.RetryAttempts,
-			&i.NextRetryAt,
-			&i.CancelledAt,
-			&i.CancelType,
-			&i.CancelFeedback,
-			&i.EntitlementsSpecSnapshot,
-			&i.CreditsSpecSnapshot,
-			&i.GatewayResponse,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TierGroup,
-			&i.DeletionScheduledAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.RailMerchantAccountID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSubscriptionsByCustomerPaged = `-- name: ListSubscriptionsByCustomerPaged :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, rail_merchant_account_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1

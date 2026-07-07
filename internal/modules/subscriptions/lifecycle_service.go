@@ -2009,12 +2009,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		return err
 	}
 
-	// Schedule the deferred NMI delete AFTER the cancellation committed. Runs
-	// at "now": the undo-window semantics of user cancellations do not apply to
+	// The deferred NMI delete intent committed inside the failure-flow
+	// transaction above, atomically with the cancellation + marker. Runs at
+	// "now": the undo-window semantics of user cancellations do not apply to
 	// dunning exhaustion. Idempotent via the intent ledger's idempotency_key
-	// (#358). On failure the persisted DeletionScheduledAt marker keeps the
-	// pending delete discoverable (startup marker sweep / #107
-	// reconciliation), so we log instead of failing the flow.
+	// (#358).
 	if scheduleDeferredDelete {
 		// Enqueued inside the failure-flow transaction above; this is just
 		// the operator-visible confirmation.
