@@ -580,9 +580,13 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
 		// Two prices for the SAME product (the scheduled downgrade target), so the
-		// subscriptions_price_product_merchant composite FK is satisfied.
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,9990000,'usd',$3),($4,$2,4990000,'usd',$3)`,
-			priceID, productID, merchantID, schedPriceID)
+		// subscriptions_price_product_merchant composite FK is satisfied. Both
+		// default to auto_renew=false/access_duration_hours=NULL, so the
+		// trg_prices_default_key trigger would derive the SAME "<product>-onetime"
+		// key for both and collide on uq_prices_merchant_key_current (#774) —
+		// supply distinct explicit keys, per insertPriceIfAbsent in tests/seed_data.go.
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, key, merchant_id) VALUES ($1,$2,9990000,'usd',$3,$4),($5,$2,4990000,'usd',$6,$4)`,
+			priceID, productID, "sa-price-"+suffix+"-current", merchantID, schedPriceID, "sa-price-"+suffix+"-scheduled")
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,

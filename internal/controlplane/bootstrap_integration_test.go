@@ -100,6 +100,21 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 }
 
+// enrollTestMFA marks userID as MFA-enrolled directly in the DB (a settings
+// row + a default email factor — exactly what authkit's userHasEnabledMFA
+// checks), so granting MFA-required root roles (authkit v0.84.0 #49) succeeds
+// in fixtures that have no session to enroll 2FA through the real HTTP flow.
+func enrollTestMFA(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID string) {
+	t.Helper()
+	_, err := pool.Exec(ctx,
+		`INSERT INTO profiles.mfa_settings (user_id, enabled) VALUES ($1::uuid, true)
+		 ON CONFLICT (user_id) DO UPDATE SET enabled = true`, userID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`INSERT INTO profiles.mfa_factors (user_id, method, is_default) VALUES ($1::uuid, 'email', true)`, userID)
+	require.NoError(t, err)
+}
+
 func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
@@ -364,6 +379,9 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 
 	rootOperator, err := cp.Core().CreateUser(ctx, "root-operator@example.test", "rootoperator")
 	require.NoError(t, err)
+	// authkit v0.84.0 #49: assigning an MFA-required root role fails closed
+	// unless the subject already has 2FA enrolled.
+	enrollTestMFA(ctx, t, pool, rootOperator.ID)
 	require.NoError(t, cp.Core().Genesis().AssignGroupRole(ctx, authcore.RootPersona, "", rootOperator.ID, authcore.SubjectKindUser, authcore.OwnerRoleName))
 
 	canModerateMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
