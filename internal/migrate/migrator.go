@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	authkitpostgres "github.com/open-rails/authkit/migrations/postgres"
+	"github.com/open-rails/authkit/authkitmigrate"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -47,12 +47,12 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 
 	// ---------- 1. AuthKit Migrations (profiles schema) ----------
 	log.Info("Running AuthKit migrations (profiles schema)...")
-	authMigrations, err := migratekit.LoadFromFS(authkitpostgres.FS)
+	authPool, err := db.NewPGXPoolWithRetry(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
-		return fmt.Errorf("authkit: load migrations: %w", err)
+		return fmt.Errorf("authkit: create pgx pool: %w", err)
 	}
-	authMigrator := migratekit.NewPostgres(sqlDB, "authkit")
-	if err := authMigrator.ApplyMigrations(ctx, authMigrations); err != nil {
+	defer authPool.Close()
+	if _, err := authkitmigrate.New(authPool, &authkitmigrate.Config{}).Migrate(ctx); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
