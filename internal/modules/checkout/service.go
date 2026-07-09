@@ -97,6 +97,7 @@ type CheckoutService struct {
 	PurchaseService      *CheckoutPurchaseService
 	VaultResolver        *CheckoutVaultService
 	NMISaleService       *CheckoutNMISaleService
+	VaultedCardService   *CheckoutVaultedCardService
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	VaultService         *paymentmethods.VaultService
 	IdempotencyService   checkoutIdempotencyStore
@@ -184,6 +185,16 @@ func NewCheckoutService(
 	// The scoped resolver is the ONLY NMI client source (#788); armed for
 	// real once SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
+	service.VaultedCardService = &CheckoutVaultedCardService{
+		PurchaseService:      service.PurchaseService,
+		PaymentMethodService: paymentMethodService,
+		IdempotencyStore:     idempotencyService,
+		Rails:                railSet,
+		Config:               cfg,
+	}
+	if vaultService != nil {
+		service.VaultedCardService.DB = vaultService.DB
+	}
 	return service
 }
 
@@ -429,6 +440,11 @@ func (s *CheckoutService) processSubscription(
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
 	case target.Rail == "solana":
 		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
+	case rail == string(models.RailVaultedCard):
+		// #795: the vaulted_card rail has no provider-side recurring engine and
+		// the OpenRails-driven renewal worker for seam rails is not built yet —
+		// enrolling would strand renewals. Loud error, never a silent accept.
+		return nil, errors.New("vaulted_card subscriptions are not supported yet (renewals are engine-driven; see #795)")
 	default:
 		return nil, fmt.Errorf("unsupported rail: %s", target.Rail)
 	}
@@ -459,6 +475,12 @@ func (s *CheckoutService) processOneTimePurchase(
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
 	case target.Rail == "stripe":
 		return s.processStripePayment(ctx, req, user, price)
+	case rail == string(models.RailVaultedCard):
+		if s.VaultedCardService == nil {
+			return nil, errors.New("vaulted_card checkout is not configured")
+		}
+		idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "vaulted_card_sale")
+		return s.VaultedCardService.Process(ctx, req, user, price, product, idempotencyKey)
 	default:
 		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", target.Rail)
 	}

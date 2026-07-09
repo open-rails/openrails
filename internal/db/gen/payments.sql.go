@@ -181,7 +181,7 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
@@ -194,7 +194,8 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $20, $21, $22,
     $23,
-    $24, $25, $26, $27
+    $24, $25, $26, $27,
+    $28
 )
 `
 
@@ -226,6 +227,7 @@ type CreatePaymentParams struct {
 	FailureCode              *string
 	FailureReason            *string
 	ReversalKind             *string
+	TokenType                *string
 }
 
 // openrails.payments — immutable payment event log.
@@ -264,6 +266,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 		arg.FailureCode,
 		arg.FailureReason,
 		arg.ReversalKind,
+		arg.TokenType,
 	)
 	if err != nil {
 		return 0, err
@@ -278,7 +281,7 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
@@ -291,7 +294,8 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $20, $21, $22,
     $23,
-    $24, $25, $26, $27
+    $24, $25, $26, $27,
+    $28
 )
 ON CONFLICT DO NOTHING
 `
@@ -324,6 +328,7 @@ type CreatePaymentIfNotExistsParams struct {
 	FailureCode              *string
 	FailureReason            *string
 	ReversalKind             *string
+	TokenType                *string
 }
 
 func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymentIfNotExistsParams) (int64, error) {
@@ -355,6 +360,7 @@ func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymen
 		arg.FailureCode,
 		arg.FailureReason,
 		arg.ReversalKind,
+		arg.TokenType,
 	)
 	if err != nil {
 		return 0, err
@@ -375,7 +381,7 @@ func (q *Queries) DeletePayment(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionID :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.subscription_id = $1
   AND purch.amount > 0
   AND COALESCE(purch.status::text, 'completed') = 'completed'
@@ -414,12 +420,13 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, subscript
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getLatestPaymentByCustomerRail = `-- name: GetLatestPaymentByCustomerRail :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.customer_id = $1
   AND purch.rail = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
@@ -463,12 +470,13 @@ func (q *Queries) GetLatestPaymentByCustomerRail(ctx context.Context, arg GetLat
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getLatestPaymentBySubscriptionID = `-- name: GetLatestPaymentBySubscriptionID :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.subscription_id = $1
 ORDER BY purch.purchased_at DESC
 LIMIT 1
@@ -505,12 +513,13 @@ func (q *Queries) GetLatestPaymentBySubscriptionID(ctx context.Context, subscrip
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getPaymentByID = `-- name: GetPaymentByID :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments WHERE id = $1
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments WHERE id = $1
 `
 
 func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (OpenrailsPayment, error) {
@@ -544,12 +553,13 @@ func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (OpenrailsPa
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getPaymentByMetadataValue = `-- name: GetPaymentByMetadataValue :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.metadata ->> $1::text = $2::text
 LIMIT 1
 `
@@ -590,12 +600,13 @@ func (q *Queries) GetPaymentByMetadataValue(ctx context.Context, arg GetPaymentB
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getPaymentByTransactionID = `-- name: GetPaymentByTransactionID :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.rail = $1 AND purch.transaction_id = $2
 `
 
@@ -635,12 +646,13 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.psp_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, p.id, p.product_id, p.amount, p.currency, p.psp_links, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, p.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.psp_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, purch.token_type, p.id, p.product_id, p.amount, p.currency, p.psp_links, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.auto_renew, p.trial_unit_amount, p.trial_duration_hours, p.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -684,6 +696,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPayment.FailureCode,
 		&i.OpenrailsPayment.FailureReason,
 		&i.OpenrailsPayment.ReversalKind,
+		&i.OpenrailsPayment.TokenType,
 		&i.OpenrailsPrice.ID,
 		&i.OpenrailsPrice.ProductID,
 		&i.OpenrailsPrice.Amount,
@@ -715,7 +728,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 }
 
 const getRefundByAdminIdempotencyKey = `-- name: GetRefundByAdminIdempotencyKey :one
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.refunded_payment_id = $1
   AND purch.metadata ->> 'admin_refund_idempotency_key' = $2::text
 LIMIT 1
@@ -757,6 +770,7 @@ func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRef
 		&i.FailureCode,
 		&i.FailureReason,
 		&i.ReversalKind,
+		&i.TokenType,
 	)
 	return i, err
 }
@@ -801,7 +815,7 @@ func (q *Queries) LinkRefundedPayment(ctx context.Context, arg LinkRefundedPayme
 }
 
 const listPaymentsByCustomer = `-- name: ListPaymentsByCustomer :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -844,6 +858,7 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, customerID uuid.UU
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}
@@ -856,7 +871,7 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, customerID uuid.UU
 }
 
 const listPaymentsByCustomerPaged = `-- name: ListPaymentsByCustomerPaged :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -906,6 +921,7 @@ func (q *Queries) ListPaymentsByCustomerPaged(ctx context.Context, arg ListPayme
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}
@@ -918,7 +934,7 @@ func (q *Queries) ListPaymentsByCustomerPaged(ctx context.Context, arg ListPayme
 }
 
 const listPaymentsByPriceID = `-- name: ListPaymentsByPriceID :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.price_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -961,6 +977,7 @@ func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) 
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}
@@ -973,7 +990,7 @@ func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) 
 }
 
 const listPaymentsByRail = `-- name: ListPaymentsByRail :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE purch.rail = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -1016,6 +1033,7 @@ func (q *Queries) ListPaymentsByRail(ctx context.Context, rail string) ([]Openra
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}
@@ -1028,7 +1046,7 @@ func (q *Queries) ListPaymentsByRail(ctx context.Context, rail string) ([]Openra
 }
 
 const listPaymentsFiltered = `-- name: ListPaymentsFiltered :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments purch
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND ($1::uuid IS NULL OR purch.customer_id = $1::uuid)
   AND ($2::uuid IS NULL OR purch.price_id = $2::uuid)
@@ -1124,6 +1142,7 @@ func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilt
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}
@@ -1166,7 +1185,7 @@ func (q *Queries) ListRefundRowsForTotal(ctx context.Context, refundedPaymentID 
 }
 
 const listRefundsForPayment = `-- name: ListRefundsForPayment :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind FROM openrails.payments
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type FROM openrails.payments
 WHERE refunded_payment_id = $1
 ORDER BY created_at DESC
 `
@@ -1208,6 +1227,7 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, refundedPaymentID *
 			&i.FailureCode,
 			&i.FailureReason,
 			&i.ReversalKind,
+			&i.TokenType,
 		); err != nil {
 			return nil, err
 		}

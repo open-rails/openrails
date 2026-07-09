@@ -82,10 +82,11 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	})
 	if err != nil {
 		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) && isHardDecline(vaultErr.ResponseCode) {
-			code := failureCode(vaultErr)
+		if errors.As(err, &vaultErr) && IsHardDecline(vaultErr.ResponseCode) {
+			code := FailureCode(vaultErr)
 			message := vaultErr.Error()
 			return charge.Result{
+				TokenType:      charge.TokenTypeProviderVault,
 				Declined:       true,
 				FailureCode:    &code,
 				FailureMessage: &message,
@@ -94,7 +95,10 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		return charge.Result{}, err
 	}
 
-	res := charge.Result{TransactionID: strings.TrimSpace(sale.TransactionID)}
+	res := charge.Result{
+		TransactionID: strings.TrimSpace(sale.TransactionID),
+		TokenType:     charge.TokenTypeProviderVault,
+	}
 	// A charge that ran without a replay reference anchors the credential's
 	// agreement sequence: NMI's reference IS its gateway transactionid.
 	if strings.TrimSpace(req.Context.PriorRef) == "" {
@@ -103,10 +107,11 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	return res, nil
 }
 
-// isHardDecline classifies parsed gateway response codes: communication
+// IsHardDecline classifies parsed gateway response codes: communication
 // errors (420, 421) and duplicate-transaction detection (430) are transient —
-// everything else parsed as a failure is a hard decline.
-func isHardDecline(code int) bool {
+// everything else parsed as a failure is a hard decline. Shared with the
+// vaulted_card rail (#795): one decline taxonomy, two transports.
+func IsHardDecline(code int) bool {
 	switch code {
 	case 420, 421, 430:
 		return false
@@ -115,7 +120,9 @@ func isHardDecline(code int) bool {
 	}
 }
 
-func failureCode(err *nmi.CustomerVaultError) string {
+// FailureCode extracts the verbatim rail failure code from a parsed NMI
+// decline (#733 no-fabrication: localization id, else nmi_response_<code>).
+func FailureCode(err *nmi.CustomerVaultError) string {
 	if err == nil {
 		return "nmi_declined"
 	}

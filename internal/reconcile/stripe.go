@@ -388,6 +388,7 @@ func normalizeStripeCharge(obj json.RawMessage) RemoteTransaction {
 	if c.Status == "failed" {
 		txn.Type = TransactionTypeDecline
 		txn.DeclineReason = strings.TrimSpace(strings.TrimSpace(c.FailureCode + " " + c.FailureMessage))
+		txn.DeclineCode = strings.TrimSpace(c.FailureCode)
 	} else if c.Status == "succeeded" && !c.Captured {
 		txn.Type = TransactionTypeAuth
 	}

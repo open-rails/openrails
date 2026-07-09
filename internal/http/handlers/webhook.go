@@ -38,6 +38,7 @@ const (
 	maxCCBillWebhookBytes int64 = 16 << 10  // 16 KiB
 	maxStripeWebhookBytes int64 = 256 << 10 // 256 KiB
 	maxNMIWebhookBytes    int64 = 64 << 10  // 64 KiB
+	maxBTWebhookBytes     int64 = 64 << 10  // 64 KiB (BT event envelopes are small JSON)
 )
 
 // readLimitedWebhookBody reads the request body capped at maxBytes via
@@ -147,6 +148,12 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
+			r.SuccessJSON(map[string]string{"status": "accepted"})
+		}
+		return
+	}
+	if provider == string(models.RailVaultedCard) {
+		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
@@ -301,6 +308,21 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			return true, false
 		}
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
+	case rail == string(models.RailVaultedCard):
+		body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
+		if !ok {
+			return true, false
+		}
+		tenantID := basisTheoryWebhookTenantID(body)
+		if tenantID == "" {
+			r.ErrorJSON(http.StatusBadRequest, "Basis Theory webhook payload is missing tenant identity")
+			return true, false
+		}
+		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailVaultedCard), environment, tenantID)
+		if !ok {
+			return true, false
+		}
+		return true, processMerchantBasisTheoryWebhookBody(r, account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
 		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {

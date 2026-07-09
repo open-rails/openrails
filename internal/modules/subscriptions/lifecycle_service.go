@@ -737,6 +737,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
+			if tt := payments.DefaultTokenTypeForRail(string(params.Rail)); tt != "" {
+				payment.TokenType = &tt
+			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
 			if err != nil {
 				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
@@ -1726,6 +1729,9 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		reason := payments.NormalizeFailureReason(string(subscription.Rail), code)
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
+	}
+	if tt := payments.DefaultTokenTypeForRail(string(subscription.Rail)); tt != "" {
+		failed.TokenType = &tt
 	}
 	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("failed to record declined renewal payment row")

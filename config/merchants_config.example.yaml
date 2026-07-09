@@ -70,6 +70,22 @@ merchants:
             security_key: replace-with-paykings-nmi-security-key
             webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
 
+      # #795 vaulted_card: Basis Theory neutral card vault detokenizing through
+      # the BT proxy into the NMI gateway account referenced by gateway_account
+      # (an NMI account_id declared above). account_id = the BT tenant id.
+      # The ONLY custodial secret is the PRIVATE application key; the public
+      # key is checkout-page config. nt_charges must stay false on NMI gateways.
+      bt-vault:
+        vaulted_card:
+          environment: test
+          account_id: replace-with-bt-tenant-id
+          settings:
+            gateway_account: "681902"
+            network_tokens: false
+            public_api_key: replace-with-bt-public-application-key
+          secrets:
+            api_key: replace-with-bt-private-application-key
+
       ccbill:
         ccbill:
           environment: live

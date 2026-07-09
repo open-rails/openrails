@@ -226,6 +226,31 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 			return nil, err
 		}
 		out.Solana = SolanaRailConfigFromSettings(settings, s.testMode())
+	case models.RailVaultedCard:
+		apiKey, err := s.requireSecret(ctx, mid, scope, "api_key")
+		if err != nil {
+			return nil, err
+		}
+		settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
+		if err != nil {
+			return nil, err
+		}
+		// Destination creds come from the LINKED NMI account (one source of
+		// truth): resolve it through this same seam by its account_id.
+		gateway, err := s.RailConfig(ctx, string(models.RailNMI), settings.GatewayAccount)
+		if err != nil {
+			return nil, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
+		}
+		if gateway.NMI == nil || strings.TrimSpace(gateway.NMI.SecurityKey) == "" {
+			return nil, fmt.Errorf("vaulted_card account %s: gateway account %q has no NMI security key: %w", scope.AccountID, settings.GatewayAccount, ErrRailNotArmed)
+		}
+		out.VaultedCard = &config.VaultedCardRailConfig{
+			APIKey:             apiKey,
+			GatewayAccountID:   settings.GatewayAccount,
+			GatewaySecurityKey: gateway.NMI.SecurityKey,
+			NetworkTokens:      settings.NetworkTokens,
+			PublicAPIKey:       settings.PublicAPIKey,
+		}
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
 	}

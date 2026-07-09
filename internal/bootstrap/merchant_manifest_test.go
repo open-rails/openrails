@@ -101,7 +101,7 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// account_id identity, lifecycle, and explicit signer/destination split for
 	// Solana.
 	accts := m.PSPs
-	require.Len(t, accts, 8)
+	require.Len(t, accts, 9)
 	type key struct{ name, env string }
 	byName := map[key]ProviderRailAccountConfig{}
 	byRail := map[string]string{}
@@ -118,6 +118,13 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.False(t, byName[key{"mobius", "live"}].Archived)
 	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName[key{"mobius", "live"}].Settings["tokenization_key"])
 	require.Equal(t, "681902", byName[key{"mobius-sandbox", "test"}].AccountID)
+
+	// #795 vaulted_card: BT tenant identity + linked NMI gateway settings; the
+	// private app key is the only custodial secret.
+	require.Equal(t, "vaulted_card", byRail["bt-vault"])
+	require.Equal(t, "replace-with-bt-tenant-id", byName[key{"bt-vault", "test"}].AccountID)
+	require.Equal(t, "681902", byName[key{"bt-vault", "test"}].Settings["gateway_account"])
+	require.Equal(t, "replace-with-bt-private-application-key", byName[key{"bt-vault", "test"}].Secrets["api_key"])
 	// A second NMI gateway (paykings) is archived/drain-only in the example.
 	require.True(t, byName[key{"paykings", "live"}].Archived)
 	// Stripe live + test side by side.

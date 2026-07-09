@@ -403,6 +403,9 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		if runtime.CheckoutService.NMISaleService != nil {
 			runtime.CheckoutService.NMISaleService.Intents = intentRunner
 		}
+		if runtime.CheckoutService.VaultedCardService != nil {
+			runtime.CheckoutService.VaultedCardService.Intents = intentRunner
+		}
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.

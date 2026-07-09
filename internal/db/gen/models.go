@@ -726,6 +726,8 @@ type OpenrailsPayment struct {
 	FailureReason *string
 	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
 	ReversalKind *string
+	// #796 credential form presented to the network: network_token | pan_via_vault | provider_vault. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
+	TokenType *string
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -753,6 +755,22 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
+	// #795 neutral card vault holding this instrument ('basis_theory' on vaulted_card rows; '' elsewhere).
+	VaultProvider string
+	// #795 vault card fingerprint (BT default expression over the PAN) for dedup/lookup.
+	VaultFingerprint string
+	// #795 BT network-token uuid; '' = not provisioned.
+	NetworkTokenID string
+	// #795 NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
+	NetworkTokenStatus string
+	// #795 payment account reference from NT provisioning.
+	NetworkTokenPar string
+	// #795 per-instrument charge routing: pan_proxy (detokenized FPAN through the vault proxy) | network_token (DPAN; gated off on NMI gateways).
+	ChargeVia string
+	// #795 instrument park marker (cancellation-last-resort): non-empty = vault-side problem (token deleted/expired, closed account); charges fail loudly, operator notified, subscriptions NEVER terminally cancelled by this.
+	ParkReason string
+	// #795 when the instrument was parked; NULL = not parked.
+	ParkedAt *time.Time
 }
 
 // Pricing tiers for products with rail-specific identifiers

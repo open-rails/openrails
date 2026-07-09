@@ -1,6 +1,9 @@
 package payments
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // Normalized failure_reason vocabulary (#733). The raw rail code is always
 // recorded verbatim in failure_code; this file maps it DETERMINISTICALLY onto
@@ -64,6 +67,46 @@ var nmiFailureReasons = map[int]string{
 	461: FailureCardUnsupported,
 }
 
+// nmiLocalizationFailureReasons maps NMI's string localization ids (the
+// verbatim failure_code the seam rails record when the gateway supplies one —
+// nmidirect.FailureCode prefers it over the numeric code) onto the same
+// categories as the numeric table above.
+var nmiLocalizationFailureReasons = map[string]string{
+	"transaction_was_declined_by_processor": FailureCardDeclined,
+	"do_not_honor":                          FailureCardDeclined,
+	"insufficient_funds":                    FailureInsufficientFunds,
+	"over_limit":                            FailureInsufficientFunds,
+	"transaction_not_allowed":               FailureCardDeclined,
+	"incorrect_payment_information":         FailureCVVAVS,
+	"no_such_card_issuer":                   FailureCardDeclined,
+	"no_card_number_on_file_with_issuer":    FailureCardDeclined,
+	"expired_card":                          FailureExpiredCard,
+	"invalid_expiration_date":               FailureExpiredCard,
+	"invalid_card_security_code":            FailureCVVAVS,
+	"invalid_pin":                           FailureCVVAVS,
+	"call_issuer_for_further_information":   FailureCardDeclined,
+	"pick_up_card":                          FailureFraudSuspected,
+	"lost_card":                             FailureFraudSuspected,
+	"stolen_card":                           FailureFraudSuspected,
+	"fraudulent_card":                       FailureFraudSuspected,
+	"declined_with_further_instructions_available_see_response_text": FailureCardDeclined,
+	"declined_stop_all_recurring_payments":                           FailureStopRecurring,
+	"declined_stop_this_recurring_program":                           FailureStopRecurring,
+	"declined_update_cardholder_data_available":                      FailureCardDeclined,
+	"declined_retry_in_a_few_days":                                   FailureCardDeclined,
+	"transaction_was_rejected_by_gateway":                            FailureProcessorError,
+	"transaction_error_returned_by_processor":                        FailureProcessorError,
+	"invalid_merchant_configuration":                                 FailureConfigError,
+	"merchant_account_is_inactive":                                   FailureConfigError,
+	"communication_error":                                            FailureProcessorError,
+	"communication_error_with_issuer":                                FailureProcessorError,
+	"duplicate_transaction_at_rail":                                  FailureDuplicateTransaction,
+	"rail_format_error":                                              FailureProcessorError,
+	"invalid_transaction_information":                                FailureProcessorError,
+	"rail_feature_not_available":                                     FailureProcessorError,
+	"unsupported_card_type":                                          FailureCardUnsupported,
+}
+
 // stripeFailureReasons maps Stripe decline_code / failure_code strings.
 var stripeFailureReasons = map[string]string{
 	"insufficient_funds":               FailureInsufficientFunds,
@@ -99,16 +142,16 @@ var stripeFailureReasons = map[string]string{
 // solanaFailureReasons maps the rail-agnostic declinecode vocabulary the
 // Solana crank classifies on-chain failures into (internal/billing/declinecode).
 var solanaFailureReasons = map[string]string{
-	"insufficient_funds":                    FailureInsufficientFunds,
-	"do_not_honor":                          FailureCardDeclined,
-	"declined_stop_all_recurring_payments":  FailureStopRecurring,
-	"duplicate_transaction":                 FailureDuplicateTransaction,
-	"merchant_configuration_error":          FailureConfigError,
-	"communication_error":                   FailureProcessorError,
-	"processing_error":                      FailureProcessorError,
-	"generic_decline":                       FailureGenericDecline,
-	"declined_update_cardholder_data":       FailureCardDeclined,
-	"declined_stop_this_recurring_program":  FailureStopRecurring,
+	"insufficient_funds":                   FailureInsufficientFunds,
+	"do_not_honor":                         FailureCardDeclined,
+	"declined_stop_all_recurring_payments": FailureStopRecurring,
+	"duplicate_transaction":                FailureDuplicateTransaction,
+	"merchant_configuration_error":         FailureConfigError,
+	"communication_error":                  FailureProcessorError,
+	"processing_error":                     FailureProcessorError,
+	"generic_decline":                      FailureGenericDecline,
+	"declined_update_cardholder_data":      FailureCardDeclined,
+	"declined_stop_this_recurring_program": FailureStopRecurring,
 }
 
 // ccbillFailureReasons: CCBill webhook failureCode values. CCBill's decline
@@ -117,6 +160,22 @@ var solanaFailureReasons = map[string]string{
 // preserved (documented as partial coverage in /schema caveats).
 var ccbillFailureReasons = map[string]string{}
 
+// DefaultTokenTypeForRail is the #796 token_type stamp for charge records
+// created OFF the seam (provider-driven renewals, webhook/converge folds),
+// where no charge.Result carries the rail's answer: NMI charges its own
+// customer vault; vaulted_card proxies the detokenized FPAN (NT charging is
+// config-gated off on NMI gateways). "" = not a stamped card rail.
+func DefaultTokenTypeForRail(rail string) string {
+	switch strings.ToLower(strings.TrimSpace(rail)) {
+	case "nmi", "mobius":
+		return "provider_vault"
+	case "vaulted_card":
+		return "pan_via_vault"
+	default:
+		return ""
+	}
+}
+
 // NormalizeFailureReason maps a rail's raw decline code to the normalized
 // failure_reason vocabulary. Deterministic: same input, same output.
 func NormalizeFailureReason(rail, rawCode string) string {
@@ -124,11 +183,17 @@ func NormalizeFailureReason(rail, rawCode string) string {
 		return FailureUnknown
 	}
 	switch rail {
-	case "nmi", "mobius":
+	case "nmi", "mobius", "vaulted_card":
+		// vaulted_card parses NMI classic responses through the same taxonomy
+		// (#795: one decline vocabulary, two transports).
 		if n, err := strconv.Atoi(rawCode); err == nil {
 			if r, ok := nmiFailureReasons[n]; ok {
 				return r
 			}
+			return FailureUnknown
+		}
+		if r, ok := nmiLocalizationFailureReasons[rawCode]; ok {
+			return r
 		}
 		return FailureUnknown
 	case "stripe":

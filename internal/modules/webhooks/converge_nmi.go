@@ -273,6 +273,9 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
+			if tt := payments.DefaultTokenTypeForRail(rail); tt != "" {
+				failed.TokenType = &tt
+			}
 			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
 				return fmt.Errorf("nmi converge: record fetched decline: %w", err)
 			}

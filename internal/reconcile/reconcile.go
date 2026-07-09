@@ -123,7 +123,11 @@ type RemoteTransaction struct {
 	OccurredAt  time.Time `json:"occurred_at"`
 	// DeclineReason carries the rail's failure/decline text for declined
 	// attempts; it is the raw material for the dunning-forensics report.
-	DeclineReason string          `json:"decline_reason,omitempty"`
+	DeclineReason string `json:"decline_reason,omitempty"`
+	// DeclineCode is the rail's decline CODE verbatim (NMI response_code,
+	// Stripe failure_code) — the payments.failure_code stamp (#796): a
+	// backfilled decline without it reads failure_reason='unknown'.
+	DeclineCode string          `json:"decline_code,omitempty"`
 	Raw           json.RawMessage `json:"raw,omitempty"`
 }
 
