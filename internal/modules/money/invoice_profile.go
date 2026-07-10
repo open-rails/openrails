@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -57,8 +59,9 @@ func (s *MoneyService) SetCustomerInvoiceProfile(ctx context.Context, payer iden
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	if p.NetTermsDays < 0 {
-		return fmt.Errorf("net_terms_days must be >= 0")
+	netTerms, castErr := safecast.Convert[int32](p.NetTermsDays)
+	if castErr != nil || netTerms < 0 {
+		return fmt.Errorf("net_terms_days must be a non-negative int32")
 	}
 	method, err := normalizeCollectionMethod(p.CollectionMethod)
 	if err != nil {
@@ -87,7 +90,7 @@ func (s *MoneyService) SetCustomerInvoiceProfile(ctx context.Context, payer iden
 		return q.UpsertCustomerInvoiceProfile(ctx, gen.UpsertCustomerInvoiceProfileParams{
 			MerchantID:       tid.UUID(),
 			CustomerID:       payer.UUID(),
-			NetTermsDays:     int32(p.NetTermsDays),
+			NetTermsDays:     netTerms,
 			CollectionMethod: method,
 			PoNumber:         nilIfEmpty(p.PONumber),
 			Tax:              taxJSON,
