@@ -78,6 +78,15 @@ type AdmissionClient interface {
 	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
 }
 
+// UsageReportClient reports metered usage events outside the admission
+// hold/capture cycle (#797): the host records a usage_events row (optionally
+// host-priced via Amount; 0 = free/metered-only) that the rate-card rating
+// sweep aggregates into arrears invoice lines. Gauge meters (GB-month style)
+// report unit-second segment quantities in Dimensions.
+type UsageReportClient interface {
+	RecordUsage(ctx context.Context, report UsageReport) error
+}
+
 // PolicySyncClient installs merchant-owned admission policy in one settings
 // document.
 type PolicySyncClient interface {
@@ -146,6 +155,7 @@ type CustomerLookupClient interface {
 // smaller interfaces above.
 type Client interface {
 	AdmissionClient
+	UsageReportClient
 	PolicySyncClient
 	AdminFundingClient
 	CustomerLookupClient
@@ -435,6 +445,28 @@ type WastedSpendReport struct {
 	// SourceID is the idempotency key for this report within the Source namespace.
 	SourceID string `json:"source_id"`
 	Reason   string `json:"reason,omitempty"`
+}
+
+// UsageReport is one host-reported metered usage event (#797). CustomerID is
+// the billed payer; Source+SourceID form the idempotency key within
+// (payer, event_type) — replays are accepted and never double-record or
+// double-charge. Amount is the host-priced cost in the currency's internal
+// precision; 0 records a free/metered-only event (dimensions still aggregate
+// through rate-card rating). OccurredAtUnix (seconds; 0 = now) places the
+// event in its rating window — gauge segment reporters set it to segment end.
+type UsageReport struct {
+	CustomerID string           `json:"customer_id"`
+	Invoker    string           `json:"invoker"`
+	Currency   string           `json:"currency,omitempty"`
+	EventType  string           `json:"event_type"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
+	Amount     int64            `json:"amount"`
+	Resource   string           `json:"resource,omitempty"`
+	Metadata   map[string]any   `json:"metadata,omitempty"`
+	Source     string           `json:"source"`
+	SourceID   string           `json:"source_id"`
+	// OccurredAtUnix is the event time as a unix timestamp in seconds (0 = now).
+	OccurredAtUnix int64 `json:"occurred_at_unix,omitempty"`
 }
 
 // WastedSpendResponse reports how OpenRails handled a wasted-spend report.

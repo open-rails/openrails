@@ -346,6 +346,28 @@ func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 	return &out, nil
 }
 
+// RecordUsage implements Client (handler ServiceRecordUsage, #797).
+func (c *remote) RecordUsage(ctx context.Context, report UsageReport) error {
+	currency := normalizeCurrency(report.Currency)
+	if currency == "" {
+		currency = normalizeCurrency(c.currency)
+	}
+	body := map[string]any{
+		"customer_id":      strings.TrimSpace(report.CustomerID),
+		"invoker":          report.Invoker,
+		"currency":         currency,
+		"event_type":       report.EventType,
+		"dimensions":       report.Dimensions,
+		"amount":           report.Amount,
+		"resource":         report.Resource,
+		"metadata":         report.Metadata,
+		"source":           report.Source,
+		"source_id":        report.SourceID,
+		"occurred_at_unix": report.OccurredAtUnix,
+	}
+	return c.do(ctx, http.MethodPost, "/v1/merchant/usage/report", body, nil)
+}
+
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
 func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
 	body := map[string]any{

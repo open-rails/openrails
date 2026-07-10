@@ -1,0 +1,94 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/identity"
+)
+
+// RecordUsageInput is one host-reported metered usage event (#797).
+// Source+SourceID form the idempotency key within (payer, event_type):
+// replays return success without double-recording or double-charging.
+// Amount is the host-priced cost in the currency's internal precision;
+// 0 records a free/metered-only event whose Dimensions still aggregate
+// through rate-card rating (gauge meters report unit-second quantities).
+type RecordUsageInput struct {
+	CustomerID identity.CustomerID
+	Invoker    string
+	Currency   string
+	EventType  string
+	Dimensions map[string]int64
+	Amount     int64
+	Resource   string
+	Metadata   map[string]any
+	Source     string
+	SourceID   string
+	// OccurredAt places the event in its rating window (zero = now).
+	OccurredAt time.Time
+}
+
+// RecordUsage durably records a metered usage event (and debits the ledger for
+// a non-zero Amount) via money.RecordUsage (#289/#797). Idempotent on
+// (merchant, payer, event_type, source, source_id).
+func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if in.CustomerID.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	cur, err := requireCurrency(in.Currency)
+	if err != nil {
+		return err
+	}
+	metadata := in.Metadata
+	if in.Resource = strings.TrimSpace(in.Resource); in.Resource != "" {
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		if _, ok := metadata["resource"]; !ok {
+			metadata["resource"] = in.Resource
+		}
+	}
+	payer := in.CustomerID
+	_, err = s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
+		Payer:      &payer,
+		Invoker:    strings.TrimSpace(in.Invoker),
+		Currency:   cur,
+		EventType:  strings.TrimSpace(in.EventType),
+		Dimensions: in.Dimensions,
+		Amount:     in.Amount,
+		Source:     strings.TrimSpace(in.Source),
+		SourceID:   strings.TrimSpace(in.SourceID),
+		Metadata:   metadata,
+		OccurredAt: in.OccurredAt,
+	})
+	return err
+}
+
+// FinalizeInvoice closes the rating window [from, to) for one payer: the
+// metered rating sweep rates reported usage through the catalog rate cards
+// (allowances + per-period watermarks) and the resulting statement is
+// finalized as an invoice (#797 public export). Idempotent per window.
+func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*InvoiceDTO, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+	inv, err := s.moneyService().FinalizeInvoice(ctx, payer, cur, from, to)
+	if err != nil {
+		return nil, err
+	}
+	dto := invoiceToDTO(inv)
+	return &dto, nil
+}
