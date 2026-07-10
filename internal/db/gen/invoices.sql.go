@@ -105,7 +105,7 @@ func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByP
 
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
 
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
   AND period_from = $3 AND period_to = $4 AND currency = $5
 LIMIT 1
@@ -161,12 +161,16 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 		&i.ExternalInvoiceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PoNumber,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.Memo,
 	)
 	return i, err
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 `
@@ -210,12 +214,16 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 		&i.ExternalInvoiceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PoNumber,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.Memo,
 	)
 	return i, err
 }
 
 const getInvoiceForPayerForUpdate = `-- name: GetInvoiceForPayerForUpdate :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE
@@ -260,6 +268,10 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 		&i.ExternalInvoiceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PoNumber,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.Memo,
 	)
 	return i, err
 }
@@ -272,7 +284,9 @@ INSERT INTO openrails.invoices (
     closing_balance, subtotal_amount, total_amount, amount_paid, amount_due,
     line_items, money_movements, status, collection_method,
     issued_at, due_at, paid_at, voided_at, uncollectible_at,
-    finalized_at, external_invoice_id, created_at, updated_at
+    finalized_at, external_invoice_id,
+    po_number, tax, billing_contacts, memo,
+    created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $12,
@@ -282,7 +296,9 @@ INSERT INTO openrails.invoices (
     $19, $20,
     $21, $22, $23, $24,
     $25, $26,
-    $27, $28, $29
+    $27,
+    $28, COALESCE($29, '{}'::jsonb), COALESCE($30, '[]'::jsonb), $31,
+    $32, $33
 )
 `
 
@@ -314,6 +330,10 @@ type InsertInvoiceParams struct {
 	UncollectibleAt   *time.Time
 	FinalizedAt       *time.Time
 	ExternalInvoiceID *string
+	PoNumber          *string
+	Tax               []byte
+	BillingContacts   []byte
+	Memo              *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -347,6 +367,10 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 		arg.UncollectibleAt,
 		arg.FinalizedAt,
 		arg.ExternalInvoiceID,
+		arg.PoNumber,
+		arg.Tax,
+		arg.BillingContacts,
+		arg.Memo,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -465,6 +489,7 @@ JOIN openrails.money_settings s
 WHERE i.merchant_id = $1
   AND i.status IN ('open', 'past_due')
   AND i.amount_due > 0
+  AND i.collection_method = 'charge_automatically'
   AND s.auto_topup_payment_method_id IS NOT NULL
   AND ($2::bigint <= 0 OR i.amount_due >= $2::bigint)
 ORDER BY i.due_at NULLS FIRST, i.created_at ASC
@@ -576,7 +601,7 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 }
 
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY period_from DESC
 LIMIT $3::int OFFSET $4::int
@@ -633,6 +658,59 @@ func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPay
 			&i.ExternalInvoiceID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PoNumber,
+			&i.Tax,
+			&i.BillingContacts,
+			&i.Memo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingInvoiceItemsByPayer = `-- name: ListPendingInvoiceItemsByPayer :many
+SELECT source_type,
+       COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
+       amount, invoice_at
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND invoice_id IS NULL AND status = 'pending'
+ORDER BY invoice_at ASC, source_id ASC
+`
+
+type ListPendingInvoiceItemsByPayerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+type ListPendingInvoiceItemsByPayerRow struct {
+	SourceType string
+	Source     string
+	Amount     int64
+	InvoiceAt  time.Time
+}
+
+// #798: current accrued-but-uninvoiced charges (running-spend surface).
+func (q *Queries) ListPendingInvoiceItemsByPayer(ctx context.Context, arg ListPendingInvoiceItemsByPayerParams) ([]ListPendingInvoiceItemsByPayerRow, error) {
+	rows, err := q.db.Query(ctx, listPendingInvoiceItemsByPayer, arg.MerchantID, arg.CustomerID, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingInvoiceItemsByPayerRow
+	for rows.Next() {
+		var i ListPendingInvoiceItemsByPayerRow
+		if err := rows.Scan(
+			&i.SourceType,
+			&i.Source,
+			&i.Amount,
+			&i.InvoiceAt,
 		); err != nil {
 			return nil, err
 		}
@@ -651,7 +729,7 @@ SET status = 'uncollectible',
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('open', 'past_due')
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo
 `
 
 type MarkInvoiceUncollectibleForPayerParams struct {
@@ -699,8 +777,39 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 		&i.ExternalInvoiceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PoNumber,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.Memo,
 	)
 	return i, err
+}
+
+const markInvoicesPastDue = `-- name: MarkInvoicesPastDue :execrows
+UPDATE openrails.invoices
+SET status = 'past_due',
+    updated_at = $2::timestamptz
+WHERE merchant_id = $1
+  AND status = 'open'
+  AND amount_due > 0
+  AND due_at IS NOT NULL
+  AND due_at < $2::timestamptz
+`
+
+type MarkInvoicesPastDueParams struct {
+	MerchantID uuid.UUID
+	Now        time.Time
+}
+
+// #798: net-N receivables whose due date has passed become past_due. The
+// collection path already treats open and past_due alike; this transition is
+// the host-visible dunning signal.
+func (q *Queries) MarkInvoicesPastDue(ctx context.Context, arg MarkInvoicesPastDueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInvoicesPastDue, arg.MerchantID, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setInvoiceExternalID = `-- name: SetInvoiceExternalID :execrows
@@ -773,6 +882,63 @@ func (q *Queries) SumPendingInvoiceItemAmount(ctx context.Context, arg SumPendin
 	return column_1, err
 }
 
+const sumPendingInvoiceItemAmountBySourceInPeriod = `-- name: SumPendingInvoiceItemAmountBySourceInPeriod :many
+SELECT COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
+       COALESCE(SUM(amount), 0)::bigint AS amount,
+       COUNT(*)::bigint AS item_count
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND invoice_id IS NULL AND status = 'pending'
+  AND invoice_at >= $4::timestamptz
+  AND invoice_at < $5::timestamptz
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type SumPendingInvoiceItemAmountBySourceInPeriodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	PeriodFrom time.Time
+	PeriodTo   time.Time
+}
+
+type SumPendingInvoiceItemAmountBySourceInPeriodRow struct {
+	Source    string
+	Amount    int64
+	ItemCount int64
+}
+
+// #798: rated charge per accrual source for the statement's per-category
+// itemization at finalize. Metered accruals carry their rating identity
+// (e.g. metered:<meter>) in metadata->>'source' (the row source_id also
+// embeds the period window).
+func (q *Queries) SumPendingInvoiceItemAmountBySourceInPeriod(ctx context.Context, arg SumPendingInvoiceItemAmountBySourceInPeriodParams) ([]SumPendingInvoiceItemAmountBySourceInPeriodRow, error) {
+	rows, err := q.db.Query(ctx, sumPendingInvoiceItemAmountBySourceInPeriod,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.PeriodFrom,
+		arg.PeriodTo,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumPendingInvoiceItemAmountBySourceInPeriodRow
+	for rows.Next() {
+		var i SumPendingInvoiceItemAmountBySourceInPeriodRow
+		if err := rows.Scan(&i.Source, &i.Amount, &i.ItemCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const sumPendingInvoiceItemAmountInPeriod = `-- name: SumPendingInvoiceItemAmountInPeriod :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM openrails.invoice_items
@@ -811,7 +977,7 @@ SET status = 'voided',
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('draft', 'open', 'past_due')
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo
 `
 
 type VoidInvoiceForPayerParams struct {
@@ -859,6 +1025,10 @@ func (q *Queries) VoidInvoiceForPayer(ctx context.Context, arg VoidInvoiceForPay
 		&i.ExternalInvoiceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PoNumber,
+		&i.Tax,
+		&i.BillingContacts,
+		&i.Memo,
 	)
 	return i, err
 }

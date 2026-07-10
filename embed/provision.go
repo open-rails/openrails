@@ -20,6 +20,10 @@ import (
 
 type BillingConfig = boot.BillingConfig
 type MerchantConfig = boot.MerchantConfig
+
+// InvoiceConfig aliases the merchant invoice/collection policy block so
+// embedded hosts can set it programmatically (#798).
+type InvoiceConfig = boot.InvoiceConfig
 type MerchantProfileConfig = boot.MerchantProfileConfig
 type RailMerchantAccountConfig = boot.RailMerchantAccountConfig
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig

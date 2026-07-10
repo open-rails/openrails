@@ -146,6 +146,8 @@ func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 		TotalAmount:       r.TotalAmount,
 		AmountPaid:        r.AmountPaid,
 		AmountDue:         r.AmountDue,
+		PONumber:          r.PoNumber,
+		Memo:              r.Memo,
 		Status:            r.Status,
 		CollectionMethod:  r.CollectionMethod,
 		IssuedAt:          r.IssuedAt,
@@ -165,6 +167,14 @@ func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 	}
 	if err := fromJSONBC(r.MoneyMovements, &m.MoneyMovements, "invoices.money_movements"); err != nil {
 		return nil, err
+	}
+	if err := fromJSONBC(r.Tax, &m.Tax, "invoices.tax"); err != nil {
+		return nil, err
+	}
+	if len(r.BillingContacts) > 0 {
+		if err := json.Unmarshal(r.BillingContacts, &m.BillingContacts); err != nil {
+			return nil, fmt.Errorf("money: decode invoices.billing_contacts: %w", err)
+		}
 	}
 	return m, nil
 }

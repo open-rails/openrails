@@ -23,6 +23,7 @@ import (
 type catalogRateCardRow struct {
 	ID          uuid.UUID
 	MeterKey    string
+	PayerScoped bool
 	EventType   string
 	ValueKey    string
 	Aggregation string
@@ -51,7 +52,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 	if err != nil {
 		return err
 	}
-	rateCards, err := s.loadCatalogRateCards(ctx, tid.UUID(), cur)
+	rateCards, err := s.loadCatalogRateCards(ctx, tid.UUID(), payer, cur)
 	if err != nil {
 		return err
 	}
@@ -103,17 +104,20 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 	return nil
 }
 
-// loadCatalogRateCards loads the merchant's arrears usage rate cards joined to
-// their meters. Legacy-shaped meters ({key, kind}, no aggregation) bridge to
+// loadCatalogRateCards loads the arrears usage rate cards that apply to one
+// payer, joined to their meters. A payer-scoped card (#798 negotiated
+// pricing, customer_id set) REPLACES the merchant-default card for the same
+// meter_key. Legacy-shaped meters ({key, kind}, no aggregation) bridge to
 // the #599 conventions: event_type/value property default to the meter key;
 // counter aggregates as sum-of-quantities defaulting each event to 1, gauge as
 // sum of unit-seconds defaulting to 0.
-func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, currency string) ([]catalogRateCardRow, error) {
+func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, qerr := s.db.Pool().Query(ctx, `
 SELECT rc.id,
        rc.meter_key,
+       rc.customer_id IS NOT NULL AS payer_scoped,
        COALESCE(NULLIF(cm.event_type, ''), cm.key) AS event_type,
        COALESCE(NULLIF(cm.value_property, ''), cm.key) AS value_property,
        COALESCE(NULLIF(cm.aggregation, ''), 'sum') AS aggregation,
@@ -127,9 +131,10 @@ JOIN openrails.catalog_meters cm
   ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
 WHERE rc.merchant_id = $1
   AND rc.meter_key IS NOT NULL
+  AND (rc.customer_id IS NULL OR rc.customer_id = $3)
   AND lower(COALESCE(rc.price ->> 'currency', $2)) = lower($2)
   AND rc.payment_term = 'in_arrears'
-ORDER BY rc.ordinal`, merchantID, currency)
+ORDER BY rc.ordinal`, merchantID, currency, payer.UUID())
 		if qerr != nil {
 			return qerr
 		}
@@ -138,7 +143,7 @@ ORDER BY rc.ordinal`, merchantID, currency)
 			var row catalogRateCardRow
 			var groupByJSON, filterJSON, priceJSON []byte
 			var allowanceJSON []byte
-			if err := rows.Scan(&row.ID, &row.MeterKey, &row.EventType, &row.ValueKey, &row.Aggregation, &row.MissingDefault, &groupByJSON, &filterJSON, &allowanceJSON, &priceJSON); err != nil {
+			if err := rows.Scan(&row.ID, &row.MeterKey, &row.PayerScoped, &row.EventType, &row.ValueKey, &row.Aggregation, &row.MissingDefault, &groupByJSON, &filterJSON, &allowanceJSON, &priceJSON); err != nil {
 				return err
 			}
 			if err := json.Unmarshal(groupByJSON, &row.GroupBy); err != nil {
@@ -162,7 +167,32 @@ ORDER BY rc.ordinal`, merchantID, currency)
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return resolvePayerRateCardOverrides(out), nil
+}
+
+// resolvePayerRateCardOverrides collapses the loaded set to one card per
+// meter_key: a payer-scoped card (#798) replaces the merchant default.
+func resolvePayerRateCardOverrides(cards []catalogRateCardRow) []catalogRateCardRow {
+	overridden := map[string]bool{}
+	for _, rc := range cards {
+		if rc.PayerScoped {
+			overridden[rc.MeterKey] = true
+		}
+	}
+	if len(overridden) == 0 {
+		return cards
+	}
+	out := cards[:0]
+	for _, rc := range cards {
+		if !rc.PayerScoped && overridden[rc.MeterKey] {
+			continue
+		}
+		out = append(out, rc)
+	}
+	return out
 }
 
 func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string, rc catalogRateCardRow, groupProperty string, from, to time.Time) (map[string]int64, error) {
@@ -476,7 +506,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AN
 		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, source, sourceID, nil); err != nil {
 			return err
 		}
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, delta, now, map[string]any{
+		// #798: the accrual belongs to its RATING PERIOD, not the sweep time —
+		// stamp invoice_at = periodFrom so a close over a past window (e.g. the
+		// previous-month finalize) attaches it instead of leaking it into the
+		// next period's invoice.
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, delta, periodFrom.UTC(), map[string]any{
 			"source": source,
 		}); err != nil {
 			return err

@@ -207,7 +207,7 @@ type OpenrailsCatalogMeter struct {
 type OpenrailsCatalogRateCard struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
-	ProductID   uuid.UUID
+	ProductID   *uuid.UUID
 	Ordinal     int32
 	MeterKey    *string
 	PaymentTerm string
@@ -216,6 +216,8 @@ type OpenrailsCatalogRateCard struct {
 	Price       []byte
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// #798 negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
+	CustomerID *uuid.UUID
 }
 
 // #594 catalog usage-limit registry. Durable config only; Redis/Garnet owns request-time counters.
@@ -275,6 +277,20 @@ type OpenrailsCustomer struct {
 	Subject    *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+}
+
+// #798 per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
+type OpenrailsCustomerInvoiceProfile struct {
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	NetTermsDays     int32
+	CollectionMethod string
+	PoNumber         *string
+	Tax              []byte
+	BillingContacts  []byte
+	Memo             *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // #643 per-customer per-currency minimum-spend commitment; trues-up at periodic invoice close.
@@ -409,6 +425,13 @@ type OpenrailsInvoice struct {
 	ExternalInvoiceID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// #798 purchase-order reference snapshotted from the payer invoice profile at finalize.
+	PoNumber *string
+	// #798 tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.
+	Tax []byte
+	// #798 billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.
+	BillingContacts []byte
+	Memo            *string
 }
 
 // Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.

@@ -35,6 +35,13 @@ type Invoice struct {
 	LineItems      []InvoiceLineItem `json:"line_items"`
 	MoneyMovements map[string]int64  `json:"money_movements"`
 
+	// Enterprise document fields (#798), snapshotted from the payer's
+	// customer_invoice_profiles row at finalize. Tax is a host-defined shape.
+	PONumber        *string          `json:"po_number,omitempty"`
+	Tax             map[string]any   `json:"tax,omitempty"`
+	BillingContacts []InvoiceContact `json:"billing_contacts,omitempty"`
+	Memo            *string          `json:"memo,omitempty"`
+
 	Status            string     `json:"status"`
 	CollectionMethod  string     `json:"collection_method"`
 	IssuedAt          *time.Time `json:"issued_at,omitempty"`
@@ -46,6 +53,12 @@ type Invoice struct {
 	ExternalInvoiceID *string    `json:"external_invoice_id,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// InvoiceContact is one billing contact on an invoice / invoice profile (#798).
+type InvoiceContact struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email"`
 }
 
 // InvoiceLineItem is one statement line on an invoice: a per-event_type usage
