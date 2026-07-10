@@ -153,6 +153,7 @@ POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/reprice
 POST /v1/merchant/subscriptions/{id}/resume
 POST /v1/merchant/team/invites
+POST /v1/merchant/usage/report
 POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
 POST /v1/merchant/wasted-spend

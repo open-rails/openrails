@@ -210,6 +210,73 @@ type serviceUsageRollupRequest struct {
 	GroupBy    string `json:"group_by" binding:"required"`
 }
 
+type serviceRecordUsageRequest struct {
+	CustomerID     string           `json:"customer_id" binding:"required"`
+	Invoker        string           `json:"invoker"`
+	Currency       string           `json:"currency"`
+	EventType      string           `json:"event_type" binding:"required"`
+	Dimensions     map[string]int64 `json:"dimensions"`
+	Amount         int64            `json:"amount"`
+	Resource       string           `json:"resource"`
+	Metadata       map[string]any   `json:"metadata"`
+	Source         string           `json:"source" binding:"required"`
+	SourceID       string           `json:"source_id" binding:"required"`
+	OccurredAtUnix int64            `json:"occurred_at_unix"`
+}
+
+// ServiceRecordUsage records one host-reported metered usage event (#797): a
+// usage_events row (plus a ledger debit for a non-zero amount) that the
+// rate-card rating sweep aggregates into arrears invoice lines. Idempotent on
+// (payer, event_type, source, source_id). Operator API key, admissions:create.
+func ServiceRecordUsage(r *httprequest.Request) {
+	var req serviceRecordUsageRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if req.Amount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
+		return
+	}
+	payer, err := parseServiceCustomerID(req.CustomerID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	var occurredAt time.Time
+	if req.OccurredAtUnix > 0 {
+		occurredAt = time.Unix(req.OccurredAtUnix, 0).UTC()
+	}
+	if err := svc.RecordUsage(r.Request.Context(), billingservice.RecordUsageInput{
+		CustomerID: *payer,
+		Invoker:    req.Invoker,
+		Currency:   currency,
+		EventType:  req.EventType,
+		Dimensions: req.Dimensions,
+		Amount:     req.Amount,
+		Resource:   req.Resource,
+		Metadata:   req.Metadata,
+		Source:     req.Source,
+		SourceID:   req.SourceID,
+		OccurredAt: occurredAt,
+	}); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	r.SuccessJSON(map[string]any{"currency": currency, "recorded": true})
+}
+
 type serviceEndpointRevenueRequest struct {
 	Resource string `json:"resource" binding:"required"`
 	Currency string `json:"currency"`
