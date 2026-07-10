@@ -16,7 +16,9 @@ INSERT INTO openrails.invoices (
     closing_balance, subtotal_amount, total_amount, amount_paid, amount_due,
     line_items, money_movements, status, collection_method,
     issued_at, due_at, paid_at, voided_at, uncollectible_at,
-    finalized_at, external_invoice_id, created_at, updated_at
+    finalized_at, external_invoice_id,
+    po_number, tax, billing_contacts, memo,
+    created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     sqlc.narg(invoice_number),
@@ -26,7 +28,9 @@ INSERT INTO openrails.invoices (
     sqlc.arg(status), sqlc.arg(collection_method),
     sqlc.narg(issued_at), sqlc.narg(due_at), sqlc.narg(paid_at), sqlc.narg(voided_at),
     sqlc.narg(uncollectible_at), sqlc.narg(finalized_at),
-    sqlc.narg(external_invoice_id), sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.narg(external_invoice_id),
+    sqlc.narg(po_number), COALESCE(sqlc.arg(tax), '{}'::jsonb), COALESCE(sqlc.arg(billing_contacts), '[]'::jsonb), sqlc.narg(memo),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
 );
 
 -- name: InsertPendingInvoiceItem :exec
@@ -113,9 +117,49 @@ JOIN openrails.money_settings s
 WHERE i.merchant_id = $1
   AND i.status IN ('open', 'past_due')
   AND i.amount_due > 0
+  AND i.collection_method = 'charge_automatically'
   AND s.auto_topup_payment_method_id IS NOT NULL
   AND (sqlc.arg(min_threshold)::bigint <= 0 OR i.amount_due >= sqlc.arg(min_threshold)::bigint)
 ORDER BY i.due_at NULLS FIRST, i.created_at ASC;
+
+-- name: MarkInvoicesPastDue :execrows
+-- #798: net-N receivables whose due date has passed become past_due. The
+-- collection path already treats open and past_due alike; this transition is
+-- the host-visible dunning signal.
+UPDATE openrails.invoices
+SET status = 'past_due',
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1
+  AND status = 'open'
+  AND amount_due > 0
+  AND due_at IS NOT NULL
+  AND due_at < sqlc.arg(now)::timestamptz;
+
+-- name: SumPendingInvoiceItemAmountBySourceInPeriod :many
+-- #798: rated charge per accrual source for the statement's per-category
+-- itemization at finalize. Metered accruals carry their rating identity
+-- (e.g. metered:<meter>) in metadata->>'source' (the row source_id also
+-- embeds the period window).
+SELECT COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
+       COALESCE(SUM(amount), 0)::bigint AS amount,
+       COUNT(*)::bigint AS item_count
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND invoice_id IS NULL AND status = 'pending'
+  AND invoice_at >= sqlc.arg(period_from)::timestamptz
+  AND invoice_at < sqlc.arg(period_to)::timestamptz
+GROUP BY 1
+ORDER BY 1 ASC;
+
+-- name: ListPendingInvoiceItemsByPayer :many
+-- #798: current accrued-but-uninvoiced charges (running-spend surface).
+SELECT source_type,
+       COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
+       amount, invoice_at
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND invoice_id IS NULL AND status = 'pending'
+ORDER BY invoice_at ASC, source_id ASC;
 
 -- name: ApplyInvoicePaymentSnapshot :execrows
 UPDATE openrails.invoices

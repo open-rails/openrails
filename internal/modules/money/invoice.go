@@ -133,6 +133,22 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			lineItems = append(lineItems, *it)
 		}
 
+		// #798: itemize the RATED charge per accrual source (e.g.
+		// "metered:<meter>") so the statement shows cost per category —
+		// gauge/metered usage rollups above carry quantities but zero amounts.
+		ratedRows, rerr := q.SumPendingInvoiceItemAmountBySourceInPeriod(ctx, gen.SumPendingInvoiceItemAmountBySourceInPeriodParams{
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+			PeriodFrom: pfrom, PeriodTo: pto,
+		})
+		if rerr != nil {
+			return rerr
+		}
+		for _, rr := range ratedRows {
+			if rr.Amount > 0 {
+				lineItems = append(lineItems, models.InvoiceLineItem{EventType: rr.Source, Amount: rr.Amount, Count: rr.ItemCount})
+			}
+		}
+
 		// --- money movements (#512 ledger, by transfer_type; amounts positive) ---
 		movs, merr := q.SumLedgerMovementsByCustomerInPeriod(ctx, gen.SumLedgerMovementsByCustomerInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
@@ -202,6 +218,20 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		}
 		closing := bal.Balance
 
+		// --- payer invoice profile (#798): net-N terms, collection method,
+		// document snapshot. Absent profile keeps the historical defaults
+		// (due at finalize, charge_automatically, no document fields).
+		var profile *CustomerInvoiceProfile
+		if row, perr := q.GetCustomerInvoiceProfile(ctx, gen.GetCustomerInvoiceProfileParams{
+			MerchantID: tenantID, CustomerID: payerID,
+		}); perr == nil {
+			if profile, perr = invoiceProfileFromGen(row); perr != nil {
+				return perr
+			}
+		} else if !errors.Is(perr, pgx.ErrNoRows) {
+			return perr
+		}
+
 		now := s.now()
 		invoiceID := uuidutil.NewV7()
 		invoiceNumber := fmt.Sprintf("INV-%s", invoiceID.String())
@@ -211,6 +241,16 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		status := "open"
 		issuedAt := &now
 		dueAt := &now
+		collectionMethod := CollectionChargeAutomatically
+		if profile != nil {
+			if profile.NetTermsDays > 0 {
+				d := now.Add(time.Duration(profile.NetTermsDays) * 24 * time.Hour)
+				dueAt = &d
+			}
+			if m, merr := normalizeCollectionMethod(profile.CollectionMethod); merr == nil {
+				collectionMethod = m
+			}
+		}
 		var paidAt *time.Time
 		if amountDue == 0 {
 			status = "paid"
@@ -238,13 +278,19 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			LineItems:        lineItems,
 			MoneyMovements:   movements,
 			Status:           status,
-			CollectionMethod: "charge_automatically",
+			CollectionMethod: collectionMethod,
 			IssuedAt:         issuedAt,
 			DueAt:            dueAt,
 			PaidAt:           paidAt,
 			FinalizedAt:      &now,
 			CreatedAt:        now,
 			UpdatedAt:        now,
+		}
+		if profile != nil {
+			inv.PONumber = nilIfEmpty(profile.PONumber)
+			inv.Tax = profile.Tax
+			inv.BillingContacts = profile.BillingContacts
+			inv.Memo = nilIfEmpty(profile.Memo)
 		}
 		lineItemsJSON, jerr := json.Marshal(inv.LineItems)
 		if jerr != nil {
@@ -253,6 +299,17 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		movementsJSON, jerr := toJSONBC(inv.MoneyMovements)
 		if jerr != nil {
 			return jerr
+		}
+		taxJSON, jerr := toJSONBC(inv.Tax)
+		if jerr != nil {
+			return jerr
+		}
+		contactsJSON, jerr := json.Marshal(inv.BillingContacts)
+		if jerr != nil {
+			return fmt.Errorf("money: encode invoice billing_contacts: %w", jerr)
+		}
+		if inv.BillingContacts == nil {
+			contactsJSON = []byte("[]")
 		}
 		if err := q.InsertInvoice(ctx, gen.InsertInvoiceParams{
 			ID:               inv.ID,
@@ -279,6 +336,10 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			DueAt:            inv.DueAt,
 			PaidAt:           inv.PaidAt,
 			FinalizedAt:      inv.FinalizedAt,
+			PoNumber:         inv.PONumber,
+			Tax:              taxJSON,
+			BillingContacts:  contactsJSON,
+			Memo:             inv.Memo,
 			CreatedAt:        inv.CreatedAt,
 			UpdatedAt:        inv.UpdatedAt,
 		}); err != nil {

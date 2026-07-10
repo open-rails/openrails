@@ -151,6 +151,10 @@ type InvoiceDTO struct {
 	AmountDue         int64                `json:"amount_due"`
 	LineItems         []InvoiceLineItemDTO `json:"line_items"`
 	MoneyMovements    map[string]int64     `json:"money_movements,omitempty"`
+	PONumber          *string              `json:"po_number,omitempty"`
+	Tax               map[string]any       `json:"tax,omitempty"`
+	BillingContacts   []InvoiceContactDTO  `json:"billing_contacts,omitempty"`
+	Memo              *string              `json:"memo,omitempty"`
 	Status            string               `json:"status"`
 	CollectionMethod  string               `json:"collection_method"`
 	IssuedAt          *time.Time           `json:"issued_at,omitempty"`
@@ -161,6 +165,23 @@ type InvoiceDTO struct {
 	FinalizedAt       *time.Time           `json:"finalized_at,omitempty"`
 	ExternalInvoiceID *string              `json:"external_invoice_id,omitempty"`
 	CreatedAt         time.Time            `json:"created_at"`
+}
+
+// InvoiceContactDTO is one billing contact on an invoice document (#798).
+type InvoiceContactDTO struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email"`
+}
+
+func contactsToDTO(contacts []models.InvoiceContact) []InvoiceContactDTO {
+	if len(contacts) == 0 {
+		return nil
+	}
+	out := make([]InvoiceContactDTO, 0, len(contacts))
+	for _, c := range contacts {
+		out = append(out, InvoiceContactDTO{Name: c.Name, Email: c.Email})
+	}
+	return out
 }
 
 // invoiceToDTO projects an internal models.Invoice onto the public InvoiceDTO.
@@ -191,6 +212,10 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 		AmountDue:         inv.AmountDue,
 		LineItems:         items,
 		MoneyMovements:    inv.MoneyMovements,
+		PONumber:          inv.PONumber,
+		Tax:               inv.Tax,
+		BillingContacts:   contactsToDTO(inv.BillingContacts),
+		Memo:              inv.Memo,
 		Status:            inv.Status,
 		CollectionMethod:  inv.CollectionMethod,
 		IssuedAt:          inv.IssuedAt,

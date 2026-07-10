@@ -147,7 +147,7 @@ SET measure = EXCLUDED.measure, windows = EXCLUDED.windows, updated_at = now()`,
 }
 
 func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []CatalogMeterSpec) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1`, merchantID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND customer_id IS NULL`, merchantID); err != nil {
 		return err
 	}
 	meterKeys := make([]string, 0, len(meters))
@@ -184,7 +184,7 @@ SET kind = EXCLUDED.kind,
 }
 
 func syncRateCards(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, rateCards []CatalogRateCardSpec) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1`, merchantID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND customer_id IS NULL`, merchantID); err != nil {
 		return err
 	}
 	for _, spec := range rateCards {

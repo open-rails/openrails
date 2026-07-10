@@ -36,6 +36,10 @@ import (
 type BillingConfig = boot.BillingConfig
 type MerchantConfig = boot.MerchantConfig
 
+// InvoiceConfig aliases the merchant invoice/collection policy block so
+// embedded hosts can set it programmatically (#798).
+type InvoiceConfig = boot.InvoiceConfig
+
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
 	Config              *config.Config

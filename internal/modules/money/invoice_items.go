@@ -45,6 +45,7 @@ func insertPendingInvoiceItemTx(
 	if err != nil {
 		return fmt.Errorf("money: encode invoice item metadata: %w", err)
 	}
+	now := time.Now().UTC()
 	return q.InsertPendingInvoiceItem(ctx, gen.InsertPendingInvoiceItemParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: merchantID,
@@ -55,7 +56,7 @@ func insertPendingInvoiceItemTx(
 		InvoiceAt:  invoiceAt,
 		Amount:     amount,
 		Metadata:   meta,
-		CreatedAt:  invoiceAt,
-		UpdatedAt:  invoiceAt,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	})
 }

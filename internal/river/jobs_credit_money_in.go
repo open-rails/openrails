@@ -236,6 +236,13 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 	}
 
 	if job.Args.Collect {
+		// #798: overdue net-N receivables flip to past_due before collection —
+		// the host-visible dunning signal even when no charger is armed.
+		if n, err := w.Money.MarkInvoicesPastDue(ctx, now); err != nil {
+			return err
+		} else if n > 0 {
+			logger.WithField("invoices", n).Info("invoices marked past_due")
+		}
 		if w.Config != nil && w.Config.IsLimitedMode() {
 			logger.Warn("limited mode: skipping invoice collection charges (#345)")
 			return nil
