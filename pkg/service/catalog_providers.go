@@ -275,14 +275,14 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	// The manifest speaks the operator's ACCOUNT vocabulary ("mobius"), not
 	// rail names: resolve each declared name to its rail via the merchant's
 	// declared accounts (a rail name itself also resolves — the reserved
-	// gateways are their own account names). Unknown names fail loudly:
-	// silently dropping cost doujins its NMI plan links. Several accounts on
-	// one rail are fine — rails[] is keyed by the ACCOUNT key and each entry
-	// records its rail (#799).
+	// gateways are their own account names). Unknown names fail loudly: a
+	// silently dropped name loses its provider links. Several accounts on one
+	// rail are fine — rails[] is keyed by the ACCOUNT key and each entry
+	// records its rail.
 	type attachTarget struct {
 		declared  string // manifest name = ProviderLinks key = rails[]/states[] key
 		rail      string // adapters index; recorded in the entry's RailKeyRail
-		accountID string // rail-native account id; pins Attach/AutoCreate (#641)
+		accountID string // rail-native account id; pins Attach/AutoCreate to the account
 		adapter   providerAdapter
 	}
 	accountRails := s.merchantAccountRails(ctx)
@@ -330,23 +330,19 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
-	// stampRail records the entry's rail inside account-keyed entries so
-	// readers can scan by rail (RailLinkEntries); a rail-named key is already
-	// self-describing.
+	// Every entry records its rail; readers match on RailKeyRail only.
 	stampRail := func(ids map[string]string, t attachTarget) map[string]string {
 		if ids == nil {
 			ids = map[string]string{}
 		}
-		if t.declared != t.rail {
-			ids[models.RailKeyRail] = t.rail
-		}
+		ids[models.RailKeyRail] = t.rail
 		return ids
 	}
 
 	for _, t := range targets {
 		link := req.ProviderLinks[t.declared]
-		// Pin provider calls to THIS account's credentials (#641); empty means
-		// the rail's armed default.
+		// Pin provider calls to THIS account's credentials; empty means the
+		// rail's armed default.
 		tctx := pctx
 		tctx.TargetAccountID = t.accountID
 		// Try the user-supplied attach path first. Attach VERIFIES the linked

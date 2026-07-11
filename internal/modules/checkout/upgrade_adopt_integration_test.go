@@ -261,7 +261,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	newPrice := &models.Price{
 		ID: newPriceID, ProductID: newProductID, Amount: 5_000_000, Currency: "USD",
 		AutoRenew: true, AccessDurationHours: &hours,
-		Rails: map[string]map[string]string{"nmi": {models.RailKeyPlanID: planID}},
+		Rails: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID}},
 	}
 	newProduct := &models.Product{ID: newProductID, Key: "upg-new-" + sfx, DisplayName: "Upgrade New"}
 

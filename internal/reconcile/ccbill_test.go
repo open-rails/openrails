@@ -127,7 +127,7 @@ func TestCCBillPlanIndexUsesRecurringBillingOption(t *testing.T) {
 		ID:        priceID,
 		ProductID: productID,
 		Rails: map[string]map[string]string{
-			"ccbill": {"recurring_billing_option_id": "0000007498"},
+			"ccbill": {"rail": "ccbill", "recurring_billing_option_id": "0000007498"},
 		},
 	}})
 

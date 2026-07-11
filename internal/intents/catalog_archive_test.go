@@ -243,7 +243,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		linked := &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true,
 			Rails: map[string]map[string]string{
-				"stripe": {models.RailKeyStripePriceID: "price_x"},
+				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"},
 			},
 		}
 		h.LoadCatalog = stubCatalog(nil, []*models.Price{linked})

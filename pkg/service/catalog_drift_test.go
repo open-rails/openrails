@@ -87,7 +87,7 @@ func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
 func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
 	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: currency, Archived: !active}
 	if stripePriceID != "" || stripeProductID != "" {
-		p.Rails = map[string]map[string]string{"stripe": {}}
+		p.Rails = map[string]map[string]string{"stripe": {models.RailKeyRail: "stripe"}}
 		if stripePriceID != "" {
 			p.Rails["stripe"][models.RailKeyStripePriceID] = stripePriceID
 		}
@@ -104,7 +104,7 @@ func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *m
 	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd"}
 	if planID != "" {
 		p.Rails = map[string]map[string]string{
-			string(models.RailNMI): {models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
+			"mobius": {models.RailKeyRail: string(models.RailNMI), models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
 		}
 	}
 	return p

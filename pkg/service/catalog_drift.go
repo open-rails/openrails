@@ -515,7 +515,7 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 				snap.stripeProductIDs[id] = pr.ProductID.String()
 			}
 		}
-		// Account-keyed (#799): any NMI account's plan link registers the price.
+		// Any NMI account's plan link registers the price.
 		for _, nmiLink := range pr.RailAccountConfigs(models.RailNMI) {
 			if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 				snap.nmiPlanIDByOpenRailsPrice[pr.ID.String()] = planID

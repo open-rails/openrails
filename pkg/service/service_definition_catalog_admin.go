@@ -346,13 +346,8 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 	adapters := s.providerAdapters()
 	out := make(map[string]ProviderState, len(p.Rails))
 	for name, ids := range p.Rails {
-		// Account-keyed entry (#799): the rail lives in the entry; a rail-named
-		// key is its own account.
-		rail := strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))
-		if rail == "" {
-			rail = strings.ToLower(strings.TrimSpace(name))
-		}
-		adapter, ok := adapters[rail]
+		// Entries are account-keyed; the rail lives in the entry.
+		adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
 		if !ok {
 			// Unknown providers stay visible but uncomputed.
 			out[name] = ProviderState{
@@ -653,7 +648,7 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 	}
 	newRails := cloneRails(local.Rails)
 	if newRails["stripe"] == nil {
-		newRails["stripe"] = map[string]string{}
+		newRails["stripe"] = map[string]string{models.RailKeyRail: string(models.RailStripe)}
 	}
 	newRails["stripe"][models.RailKeyStripePriceID] = newPriceID
 	if err := prices.UpdateRails(ctx, priceID, newRails); err != nil {

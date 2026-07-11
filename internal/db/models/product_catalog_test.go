@@ -85,11 +85,10 @@ func TestArchived_Purchasable(t *testing.T) {
 }
 
 func TestRailLinkEntries_AccountKeyed(t *testing.T) {
-	// #799: entries key on the ACCOUNT key with the rail stamped inside; a
-	// rail-named key is its own account.
+	// Entries key on the ACCOUNT key with the rail stamped inside.
 	p := &Price{Rails: map[string]map[string]string{
 		"mobius": {RailKeyRail: "nmi", RailKeyPlanID: "premium_new"},
-		"stripe": {RailKeyStripePriceID: "price_123"},
+		"stripe": {RailKeyRail: "stripe", RailKeyStripePriceID: "price_123"},
 	}}
 
 	nmi := p.RailAccountConfigs(RailNMI)

@@ -69,9 +69,8 @@ var planLinkIDKeys = []string{"plan_id", "price_id", "recurring_billing_option_i
 
 // buildPlanIndex maps remote plan ids onto local prices via the catalog
 // provider_links blobs, restricted to the provider's local rail names. Blobs
-// are ACCOUNT-keyed (#799: entry key = merchant account key, rail recorded in
-// the entry; a rail-named key is its own account) — two accounts carrying the
-// same plan id on one price dedup to a single link.
+// key on the merchant's ACCOUNT key with the rail recorded in each entry —
+// two accounts carrying the same plan id on one price dedup to a single link.
 func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLink {
 	idx := map[string][]planLink{}
 	names := localRailNames(provider)
