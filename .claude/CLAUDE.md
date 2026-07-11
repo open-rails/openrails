@@ -12,6 +12,13 @@ identifiers OUT of committed files (code, trackers, this file).
   credit lots. FX is forbidden inside the ledger (no cross-currency transfers).
 
 ## Rails (payment providers)
+- TERMINOLOGY (frozen 2026-07-11): a **rail** is the gateway KIND (nmi/ccbill/stripe/solana —
+  the `models.Rail` enum; row vocabulary: subscriptions.rail etc.). A **payment provider** is a
+  merchant's concrete ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi) — credentials +
+  account_id + manifest key (`rail_merchant_accounts.display_name`). Catalog provider_links,
+  prices.rails entry keys, and the checkout wire value speak PROVIDER vocabulary; a provider
+  entry records its rail inside (`rail:` field). Reserved gateways (stripe/ccbill/solana) are
+  their own provider names.
 - By repo: doujins / hentai0 → mobius (NMI) + ccbill + solana; cozy-art → stripe; tensorhub → none.
 - ALL outbound Stripe HTTP goes through the choke-point client `internal/integrations/stripeapi`
   (readonly mode blocks writes at the transport). It pins the Stripe API version via
