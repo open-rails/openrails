@@ -10,7 +10,7 @@ import (
 
 // Path-doctrine guard (#724, ADR docs/adr-custodial-merchant-secrets.md):
 // merchant-secret isolation rests on ALL secret paths being derived from the
-// single RailMerchantAccountSecretName builder and the single vaultSecretStore
+// single PSPSecretName builder and the single vaultSecretStore
 // namespace builder. Ad-hoc construction anywhere else would silently escape the
 // per-merchant namespace, so this test greps the production sources and fails on
 // any non-allowlisted occurrence of the durable path fragments.
@@ -31,7 +31,7 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 			// The durable provider-account secret-name prefix (#683).
 			fragment: `"rail_merchant_accounts`,
 			allowed: map[string]string{
-				"internal/merchants/secrets.go":           "the canonical builder/parser (RailMerchantAccountSecretName)",
+				"internal/merchants/secrets.go":           "the canonical builder/parser (PSPSecretName)",
 				"internal/merchantsecrets/store.go":       "write-restriction MATCH pattern, not construction",
 				"internal/bootstrap/merchant_manifest.go": "legacy manifest-KEY rename check (config keys, not secret paths)",
 				"embed/provision.go":                      "legacy manifest-KEY rename check (config keys, not secret paths)",
@@ -87,7 +87,7 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 				if _, ok := rule.allowed[filepath.ToSlash(rel)]; ok {
 					continue
 				}
-				t.Errorf("%s:%d: ad-hoc secret-path construction (%q) — derive paths via merchants.RailMerchantAccountSecretName / the vault store namespace builder, or extend the guard allowlist with a justification\n\t%s",
+				t.Errorf("%s:%d: ad-hoc secret-path construction (%q) — derive paths via merchants.PSPSecretName / the vault store namespace builder, or extend the guard allowlist with a justification\n\t%s",
 					rel, i+1, rule.fragment, trimmed)
 			}
 		}

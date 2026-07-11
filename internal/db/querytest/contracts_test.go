@@ -30,12 +30,12 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	subscriptionID := uuid.New()
 
 	display := "CCBill Test"
-	account, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+	account, err := q.UpsertPSP(ctx, gen.UpsertPSPParams{
 		MerchantID:  merchantID,
 		Rail:        "ccbill",
 		Environment: strptr("test"),
 		AccountID:   "acct_" + subscriptionID.String(),
-		DisplayName: &display,
+		Key:         &display,
 		Evidence:    []byte(`{"source":"query-contract"}`),
 	})
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Currency:            "USD",
 		AccessDurationHours: int32ptr(30 * 24),
 		AutoRenew:           true,
-		Rails:               []byte(`{"ccbill":{"form":"948"}}`),
+		PspLinks:            []byte(`{"ccbill":{"form":"948"}}`),
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	})
@@ -315,16 +315,16 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Equal(t, int64(3), usageDims[0].Total)
 
 	intent, err := q.EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
-		MerchantID:            merchantID,
-		Rail:                  "ccbill",
-		IntentType:            "nmi_delete_subscription",
-		SubscriptionID:        &subscriptionID,
-		PriceID:               &priceID,
-		Payload:               []byte(`{"contract":true}`),
-		IdempotencyKey:        "intent-" + subscriptionID.String(),
-		NextAttemptAt:         now,
-		Origin:                "system",
-		RailMerchantAccountID: &account.ID,
+		MerchantID:     merchantID,
+		Rail:           "ccbill",
+		IntentType:     "nmi_delete_subscription",
+		SubscriptionID: &subscriptionID,
+		PriceID:        &priceID,
+		Payload:        []byte(`{"contract":true}`),
+		IdempotencyKey: "intent-" + subscriptionID.String(),
+		NextAttemptAt:  now,
+		Origin:         "system",
+		PspID:          &account.ID,
 	})
 	require.NoError(t, err)
 	claimed, err := q.ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
@@ -368,7 +368,7 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	require.NoError(t, err)
 
 	accountID := "acct-global-" + uuid.NewString()
-	first, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+	first, err := q.UpsertPSP(ctx, gen.UpsertPSPParams{
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -376,7 +376,7 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	same, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+	same, err := q.UpsertPSP(ctx, gen.UpsertPSPParams{
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -385,7 +385,7 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, same.ID)
 
-	_, err = q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+	_, err = q.UpsertPSP(ctx, gen.UpsertPSPParams{
 		MerchantID:  otherMerchantID,
 		Rail:        "stripe",
 		Environment: strptr("test"),
@@ -393,7 +393,7 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	byIdentity, err := q.GetRailMerchantAccountByRailIdentity(ctx, gen.GetRailMerchantAccountByRailIdentityParams{
+	byIdentity, err := q.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
 		Rail:        "stripe",
 		Environment: strptr("test"),
 		AccountID:   accountID,

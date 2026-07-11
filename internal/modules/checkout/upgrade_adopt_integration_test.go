@@ -261,7 +261,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	newPrice := &models.Price{
 		ID: newPriceID, ProductID: newProductID, Amount: 5_000_000, Currency: "USD",
 		AutoRenew: true, AccessDurationHours: &hours,
-		Rails: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID}},
+		PSPLinks: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID}},
 	}
 	newProduct := &models.Product{ID: newProductID, Key: "upg-new-" + sfx, DisplayName: "Upgrade New"}
 
@@ -286,7 +286,7 @@ func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLanded")
 
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{Provider: "nmi", Rail: "nmi"})
+	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
 	require.NoError(t, err, "landed-but-lost create must be adopted, not failed")
 	require.Equal(t, "success", resp.Status)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "never a second blind create")
@@ -312,7 +312,7 @@ func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLost")
 
-	_, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{Provider: "nmi", Rail: "nmi"})
+	_, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrCheckoutProcessing), "unresolved ambiguity is processing, never a decline: %v", err)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
@@ -327,7 +327,7 @@ func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
 	// Provider recovers; the retry (same idempotency key ⇒ retryAfterFailure)
 	// scans the roster first, then re-creates under the ORIGINAL order id.
 	fx.gateway.createMode.Store("approve")
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{Provider: "nmi", Rail: "nmi"})
+	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
 	require.NoError(t, err)
 	require.Equal(t, "success", resp.Status)
 	require.EqualValues(t, 2, fx.gateway.createCalls.Load())

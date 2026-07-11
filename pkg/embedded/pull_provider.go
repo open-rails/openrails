@@ -42,18 +42,18 @@ type InvoiceConfig = boot.InvoiceConfig
 
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
-	Config              *config.Config
-	MerchantSlug        string
-	Providers           []string
-	RailMerchantAccount string
-	Since               string
-	Until               string
-	Format              string
-	LogDir              string
-	Insert              bool
-	Overwrite           bool
-	Prune               bool
-	Out                 io.Writer
+	Config       *config.Config
+	MerchantSlug string
+	Providers    []string
+	PSP          string
+	Since        string
+	Until        string
+	Format       string
+	LogDir       string
+	Insert       bool
+	Overwrite    bool
+	Prune        bool
+	Out          io.Writer
 
 	// MerchantManifest is the parsed MODE-1 merchant manifest (#723) for this
 	// one-off process — embedded hosts pass the same manifest they boot from.
@@ -123,8 +123,8 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		accountPins := map[reconcile.Provider]string{}
 		explicitBindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{}
-		if strings.TrimSpace(opts.RailMerchantAccount) != "" {
-			provider, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.RailMerchantAccount)
+		if strings.TrimSpace(opts.PSP) != "" {
+			provider, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.PSP)
 			if err != nil {
 				return err
 			}
@@ -133,7 +133,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			} else {
 				for _, p := range providers {
 					if p != provider {
-						return fmt.Errorf("--provider-account %s is a %s account, but --provider includes %s", opts.RailMerchantAccount, provider, p)
+						return fmt.Errorf("--provider-account %s is a %s account, but --provider includes %s", opts.PSP, provider, p)
 					}
 				}
 			}
@@ -163,12 +163,12 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 
 		eng := reconcile.NewEngine(rt.DB, rt.Config, fetchers)
 		res, runErr := eng.Run(ctx, reconcile.RunParams{
-			Mode:                 mode,
-			Mutations:            &reconcile.LocalMutationPolicy{Insert: opts.Insert, Overwrite: opts.Overwrite},
-			Providers:            providers,
-			RailMerchantAccounts: bindings,
-			Since:                sinceT,
-			Until:                untilT,
+			Mode:      mode,
+			Mutations: &reconcile.LocalMutationPolicy{Insert: opts.Insert, Overwrite: opts.Overwrite},
+			Providers: providers,
+			PSPs:      bindings,
+			Since:     sinceT,
+			Until:     untilT,
 		})
 		if res == nil {
 			return runErr
@@ -303,7 +303,7 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 type pullProviderRuntime struct {
 	DB             *db.DB
 	Config         *config.Config
-	Rails          config.RailMerchantAccountSet
+	Rails          config.PSPSet
 	Merchants      *merchants.Service
 	NMIClients     map[string]*nmi.NMIClient
 	CCBillDataLink *ccbill.DataLinkClient
@@ -320,7 +320,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 	cleanup := func() { _ = database.Close() }
-	rails := config.RailMerchantAccountSet{}
+	rails := config.PSPSet{}
 	nmiClients := map[string]*nmi.NMIClient{}
 	ccbillDataLink, err := pullProviderCCBillDataLink(cfg, rails)
 	if err != nil {
@@ -424,7 +424,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	return svc, nil
 }
 
-func pullProviderCCBillDataLink(cfg *config.Config, rails config.RailMerchantAccountSet) (*ccbill.DataLinkClient, error) {
+func pullProviderCCBillDataLink(cfg *config.Config, rails config.PSPSet) (*ccbill.DataLinkClient, error) {
 	_, proc, err := rails.ActiveRailByType(models.RailCCBill)
 	if err != nil {
 		return nil, err
@@ -440,7 +440,7 @@ func pullProviderCCBillDataLink(cfg *config.Config, rails config.RailMerchantAcc
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }
 
-func pullProviderSolanaRPC(cfg *config.Config, rails config.RailMerchantAccountSet) (*solanaint.RPCClient, error) {
+func pullProviderSolanaRPC(cfg *config.Config, rails config.PSPSet) (*solanaint.RPCClient, error) {
 	_, proc, err := rails.ActiveRailByType(models.RailSolana)
 	if err != nil {
 		return nil, err
@@ -486,7 +486,7 @@ func resolvePullRailMerchantAccountTarget(ctx context.Context, rt *pullProviderR
 	if err != nil {
 		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
 	}
-	account, err := rt.DB.Gen(ctx).GetRailMerchantAccount(ctx, id)
+	account, err := rt.DB.Gen(ctx).GetPSP(ctx, id)
 	if err != nil {
 		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
@@ -574,14 +574,14 @@ func writePullProviderLog(logDir string, run reconcile.RunRecord, res *reconcile
 			subReason = "grant_ledger_entangled"
 		}
 		for _, id := range pl.Result.SkippedSubscriptionIDs {
-			writeLogLine(f, now, lf("event", "prune_skip"), lf("run_id", run.ID.String()), lf("provider", string(pl.Provider)), lf("rail_merchant_account_id", pl.Binding.ID.String()), lf("table", "subscriptions"), lf("row_id", id.String()), lf("reason", subReason))
+			writeLogLine(f, now, lf("event", "prune_skip"), lf("run_id", run.ID.String()), lf("provider", string(pl.Provider)), lf("psp_id", pl.Binding.ID.String()), lf("table", "subscriptions"), lf("row_id", id.String()), lf("reason", subReason))
 		}
 		payReason := pl.Result.PaymentSkipReason
 		if payReason == "" {
 			payReason = "protected_dependents"
 		}
 		for _, id := range pl.Result.SkippedPaymentIDs {
-			writeLogLine(f, now, lf("event", "prune_skip"), lf("run_id", run.ID.String()), lf("provider", string(pl.Provider)), lf("rail_merchant_account_id", pl.Binding.ID.String()), lf("table", "payments"), lf("row_id", id.String()), lf("reason", payReason))
+			writeLogLine(f, now, lf("event", "prune_skip"), lf("run_id", run.ID.String()), lf("provider", string(pl.Provider)), lf("psp_id", pl.Binding.ID.String()), lf("table", "payments"), lf("row_id", id.String()), lf("reason", payReason))
 		}
 	}
 	if convergeLog != nil {

@@ -181,7 +181,7 @@ func postSelfCheckout(t *testing.T, router http.Handler, body map[string]any) se
 
 func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
 	t.Helper()
-	suite.Rails[nmiE2EProvider] = &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
+	suite.Rails[nmiE2EProvider] = &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
 
 	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
 		SecurityKey: securityKey,
@@ -196,7 +196,7 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	// The checkout money path resolves the NMI client from MERCHANT SECRETS
 	// first (production posture); the suite seeds a placeholder key there, so
 	// overwrite it with the real sandbox key or every charge 401s at NMI.
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIRailMerchantAccountID(), "security_key")
+	secretName, err := merchants.PSPSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIRailMerchantAccountID(), "security_key")
 	require.NoError(t, err)
 	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
 	require.NoError(t, err)
@@ -207,15 +207,15 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 func bindPriceToNMIProvider(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID, planID string) {
 	t.Helper()
 	price := suite.GetPrice(priceID)
-	if price.Rails == nil {
-		price.Rails = map[string]map[string]string{}
+	if price.PSPLinks == nil {
+		price.PSPLinks = map[string]map[string]string{}
 	}
 	entry := map[string]string{}
 	if planID != "" {
 		entry[models.RailKeyPlanID] = planID
 	}
-	price.Rails[nmiE2EProvider] = entry
-	railsJSON, err := json.Marshal(price.Rails)
+	price.PSPLinks[nmiE2EProvider] = entry
+	railsJSON, err := json.Marshal(price.PSPLinks)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
 		"UPDATE openrails.prices SET rails = $1 WHERE id = $2", railsJSON, price.ID)

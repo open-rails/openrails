@@ -128,7 +128,7 @@ func seedArchivedRailMerchantAccount(t *testing.T, pool *pgxpool.Pool, merchantI
 func seedArchivedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, true)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func seedArchivedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, mercha
 func seedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, false)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func putProviderSecret(t *testing.T, ctx context.Context, store merchants.Mercha
 
 func putProviderSecretEnv(t *testing.T, ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, provider, environment, accountID, key, value string) {
 	t.Helper()
-	name, err := merchants.RailMerchantAccountSecretName(provider, environment, accountID, key)
+	name, err := merchants.PSPSecretName(provider, environment, accountID, key)
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, name, value)
 	require.NoError(t, err)
@@ -235,7 +235,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
 			deleted_at timestamptz
 		);
-		CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
+		CREATE TABLE IF NOT EXISTS openrails.psps (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE CASCADE,
 			rail text NOT NULL,
@@ -250,7 +250,7 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			created_at timestamptz NOT NULL DEFAULT current_timestamp,
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp
 		);
-		CREATE UNIQUE INDEX uq_rail_merchant_accounts_identity ON openrails.rail_merchant_accounts (rail, environment, account_id);
+		CREATE UNIQUE INDEX uq_rail_merchant_accounts_identity ON openrails.psps (rail, environment, account_id);
 	`)
 	require.NoError(t, err)
 }

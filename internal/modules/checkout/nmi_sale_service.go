@@ -89,8 +89,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("checkout sale intent executor not wired")
 	}
 	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.nmiClient(ctx, target.Provider); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
+	if _, err := s.nmiClient(ctx, target.PSP); err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
 	}
 	if _, err := customerIDFromUser(user.ID); err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 	}
 
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -143,7 +143,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		PriceID:    &price.ID,
 		Payload: NMISalePayload{
 			Provider:            provider,
-			ProviderAccount:     target.Provider,
+			PSP:                 target.PSP,
 			CustomerVaultID:     customerVaultID,
 			BillingID:           vaultBillingID,
 			AmountMicros:        price.Amount,

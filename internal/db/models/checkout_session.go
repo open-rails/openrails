@@ -66,12 +66,12 @@ type CheckoutSession struct {
 	// IdempotencyKey is request-scoped only (Redis owns checkout idempotency,
 	// #702 dropped the column); never persisted or round-tripped from the DB.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
-	// RailMerchantAccountID is the provider_accounts row selected for this provider
+	// PspID is the provider_accounts row selected for this provider
 	// checkout. It prevents provider sessions from being confused across rotated
 	// Stripe/NMI/CCBill accounts.
-	RailMerchantAccountID *uuid.UUID `json:"rail_merchant_account_id,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	PspID     *uuid.UUID `json:"psp_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 
 	Price      *Price  `json:"price,omitempty"`
 	LastFour   *string `json:"last_four,omitempty"`

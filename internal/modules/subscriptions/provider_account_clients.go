@@ -32,7 +32,7 @@ func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSou
 	if resolver == nil {
 		return nil, "", false, errors.New("nmi client resolver is not configured")
 	}
-	client, ok, err := resolver.ResolveNMIClient(ctx, sub.MerchantID, sub.RailMerchantAccountID)
+	client, ok, err := resolver.ResolveNMIClient(ctx, sub.MerchantID, sub.PspID)
 	if err != nil || !ok {
 		return nil, strings.ToLower(string(sub.Rail)), false, err
 	}
@@ -40,8 +40,8 @@ func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSou
 }
 
 func PaymentMethodMatchesSubscriptionProvider(pm *models.PaymentMethod, sub *models.Subscription) bool {
-	if pm == nil || sub == nil || pm.RailMerchantAccountID == nil || sub.RailMerchantAccountID == nil {
+	if pm == nil || sub == nil || pm.PspID == nil || sub.PspID == nil {
 		return true
 	}
-	return *pm.RailMerchantAccountID == *sub.RailMerchantAccountID
+	return *pm.PspID == *sub.PspID
 }

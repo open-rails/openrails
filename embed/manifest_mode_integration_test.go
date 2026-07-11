@@ -56,7 +56,7 @@ func manifestModeManifestYAML(slug, gatewayID string) []byte {
 merchants:
   %s:
     display_name: %s
-    accounts:
+    psps:
       mobius:
         nmi:
           environment: live
@@ -206,7 +206,7 @@ func TestManifestMode_Loop(t *testing.T) {
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
 			`DELETE FROM openrails.products WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = pool.Exec(context.Background(), stmt, id.UUID())
@@ -379,7 +379,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
@@ -426,7 +426,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 
 	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"mobius": {"nmi": {Environment: "live", AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
 		},
 	})
@@ -467,7 +467,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
@@ -529,7 +529,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 // TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders. Options.PaymentProviders
 // is deliberately unset, so Runtime.Rails (the legacy boot-config bridge) stays
 // empty while Runtime.Merchants arms from the DB-projected accounts (#775).
-func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn, slug string, railAccounts map[string]embed.RailMerchantAccountConfig) (*embed.Runtime, merchant.ID) {
+func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn, slug string, railAccounts map[string]embed.PSPConfig) (*embed.Runtime, merchant.ID) {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := manifestModeConfig(dsn)
@@ -537,14 +537,14 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
-		DisplayName:          slug,
-		RailMerchantAccounts: railAccounts,
+		DisplayName: slug,
+		PSPs:        railAccounts,
 	})
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
@@ -572,7 +572,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	slug := fmt.Sprintf("mccbill%d", nano)
 	ccbillAccount := fmt.Sprintf("92%04d-0000", nano%10_000)
 
-	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.RailMerchantAccountConfig{
+	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
 				Environment: "live",
@@ -627,7 +627,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	slug := fmt.Sprintf("mwebhook%d", nano)
 	ccbillAccount := fmt.Sprintf("93%04d-0000", nano%10_000)
 
-	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.RailMerchantAccountConfig{
+	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
 				Environment: "live",

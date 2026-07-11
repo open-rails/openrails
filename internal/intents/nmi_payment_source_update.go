@@ -398,11 +398,11 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	}
 
 	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
-		MerchantID:            tid.UUID(),
-		Provider:              strings.ToLower(string(sub.Rail)),
-		IntentType:            TypeNMIPaymentSourceUpdate,
-		SubscriptionID:        &subID,
-		RailMerchantAccountID: sub.RailMerchantAccountID,
+		MerchantID:     tid.UUID(),
+		Provider:       strings.ToLower(string(sub.Rail)),
+		IntentType:     TypeNMIPaymentSourceUpdate,
+		SubscriptionID: &subID,
+		PspID:          sub.PspID,
 		Payload: NMIPaymentSourceUpdatePayload{
 			UserID:             sub.CustomerID.String(),
 			RailSubscriptionID: sub.RailSubscriptionID,

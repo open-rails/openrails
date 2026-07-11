@@ -54,7 +54,7 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
 			return err
 		}
-		for key, account := range t.RailMerchantAccounts {
+		for key, account := range t.PSPs {
 			if err := validateManifestRailMerchantAccount(slug, key, account); err != nil {
 				return err
 			}
@@ -145,7 +145,7 @@ func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 	return nil
 }
 
-func validateManifestRailMerchantAccount(slug string, key string, account RailMerchantAccountConfig) error {
+func validateManifestRailMerchantAccount(slug string, key string, account PSPConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("merchant %q accounts key is required", slug)
@@ -166,7 +166,7 @@ func validateManifestRailMerchantAccount(slug string, key string, account RailMe
 			}
 		}
 		for secretKey := range cfg.Secrets {
-			if _, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, secretKey); err != nil {
+			if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {
 				return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
 			}
 		}

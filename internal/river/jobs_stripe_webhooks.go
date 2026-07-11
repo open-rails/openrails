@@ -52,7 +52,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	rows, err := w.DB.Qx(ctx).Query(ctx, `
 		SELECT m.id::text, m.slug, pa.environment, pa.account_id
 		  FROM openrails.merchants m
-		  JOIN openrails.rail_merchant_accounts pa ON pa.merchant_id = m.id
+		  JOIN openrails.psps pa ON pa.merchant_id = m.id
 		 WHERE m.deleted_at IS NULL
 		   AND pa.rail = 'stripe'
 		   AND pa.archived = false
@@ -74,13 +74,13 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 			return fmt.Errorf("stripe webhook reconcile: parse merchant id %q: %w", idStr, err)
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			Config:                w.Config,
-			SecretStore:           w.Merchants.Secrets(),
-			MerchantID:            id,
-			MerchantSlug:          slug,
-			ProviderEnvironment:   environment,
-			RailMerchantAccountID: accountID,
-			EnabledEvents:         webhooks.HandledStripeEventTypes,
+			Config:              w.Config,
+			SecretStore:         w.Merchants.Secrets(),
+			MerchantID:          id,
+			MerchantSlug:        slug,
+			ProviderEnvironment: environment,
+			PspID:               accountID,
+			EnabledEvents:       webhooks.HandledStripeEventTypes,
 		})
 		fields := log.Fields{"merchant": slug, "stripe_account_id": accountID}
 		if err != nil {

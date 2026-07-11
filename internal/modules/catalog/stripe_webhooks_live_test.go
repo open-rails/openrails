@@ -36,7 +36,7 @@ func liveStripeSvc(t *testing.T) *StripeCatalogService {
 	if !strings.HasPrefix(key, "rk_test_") && !strings.HasPrefix(key, "sk_test_") {
 		t.Skipf("STRIPE_SECRET_KEY is not a test-mode key (prefix %.7s); refusing to run live test", key)
 	}
-	return &StripeCatalogService{Rails: config.RailMerchantAccountSet{"stripe": {Rail: models.RailStripe, SecretKey: key}}}
+	return &StripeCatalogService{Rails: config.PSPSet{"stripe": {Rail: models.RailStripe, SecretKey: key}}}
 }
 
 // deleteLiveTestEndpoints removes any managed endpoint at one of our test URLs.

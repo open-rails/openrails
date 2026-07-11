@@ -150,8 +150,8 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"stripe", "ccbill", "nmi"},
-		ProviderLinks: map[string]map[string]string{
+		PSPs:       []string{"stripe", "ccbill", "nmi"},
+		PSPLinks: map[string]map[string]string{
 			"stripe": {models.RailKeyStripePriceID: "price_xxx"},
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 			"nmi":    {"plan_id": "premium_monthly"},
@@ -182,8 +182,8 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"ccbill", "nmi"},
-		ProviderLinks: map[string]map[string]string{
+		PSPs:       []string{"ccbill", "nmi"},
+		PSPLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 			// mobius intentionally has no link -> pending
 		},
@@ -213,7 +213,7 @@ func TestResolveProviders_AllPending(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"ccbill", "nmi"},
+		PSPs:       []string{"ccbill", "nmi"},
 	}
 	_, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
 	if err != nil {
@@ -236,7 +236,7 @@ func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		Providers:  []string{"paypal"}, // not in dispatch table
+		PSPs:       []string{"paypal"}, // not in dispatch table
 	}
 	_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
 	if err == nil || !strings.Contains(err.Error(), `unknown provider "paypal"`) {
@@ -253,7 +253,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
 		Currency:   "usd",
-		ProviderLinks: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 		},
 	}
@@ -276,7 +276,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}}}
 	priceID := uuid.New()
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
-		Providers:  []string{"stripe", "nmi"},
+		PSPs:       []string{"stripe", "nmi"},
 		UnitAmount: 23_000_000,
 		Currency:   "usd",
 	}, priceID)

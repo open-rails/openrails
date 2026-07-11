@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, rails, key, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, psp_links, key, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     sqlc.arg(archived)::boolean,
     $3, $4,
-    sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(rails),
+    sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(psp_links),
     sqlc.arg(key)::text,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -74,27 +74,36 @@ ORDER BY price.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetPriceByNMIPlan :one
--- include_nmi_fallback consults the canonical "nmi" rail key when a non-"nmi"
--- rail key is supplied (legacy compatibility).
+-- psp_links entries key on the PSP key with the rail recorded inside; the
+-- lookup name may be either the PSP key or the rail.
 SELECT * FROM openrails.prices price
-WHERE (price.rails -> sqlc.arg(rail)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
-       OR (sqlc.arg(include_nmi_fallback)::boolean
-           AND price.rails -> 'nmi' ->> 'plan_id' = sqlc.arg(plan_id)::text))
+WHERE EXISTS (
+    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
+    WHERE cfg ->> 'plan_id' = sqlc.arg(plan_id)::text
+      AND (link.psp = sqlc.arg(rail)::text OR cfg ->> 'rail' = sqlc.arg(rail)::text)
+)
 LIMIT 1;
 
 -- name: GetPriceWithProductByCCBillPriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE (price.rails -> 'ccbill' ->> 'flex_id' = sqlc.arg(ccbill_price_id)::text
-       OR price.rails -> 'ccbill' ->> 'recurring_billing_option_id' = sqlc.arg(ccbill_price_id)::text)
+WHERE EXISTS (
+    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
+    WHERE cfg ->> 'rail' = 'ccbill'
+      AND (cfg ->> 'flex_id' = sqlc.arg(ccbill_price_id)::text
+           OR cfg ->> 'recurring_billing_option_id' = sqlc.arg(ccbill_price_id)::text)
+)
 LIMIT 1;
 
 -- name: GetPriceWithProductByStripePriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.rails -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
+WHERE EXISTS (
+    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
+    WHERE cfg ->> 'rail' = 'stripe' AND cfg ->> 'price_id' = sqlc.arg(stripe_price_id)::text
+)
 LIMIT 1;
 
 -- #662: a price's money/identity columns (product_id, amount, currency,
@@ -110,14 +119,14 @@ UPDATE openrails.prices SET
     updated_at = now()
 WHERE id = sqlc.arg(id);
 
--- name: UpdatePriceRails :execrows
+-- name: UpdatePricePSPLinks :execrows
 UPDATE openrails.prices SET
-    rails = sqlc.narg(rails),
+    psp_links = sqlc.narg(psp_links),
     updated_at = now()
 WHERE id = sqlc.arg(id);
 
 -- #774: key is a mutable LABEL (the movable pointer), not financial substance —
--- its own narrow query, same pattern as rails/archived above.
+-- its own narrow query, same pattern as psp_links/archived above.
 -- name: UpdatePriceKey :execrows
 UPDATE openrails.prices SET
     key = sqlc.arg(key)::text,

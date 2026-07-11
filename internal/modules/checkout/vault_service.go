@@ -30,7 +30,7 @@ func NewCheckoutVaultService(paymentMethodService *paymentmethods.PaymentMethodS
 // vaulted from a token in THIS request (created=true — the caller may
 // best-effort clean it up on a verified-clean decline). The billing id is ""
 // for pre-#682 rows that never recorded one.
-func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, provider string) (vaultID, billingID string, pm *models.PaymentMethod, created bool, err error) {
+func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (vaultID, billingID string, pm *models.PaymentMethod, created bool, err error) {
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
 		if err != nil {
@@ -45,7 +45,7 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 		if !rails.IsNMI(pm.Rail) {
 			return "", "", nil, false, errors.New("payment method is not compatible with card payments")
 		}
-		if !rails.SameRail(pm.Rail, models.Rail(provider)) {
+		if !rails.SameRail(pm.Rail, models.Rail(target.Rail)) {
 			return "", "", nil, false, errors.New("payment method belongs to a different payment provider")
 		}
 
@@ -63,7 +63,7 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 
 	pmNew, err := s.VaultService.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
-		Provider:     provider,
+		Provider:     target.PSP,
 		FirstName:    ResolveCheckoutFirstName(req, user),
 		LastName:     ResolveCheckoutLastName(req),
 		Address1:     req.Address1,

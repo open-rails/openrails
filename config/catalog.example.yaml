@@ -40,12 +40,12 @@ catalogs:
             unit_amount: 20_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
           - currency: usd
             unit_amount: 200_000_000
             duration: 365d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       - key: claude-code-max-5x
         display_name: Claude Code Max 5x
@@ -59,7 +59,7 @@ catalogs:
             unit_amount: 100_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       - key: claude-code-max-20x
         display_name: Claude Code Max 20x
@@ -73,7 +73,7 @@ catalogs:
             unit_amount: 200_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
   - merchant: digital-ocean
     # ───────────────────────────────────────────────────────────────────────
@@ -286,7 +286,7 @@ catalogs:
             unit_amount: 12_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       - key: craftsman
         display_name: Craftsman
@@ -304,7 +304,7 @@ catalogs:
             unit_amount: 29_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       - key: expert
         display_name: Expert
@@ -322,7 +322,7 @@ catalogs:
             unit_amount: 59_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       - key: grandmaster
         display_name: Grandmaster
@@ -340,7 +340,7 @@ catalogs:
             unit_amount: 119_000_000
             duration: 30d
             auto_renew: true
-            providers: [stripe]
+            psps: [stripe]
 
       # ── Arbitrary credit top-up (#639 + #640) ──────────────────────────────
       # Buy ANY amount of image credits — no fixed packs. Larger purchases earn a
@@ -357,7 +357,7 @@ catalogs:
           - key: ai-image-gen
         prices:
           - currency: usd
-            providers: [stripe]
+            psps: [stripe]
             input_min: 5_000_000
             input_max: 500_000_000
             round: down
@@ -393,7 +393,7 @@ catalogs:
           - currency: usd
             unit_amount: 20_000_000
             duration: indefinite
-            providers: [stripe]
+            psps: [stripe]
 
       - key: prepaid-gpu-hours
         display_name: Prepaid GPU Hours
@@ -406,4 +406,4 @@ catalogs:
           - currency: usd
             unit_amount: 150_000_000
             duration: indefinite
-            providers: [stripe]
+            psps: [stripe]

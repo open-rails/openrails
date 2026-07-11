@@ -45,23 +45,23 @@ const (
 
 // DeclaredSubscriptionFact is one subscription's host-declared facts.
 type DeclaredSubscriptionFact struct {
-	SourceID              string // host's stable id (result reporting)
-	Customer              uuid.UUID
-	PriceID               uuid.UUID
-	Rail                  string
-	RailSubscriptionID    string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
-	RailMerchantAccountID *uuid.UUID
-	UserEmail             *string
-	StartedAt             time.Time
-	PaidThrough           *time.Time // last paid-through evidence (legacy expiration)
-	CancelKind            DeclaredCancelKind
-	CancelAt              time.Time // required when CancelKind != none
-	CancelScheduleLive    bool      // provider-side recurring schedule NOT confirmed dead at AsOf
-	DunningLive           bool      // legacy dunning schedule still live at AsOf
-	DunningRetries        int       // legacy retry count → retry_attempts (forensics)
-	DunningLastRetryAt    *time.Time
-	PaymentMethodID       *uuid.UUID
-	Evidence              []byte // verbatim legacy payload → gateway_response at seed
+	SourceID           string // host's stable id (result reporting)
+	Customer           uuid.UUID
+	PriceID            uuid.UUID
+	Rail               string
+	RailSubscriptionID string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
+	PspID              *uuid.UUID
+	UserEmail          *string
+	StartedAt          time.Time
+	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)
+	CancelKind         DeclaredCancelKind
+	CancelAt           time.Time // required when CancelKind != none
+	CancelScheduleLive bool      // provider-side recurring schedule NOT confirmed dead at AsOf
+	DunningLive        bool      // legacy dunning schedule still live at AsOf
+	DunningRetries     int       // legacy retry count → retry_attempts (forensics)
+	DunningLastRetryAt *time.Time
+	PaymentMethodID    *uuid.UUID
+	Evidence           []byte // verbatim legacy payload → gateway_response at seed
 }
 
 // DeclaredOutcome is one fact's import outcome.
@@ -369,7 +369,7 @@ func insertDeclaredCancelled(
 		CancelledAt:              &cancelledAt,
 		CreatedAt:                f.StartedAt.UTC(),
 		UpdatedAt:                cancelledAt,
-		RailMerchantAccountID:    f.RailMerchantAccountID,
+		PspID:                    f.PspID,
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.
@@ -390,18 +390,18 @@ func materializeDeclaredUnknown(
 ) (uuid.UUID, error) {
 	started := f.StartedAt.UTC()
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		MerchantID:            merchantID,
-		Status:                gen.OpenrailsSubscriptionStatus(models.StatusUnknown),
-		Rail:                  f.Rail,
-		RailSubscriptionID:    f.RailSubscriptionID,
-		UserEmail:             f.UserEmail,
-		PeriodStartsAt:        periodStart,
-		PeriodEndsAt:          periodEnd,
-		StartedAt:             &started,
-		CustomerID:            f.Customer,
-		RailMerchantAccountID: f.RailMerchantAccountID,
-		PriceID:               f.PriceID,
-		Rails:                 []string{f.Rail},
+		MerchantID:         merchantID,
+		Status:             gen.OpenrailsSubscriptionStatus(models.StatusUnknown),
+		Rail:               f.Rail,
+		RailSubscriptionID: f.RailSubscriptionID,
+		UserEmail:          f.UserEmail,
+		PeriodStartsAt:     periodStart,
+		PeriodEndsAt:       periodEnd,
+		StartedAt:          &started,
+		CustomerID:         f.Customer,
+		PspID:              f.PspID,
+		PriceID:            f.PriceID,
+		Rails:              []string{f.Rail},
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("materialize subscription: %w", err)

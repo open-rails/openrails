@@ -224,7 +224,7 @@ func computeStripeDriftJob(
 				priceByContentKey[ck] = pr
 			}
 		}
-		stripe := pr.GetRailConfig(models.RailStripe)
+		stripe := pr.PSPLinkForRail(models.RailStripe)
 		if stripe == nil {
 			continue
 		}
@@ -402,7 +402,7 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
 		// Register every NMI account's plan link.
-		for _, nmiLink := range pr.RailAccountConfigs(models.RailNMI) {
+		for _, nmiLink := range pr.PSPLinksForRail(models.RailNMI) {
 			if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 				planIDByOpenRailsPrice[pr.ID.String()] = planID
 				priceByPlanID[planID] = pr.ID.String()

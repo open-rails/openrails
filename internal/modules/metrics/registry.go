@@ -143,7 +143,7 @@ var families = map[Family]familySpec{
 		DimJoins: map[string]string{
 			"product_id":    `LEFT JOIN openrails.prices pr ON pr.id = p.price_id`,
 			"billing_cycle": `LEFT JOIN openrails.prices pr ON pr.id = p.price_id`,
-			"rail_account":  `LEFT JOIN openrails.rail_merchant_accounts rma ON rma.id = p.rail_merchant_account_id`,
+			"rail_account":  `LEFT JOIN openrails.psps rma ON rma.id = p.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":       `p.currency`,
@@ -166,7 +166,7 @@ var families = map[Family]familySpec{
 		DimJoins: map[string]string{
 			"currency":      `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
 			"billing_cycle": `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
-			"rail_account":  `LEFT JOIN openrails.rail_merchant_accounts rma ON rma.id = s.rail_merchant_account_id`,
+			"rail_account":  `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -188,7 +188,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `s.cancelled_at`,
 		DimJoins: map[string]string{
 			"currency":     `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
-			"rail_account": `LEFT JOIN openrails.rail_merchant_accounts rma ON rma.id = s.rail_merchant_account_id`,
+			"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":     `COALESCE(pr.currency, '')`,
@@ -257,7 +257,7 @@ var families = map[Family]familySpec{
 		// Interval predicate: sub existed at t.
 		BaseWhere: `s.started_at <= edge.bucket AND (s.ended_at IS NULL OR s.ended_at > edge.bucket)`,
 		DimJoins: map[string]string{
-			"rail_account": `LEFT JOIN openrails.rail_merchant_accounts rma ON rma.id = s.rail_merchant_account_id`,
+			"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,

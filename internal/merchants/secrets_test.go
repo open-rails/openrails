@@ -185,7 +185,7 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 }
 
 func TestRailMerchantAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
-	if _, err := RailMerchantAccountSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
+	if _, err := PSPSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
 		t.Fatal("NMI tokenization_key is public provider settings, not a secret")
 	}
 }

@@ -156,13 +156,13 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	suite.SetNMIGateway(mock.URL())
 
 	price := suite.GetPrice(priceID)
-	if price.Rails == nil {
-		price.Rails = map[string]map[string]string{}
+	if price.PSPLinks == nil {
+		price.PSPLinks = map[string]map[string]string{}
 	}
-	price.Rails[provider] = map[string]string{
+	price.PSPLinks[provider] = map[string]string{
 		models.RailKeyPlanID: provider + "-plan",
 	}
-	railsJSON, err := json.Marshal(price.Rails)
+	railsJSON, err := json.Marshal(price.PSPLinks)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
 		"UPDATE openrails.prices SET rails = $1 WHERE id = $2", railsJSON, price.ID)

@@ -219,7 +219,7 @@ SELECT watermark_at, last_error
  WHERE merchant_id = $1::uuid
    AND rail = 'stripe'
    AND event_domain = 'events'
-   AND rail_merchant_account_id IS NULL
+   AND psp_id IS NULL
 `, merchantID).Scan(&watermark, &lastErr)
 	require.NoError(t, err)
 	return watermark.UTC(), lastErr

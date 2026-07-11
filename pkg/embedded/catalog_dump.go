@@ -325,11 +325,11 @@ ORDER BY p.product_id, p.amount, p.currency`, merchantID)
 			if trialAmount.Valid && trialHours.Valid {
 				price.Trial = &catalog.PriceTrial{UnitAmount: trialAmount.Int64, Duration: hoursSpec(int(trialHours.Int64))}
 			}
-			price.ProviderLinks = providerLinks(railsRaw)
-			for provider := range price.ProviderLinks {
-				price.Providers = append(price.Providers, provider)
+			price.PSPLinks = providerLinks(railsRaw)
+			for provider := range price.PSPLinks {
+				price.PSPs = append(price.PSPs, provider)
 			}
-			sort.Strings(price.Providers)
+			sort.Strings(price.PSPs)
 			p.Prices = append(p.Prices, price)
 		}
 	}
@@ -396,7 +396,7 @@ ORDER BY product_id, ordinal`, merchantID)
 			price     catalog.Price
 			priceRaw  []byte
 		)
-		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.Providers, &price.InputMin, &price.InputMax, &price.Round, &priceRaw); err != nil {
+		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.PSPs, &price.InputMin, &price.InputMax, &price.Round, &priceRaw); err != nil {
 			return err
 		}
 		if err := json.Unmarshal(priceRaw, &price); err != nil {

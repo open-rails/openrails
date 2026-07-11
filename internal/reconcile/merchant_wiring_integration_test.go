@@ -32,7 +32,7 @@ func newWiringMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 		id.UUID(), slug)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`, id.UUID())
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE merchant_id = $1`, id.UUID())
 		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, id.UUID())
 	})
 	return id

@@ -145,7 +145,7 @@ func newFixture() *testFixture {
 		Amount: 10_000_000, Currency: "usd", AccessDurationHours: &dur, AutoRenew: true, Archived: true}
 	premiumV2 := &models.Price{ID: uuid.New(), ProductID: premiumProduct.ID, Key: "premium-monthly",
 		Amount: 12_000_000, Currency: "usd", AccessDurationHours: &dur, AutoRenew: true,
-		Rails: map[string]map[string]string{"stripe": {"price_id": "price_123"}}}
+		PSPLinks: map[string]map[string]string{"stripe": {"price_id": "price_123"}}}
 	basic := &models.Price{ID: uuid.New(), ProductID: basicProduct.ID, Key: "basic-monthly",
 		Amount: 5_000_000, Currency: "eur", AccessDurationHours: &dur, AutoRenew: true}
 

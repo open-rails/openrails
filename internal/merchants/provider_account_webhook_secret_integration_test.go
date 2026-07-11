@@ -24,7 +24,7 @@ func TestLoadNMIWebhookSigningSecretForAccount(t *testing.T) {
 	seedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", "100002")
 
 	putSecret := func(accountID, secret string) {
-		name, err := RailMerchantAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
+		name, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 		require.NoError(t, err)
 		_, err = svc.secrets.Put(ctx, tn.ID, name, secret)
 		require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestLoadStripeCredentialsForAccount(t *testing.T) {
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_new")
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_old")
 	put := func(accountID, val string) {
-		name, err := RailMerchantAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
+		name, err := PSPSecretName("stripe", "live", accountID, "webhook_signing_secret")
 		require.NoError(t, err)
 		_, err = svc.secrets.Put(ctx, tn.ID, name, val)
 		require.NoError(t, err)

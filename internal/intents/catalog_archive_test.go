@@ -242,7 +242,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		// A local price links price_x by id.
 		linked := &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true,
-			Rails: map[string]map[string]string{
+			PSPLinks: map[string]map[string]string{
 				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"},
 			},
 		}

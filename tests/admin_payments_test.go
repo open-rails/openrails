@@ -882,13 +882,13 @@ func TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured(t *testing.T) {
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	store := suite.App.Runtime.Merchants.Secrets()
 	for _, key := range []string{"datalink_username", "datalink_password"} {
-		name, err := merchants.RailMerchantAccountSecretName("ccbill", env, "945280-0000", key)
+		name, err := merchants.PSPSecretName("ccbill", env, "945280-0000", key)
 		require.NoError(t, err)
 		require.NoError(t, store.Delete(ctxBg, dbtest.TestMerchantID, name))
 	}
 	t.Cleanup(func() {
 		for key, value := range map[string]string{"datalink_username": "dl-user", "datalink_password": "dl-pass"} {
-			name, err := merchants.RailMerchantAccountSecretName("ccbill", env, "945280-0000", key)
+			name, err := merchants.PSPSecretName("ccbill", env, "945280-0000", key)
 			require.NoError(t, err)
 			_, err = store.Put(ctxBg, dbtest.TestMerchantID, name, value)
 			require.NoError(t, err)

@@ -72,13 +72,13 @@ type checkoutStaticProviderSecretResolver struct {
 	settings    map[string]any
 }
 
-func (r checkoutStaticProviderSecretResolver) ActiveRailMerchantAccountSecretName(_ context.Context, _ merchant.ID, rail, environment, key string) (string, bool, error) {
-	name, err := merchants.RailMerchantAccountSecretName(r.rail, r.environment, r.accountID, key)
+func (r checkoutStaticProviderSecretResolver) ActivePSPSecretName(_ context.Context, _ merchant.ID, rail, environment, key string) (string, bool, error) {
+	name, err := merchants.PSPSecretName(r.rail, r.environment, r.accountID, key)
 	return name, err == nil, err
 }
 
-func (r checkoutStaticProviderSecretResolver) ActiveRailMerchantAccountScope(context.Context, merchant.ID, string, string) (merchants.RailMerchantAccountScope, bool, error) {
-	return merchants.RailMerchantAccountScope{
+func (r checkoutStaticProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{
 		Rail:        r.rail,
 		Environment: r.environment,
 		AccountID:   r.accountID,
@@ -88,19 +88,19 @@ func (r checkoutStaticProviderSecretResolver) ActiveRailMerchantAccountScope(con
 
 type checkoutMissingProviderSecretResolver struct{}
 
-func (checkoutMissingProviderSecretResolver) ActiveRailMerchantAccountSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+func (checkoutMissingProviderSecretResolver) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (checkoutMissingProviderSecretResolver) ActiveRailMerchantAccountScope(context.Context, merchant.ID, string, string) (merchants.RailMerchantAccountScope, bool, error) {
-	return merchants.RailMerchantAccountScope{}, false, nil
+func (checkoutMissingProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{}, false, nil
 }
 
 func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	fakeKV := newCheckoutFakeVaultKV()
 	store := merchants.NewVaultSecretStore("secret", fakeKV, checkoutSlugResolver{dbtest.TestMerchantID.String(): "cozy-art"})
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	secretName, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "merchant-mobius-key", client.SecurityKey)
-	require.Contains(t, fakeKV.data, "secret/openrails/merchants/cozy-art/rail_merchant_accounts/nmi/live/mobius-account/security_key")
+	require.Contains(t, fakeKV.data, "secret/openrails/merchants/cozy-art/psps/nmi/live/mobius-account/security_key")
 }
 
 // #788: the boot-config plane is gone — with no scoped merchant secret store
@@ -152,7 +152,7 @@ func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "945280-0000", "salt")
+	secretName, err := merchants.PSPSecretName("ccbill", "live", "945280-0000", "salt")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-salt")
 	require.NoError(t, err)
@@ -208,7 +208,7 @@ func TestCheckoutCCBillSlashAccountIDRejected(t *testing.T) {
 func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "945280-0000", "salt")
+	secretName, err := merchants.PSPSecretName("ccbill", "live", "945280-0000", "salt")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-salt")
 	require.NoError(t, err)
@@ -224,7 +224,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 		Username: "alice",
 	}, &models.Price{
 		ID: uuid.New(),
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			"ccbill": {
 				models.RailKeyRail:           "ccbill",
 				models.RailKeyCCBillFormName: "premium",

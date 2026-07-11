@@ -143,7 +143,7 @@ func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
 	}
 	// Environment follows deployment posture (#681): test rows under test_mode.
 	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
-	_, ok, err := r.State.Merchants.ActiveRailMerchantAccountScope(r.Request.Context(), mid, rail, env)
+	_, ok, err := r.State.Merchants.ActivePSPScope(r.Request.Context(), mid, rail, env)
 	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {

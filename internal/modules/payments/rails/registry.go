@@ -48,7 +48,7 @@ type Descriptor struct {
 	DisplayName string
 
 	// HasRailMerchantAccounts: the rail participates in the operator-declared
-	// provider-account catalog (openrails.rail_merchant_accounts).
+	// provider-account catalog (openrails.psps).
 	HasRailMerchantAccounts bool
 
 	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer

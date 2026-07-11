@@ -379,16 +379,16 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 		return nil
 	}
 	return logger.LogExternalMutation(ctx, MutationLogParams{
-		MerchantID:            intent.MerchantID,
-		Provider:              intent.Rail,
-		RailMerchantAccountID: intent.RailMerchantAccountID,
-		ProviderIntentID:      &intentID,
-		IntentType:            intent.IntentType,
-		IdempotencyKey:        intent.IdempotencyKey,
-		Attempt:               intent.Attempts,
-		Phase:                 phase,
-		Reason:                reason,
-		Evidence:              mutationLogEvidence(intent, evidence),
+		MerchantID:       intent.MerchantID,
+		Provider:         intent.Rail,
+		PspID:            intent.PspID,
+		ProviderIntentID: &intentID,
+		IntentType:       intent.IntentType,
+		IdempotencyKey:   intent.IdempotencyKey,
+		Attempt:          intent.Attempts,
+		Phase:            phase,
+		Reason:           reason,
+		Evidence:         mutationLogEvidence(intent, evidence),
 	})
 }
 

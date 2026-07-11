@@ -229,7 +229,7 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 		return
 	}
 	var stripePriceID string
-	if m := price.GetRailConfig(models.RailStripe); m != nil {
+	if m := price.PSPLinkForRail(models.RailStripe); m != nil {
 		stripePriceID = strings.TrimSpace(m[models.RailKeyStripePriceID])
 	}
 	if stripePriceID == "" {
@@ -335,7 +335,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 	if err != nil {
 		return nil, err
 	}
-	if len(p.Rails) == 0 {
+	if len(p.PSPLinks) == 0 {
 		return nil, nil
 	}
 	local := &priceVerifyContext{
@@ -344,8 +344,8 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		Currency:   p.Currency,
 	}
 	adapters := s.providerAdapters()
-	out := make(map[string]ProviderState, len(p.Rails))
-	for name, ids := range p.Rails {
+	out := make(map[string]ProviderState, len(p.PSPLinks))
+	for name, ids := range p.PSPLinks {
 		// Entries are account-keyed; the rail lives in the entry.
 		adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
 		if !ok {
@@ -646,12 +646,12 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 	if err != nil {
 		return "", err
 	}
-	newRails := cloneRails(local.Rails)
+	newRails := cloneRails(local.PSPLinks)
 	if newRails["stripe"] == nil {
 		newRails["stripe"] = map[string]string{models.RailKeyRail: string(models.RailStripe)}
 	}
 	newRails["stripe"][models.RailKeyStripePriceID] = newPriceID
-	if err := prices.UpdateRails(ctx, priceID, newRails); err != nil {
+	if err := prices.UpdatePSPLinks(ctx, priceID, newRails); err != nil {
 		return "", err
 	}
 	return newPriceID, nil

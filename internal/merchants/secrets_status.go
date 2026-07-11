@@ -46,7 +46,7 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		if _, ok := SecretDefinitionFor(name); ok {
 			continue
 		}
-		rail, _, _, key, ok, err := ParseRailMerchantAccountSecretName(name)
+		rail, _, _, key, ok, err := ParsePSPSecretName(name)
 		if !ok || err != nil {
 			continue
 		}
@@ -128,14 +128,14 @@ func isStripeSecretKeyName(name string) bool {
 	if cleanSecretName(name) == SecretStripeSecretKey {
 		return true
 	}
-	rail, _, _, key, ok, err := ParseRailMerchantAccountSecretName(name)
+	rail, _, _, key, ok, err := ParsePSPSecretName(name)
 	return ok && err == nil && rail == "stripe" && key == "secret_key"
 }
 
 func validateSecretValueLocal(name, value string) error {
 	name = cleanSecretName(name)
 	value = strings.TrimSpace(value)
-	rail, _, _, key, scoped, err := ParseRailMerchantAccountSecretName(name)
+	rail, _, _, key, scoped, err := ParsePSPSecretName(name)
 	if err != nil {
 		return err
 	}

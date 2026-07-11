@@ -101,7 +101,7 @@ type CheckoutService struct {
 	VaultService         *paymentmethods.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.RailMerchantAccountSecretResolver
+	ProviderSecrets      merchants.PSPSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
@@ -271,8 +271,8 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 
 	// #704: pin the active provider account for this rail so payment /
 	// subscription / payment-method rows created by this flow carry
-	// rail_merchant_account_id provenance (nil when unresolvable — never invented).
-	ctx = s.stampRailMerchantAccount(ctx, rail)
+	// psp_id provenance (nil when unresolvable — never invented).
+	ctx = s.stampPSP(ctx, rail)
 
 	// Check for tier group conflicts (upgrade/downgrade scenarios)
 	// This must happen BEFORE the general coverage check
@@ -619,8 +619,8 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.resolveNMIClient(ctx, target.Provider); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
+	if _, err := s.resolveNMIClient(ctx, target.PSP); err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
 	}
 
 	// Get idempotency key (client-provided or generated)
@@ -672,7 +672,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -722,7 +722,7 @@ func (s *CheckoutService) processNMISubscription(
 		PriceID:    &price.ID,
 		Payload: NMISubscriptionCreatePayload{
 			Provider:               provider,
-			ProviderAccount:        target.Provider,
+			PSP:                    target.PSP,
 			PlanID:                 nmiPlanID,
 			CustomerVaultID:        customerVaultID,
 			BillingID:              vaultBillingID,
@@ -1518,7 +1518,7 @@ func getStripePriceID(price *models.Price) (string, error) {
 	if price == nil {
 		return "", errors.New("price is required")
 	}
-	cfg := price.GetRailConfig(models.RailStripe)
+	cfg := price.PSPLinkForRail(models.RailStripe)
 	if cfg == nil {
 		return "", errors.New("stripe price not configured")
 	}
@@ -1650,7 +1650,7 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 	}
 	if req != nil {
 		// #704 provenance stamping for the registered payment row.
-		ctx = s.stampRailMerchantAccount(ctx, req.Rail)
+		ctx = s.stampPSP(ctx, req.Rail)
 	}
 	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
@@ -1799,15 +1799,15 @@ func (s *CheckoutService) processUpgrade(
 	newPeriodEnd := now.Add(time.Duration(cycleHours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
 
-	client, err := s.resolveNMIClient(ctx, target.Provider)
+	client, err := s.resolveNMIClient(ctx, target.PSP)
 	if err != nil {
-		err := fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
+		err := fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 
 	// Get or create vault
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -2981,22 +2981,22 @@ func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, er
 		return "", errors.New("price is required")
 	}
 	lookup := func(key string) (string, bool) {
-		cfg := price.Rails[key]
+		cfg := price.PSPLinks[key]
 		if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg[models.RailKeyRail]), target.Rail) {
 			return "", false
 		}
 		id := strings.TrimSpace(cfg[models.RailKeyPlanID])
 		return id, id != ""
 	}
-	if id, ok := lookup(target.Provider); ok {
+	if id, ok := lookup(target.PSP); ok {
 		return id, nil
 	}
-	if target.Provider != target.Rail {
+	if target.PSP != target.Rail {
 		if id, ok := lookup(target.Rail); ok {
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.Provider, target.Rail)
+	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.PSP, target.Rail)
 }
 
 // captureStoredCredentialRef persists a stored-credential sequence anchor for

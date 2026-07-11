@@ -114,7 +114,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid merchant.ID) routesurface.ProviderRoutes {
 	env := config.ExpectedProviderEnvironment(rt.Config != nil && rt.Config.IsTestMode())
 	armed := func(rail string) bool {
-		_, ok, err := rt.Merchants.ActiveRailMerchantAccountScope(ctx, mid, rail, env)
+		_, ok, err := rt.Merchants.ActivePSPScope(ctx, mid, rail, env)
 		return err == nil && ok
 	}
 	stripe := armed(string(models.RailStripe))

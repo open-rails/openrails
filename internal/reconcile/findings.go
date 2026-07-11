@@ -142,9 +142,9 @@ type DecideAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// RailMerchantAccountID is openrails.rail_merchant_accounts.id for account-bound
+	// PspID is openrails.psps.id for account-bound
 	// provider-pull materialization.
-	RailMerchantAccountID *uuid.UUID
+	PspID *uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
 	// "stripe"), so the new row joins the same roster future reconciles load.
@@ -179,16 +179,16 @@ type MaterializeResult struct {
 // charge (PS-4), deduped on (tenant, rail, transaction_id), and grants
 // the subscription's entitlements when the period is current.
 type BackfillPaymentAction struct {
-	RailMerchantAccountID *uuid.UUID
-	Rail                  string
-	TransactionID         string
-	AmountCents           int64
-	Currency              string
-	PurchasedAt           time.Time
-	PriceID               uuid.UUID
-	SubscriptionID        *uuid.UUID
-	CustomerID            uuid.UUID
-	Metadata              map[string]any
+	PspID          *uuid.UUID
+	Rail           string
+	TransactionID  string
+	AmountCents    int64
+	Currency       string
+	PurchasedAt    time.Time
+	PriceID        uuid.UUID
+	SubscriptionID *uuid.UUID
+	CustomerID     uuid.UUID
+	Metadata       map[string]any
 	// Grant, when non-nil, grants entitlements for the current period after
 	// the backfill (charge covers a period that is still running).
 	Grant *GrantEntitlementsAction
@@ -197,17 +197,17 @@ type BackfillPaymentAction struct {
 // RecordRefundAction records a rail refund locally (PS-5) as a
 // negative-amount payment row linked to the refunded payment.
 type RecordRefundAction struct {
-	RailMerchantAccountID *uuid.UUID
-	Rail                  string
-	TransactionID         string
-	AmountCents           int64 // positive remote amount; recorded negative
-	Currency              string
-	PurchasedAt           time.Time
-	PriceID               uuid.UUID
-	SubscriptionID        *uuid.UUID
-	RefundedPaymentID     *uuid.UUID
-	CustomerID            uuid.UUID
-	Metadata              map[string]any
+	PspID             *uuid.UUID
+	Rail              string
+	TransactionID     string
+	AmountCents       int64 // positive remote amount; recorded negative
+	Currency          string
+	PurchasedAt       time.Time
+	PriceID           uuid.UUID
+	SubscriptionID    *uuid.UUID
+	RefundedPaymentID *uuid.UUID
+	CustomerID        uuid.UUID
+	Metadata          map[string]any
 	// MarkRefundedOnly skips inserting a refund row and only flips the
 	// original payment's status to refunded — used when the refund shares the
 	// original transaction id (NMI refund actions ride the original

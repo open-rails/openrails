@@ -48,18 +48,18 @@ func (s *Store) withTxDB(txdb *db.DB) *Store {
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
-	MerchantID            uuid.UUID
-	Provider              string
-	IntentType            string
-	SubscriptionID        *uuid.UUID
-	PaymentID             *uuid.UUID
-	PriceID               *uuid.UUID
-	RailMerchantAccountID *uuid.UUID
-	Payload               any
-	IdempotencyKey        string
-	NextAttemptAt         time.Time
-	Origin                Origin
-	OriginReason          string
+	MerchantID     uuid.UUID
+	Provider       string
+	IntentType     string
+	SubscriptionID *uuid.UUID
+	PaymentID      *uuid.UUID
+	PriceID        *uuid.UUID
+	PspID          *uuid.UUID
+	Payload        any
+	IdempotencyKey string
+	NextAttemptAt  time.Time
+	Origin         Origin
+	OriginReason   string
 	// Actor is the authenticated principal id (admin user id / self-service
 	// customer id) that produced this intent, stamped on the row and used by the
 	// #732 per-actor ceiling. Empty ⇒ resolved from the ambient principal on the
@@ -111,23 +111,23 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if actor != "" {
 		actorPtr = &actor
 	}
-	// rail_merchant_account_id is stamped only when the producer already has observed
+	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
 	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
-		MerchantID:            p.MerchantID,
-		Rail:                  p.Provider,
-		IntentType:            p.IntentType,
-		SubscriptionID:        p.SubscriptionID,
-		PaymentID:             p.PaymentID,
-		PriceID:               p.PriceID,
-		Payload:               payload,
-		IdempotencyKey:        p.IdempotencyKey,
-		NextAttemptAt:         p.NextAttemptAt.UTC(),
-		Origin:                string(p.Origin),
-		OriginReason:          originReason,
-		Actor:                 actorPtr,
-		ExpiresAt:             p.ExpiresAt,
-		RailMerchantAccountID: p.RailMerchantAccountID,
+		MerchantID:     p.MerchantID,
+		Rail:           p.Provider,
+		IntentType:     p.IntentType,
+		SubscriptionID: p.SubscriptionID,
+		PaymentID:      p.PaymentID,
+		PriceID:        p.PriceID,
+		Payload:        payload,
+		IdempotencyKey: p.IdempotencyKey,
+		NextAttemptAt:  p.NextAttemptAt.UTC(),
+		Origin:         string(p.Origin),
+		OriginReason:   originReason,
+		Actor:          actorPtr,
+		ExpiresAt:      p.ExpiresAt,
+		PspID:          p.PspID,
 	})
 }
 

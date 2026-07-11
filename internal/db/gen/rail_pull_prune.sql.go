@@ -12,10 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const listExcessPaymentsForRailMerchantAccount = `-- name: ListExcessPaymentsForRailMerchantAccount :many
+const listExcessPaymentsForPSP = `-- name: ListExcessPaymentsForPSP :many
 SELECT id FROM openrails.payments
 WHERE merchant_id = $1::uuid
-  AND rail_merchant_account_id = $2::uuid
+  AND psp_id = $2::uuid
   AND (
     COALESCE(cardinality($3::text[]), 0) = 0
     OR transaction_id <> ALL($3::text[])
@@ -24,20 +24,20 @@ WHERE merchant_id = $1::uuid
   AND ($5::timestamptz IS NULL OR purchased_at <= $5::timestamptz)
 `
 
-type ListExcessPaymentsForRailMerchantAccountParams struct {
-	MerchantID            uuid.UUID
-	RailMerchantAccountID uuid.UUID
-	PresentTxns           []string
-	Since                 *time.Time
-	Until                 *time.Time
+type ListExcessPaymentsForPSPParams struct {
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	PresentTxns []string
+	Since       *time.Time
+	Until       *time.Time
 }
 
 // Windowed: only payments inside the pulled [since, until] window are eligible
 // (a snapshot only proves absence within the window it covered).
-func (q *Queries) ListExcessPaymentsForRailMerchantAccount(ctx context.Context, arg ListExcessPaymentsForRailMerchantAccountParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listExcessPaymentsForRailMerchantAccount,
+func (q *Queries) ListExcessPaymentsForPSP(ctx context.Context, arg ListExcessPaymentsForPSPParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listExcessPaymentsForPSP,
 		arg.MerchantID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.PresentTxns,
 		arg.Since,
 		arg.Until,
@@ -60,11 +60,11 @@ func (q *Queries) ListExcessPaymentsForRailMerchantAccount(ctx context.Context, 
 	return items, nil
 }
 
-const listExcessSubscriptionsForRailMerchantAccount = `-- name: ListExcessSubscriptionsForRailMerchantAccount :many
+const listExcessSubscriptionsForPSP = `-- name: ListExcessSubscriptionsForPSP :many
 
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
-  AND rail_merchant_account_id = $2::uuid
+  AND psp_id = $2::uuid
   AND rail_subscription_id <> ''
   AND (
     COALESCE(cardinality($3::text[]), 0) = 0
@@ -72,19 +72,19 @@ WHERE merchant_id = $1::uuid
   )
 `
 
-type ListExcessSubscriptionsForRailMerchantAccountParams struct {
-	MerchantID            uuid.UUID
-	RailMerchantAccountID uuid.UUID
-	PresentIds            []string
+type ListExcessSubscriptionsForPSPParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	PresentIds []string
 }
 
 // #511 pull-provider --prune: account-bound EXCESS detection + safe deletion.
-// "Excess" = a local row attributed to the pulled rail_merchant_account_id whose
+// "Excess" = a local row attributed to the pulled psp_id whose
 // provider key is ABSENT from the freshly fetched provider snapshot. Only rows
 // stamped with the provider account are considered; legacy NULL-binding import
 // rows are never pruned (NULL <> arg).
-func (q *Queries) ListExcessSubscriptionsForRailMerchantAccount(ctx context.Context, arg ListExcessSubscriptionsForRailMerchantAccountParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listExcessSubscriptionsForRailMerchantAccount, arg.MerchantID, arg.RailMerchantAccountID, arg.PresentIds)
+func (q *Queries) ListExcessSubscriptionsForPSP(ctx context.Context, arg ListExcessSubscriptionsForPSPParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listExcessSubscriptionsForPSP, arg.MerchantID, arg.PspID, arg.PresentIds)
 	if err != nil {
 		return nil, err
 	}

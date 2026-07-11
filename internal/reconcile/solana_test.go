@@ -954,7 +954,7 @@ func TestDiffSolanaDiscoveredSubscriptionNeverMaterializes(t *testing.T) {
 		PaymentMethods: []LocalPaymentMethod{{ID: uuid.New(), CustomerID: customerID, Rail: "solana", VaultID: wallet}},
 		Prices: []LocalPrice{{
 			ID: priceID, ProductID: uuid.New(), Amount: 9_990_000, Currency: "usd",
-			Rails: map[string]map[string]string{"solana": {"rail": "solana", "plan_pda": planPDA, "provider": "solana"}},
+			PSPLinks: map[string]map[string]string{"solana": {"rail": "solana", "plan_pda": planPDA, "provider": "solana"}},
 		}},
 	}
 	remote := func(raw json.RawMessage) *RemoteSnapshot {

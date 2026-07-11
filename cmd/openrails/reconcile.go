@@ -20,18 +20,18 @@ import (
 // the provider intent ledger, not by provider pull.
 func newPullProviderCmd() *cobra.Command {
 	var (
-		providers           []string
-		since               string
-		until               string
-		format              string
-		merchantSlug        string
-		railMerchantAccount string
-		runIDStr            string
-		logDir              string
-		manifestPath        string
-		insert              bool
-		overwrite           bool
-		prune               bool
+		providers    []string
+		since        string
+		until        string
+		format       string
+		merchantSlug string
+		psp          string
+		runIDStr     string
+		logDir       string
+		manifestPath string
+		insert       bool
+		overwrite    bool
+		prune        bool
 	)
 
 	cmd := &cobra.Command{
@@ -45,12 +45,12 @@ func newPullProviderCmd() *cobra.Command {
 			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
 			"that are ABSENT from the provider source. The remote rails are NEVER mutated.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runPullProvider(c, providers, railMerchantAccount, since, until, format, merchantSlug, logDir, manifestPath, insert, overwrite, prune)
+			return runPullProvider(c, providers, psp, since, until, format, merchantSlug, logDir, manifestPath, insert, overwrite, prune)
 		},
 	}
 	cmd.Flags().StringSliceVar(&providers, "rail", nil, "Rail(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "MODE-1 (#723) merchant manifest to arm credentials from (default: the conventional /etc/openrails/merchants.yaml when present)")
-	cmd.Flags().StringVar(&railMerchantAccount, "provider-account", "", "Provider account UUID to pull explicitly (requires matching configured credentials)")
+	cmd.Flags().StringVar(&psp, "provider-account", "", "Provider account UUID to pull explicitly (requires matching configured credentials)")
 	cmd.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
@@ -81,7 +81,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAcc
 		Config:               cfg,
 		MerchantSlug:         merchantSlug,
 		Providers:            providerNames,
-		RailMerchantAccount:  railMerchantAccountStr,
+		PSP:                  railMerchantAccountStr,
 		Since:                sinceStr,
 		Until:                untilStr,
 		Format:               format,

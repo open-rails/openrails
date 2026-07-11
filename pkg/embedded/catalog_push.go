@@ -365,7 +365,7 @@ func catalogManifestUsesProvider(manifest *catalog.Manifest, provider string) bo
 	for _, group := range manifest.TierGroups {
 		for _, product := range group.Products {
 			for _, price := range product.Prices {
-				if hasProvider(price.Providers) {
+				if hasProvider(price.PSPs) {
 					return true
 				}
 			}

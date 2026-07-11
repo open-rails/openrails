@@ -86,7 +86,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	environment := "test"
 	now := time.Now().UTC()
 	require.NoError(t, surface.app.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, dbtest.TestMerchantID), func(ctx context.Context) error {
-		_, err := surface.app.Runtime.DB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err := surface.app.Runtime.DB.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Rail:           "solana",
 			Environment:    &environment,
@@ -96,7 +96,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		})
 		return err
 	}))
-	secretName, err := merchants.RailMerchantAccountSecretName("solana", environment, merchantPub.String(), "private_key")
+	secretName, err := merchants.PSPSecretName("solana", environment, merchantPub.String(), "private_key")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, base58Key)
 	require.NoError(t, err, "inject provider-account private_key secret")
@@ -136,7 +136,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 				Currency:   "usd",
 				Duration:   "30d",
 				AutoRenew:  true,
-				Providers:  []string{"solana"}, // priced for the Solana rail
+				PSPs:       []string{"solana"}, // priced for the Solana rail
 			}},
 		}},
 	}

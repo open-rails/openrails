@@ -86,7 +86,7 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	secretName, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
@@ -210,11 +210,11 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 	merchantA := merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
 	merchantB := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 	store := merchants.NewMemorySecretStore()
-	nameA, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-a", "security_key")
+	nameA, err := merchants.PSPSecretName("nmi", "live", "mobius-a", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(context.Background(), merchantA, nameA, "merchant-a-key")
 	require.NoError(t, err)
-	nameB, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-b", "security_key")
+	nameB, err := merchants.PSPSecretName("nmi", "live", "mobius-b", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(context.Background(), merchantB, nameB, "merchant-b-key")
 	require.NoError(t, err)
@@ -242,13 +242,13 @@ type vaultStaticProviderSecretResolver struct {
 	accountID   string
 }
 
-func (r vaultStaticProviderSecretResolver) ActiveRailMerchantAccountSecretName(_ context.Context, _ merchant.ID, _, _, key string) (string, bool, error) {
-	name, err := merchants.RailMerchantAccountSecretName(r.rail, r.environment, r.accountID, key)
+func (r vaultStaticProviderSecretResolver) ActivePSPSecretName(_ context.Context, _ merchant.ID, _, _, key string) (string, bool, error) {
+	name, err := merchants.PSPSecretName(r.rail, r.environment, r.accountID, key)
 	return name, err == nil, err
 }
 
-func (r vaultStaticProviderSecretResolver) ActiveRailMerchantAccountScope(context.Context, merchant.ID, string, string) (merchants.RailMerchantAccountScope, bool, error) {
-	return merchants.RailMerchantAccountScope{
+func (r vaultStaticProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{
 		Rail:        r.rail,
 		Environment: r.environment,
 		AccountID:   r.accountID,
@@ -257,31 +257,31 @@ func (r vaultStaticProviderSecretResolver) ActiveRailMerchantAccountScope(contex
 
 type vaultMissingProviderSecretResolver struct{}
 
-func (vaultMissingProviderSecretResolver) ActiveRailMerchantAccountSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+func (vaultMissingProviderSecretResolver) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (vaultMissingProviderSecretResolver) ActiveRailMerchantAccountScope(context.Context, merchant.ID, string, string) (merchants.RailMerchantAccountScope, bool, error) {
-	return merchants.RailMerchantAccountScope{}, false, nil
+func (vaultMissingProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{}, false, nil
 }
 
 type vaultPerMerchantProviderSecretResolver map[merchant.ID]string
 
-func (r vaultPerMerchantProviderSecretResolver) ActiveRailMerchantAccountSecretName(_ context.Context, id merchant.ID, _, _, key string) (string, bool, error) {
+func (r vaultPerMerchantProviderSecretResolver) ActivePSPSecretName(_ context.Context, id merchant.ID, _, _, key string) (string, bool, error) {
 	accountID := r[id]
 	if accountID == "" {
 		return "", false, nil
 	}
-	name, err := merchants.RailMerchantAccountSecretName("nmi", "live", accountID, key)
+	name, err := merchants.PSPSecretName("nmi", "live", accountID, key)
 	return name, err == nil, err
 }
 
-func (r vaultPerMerchantProviderSecretResolver) ActiveRailMerchantAccountScope(_ context.Context, id merchant.ID, _, _ string) (merchants.RailMerchantAccountScope, bool, error) {
+func (r vaultPerMerchantProviderSecretResolver) ActivePSPScope(_ context.Context, id merchant.ID, _, _ string) (merchants.PSPScope, bool, error) {
 	accountID := r[id]
 	if accountID == "" {
-		return merchants.RailMerchantAccountScope{}, false, nil
+		return merchants.PSPScope{}, false, nil
 	}
-	return merchants.RailMerchantAccountScope{Rail: "nmi", Environment: "live", AccountID: accountID}, true, nil
+	return merchants.PSPScope{Rail: "nmi", Environment: "live", AccountID: accountID}, true, nil
 }
 
 func vaultTestConfig(testMode bool) *config.Config {
@@ -317,7 +317,7 @@ func (f *fakeVaultDeleteExecutor) ExecuteVaultDelete(context.Context, *models.Pa
 func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.PaymentMethod) {
 	// #788: the NMI client arms from the scoped merchant secret store.
 	store := merchants.NewMemorySecretStore()
-	name, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	name, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
 	if err != nil {
 		panic(err)
 	}

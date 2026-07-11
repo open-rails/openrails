@@ -117,7 +117,7 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 						Ordinal:    i + 1,
 						CreditKey:  creditKey,
 						Currency:   price.Currency,
-						Providers:  append([]string(nil), price.Providers...),
+						PSPs:       append([]string(nil), price.PSPs...),
 						InputMin:   price.InputMin,
 						InputMax:   price.InputMax,
 						Round:      price.Round,

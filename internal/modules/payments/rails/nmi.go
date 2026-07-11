@@ -15,7 +15,7 @@ func IsNMI(rail models.Rail) bool {
 }
 
 // IsConfigured reports whether the named rail/provider account is configured.
-func IsConfigured(rails config.RailMerchantAccountSet, rail string) bool {
+func IsConfigured(rails config.PSPSet, rail string) bool {
 	return rails.RailOf(normalize.Lower(rail)) != ""
 }
 

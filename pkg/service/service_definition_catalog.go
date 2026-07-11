@@ -296,7 +296,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 		return ""
 	}
 	for _, p := range priceList {
-		if id := strings.TrimSpace(p.GetRailConfig(models.RailStripe)[models.RailKeyStripeProductID]); id != "" {
+		if id := strings.TrimSpace(p.PSPLinkForRail(models.RailStripe)[models.RailKeyStripeProductID]); id != "" {
 			return id
 		}
 	}
@@ -414,16 +414,16 @@ type CreatePriceRequest struct {
 	// Providers is the list of provider names to attach (e.g. ["stripe",
 	// "ccbill", "nmi"]). Empty means "DB-only price with no external
 	// links" — useful for testing or for prices that are not sold externally.
-	Providers []string `json:"providers,omitempty"`
+	PSPs []string `json:"psps,omitempty"`
 
-	// ProviderLinks maps provider name -> pre-existing link key/value pairs.
+	// PSPLinks maps PSP key -> pre-existing link key/value pairs.
 	// Schema is per-provider:
 	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
 	//   ccbill : {"form_name": "...", "flex_id": "..."}
 	//   nmi : {"plan_id": "..."}
 	// Any provider with a non-empty link here is implicitly added to the
 	// attach set even if absent from Providers.
-	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`
+	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 
 	// Archived creates the price retired — migrates a historical plan in one
 	// step (grandfathered subscriptions bill it; new buyers cannot).
@@ -607,7 +607,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 			AutoRenew:           req.AutoRenew,
 			TrialUnitAmount:     req.TrialUnitAmount,
 			TrialDurationHours:  req.TrialDurationHours,
-			Rails:               rails,
+			PSPLinks:            rails,
 			Key:                 key,
 			CreatedAt:           now,
 			UpdatedAt:           now,
@@ -653,20 +653,19 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 }
 
 // UpdatePriceRequest is the declarative-shape PATCH for a price. Add or rotate
-// provider links via `provider_links` (partial merge into the
-// existing map). To clear a provider entirely, supply an empty inner map for
-// it and set ReplaceProviderLinks=true.
+// PSP links via `psp_links` (partial merge into the existing map). To clear a
+// PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
 type UpdatePriceRequest struct {
-	// ProviderLinks merges per-provider link maps into the existing rails
-	// map. Supply only the providers you want to add or rotate. Each map's
-	// values are validated through the matching provider adapter's Attach.
-	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`
+	// PSPLinks merges per-PSP link maps into the existing psp_links map.
+	// Supply only the PSPs you want to add or rotate. Each map's values are
+	// validated through the matching rail adapter's Attach.
+	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 
-	// ReplaceProviderLinks, when true, replaces the entire rails map
-	// rather than merging — useful for clearing a provider. When false (the
-	// default) supplied entries are merged into the existing map and providers
-	// not mentioned are left alone.
-	ReplaceProviderLinks bool `json:"replace_provider_links,omitempty"`
+	// ReplacePSPLinks, when true, replaces the entire psp_links map rather
+	// than merging — useful for clearing a PSP. When false (the default)
+	// supplied entries are merged into the existing map and PSPs not
+	// mentioned are left alone.
+	ReplacePSPLinks bool `json:"replace_psp_links,omitempty"`
 
 	// Archived sets the lifecycle flag. archived propagates to providers as
 	// active=false; unarchived as active=true.
@@ -684,10 +683,10 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	if priceID == uuid.Nil {
 		return nil, fmt.Errorf("price_id required")
 	}
-	// Declarative provider link rotation. ReplaceProviderLinks=true overwrites
-	// the entire rails map; otherwise the supplied entries are merged
+	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
+	// entire psp_links map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
-	if req.ProviderLinks != nil {
+	if req.PSPLinks != nil {
 		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
 		// regardless of merge/replace so a rotated link is verified, not blindly
@@ -701,40 +700,50 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			return nil, ctxErr
 		}
 		var next map[string]map[string]string
-		if req.ReplaceProviderLinks {
+		if req.ReplacePSPLinks {
 			next = map[string]map[string]string{}
 		} else {
-			next = cloneRails(existing.Rails)
+			next = cloneRails(existing.PSPLinks)
 			if next == nil {
 				next = map[string]map[string]string{}
 			}
 		}
 		adapters := s.providerAdapters()
-		for provider, link := range req.ProviderLinks {
-			provider = strings.ToLower(strings.TrimSpace(provider))
-			if provider == "" {
+		accountRails := s.merchantAccountRails(ctx)
+		for psp, link := range req.PSPLinks {
+			psp = strings.ToLower(strings.TrimSpace(psp))
+			if psp == "" {
 				continue
 			}
 			normalized := normalizeLinkMap(link)
-			// Empty link map = clear this provider (only on merge; replace
-			// already starts empty).
+			// Empty link map = clear this PSP (only on merge; replace already
+			// starts empty).
 			if len(normalized) == 0 {
-				delete(next, provider)
+				delete(next, psp)
 				continue
 			}
-			adapter, ok := adapters[provider]
+			rail := psp
+			adapter, ok := adapters[psp]
 			if !ok {
-				// Unknown provider: store raw, same as resolveProviders tolerance.
-				next[provider] = normalized
-				continue
+				if acct, found := accountRails[psp]; found {
+					rail = acct.rail
+					adapter, ok = adapters[acct.rail]
+				}
+			}
+			if !ok {
+				return nil, fmt.Errorf("unknown PSP %q: not a rail or a declared PSP key", psp)
 			}
 			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
 			if attachErr != nil {
-				return nil, fmt.Errorf("%s: %w", provider, attachErr)
+				return nil, fmt.Errorf("%s: %w", psp, attachErr)
 			}
-			next[provider] = ids
+			if ids == nil {
+				ids = map[string]string{}
+			}
+			ids[models.RailKeyRail] = rail
+			next[psp] = ids
 		}
-		if err := prices.UpdateRails(ctx, priceID, next); err != nil {
+		if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
 			return nil, err
 		}
 	}
@@ -756,7 +765,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		mutable := mutableUpdate{IsActive: &active}
 		if !s.catalogRemoteWritesDisabled() {
 			adapters := s.providerAdapters()
-			for _, ids := range updated.Rails {
+			for _, ids := range updated.PSPLinks {
 				// Entries are account-keyed; the rail lives in the entry.
 				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
 				if !ok {
@@ -789,11 +798,11 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 		CreatedAt:           p.CreatedAt,
 		UpdatedAt:           p.UpdatedAt,
 	}
-	if len(p.Rails) == 0 {
+	if len(p.PSPLinks) == 0 {
 		return cp
 	}
-	cp.Providers = make(map[string]ProviderState, len(p.Rails))
-	for name, ids := range p.Rails {
+	cp.Providers = make(map[string]ProviderState, len(p.PSPLinks))
+	for name, ids := range p.PSPLinks {
 		if len(ids) == 0 {
 			continue
 		}

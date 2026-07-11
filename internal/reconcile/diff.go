@@ -78,7 +78,7 @@ func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLin
 		p := &prices[i]
 		for _, name := range names {
 			seen := map[string]struct{}{}
-			for _, cfg := range models.RailLinkEntries(p.Rails, models.Rail(name)) {
+			for _, cfg := range models.PSPLinksOnRail(p.PSPLinks, models.Rail(name)) {
 				for _, key := range planLinkIDKeys {
 					id := strings.TrimSpace(cfg[key])
 					if id == "" {

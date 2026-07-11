@@ -38,14 +38,14 @@ UPDATE openrails.merchants
 RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
 
 -- Per-merchant list-view enrichment. Runs under a MerchantTx (RLS GUC pinned to
--- the merchant): rail_merchant_accounts + payments are merchant-isolated, so a
+-- the merchant): psps + payments are merchant-isolated, so a
 -- single cross-merchant JOIN is impossible under the openrails_app role — the
 -- directory page loops cheap GUC-scoped index probes per row instead
 -- (page-bounded).
 
 -- name: ListPlatformMerchantRailsArmed :many
 SELECT DISTINCT rail
-FROM openrails.rail_merchant_accounts
+FROM openrails.psps
 WHERE merchant_id = $1 AND NOT archived
 ORDER BY rail;
 

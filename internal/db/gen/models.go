@@ -251,8 +251,8 @@ type OpenrailsCheckoutSession struct {
 	UpdatedAt      time.Time
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
-	// Provider account selected for this provider checkout/session.
-	RailMerchantAccountID *uuid.UUID
+	// PSP selected for this provider checkout/session.
+	PspID *uuid.UUID
 }
 
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
@@ -469,8 +469,8 @@ type OpenrailsInvoicePayment struct {
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// Provider account used for this invoice payment attempt or settled provider payment.
-	RailMerchantAccountID *uuid.UUID
+	// PSP used for this invoice payment attempt or settled provider payment.
+	PspID *uuid.UUID
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -716,8 +716,8 @@ type OpenrailsPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
-	// Provider account that produced this payment/charge mirror row.
-	RailMerchantAccountID *uuid.UUID
+	// PSP that produced this payment/charge mirror row.
+	PspID *uuid.UUID
 	// #733 initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string
 	// #733 raw rail decline code, recorded verbatim (no fabrication).
@@ -742,8 +742,8 @@ type OpenrailsPaymentMethod struct {
 	UpdatedAt            time.Time
 	MerchantID           uuid.UUID
 	CustomerID           uuid.UUID
-	// Provider account that produced this vaulted payment method mirror row.
-	RailMerchantAccountID *uuid.UUID
+	// PSP that produced this vaulted payment method mirror row.
+	PspID *uuid.UUID
 	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customers (Stripe).
 	RailCustomerRef string
 	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
@@ -760,9 +760,10 @@ type OpenrailsPrice struct {
 	ID        uuid.UUID
 	ProductID uuid.UUID
 	// Price amount in row currency micros (1 major unit = 1,000,000).
-	Amount     int64
-	Currency   string
-	Rails      []byte
+	Amount   int64
+	Currency string
+	// PSP link entries keyed by PSP key (e.g. mobius); each entry records its rail and the provider-side object ids (plan_id, price_id, ...).
+	PspLinks   []byte
 	Archived   bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -854,6 +855,28 @@ type OpenrailsProductUsageLimitBinding struct {
 	UpdatedAt     time.Time
 }
 
+// Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.
+type OpenrailsPsp struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
+	Rail string
+	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
+	Environment string
+	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
+	AccountID string
+	// The PSP's manifest key (e.g. mobius) — the vocabulary catalog psp_links and checkout speak.
+	Key            *string
+	Evidence       []byte
+	FirstSeenAt    time.Time
+	LastVerifiedAt *time.Time
+	ReplacedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
+	Archived bool
+}
+
 // customer <-> rail customer-id mapping. Keyed per (merchant, customer, rail); rail_merchant_account_id provenance was dropped (#704) — no writer ever set it.
 type OpenrailsRailCustomerAccount struct {
 	ID         uuid.UUID
@@ -898,41 +921,20 @@ type OpenrailsRailIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// Provider account row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
-	RailMerchantAccountID *uuid.UUID
-}
-
-// Merchant payment-provider account registry. A row is one merchant-owned account on one rail.
-type OpenrailsRailMerchantAccount struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
-	Rail string
-	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
-	Environment string
-	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
-	AccountID      string
-	DisplayName    *string
-	Evidence       []byte
-	FirstSeenAt    time.Time
-	LastVerifiedAt *time.Time
-	ReplacedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
-	Archived bool
+	// PSP row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
+	PspID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533).
 type OpenrailsRailMutationLog struct {
-	ID                    uuid.UUID
-	MerchantID            uuid.UUID
-	Rail                  string
-	RailMerchantAccountID *uuid.UUID
-	RailIntentID          *uuid.UUID
-	IntentType            *string
-	IdempotencyKey        *string
-	Attempt               int32
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	Rail           string
+	PspID          *uuid.UUID
+	RailIntentID   *uuid.UUID
+	IntentType     *string
+	IdempotencyKey *string
+	Attempt        int32
 	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
 	Phase  string
 	Reason *string
@@ -946,9 +948,9 @@ type OpenrailsRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// Current provider account row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
-	RailMerchantAccountID  *uuid.UUID
-	RailMerchantAccountKey *uuid.UUID
+	// Current PSP row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
+	PspID  *uuid.UUID
+	PspKey *uuid.UUID
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
 	// Exclusive lower bound for the next successful bounded provider event refresh window.
@@ -1081,8 +1083,8 @@ type OpenrailsSubscription struct {
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
-	// Provider account that produced this remote subscription mirror row.
-	RailMerchantAccountID *uuid.UUID
+	// PSP that produced this remote subscription mirror row.
+	PspID *uuid.UUID
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).

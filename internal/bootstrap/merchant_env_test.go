@@ -10,14 +10,14 @@ import (
 
 func TestMerchantBillingEnvKey(t *testing.T) {
 	tests := map[string]string{
-		"BILLING_VERSION":                                                                 "version",
-		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                          "merchants.doujins.display_name",
-		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                    "merchants.doujins.profile.from_email",
-		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.accounts.mobius.nmi.secrets.security_key",
-		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.accounts.mobius-sandbox.nmi.settings.tokenization_url",
-		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.accounts.mobius-sandbox.nmi.settings.tokenization_key",
-		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME":      "merchants.doujins.accounts.ccbill.ccbill.secrets.datalink_username",
-		"BILLING_MERCHANTS_DOUJINS_ACCOUNTS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.accounts.solana.solana.signer.mode",
+		"BILLING_VERSION":                                                             "version",
+		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                      "merchants.doujins.display_name",
+		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                "merchants.doujins.profile.from_email",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.psps.mobius.nmi.secrets.security_key",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_url",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_key",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME":      "merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.psps.solana.solana.signer.mode",
 		// #710: real manifest field, previously listed as a section but unrouted.
 		"BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS": "merchants.doujins.delegated_invoker_wasted_spend_windows",
 	}
@@ -33,7 +33,7 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 }
 
 // #698: env vars still using a retired accounts anchor must fail loudly. The
-// new single-token ACCOUNTS anchor would otherwise mis-split the old name into
+// new single-token PSPS anchor would otherwise mis-split the old name into
 // a wrong merchant key and silently overlay config nobody declared.
 func TestLoadMerchantConfigManifestBytesRejectsRenamedEnvAnchor(t *testing.T) {
 	manifest := []byte(`
@@ -46,14 +46,14 @@ merchants:
 		t.Setenv("BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY", "old-form")
 		_, err := LoadMerchantConfigManifestBytes(manifest)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "RAIL_MERCHANT_ACCOUNTS was renamed to ACCOUNTS")
+		require.Contains(t, err.Error(), "RAIL_MERCHANT_ACCOUNTS was renamed to PSPS")
 		require.Contains(t, err.Error(), "BILLING_MERCHANTS_DOUJINS_RAIL_MERCHANT_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY")
 	})
 	t.Run("provider_accounts", func(t *testing.T) {
 		t.Setenv("BILLING_MERCHANTS_DOUJINS_PROVIDER_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY", "pre-683-form")
 		_, err := LoadMerchantConfigManifestBytes(manifest)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "PROVIDER_ACCOUNTS was renamed to ACCOUNTS")
+		require.Contains(t, err.Error(), "PROVIDER_ACCOUNTS was renamed to PSPS")
 	})
 }
 
@@ -66,7 +66,7 @@ version: 1
 merchants:
   cozy-art:
     display_name: Cozy Art
-    accounts:
+    psps:
       mobius:
         nmi:
           environment: live
@@ -77,7 +77,7 @@ merchants:
 	require.NoError(t, os.WriteFile(overlay, []byte(`
 merchants:
   cozy-art:
-    accounts:
+    psps:
       mobius:
         nmi:
           secrets:
@@ -89,21 +89,21 @@ merchants:
 
 	manifest, err := LoadMerchantConfigManifestFiles(base, overlay)
 	require.NoError(t, err)
-	account := manifest.Merchants["cozy-art"].RailMerchantAccounts["mobius"]["nmi"]
+	account := manifest.Merchants["cozy-art"].PSPs["mobius"]["nmi"]
 	require.Equal(t, "private-overlay-value", account.Secrets["security_key"])
 	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", account.Settings["tokenization_url"])
 	require.Equal(t, "public-tokenization-key", account.Settings["tokenization_key"])
 }
 
 func TestLoadMerchantConfigManifestBytesMergesEnvOverlay(t *testing.T) {
-	t.Setenv("BILLING_MERCHANTS_COHOST_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
+	t.Setenv("BILLING_MERCHANTS_COHOST_PSPS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "private-env-value")
 
 	manifest, err := LoadMerchantConfigManifestBytes([]byte(`
 version: 1
 merchants:
   cohost:
     display_name: Cohost
-    accounts:
+    psps:
       mobius-sandbox:
         nmi:
           environment: test
@@ -112,7 +112,7 @@ merchants:
             security_key: public-placeholder
 `))
 	require.NoError(t, err)
-	account := manifest.Merchants["cohost"].RailMerchantAccounts["mobius-sandbox"]["nmi"]
+	account := manifest.Merchants["cohost"].PSPs["mobius-sandbox"]["nmi"]
 	require.Equal(t, "private-env-value", account.Secrets["security_key"])
 }
 
@@ -187,7 +187,7 @@ func TestLoadMerchantConfigManifestBytesMergesSecretFileOverlay(t *testing.T) {
 		t.Helper()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(value+"\n"), 0o600))
 	}
-	writeSecret("BILLING_MERCHANTS_COHOST_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "file-value")
+	writeSecret("BILLING_MERCHANTS_COHOST_PSPS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "file-value")
 	writeSecret("jwt-secret", "host-app-secret-ignored") // host app's dash-cased secret sharing the dir
 
 	manifest := []byte(`
@@ -195,7 +195,7 @@ version: 1
 merchants:
   cohost:
     display_name: Cohost
-    accounts:
+    psps:
       mobius-sandbox:
         nmi:
           environment: test
@@ -206,14 +206,14 @@ merchants:
 
 	out, err := LoadMerchantConfigManifestBytes(manifest)
 	require.NoError(t, err)
-	account := out.Merchants["cohost"].RailMerchantAccounts["mobius-sandbox"]["nmi"]
+	account := out.Merchants["cohost"].PSPs["mobius-sandbox"]["nmi"]
 	require.Equal(t, "file-value", account.Secrets["security_key"])
 
 	// Env overrides the file.
-	t.Setenv("BILLING_MERCHANTS_COHOST_ACCOUNTS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "env-wins")
+	t.Setenv("BILLING_MERCHANTS_COHOST_PSPS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY", "env-wins")
 	out, err = LoadMerchantConfigManifestBytes(manifest)
 	require.NoError(t, err)
-	account = out.Merchants["cohost"].RailMerchantAccounts["mobius-sandbox"]["nmi"]
+	account = out.Merchants["cohost"].PSPs["mobius-sandbox"]["nmi"]
 	require.Equal(t, "env-wins", account.Secrets["security_key"])
 }
 
@@ -225,6 +225,6 @@ func TestLoadMerchantConfigManifestBytesRejectsRenamedSecretFileAnchor(t *testin
 		[]byte("x"), 0o600))
 
 	_, err := LoadMerchantConfigManifestBytes([]byte("version: 1\nmerchants:\n  cohost:\n    display_name: Cohost\n"))
-	require.ErrorContains(t, err, "renamed to ACCOUNTS")
+	require.ErrorContains(t, err, "renamed to PSPS")
 	require.ErrorContains(t, err, "secret file")
 }

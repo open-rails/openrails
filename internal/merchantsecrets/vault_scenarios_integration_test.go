@@ -69,7 +69,7 @@ func buildVaultStore(t *testing.T, ctx context.Context, pool *db.Pool, token str
 
 func scopedName(t *testing.T, rail, environment, accountID, key string) string {
 	t.Helper()
-	name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
+	name, err := merchants.PSPSecretName(rail, environment, accountID, key)
 	require.NoError(t, err)
 	return name
 }
@@ -186,7 +186,7 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 	require.True(t, cfgA.Credentials["security_key"].Configured,
 		"API response must show the vault-held credential as configured")
 
-	// The KV holds the value at the canonical RailMerchantAccountSecretName path.
+	// The KV holds the value at the canonical PSPSecretName path.
 	keyName := scopedName(t, "nmi", "live", acctA, "security_key")
 	kvData, _, err := rootKV.ReadSecret(ctx, vaultMerchantPath(slugA, keyName))
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 		"credential must live in Vault KV at the canonical path")
 
 	// Arming/charge-path read: resolver → store.Get (the pair rail arming uses).
-	resolved, ok, err := svc.ActiveRailMerchantAccountSecretName(ctx, midA, "nmi", "live", "security_key")
+	resolved, ok, err := svc.ActivePSPSecretName(ctx, midA, "nmi", "live", "security_key")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, keyName, resolved)

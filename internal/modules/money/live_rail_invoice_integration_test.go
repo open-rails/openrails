@@ -131,7 +131,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	msvc := merchantsServiceForTest(t, dbi)
 	nmiAccountID := "live-invoice-" + uuid.NewString()[:8]
 	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccountID, map[string]string{"security_key": securityKey})
-	secretName, found, err := msvc.ActiveRailMerchantAccountSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
+	secretName, found, err := msvc.ActivePSPSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
 	require.NoError(t, err)
 	require.True(t, found, "seeded NMI rail account must resolve")
 	storedSecret, err := msvc.Secrets().Get(ctx, dbtest.TestMerchantID, secretName)

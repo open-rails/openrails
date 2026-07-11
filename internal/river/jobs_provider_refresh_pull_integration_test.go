@@ -141,7 +141,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
 			`DELETE FROM openrails.products WHERE merchant_id = $1`,

@@ -35,7 +35,7 @@ merchants:
 
     # Operator-declared rail merchant accounts (#698: the config key is `accounts`;
     # the DB table and secret-name prefix deliberately remain `rail_merchant_accounts`).
-    accounts:
+    psps:
       mobius:
         nmi:
           environment: live

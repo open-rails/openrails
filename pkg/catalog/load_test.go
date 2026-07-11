@@ -31,7 +31,7 @@ products:
         unit_amount: 1200
         duration: 30d
         auto_renew: true
-        providers: [stripe]
+        psps: [stripe]
   - key: craftsman
     display_name: Craftsman
     tier_group: cozy
@@ -42,14 +42,14 @@ products:
         unit_amount: 2900
         duration: 30d
         auto_renew: true
-        providers: [stripe]
+        psps: [stripe]
       - currency: usd
         unit_amount: 1500
         duration: 30d
         auto_renew: true
         archived: true
-        providers: [stripe]
-        provider_links:
+        psps: [stripe]
+        psp_links:
           stripe:
             price_id: price_legacy123
 `
@@ -78,11 +78,11 @@ func TestLoad_Good(t *testing.T) {
 	if !legacy.Archived {
 		t.Fatalf("historical price should be archived, got %v", legacy.Archived)
 	}
-	if got := legacy.ProviderLinks["stripe"]["price_id"]; got != "price_legacy123" {
-		t.Fatalf("provider_links.stripe.price_id not preserved: %q", got)
+	if got := legacy.PSPLinks["stripe"]["price_id"]; got != "price_legacy123" {
+		t.Fatalf("psp_links.stripe.price_id not preserved: %q", got)
 	}
-	if got := craftsman.Prices[0].Providers; len(got) != 1 || got[0] != "stripe" {
-		t.Fatalf("providers not normalized: %v", got)
+	if got := craftsman.Prices[0].PSPs; len(got) != 1 || got[0] != "stripe" {
+		t.Fatalf("psps not normalized: %v", got)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestLoad_RejectsDefaultProviders(t *testing.T) {
 }
 
 func TestLoad_RejectsProductProviders(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    providers: [stripe]\n"))
+	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    psps: [stripe]\n"))
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("want product providers unknown-field error, got %v", err)
 	}
@@ -131,12 +131,12 @@ products:
       - currency: usd
         unit_amount: 1000
         duration: 30d
-        provider_links:
+        psp_links:
           stripe:
             lookup_key: p-monthly
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "requires providers to include") {
+	if err == nil || !strings.Contains(err.Error(), "requires psps to include") {
 		t.Fatalf("want provider_links/provider mismatch error, got %v", err)
 	}
 }
@@ -189,8 +189,8 @@ products:
   - key: p
     display_name: P
     prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [mobius, ccbill, solana]}
-      - {currency: usd, unit_amount: 23000000, duration: 30d, providers: [solana], archived: true}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [mobius, ccbill, solana]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [solana], archived: true}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
@@ -208,8 +208,8 @@ products:
   - key: p
     display_name: P
     prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius]}
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius], trial: {unit_amount: 100, duration: 7d}}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius], trial: {unit_amount: 100, duration: 7d}}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("same terms with different trials must be accepted: %v", err)
@@ -333,7 +333,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: eur, unit_amount: 1000, duration: 30d, providers: [solana]}
+      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
@@ -374,7 +374,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
-        providers: []
+        psps: []
         metered: {meter: api-calls, rate: 200_000, per_units: 1_000_000}
 `
 	m, err := Load(writeManifest(t, body))
@@ -428,7 +428,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
-        providers: []
+        psps: []
         metered: {meter: vm-seconds, rate: 500_000, per: 1h}
 `
 	m, err := Load(writeManifest(t, body))
@@ -460,7 +460,7 @@ products:
         unit_amount: 5_000_000
         duration: 30d
         auto_renew: true
-        providers: []
+        psps: []
         metered: {meter: api-calls, rate: 2_000}
 `
 	m, err := Load(writeManifest(t, body))
@@ -492,7 +492,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
-        providers: []
+        psps: []
         metered: {meter: api-calls, rate: 2_000}
 `
 	_, err := Load(writeManifest(t, body))
@@ -512,7 +512,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
-        providers: []
+        psps: []
         metered: {meter: storage-mb, rate: 100}
 `
 	_, err := Load(writeManifest(t, body))
@@ -532,7 +532,7 @@ products:
     prices:
       - currency: usd
         unit_amount: 0
-        providers: [stripe]
+        psps: [stripe]
         metered: {meter: api-calls, rate: 2_000}
 `
 	_, err := Load(writeManifest(t, body))
@@ -589,7 +589,7 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, providers: [solana]}
+      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
 `
 	if _, err := Load(writeManifest(t, body)); err != nil {
 		t.Fatalf("usdc + solana should be accepted, got %v", err)

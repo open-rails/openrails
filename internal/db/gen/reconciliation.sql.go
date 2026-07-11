@@ -1036,7 +1036,7 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.rail_merchant_account_id IS NULL OR w.rail_merchant_account_id = s.rail_merchant_account_id)
+              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s
@@ -1667,7 +1667,7 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, rail_merchant_account_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -1681,17 +1681,17 @@ ON CONFLICT DO NOTHING
 `
 
 type ReconcileBackfillPaymentParams struct {
-	MerchantID            uuid.UUID
-	PriceID               uuid.UUID
-	Rail                  string
-	TransactionID         string
-	Amount                int64
-	Currency              string
-	SubscriptionID        *uuid.UUID
-	Metadata              []byte
-	PurchasedAt           time.Time
-	CustomerID            uuid.UUID
-	RailMerchantAccountID *uuid.UUID
+	MerchantID     uuid.UUID
+	PriceID        uuid.UUID
+	Rail           string
+	TransactionID  string
+	Amount         int64
+	Currency       string
+	SubscriptionID *uuid.UUID
+	Metadata       []byte
+	PurchasedAt    time.Time
+	CustomerID     uuid.UUID
+	PspID          *uuid.UUID
 }
 
 // PS-4: backfill a rail charge that has no local payment record.
@@ -1708,7 +1708,7 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CustomerID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 	)
 	if err != nil {
 		return 0, err
@@ -1782,12 +1782,12 @@ SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_typ
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY ($1::text[])
-  AND ($2::uuid IS NULL OR rail_merchant_account_id = $2::uuid)
+  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
 `
 
 type ReconcileListPaymentMethodsByRailsParams struct {
-	Rails                 []string
-	RailMerchantAccountID *uuid.UUID
+	Rails []string
+	PspID *uuid.UUID
 }
 
 type ReconcileListPaymentMethodsByRailsRow struct {
@@ -1803,7 +1803,7 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 // Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
 // here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.RailMerchantAccountID)
+	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -1836,13 +1836,13 @@ SELECT id, customer_id, rail, transaction_id, amount, status,
 FROM openrails.payments
 WHERE rail::text = ANY ($1::text[])
   AND transaction_id = ANY ($2::text[])
-  AND ($3::uuid IS NULL OR rail_merchant_account_id = $3::uuid)
+  AND ($3::uuid IS NULL OR psp_id = $3::uuid)
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
-	Rails                 []string
-	TransactionIds        []string
-	RailMerchantAccountID *uuid.UUID
+	Rails          []string
+	TransactionIds []string
+	PspID          *uuid.UUID
 }
 
 type ReconcileListPaymentsByTransactionIDsRow struct {
@@ -1858,7 +1858,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Rails, arg.TransactionIds, arg.RailMerchantAccountID)
+	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Rails, arg.TransactionIds, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -1887,13 +1887,13 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 	return items, nil
 }
 
-const reconcileListPricesWithRails = `-- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, rails
+const reconcileListPricesWithPSPLinks = `-- name: ReconcileListPricesWithPSPLinks :many
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, psp_links
 FROM openrails.prices
-WHERE rails IS NOT NULL
+WHERE psp_links IS NOT NULL
 `
 
-type ReconcileListPricesWithRailsRow struct {
+type ReconcileListPricesWithPSPLinksRow struct {
 	ID                  uuid.UUID
 	ProductID           uuid.UUID
 	Amount              int64
@@ -1901,22 +1901,22 @@ type ReconcileListPricesWithRailsRow struct {
 	AccessDurationHours *int32
 	AutoRenew           bool
 	Archived            bool
-	Rails               []byte
+	PspLinks            []byte
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
 // materializer maps a remote plan id onto the local price whose rails
 // jsonb carries that id under the provider's key. Archived prices stay
 // (grandfathered subscriptions bill them).
-func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]ReconcileListPricesWithRailsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPricesWithRails)
+func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context) ([]ReconcileListPricesWithPSPLinksRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReconcileListPricesWithRailsRow
+	var items []ReconcileListPricesWithPSPLinksRow
 	for rows.Next() {
-		var i ReconcileListPricesWithRailsRow
+		var i ReconcileListPricesWithPSPLinksRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
@@ -1925,7 +1925,7 @@ func (q *Queries) ReconcileListPricesWithRails(ctx context.Context) ([]Reconcile
 			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.Archived,
-			&i.Rails,
+			&i.PspLinks,
 		); err != nil {
 			return nil, err
 		}
@@ -1978,12 +1978,12 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE rail = ANY ($1::text[])
-  AND ($2::uuid IS NULL OR rail_merchant_account_id = $2::uuid)
+  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
-	Rails                 []string
-	RailMerchantAccountID *uuid.UUID
+	Rails []string
+	PspID *uuid.UUID
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
@@ -2014,7 +2014,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 // Local-state reads for the diff engine
 // ============================================================================
 func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg ReconcileListSubscriptionsByRailsParams) ([]ReconcileListSubscriptionsByRailsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.Rails, arg.RailMerchantAccountID)
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.Rails, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2073,7 +2073,7 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, rail_merchant_account_id
+    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, psp_id
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $3, $4,
@@ -2089,24 +2089,24 @@ WHERE pr.id = $11
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.rail_subscription_id = $4
         AND s.rail = ANY ($12::text[])
-        AND ($10::uuid IS NULL OR s.rail_merchant_account_id = $10::uuid)
+        AND ($10::uuid IS NULL OR s.psp_id = $10::uuid)
   )
 RETURNING id, entitlements_spec_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
-	MerchantID            uuid.UUID
-	Status                OpenrailsSubscriptionStatus
-	Rail                  string
-	RailSubscriptionID    string
-	UserEmail             *string
-	PeriodStartsAt        *time.Time
-	PeriodEndsAt          *time.Time
-	StartedAt             *time.Time
-	CustomerID            uuid.UUID
-	RailMerchantAccountID *uuid.UUID
-	PriceID               uuid.UUID
-	Rails                 []string
+	MerchantID         uuid.UUID
+	Status             OpenrailsSubscriptionStatus
+	Rail               string
+	RailSubscriptionID string
+	UserEmail          *string
+	PeriodStartsAt     *time.Time
+	PeriodEndsAt       *time.Time
+	StartedAt          *time.Time
+	CustomerID         uuid.UUID
+	PspID              *uuid.UUID
+	PriceID            uuid.UUID
+	Rails              []string
 }
 
 type ReconcileMaterializeSubscriptionRow struct {
@@ -2132,7 +2132,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.PeriodEndsAt,
 		arg.StartedAt,
 		arg.CustomerID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.PriceID,
 		arg.Rails,
 	)
@@ -2158,7 +2158,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, rail_merchant_account_id, reversal_kind
+    customer_id, psp_id, reversal_kind
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -2173,18 +2173,18 @@ ON CONFLICT DO NOTHING
 `
 
 type ReconcileRecordRefundParams struct {
-	MerchantID            uuid.UUID
-	PriceID               uuid.UUID
-	Rail                  string
-	TransactionID         string
-	Amount                int64
-	Currency              string
-	SubscriptionID        *uuid.UUID
-	RefundedPaymentID     *uuid.UUID
-	Metadata              []byte
-	PurchasedAt           time.Time
-	CustomerID            uuid.UUID
-	RailMerchantAccountID *uuid.UUID
+	MerchantID        uuid.UUID
+	PriceID           uuid.UUID
+	Rail              string
+	TransactionID     string
+	Amount            int64
+	Currency          string
+	SubscriptionID    *uuid.UUID
+	RefundedPaymentID *uuid.UUID
+	Metadata          []byte
+	PurchasedAt       time.Time
+	CustomerID        uuid.UUID
+	PspID             *uuid.UUID
 }
 
 // PS-5: record a rail refund that is missing locally as a negative-
@@ -2202,7 +2202,7 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CustomerID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 	)
 	if err != nil {
 		return 0, err

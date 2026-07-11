@@ -23,7 +23,7 @@ func resolveIntentNMIClient(ctx context.Context, r money.NMIClientResolver, inte
 	if r == nil {
 		return nil, false, errors.New("nmi client resolver is not configured")
 	}
-	return r.ResolveNMIClient(ctx, intent.MerchantID, intent.RailMerchantAccountID)
+	return r.ResolveNMIClient(ctx, intent.MerchantID, intent.PspID)
 }
 
 // ccbillDataLinkForMerchant arms the ctx merchant's CCBill DataLink client

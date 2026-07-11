@@ -65,17 +65,17 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		MerchantID:            tid.UUID(),
-		PriceID:               a.PriceID,
-		Rail:                  string(a.Rail),
-		TransactionID:         a.TransactionID,
-		Amount:                moneyutil.CentsToMicros(a.AmountCents),
-		Currency:              currency,
-		SubscriptionID:        a.SubscriptionID,
-		Metadata:              metadataJSON(a.Metadata),
-		PurchasedAt:           a.PurchasedAt,
-		CustomerID:            a.CustomerID,
-		RailMerchantAccountID: a.RailMerchantAccountID,
+		MerchantID:     tid.UUID(),
+		PriceID:        a.PriceID,
+		Rail:           string(a.Rail),
+		TransactionID:  a.TransactionID,
+		Amount:         moneyutil.CentsToMicros(a.AmountCents),
+		Currency:       currency,
+		SubscriptionID: a.SubscriptionID,
+		Metadata:       metadataJSON(a.Metadata),
+		PurchasedAt:    a.PurchasedAt,
+		CustomerID:     a.CustomerID,
+		PspID:          a.PspID,
 	})
 	if err != nil {
 		return false, err
@@ -109,18 +109,18 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
-		MerchantID:            tid.UUID(),
-		PriceID:               a.PriceID,
-		Rail:                  string(a.Rail),
-		TransactionID:         a.TransactionID,
-		Amount:                amount,
-		Currency:              currency,
-		SubscriptionID:        a.SubscriptionID,
-		RefundedPaymentID:     a.RefundedPaymentID,
-		Metadata:              metadataJSON(a.Metadata),
-		PurchasedAt:           a.PurchasedAt,
-		CustomerID:            a.CustomerID,
-		RailMerchantAccountID: a.RailMerchantAccountID,
+		MerchantID:        tid.UUID(),
+		PriceID:           a.PriceID,
+		Rail:              string(a.Rail),
+		TransactionID:     a.TransactionID,
+		Amount:            amount,
+		Currency:          currency,
+		SubscriptionID:    a.SubscriptionID,
+		RefundedPaymentID: a.RefundedPaymentID,
+		Metadata:          metadataJSON(a.Metadata),
+		PurchasedAt:       a.PurchasedAt,
+		CustomerID:        a.CustomerID,
+		PspID:             a.PspID,
 	})
 	if err != nil {
 		return false, err
@@ -183,18 +183,18 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, err
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		MerchantID:            tid.UUID(),
-		Status:                gen.OpenrailsSubscriptionStatus(a.Status),
-		Rail:                  a.Rail,
-		RailSubscriptionID:    a.RailSubscriptionID,
-		UserEmail:             emailPtr,
-		PeriodStartsAt:        a.PeriodStartsAt,
-		PeriodEndsAt:          a.PeriodEndsAt,
-		StartedAt:             a.StartedAt,
-		CustomerID:            a.CustomerID,
-		PriceID:               a.PriceID,
-		Rails:                 localRailNames(a.Provider),
-		RailMerchantAccountID: a.RailMerchantAccountID,
+		MerchantID:         tid.UUID(),
+		Status:             gen.OpenrailsSubscriptionStatus(a.Status),
+		Rail:               a.Rail,
+		RailSubscriptionID: a.RailSubscriptionID,
+		UserEmail:          emailPtr,
+		PeriodStartsAt:     a.PeriodStartsAt,
+		PeriodEndsAt:       a.PeriodEndsAt,
+		StartedAt:          a.StartedAt,
+		CustomerID:         a.CustomerID,
+		PriceID:            a.PriceID,
+		Rails:              localRailNames(a.Provider),
+		PspID:              a.PspID,
 	})
 	if err != nil {
 		return MaterializeResult{}, err

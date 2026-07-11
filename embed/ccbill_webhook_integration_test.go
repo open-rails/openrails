@@ -65,8 +65,8 @@ catalogs:
             unit_amount: %d
             duration: 30d
             auto_renew: true
-            providers: [ccbill]
-            provider_links:
+            psps: [ccbill]
+            psp_links:
               ccbill:
                 flex_id: %q
                 form_name: %q
@@ -176,7 +176,7 @@ func cleanupCCBillWebhookMerchant(t *testing.T, dsn string, mid merchant.ID) {
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
 			`DELETE FROM openrails.products WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = pool.Exec(context.Background(), stmt, mid.UUID())
@@ -204,7 +204,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"ccbill": {
 				"ccbill": {
 					Environment: "test",
@@ -308,7 +308,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	// is refused as a second truth) — publish a ccbill-linked price.
 	flexID := uuid.NewString()
 	formName := "test-form"
-	publish := fmt.Sprintf(`{"insert":true,"overwrite":true,"catalog":{"version":1,"products":[{"key":"pro-%s","display_name":"Pro","entitlements":["pro-access"],"prices":[{"currency":"usd","unit_amount":%d,"duration":"30d","auto_renew":true,"providers":["ccbill"],"provider_links":{"ccbill":{"flex_id":%q,"form_name":%q}}}]}]}}`,
+	publish := fmt.Sprintf(`{"insert":true,"overwrite":true,"catalog":{"version":1,"products":[{"key":"pro-%s","display_name":"Pro","entitlements":["pro-access"],"prices":[{"currency":"usd","unit_amount":%d,"duration":"30d","auto_renew":true,"psps":["ccbill"],"psp_links":{"ccbill":{"flex_id":%q,"form_name":%q}}}]}]}}`,
 		slug, ccbillWebhookTestPriceMicros, flexID, formName)
 	req, err = http.NewRequest(http.MethodPost, adminServer.URL+"/v1/merchant/catalog/publish", strings.NewReader(publish))
 	require.NoError(t, err)

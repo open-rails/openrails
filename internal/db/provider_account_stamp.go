@@ -8,8 +8,8 @@ import (
 
 type railMerchantAccountIDCtxKey struct{}
 
-// WithRailMerchantAccountID pins the external account that actually produced a row.
-func WithRailMerchantAccountID(ctx context.Context, id uuid.UUID) context.Context {
+// WithPSPID pins the external account that actually produced a row.
+func WithPSPID(ctx context.Context, id uuid.UUID) context.Context {
 	if id == uuid.Nil {
 		return ctx
 	}

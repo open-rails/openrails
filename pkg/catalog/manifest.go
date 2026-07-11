@@ -145,25 +145,32 @@ type Price struct {
 	// Archived maps to status=archived. Omitted/false = active.
 	Archived bool `json:"archived,omitempty" yaml:"archived,omitempty"`
 
-	// Providers is the explicit provider list for this price. Omitted or empty
-	// means OpenRails-native only: no external provider sync.
-	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
+	// PSPs is the explicit payment-service-provider list for this price: the
+	// merchant's PSP keys (e.g. mobius) — reserved gateways (stripe, ccbill,
+	// solana) are their own PSP names. Omitted or empty means OpenRails-native
+	// only: no external provider sync.
+	PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
 
-	// ProviderLinks pre-supplies provider-specific link ids, mapping
-	// provider name -> key/value pairs. Maps straight onto
-	// service.CreatePriceRequest.ProviderLinks. A supplied link is VALIDATED
+	// PSPLinks pre-supplies PSP-specific link ids, mapping
+	// PSP key -> key/value pairs. Maps straight onto
+	// service.CreatePriceRequest.PSPLinks. A supplied link is VALIDATED
 	// against the provider (object exists + matches the price's money terms)
 	// before it is accepted; a mismatch fails the apply loudly. An existing
 	// object is never duplicated. A MISSING object is created where the linked id
 	// is client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
 	// provider-generated (Stripe price_id, Solana plan_pda). Canonical keys:
-	//   provider_links:
+	//   psp_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
-	//     nmi: {plan_id: premium}                           # NMI recurring plan; find-or-create at this id
+	//     mobius: {plan_id: premium}                           # NMI recurring plan on the "mobius" PSP; find-or-create
 	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
-	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
+	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
+
+	// Retired manifest keys (renamed to psps / psp_links). Kept only so a
+	// stale manifest fails loudly instead of silently dropping its links.
+	LegacyProviders     []string                     `json:"providers,omitempty" yaml:"providers,omitempty"`
+	LegacyProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
 
 	// Trial is an optional FIRST phase that differs from the recurring terms above
 	// (#622). unit_amount=0 is a free trial. Requires auto_renew. Omit for a flat

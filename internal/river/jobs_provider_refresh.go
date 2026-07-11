@@ -146,7 +146,7 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
 		// Explicit merchant_id predicate: redundant under RLS, load-bearing on
 		// BYPASSRLS roles (tests, superuser self-hosts).
-		return tx.QueryRow(tctx, `SELECT EXISTS (SELECT 1 FROM openrails.rail_merchant_accounts WHERE merchant_id = $1)`, mid).Scan(&exists)
+		return tx.QueryRow(tctx, `SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1)`, mid).Scan(&exists)
 	})
 	return exists, err
 }
@@ -490,12 +490,12 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			break
 		}
 		res, err := engine.Run(ctx, reconcile.RunParams{
-			Mode:                 reconcile.ModeEnforce,
-			Mutations:            &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
-			Providers:            []reconcile.Provider{provider},
-			RailMerchantAccounts: bindings,
-			Since:                since,
-			Until:                until,
+			Mode:      reconcile.ModeEnforce,
+			Mutations: &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
+			Providers: []reconcile.Provider{provider},
+			PSPs:      bindings,
+			Since:     since,
+			Until:     until,
 		})
 		if err != nil {
 			out.ProviderErrors++
@@ -552,7 +552,7 @@ SELECT watermark_at
  WHERE merchant_id = $1::uuid
    AND rail = $2::text
    AND event_domain = $3::text
-   AND rail_merchant_account_key = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+   AND psp_key = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
 `, mid, string(provider), providerRefreshDomainEvents, accountID).Scan(&watermark)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fallback.UTC(), nil
@@ -566,7 +566,7 @@ SELECT watermark_at
 func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time) error {
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, rail_merchant_account_id, event_domain, watermark_at,
+    merchant_id, rail, psp_id, event_domain, watermark_at,
     last_attempted_at, last_succeeded_at, last_error
 ) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, $6::timestamptz, NULL)
 ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
@@ -584,7 +584,7 @@ func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid 
 	errText := cause.Error()
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, rail_merchant_account_id, event_domain, watermark_at,
+    merchant_id, rail, psp_id, event_domain, watermark_at,
     last_attempted_at, last_succeeded_at, last_error
 ) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, NULL, $7::text)
 ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key

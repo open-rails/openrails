@@ -58,7 +58,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Amount:              999,
 		Currency:            "usd",
 		AccessDurationHours: &billingDays, AutoRenew: true,
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			string(models.RailNMI): {
 				models.RailKeyRail:   string(models.RailNMI),
 				models.RailKeyPlanID: "plan_test_999",

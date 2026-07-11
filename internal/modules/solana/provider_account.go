@@ -34,10 +34,10 @@ func resolveActiveSolanaRailMerchantAccount(ctx context.Context, database *db.DB
 		environment = config.ExpectedProviderEnvironment(cfg.IsTestMode())
 	}
 
-	var row gen.OpenrailsRailMerchantAccount
+	var row gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
 		var qerr error
-		row, qerr = database.Gen(ctx).GetActiveRailMerchantAccountForNewWork(ctx, gen.GetActiveRailMerchantAccountForNewWorkParams{
+		row, qerr = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
 			MerchantID:  tid.UUID(),
 			Rail:        string(models.RailSolana),
 			Environment: &environment,
