@@ -172,6 +172,15 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 	}
 }
 
+func sortedAdapterNames(adapters map[string]providerAdapter) []string {
+	names := make([]string, 0, len(adapters))
+	for name := range adapters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // priceCycleToken renders the provider-cadence component of a price content key.
 // A recurring price (cycle > 0) renders the day count for day-granularity
 // providers; a one-time price (nil or
@@ -263,6 +272,39 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	}
 	sort.Strings(names)
 
+	// The manifest speaks the operator's ACCOUNT vocabulary ("mobius"), not
+	// rail names: resolve each declared name to its rail via the merchant's
+	// declared accounts (a rail name itself also resolves — the reserved
+	// gateways are their own account names). Unknown names fail loudly:
+	// silently dropping cost doujins its NMI plan links. Several accounts on
+	// one rail are fine — rails[] is keyed by the ACCOUNT key and each entry
+	// records its rail (#799).
+	type attachTarget struct {
+		declared  string // manifest name = ProviderLinks key = rails[]/states[] key
+		rail      string // adapters index; recorded in the entry's RailKeyRail
+		accountID string // rail-native account id; pins Attach/AutoCreate (#641)
+		adapter   providerAdapter
+	}
+	accountRails := s.merchantAccountRails(ctx)
+	targets := make([]attachTarget, 0, len(names))
+	for _, name := range names {
+		t := attachTarget{declared: name, rail: name}
+		var ok bool
+		t.adapter, ok = adapters[name]
+		if !ok {
+			if acct, found := accountRails[name]; found {
+				t.rail, t.accountID = acct.rail, acct.accountID
+				t.adapter, ok = adapters[acct.rail]
+			}
+		}
+		if !ok {
+			return nil, nil, nil, fmt.Errorf(
+				"unknown provider %q in providers/provider_links: not a rail (%s) or a declared merchant account key",
+				name, strings.Join(sortedAdapterNames(adapters), ", "))
+		}
+		targets = append(targets, t)
+	}
+
 	// The price substance (product key + immutable money terms) is the same for the
 	// Attach (link-validation) and AutoCreate (mint) paths. lookup_key + content
 	// keys are derived from the product key + money terms, not the row UUIDs, so
@@ -288,28 +330,40 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
-	for _, name := range names {
-		adapter, ok := adapters[name]
-		if !ok {
-			// Unknown provider: silently drop. Matches pre-#208 catalog tolerance.
-			continue
+	// stampRail records the entry's rail inside account-keyed entries so
+	// readers can scan by rail (RailLinkEntries); a rail-named key is already
+	// self-describing.
+	stampRail := func(ids map[string]string, t attachTarget) map[string]string {
+		if ids == nil {
+			ids = map[string]string{}
 		}
-		link := req.ProviderLinks[name]
+		if t.declared != t.rail {
+			ids[models.RailKeyRail] = t.rail
+		}
+		return ids
+	}
+
+	for _, t := range targets {
+		link := req.ProviderLinks[t.declared]
+		// Pin provider calls to THIS account's credentials (#641); empty means
+		// the rail's armed default.
+		tctx := pctx
+		tctx.TargetAccountID = t.accountID
 		// Try the user-supplied attach path first. Attach VERIFIES the linked
 		// remote object exists and matches the price substance (pctx) — a wrong
 		// or missing link is a loud error, never a silent accept — and no provider
 		// object is created when a valid link is supplied.
 		if len(normalizeLinkMap(link)) > 0 {
-			ids, attachErr := adapter.Attach(ctx, link, pctx)
+			ids, attachErr := t.adapter.Attach(ctx, link, tctx)
 			if errors.Is(attachErr, errRemoteWritesDisabled) {
 				// The link verified as MISSING remotely and creating it is blocked
 				// by the operating mode: defer, don't fail the apply. The slot
 				// converges on a later apply once writes are allowed.
-				template := adapter.PendingActionTemplate(priceID)
+				template := t.adapter.PendingActionTemplate(priceID)
 				if template.Provider == "" {
-					template.Provider = name
+					template.Provider = t.rail
 				}
-				states[name] = ProviderState{
+				states[t.declared] = ProviderState{
 					Status:     ProviderStatusPendingManualLink,
 					SyncStatus: SyncStatusNeverSynced,
 					Message:    remoteWritesDisabledMessage,
@@ -318,13 +372,11 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 				continue
 			}
 			if attachErr != nil {
-				return nil, nil, nil, fmt.Errorf("%s: %w", name, attachErr)
+				return nil, nil, nil, fmt.Errorf("%s: %w", t.declared, attachErr)
 			}
-			if ids == nil {
-				ids = map[string]string{}
-			}
-			rails[name] = ids
-			states[name] = ProviderState{
+			ids = stampRail(ids, t)
+			rails[t.declared] = ids
+			states[t.declared] = ProviderState{
 				Status:     ProviderStatusLinked,
 				IDs:        copyStringMap(ids),
 				LookupKey:  ids[providerLookupKey],
@@ -337,11 +389,11 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		// the find-half of find-or-create is not worth a special case here; the
 		// slot converges on a later apply.
 		if pctx.RemoteWritesDisabled {
-			template := adapter.PendingActionTemplate(priceID)
+			template := t.adapter.PendingActionTemplate(priceID)
 			if template.Provider == "" {
-				template.Provider = name
+				template.Provider = t.rail
 			}
-			states[name] = ProviderState{
+			states[t.declared] = ProviderState{
 				Status:     ProviderStatusPendingManualLink,
 				SyncStatus: SyncStatusNeverSynced,
 				Message:    remoteWritesDisabledMessage,
@@ -349,27 +401,25 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			pending = append(pending, template)
 			continue
 		}
-		ids, createErr := adapter.AutoCreate(ctx, pctx)
+		ids, createErr := t.adapter.AutoCreate(ctx, tctx)
 		switch {
 		case errors.Is(createErr, errPendingManualLink):
-			template := adapter.PendingActionTemplate(priceID)
-			states[name] = ProviderState{
+			template := t.adapter.PendingActionTemplate(priceID)
+			states[t.declared] = ProviderState{
 				Status:     ProviderStatusPendingManualLink,
 				SyncStatus: SyncStatusNeverSynced,
 				Message:    template.Hint,
 			}
 			if template.Provider == "" {
-				template.Provider = name
+				template.Provider = t.rail
 			}
 			pending = append(pending, template)
 		case createErr != nil:
-			return nil, nil, nil, fmt.Errorf("%s: %w", name, createErr)
+			return nil, nil, nil, fmt.Errorf("%s: %w", t.declared, createErr)
 		default:
-			if ids == nil {
-				ids = map[string]string{}
-			}
-			rails[name] = ids
-			states[name] = ProviderState{
+			ids = stampRail(ids, t)
+			rails[t.declared] = ids
+			states[t.declared] = ProviderState{
 				Status:     ProviderStatusLinked,
 				IDs:        copyStringMap(ids),
 				LookupKey:  ids[providerLookupKey],
@@ -377,15 +427,62 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 		}
 	}
-	// Keep every non-archived account in sync (best-effort); archived is skipped.
+	// Keep every non-archived account in sync (best-effort); archived is
+	// skipped. Once per RAIL — the sync itself enumerates the rail's accounts.
 	if !remoteWritesDisabled {
-		for _, name := range names {
-			if adapter, ok := adapters[name]; ok {
-				s.syncSecondaryCatalogAccounts(ctx, name, pctx, adapter)
+		syncedRails := map[string]struct{}{}
+		for _, t := range targets {
+			if _, done := syncedRails[t.rail]; done {
+				continue
 			}
+			syncedRails[t.rail] = struct{}{}
+			s.syncSecondaryCatalogAccounts(ctx, t.rail, pctx, t.adapter)
 		}
 	}
 	return rails, states, pending, nil
+}
+
+// railAccountRef is one declared merchant account: its rail plus the
+// rail-native account id (pins provider calls to that account's credentials).
+type railAccountRef struct {
+	rail      string
+	accountID string
+}
+
+// merchantAccountRails maps the ctx merchant's declared account keys
+// (rail_merchant_accounts.display_name — the manifest `accounts.<key>` name,
+// e.g. "mobius") to their rails. Best-effort: no merchant ctx / DB means only
+// rail names resolve.
+func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccountRef {
+	out := map[string]railAccountRef{}
+	if s.rt == nil || s.rt.DB == nil {
+		return out
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return out
+	}
+	rows, err := s.rt.DB.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+		MerchantID: mid.UUID(),
+	})
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("catalog: list declared rail accounts failed; only rail names resolve")
+		return out
+	}
+	for _, row := range rows {
+		if row.Archived || row.DisplayName == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(*row.DisplayName))
+		if name == "" {
+			continue
+		}
+		out[name] = railAccountRef{
+			rail:      strings.ToLower(strings.TrimSpace(row.Rail)),
+			accountID: strings.TrimSpace(row.AccountID),
+		}
+	}
+	return out
 }
 
 // syncSecondaryCatalogAccounts best-effort find-or-creates the price in each

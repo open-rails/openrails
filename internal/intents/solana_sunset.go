@@ -133,7 +133,7 @@ func (h *SolanaSunsetPlanHandler) CheckRelevance(ctx context.Context, intent gen
 		if !pr.IsPurchasable() {
 			continue
 		}
-		cfg := pr.Rails[string(models.RailSolana)]
+		cfg := pr.GetRailConfig(models.RailSolana)
 		if cfg != nil && strings.TrimSpace(cfg["plan_pda"]) == pda {
 			return SupersededBy("a purchasable local price references this plan again; sunsetting it would be wrong"), nil
 		}

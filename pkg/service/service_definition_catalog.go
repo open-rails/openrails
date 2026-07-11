@@ -296,7 +296,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 		return ""
 	}
 	for _, p := range priceList {
-		if id := strings.TrimSpace(p.Rails["stripe"][models.RailKeyStripeProductID]); id != "" {
+		if id := strings.TrimSpace(p.GetRailConfig(models.RailStripe)[models.RailKeyStripeProductID]); id != "" {
 			return id
 		}
 	}
@@ -757,7 +757,12 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		if !s.catalogRemoteWritesDisabled() {
 			adapters := s.providerAdapters()
 			for provider, ids := range updated.Rails {
-				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
+				// Account-keyed entry (#799): rail from the entry, key as fallback.
+				rail := strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))
+				if rail == "" {
+					rail = strings.ToLower(strings.TrimSpace(provider))
+				}
+				adapter, ok := adapters[rail]
 				if !ok {
 					continue
 				}

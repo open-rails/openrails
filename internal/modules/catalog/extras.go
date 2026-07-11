@@ -49,7 +49,7 @@ func BuildExtrasIndex(products []*models.Product, prices []*models.Price) Extras
 		if key := keyByProductID[pr.ProductID.String()]; key != "" {
 			ix.PriceContentKeys[OpenRailsPriceContentKey(key, pr.Currency, pr.Amount, pr.RecurringCycleDays())] = struct{}{}
 		}
-		if stripe := pr.Rails["stripe"]; stripe != nil {
+		if stripe := pr.GetRailConfig(models.RailStripe); stripe != nil {
 			if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
 				ix.StripePriceIDs[id] = struct{}{}
 			}
