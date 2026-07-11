@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // localIndex precomputes the lookups the diff checks share.
@@ -66,23 +68,29 @@ type planLink struct {
 var planLinkIDKeys = []string{"plan_id", "price_id", "recurring_billing_option_id", "plan_pda"}
 
 // buildPlanIndex maps remote plan ids onto local prices via the catalog
-// provider_links blobs, restricted to the provider's local rail names.
+// provider_links blobs, restricted to the provider's local rail names. Blobs
+// are ACCOUNT-keyed (#799: entry key = merchant account key, rail recorded in
+// the entry; a rail-named key is its own account) — two accounts carrying the
+// same plan id on one price dedup to a single link.
 func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLink {
 	idx := map[string][]planLink{}
 	names := localRailNames(provider)
 	for i := range prices {
 		p := &prices[i]
 		for _, name := range names {
-			cfg := p.Rails[name]
-			if cfg == nil {
-				continue
-			}
-			for _, key := range planLinkIDKeys {
-				id := strings.TrimSpace(cfg[key])
-				if id == "" {
-					continue
+			seen := map[string]struct{}{}
+			for _, cfg := range models.RailLinkEntries(p.Rails, models.Rail(name)) {
+				for _, key := range planLinkIDKeys {
+					id := strings.TrimSpace(cfg[key])
+					if id == "" {
+						continue
+					}
+					if _, dup := seen[id]; dup {
+						continue
+					}
+					seen[id] = struct{}{}
+					idx[id] = append(idx[id], planLink{price: p, railName: name})
 				}
-				idx[id] = append(idx[id], planLink{price: p, railName: name})
 			}
 		}
 	}

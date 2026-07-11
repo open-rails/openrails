@@ -229,7 +229,7 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 		return
 	}
 	var stripePriceID string
-	if m := price.Rails["stripe"]; m != nil {
+	if m := price.GetRailConfig(models.RailStripe); m != nil {
 		stripePriceID = strings.TrimSpace(m[models.RailKeyStripePriceID])
 	}
 	if stripePriceID == "" {
@@ -346,7 +346,13 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 	adapters := s.providerAdapters()
 	out := make(map[string]ProviderState, len(p.Rails))
 	for name, ids := range p.Rails {
-		adapter, ok := adapters[strings.ToLower(strings.TrimSpace(name))]
+		// Account-keyed entry (#799): the rail lives in the entry; a rail-named
+		// key is its own account.
+		rail := strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))
+		if rail == "" {
+			rail = strings.ToLower(strings.TrimSpace(name))
+		}
+		adapter, ok := adapters[rail]
 		if !ok {
 			// Unknown providers stay visible but uncomputed.
 			out[name] = ProviderState{

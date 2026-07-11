@@ -218,19 +218,60 @@ const (
 	RailKeyCCBillRecurringBillingOption = "recurring_billing_option_id"
 	RailKeyStripePriceID                = "price_id"
 	RailKeyStripeProductID              = "product_id"
+	// RailKeyRail records the entry's rail inside an ACCOUNT-keyed entry
+	// (#799: prices.rails keys on the merchant's account key, e.g. "mobius";
+	// the rail lives in the entry so several accounts can share one rail).
+	RailKeyRail = "rail"
 )
 
-// GetRailConfig returns the configuration for a specific rail, or nil if not configured
-func (p *Price) GetRailConfig(rail Rail) map[string]string {
-	if p.Rails == nil {
+// RailLinkEntries returns every provider-link entry on the given rail, keyed
+// by account key (#799). An entry matches when its RailKeyRail field names the
+// rail, or its account key IS the rail name — the reserved gateways (stripe,
+// ccbill, solana) are their own account names.
+func RailLinkEntries(rails map[string]map[string]string, rail Rail) map[string]map[string]string {
+	if len(rails) == 0 {
 		return nil
 	}
-	return p.Rails[string(rail)]
+	want := string(rail)
+	var out map[string]map[string]string
+	for key, cfg := range rails {
+		if cfg == nil {
+			continue
+		}
+		if key != want && strings.TrimSpace(cfg[RailKeyRail]) != want {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]map[string]string, 1)
+		}
+		out[key] = cfg
+	}
+	return out
+}
+
+// GetRailConfig returns the rail's single provider-link entry, or nil when the
+// rail is unlinked. Several accounts linked on one rail also yield nil (never
+// guess between accounts) — enumerate RailAccountConfigs there.
+func (p *Price) GetRailConfig(rail Rail) map[string]string {
+	entries := RailLinkEntries(p.Rails, rail)
+	if len(entries) != 1 {
+		return nil
+	}
+	for _, cfg := range entries {
+		return cfg
+	}
+	return nil
+}
+
+// RailAccountConfigs returns every provider-link entry on the rail, keyed by
+// account key.
+func (p *Price) RailAccountConfigs(rail Rail) map[string]map[string]string {
+	return RailLinkEntries(p.Rails, rail)
 }
 
 // HasRail checks if a specific rail is configured for this price
 func (p *Price) HasRail(rail Rail) bool {
-	return p.GetRailConfig(rail) != nil
+	return len(RailLinkEntries(p.Rails, rail)) > 0
 }
 
 // GetNMIConfigForRail returns the NMI plan link for the given rail key (the

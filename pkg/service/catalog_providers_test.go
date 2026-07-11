@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -226,7 +227,9 @@ func TestResolveProviders_AllPending(t *testing.T) {
 	}
 }
 
-func TestResolveProviders_UnknownProviderDropped(t *testing.T) {
+func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
+	// An unknown provider name (e.g. an account name like "mobius" instead of
+	// its rail) must fail loudly — silent dropping loses provider links.
 	s := newUnconfiguredService()
 	productID := uuid.New()
 	req := CreatePriceRequest{
@@ -235,12 +238,9 @@ func TestResolveProviders_UnknownProviderDropped(t *testing.T) {
 		Currency:   "usd",
 		Providers:  []string{"paypal"}, // not in dispatch table
 	}
-	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(rails) != 0 || len(states) != 0 || len(pending) != 0 {
-		t.Fatalf("expected unknown provider to be dropped, got rails=%v states=%v pending=%v", rails, states, pending)
+	_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
+	if err == nil || !strings.Contains(err.Error(), `unknown provider "paypal"`) {
+		t.Fatalf("expected unknown-provider error, got %v", err)
 	}
 }
 

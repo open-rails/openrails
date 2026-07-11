@@ -366,7 +366,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 	}
 	byPDA := map[string]*pdaState{}
 	for _, pr := range snap.priceByID {
-		cfg := pr.Rails[string(models.RailSolana)]
+		cfg := pr.GetRailConfig(models.RailSolana)
 		if cfg == nil {
 			continue
 		}

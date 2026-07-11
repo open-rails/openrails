@@ -506,7 +506,7 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 				snap.priceByContentKey[ck] = pr
 			}
 		}
-		if stripe := pr.Rails["stripe"]; stripe != nil {
+		if stripe := pr.GetRailConfig(models.RailStripe); stripe != nil {
 			if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
 				snap.stripePriceIDs[id] = pr.ID.String()
 			}
@@ -515,7 +515,8 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 				snap.stripeProductIDs[id] = pr.ProductID.String()
 			}
 		}
-		if nmiLink := pr.Rails[string(models.RailNMI)]; nmiLink != nil {
+		// Account-keyed (#799): any NMI account's plan link registers the price.
+		for _, nmiLink := range pr.RailAccountConfigs(models.RailNMI) {
 			if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 				snap.nmiPlanIDByOpenRailsPrice[pr.ID.String()] = planID
 			}
@@ -685,7 +686,7 @@ func (s *Service) computeSolanaCatalogDrift(ctx context.Context, snap localCatal
 	var events []models.CatalogDriftEvent
 	scanned := 0
 	for _, pr := range snap.priceByID {
-		cfg := pr.Rails[string(models.RailSolana)]
+		cfg := pr.GetRailConfig(models.RailSolana)
 		if len(cfg) == 0 {
 			continue
 		}

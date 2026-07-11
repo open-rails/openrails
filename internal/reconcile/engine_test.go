@@ -1358,9 +1358,9 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		Amount:    999,
 		Currency:  "usd",
 		Rails: map[string]map[string]string{
-			// #630: the provider-link key is the gateway rail (nmi), not the
-			// provider-account name (mobius).
-			"nmi": {"plan_id": "plan-gold"},
+			// #799: the provider-link key is the merchant's ACCOUNT key with
+			// the rail recorded inside the entry.
+			"mobius": {"rail": "nmi", "plan_id": "plan-gold"},
 		},
 	}
 	local.state.Prices = []LocalPrice{price}

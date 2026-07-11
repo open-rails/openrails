@@ -83,3 +83,39 @@ func TestArchived_Purchasable(t *testing.T) {
 		}
 	}
 }
+
+func TestRailLinkEntries_AccountKeyed(t *testing.T) {
+	// #799: entries key on the ACCOUNT key with the rail stamped inside; a
+	// rail-named key is its own account.
+	p := &Price{Rails: map[string]map[string]string{
+		"mobius": {RailKeyRail: "nmi", RailKeyPlanID: "premium_new"},
+		"stripe": {RailKeyStripePriceID: "price_123"},
+	}}
+
+	nmi := p.RailAccountConfigs(RailNMI)
+	if len(nmi) != 1 || nmi["mobius"][RailKeyPlanID] != "premium_new" {
+		t.Fatalf("nmi entries = %v", nmi)
+	}
+	if cfg := p.GetRailConfig(RailNMI); cfg[RailKeyPlanID] != "premium_new" {
+		t.Fatalf("GetRailConfig(nmi) = %v", cfg)
+	}
+	if cfg := p.GetRailConfig(RailStripe); cfg[RailKeyStripePriceID] != "price_123" {
+		t.Fatalf("GetRailConfig(stripe) = %v", cfg)
+	}
+	if !p.HasRail(RailNMI) || p.HasRail(RailCCBill) {
+		t.Fatalf("HasRail: nmi=%v ccbill=%v", p.HasRail(RailNMI), p.HasRail(RailCCBill))
+	}
+	if planID, ok := p.GetNMIConfigForRail("nmi"); !ok || planID != "premium_new" {
+		t.Fatalf("GetNMIConfigForRail = %q, %v", planID, ok)
+	}
+
+	// Two accounts on one rail: enumeration sees both, the single-entry
+	// accessor refuses to guess.
+	p.Rails["paykings"] = map[string]string{RailKeyRail: "nmi", RailKeyPlanID: "premium_pk"}
+	if got := len(p.RailAccountConfigs(RailNMI)); got != 2 {
+		t.Fatalf("expected 2 nmi entries, got %d", got)
+	}
+	if cfg := p.GetRailConfig(RailNMI); cfg != nil {
+		t.Fatalf("ambiguous GetRailConfig should be nil, got %v", cfg)
+	}
+}

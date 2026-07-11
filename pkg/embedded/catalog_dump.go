@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -456,6 +457,12 @@ func providerLinks(raw []byte) map[string]map[string]string {
 	_ = json.Unmarshal(raw, &links)
 	if len(links) == 0 {
 		return nil
+	}
+	// The stored blob is account-keyed with the rail stamped inside each entry
+	// (#799); the manifest derives the rail from the account key, so the stamp
+	// is storage detail, not manifest content.
+	for _, cfg := range links {
+		delete(cfg, models.RailKeyRail)
 	}
 	return links
 }
