@@ -269,19 +269,6 @@ func (p *Price) HasRail(rail Rail) bool {
 	return len(RailLinkEntries(p.Rails, rail)) > 0
 }
 
-// GetNMIConfigForRail returns the NMI plan link for the given rail (e.g.
-// "nmi"), whichever account key carries it. Several accounts on the rail is
-// ambiguous and reports no link — the caller fails loudly rather than
-// charging a plan on the wrong account.
-func (p *Price) GetNMIConfigForRail(railName string) (planID string, ok bool) {
-	config := p.GetRailConfig(Rail(railName))
-	if config == nil {
-		return "", false
-	}
-	planID = config[RailKeyPlanID]
-	return planID, planID != ""
-}
-
 // GetCCBillFlexForm returns the CCBill flexform configuration (form name + flex ID)
 func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
 	config := p.GetRailConfig(RailCCBill)

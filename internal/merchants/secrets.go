@@ -233,6 +233,9 @@ type RailMerchantAccountScope struct {
 	Rail        string
 	Environment string
 	AccountID   string
+	// DisplayName is the manifest account KEY ("mobius") — the
+	// payment-provider vocabulary catalog links and checkout use.
+	DisplayName string
 	Settings    map[string]any
 }
 
@@ -240,6 +243,13 @@ type RailMerchantAccountScope struct {
 // requiring a particular secret key.
 type RailMerchantAccountScopeResolver interface {
 	ActiveRailMerchantAccountScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (RailMerchantAccountScope, bool, error)
+}
+
+// RailMerchantAccountKeyResolver resolves a declared account by its manifest
+// account key (display_name) — the payment-provider name checkout requests
+// and catalog provider_links use.
+type RailMerchantAccountKeyResolver interface {
+	RailMerchantAccountScopeByKey(ctx context.Context, merchantID merchant.ID, key, environment string) (RailMerchantAccountScope, bool, error)
 }
 
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every

@@ -87,76 +87,144 @@ func (s *CheckoutService) railMerchantAccountEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
 }
 
-// ResolveRailMerchantAccountID resolves the ACTIVE provider account for new work
-// on the given rail (#704). Returns nil when no resolver is wired or no active
-// account exists — provenance is only ever stamped with a REAL resolved account,
-// never invented. Resolution failures are logged and swallowed: stamping is
-// metadata and must not block a sale.
-func (s *CheckoutService) ResolveRailMerchantAccountID(ctx context.Context, rail string) *uuid.UUID {
+// railTarget is a resolved checkout destination: the payment PROVIDER (the
+// merchant's account key, e.g. "mobius") plus the rail it runs on. Checkout
+// requests name the provider; a bare rail name resolves through arming to THE
+// active provider on that rail, so the provider is always picked.
+type railTarget struct {
+	Provider string // account key: catalog provider_links key, plan lookup key
+	Rail     string // gateway rail: dispatch, row vocabulary (subscriptions.rail)
+	Scope    *merchants.RailMerchantAccountScope
+}
+
+// knownRails are the gateway rails checkout can dispatch to.
+var knownRails = map[string]struct{}{
+	string(models.RailNMI):    {},
+	string(models.RailCCBill): {},
+	string(models.RailStripe): {},
+	string(models.RailSolana): {},
+}
+
+// resolveRailTarget resolves a requested checkout provider name. The name is
+// either a declared account key ("mobius"), or a rail name — reserved gateways
+// (stripe/ccbill/solana) are their own account names, and a bare rail resolves
+// to its active armed account. Unknown names fail loudly.
+func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested string) (railTarget, error) {
+	name := strings.ToLower(strings.TrimSpace(requested))
+	if name == "" {
+		return railTarget{}, errors.New("rail is required")
+	}
+	_, isRail := knownRails[name]
+
+	// Declared account key wins (a rail-named account resolves identically).
+	if keys, ok := s.ProviderSecrets.(merchants.RailMerchantAccountKeyResolver); ok {
+		if tid, err := merchant.Require(ctx); err == nil {
+			scope, found, err := keys.RailMerchantAccountScopeByKey(ctx, tid, name, s.railMerchantAccountEnvironment())
+			if err != nil {
+				return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
+			}
+			if found {
+				return railTarget{Provider: name, Rail: scope.Rail, Scope: &scope}, nil
+			}
+		}
+	}
+
+	if !isRail {
+		return railTarget{}, fmt.Errorf("unknown payment provider %q: not a declared account key or a rail (nmi, ccbill, stripe, solana)", name)
+	}
+
+	// Bare rail: arming picks the provider. The active account's key becomes
+	// the provider so plan links resolve; an unwired resolver leaves the rail
+	// name (single-account deployments declare links under it).
+	target := railTarget{Provider: name, Rail: name}
+	if scopes, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver); ok {
+		if tid, err := merchant.Require(ctx); err == nil {
+			scope, found, err := scopes.ActiveRailMerchantAccountScope(ctx, tid, name, s.railMerchantAccountEnvironment())
+			if err != nil {
+				log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			} else if found {
+				target.Scope = &scope
+				if key := strings.ToLower(strings.TrimSpace(scope.DisplayName)); key != "" {
+					target.Provider = key
+				}
+			}
+		}
+	}
+	return target, nil
+}
+
+// ResolveRailMerchantAccountID resolves the provider account for new work on
+// the given provider/rail name for provenance stamping. Returns nil when no resolver
+// is wired or nothing is armed — provenance is only ever stamped with a REAL
+// resolved account, never invented. Resolution failures are logged and
+// swallowed: stamping is metadata and must not block a sale.
+func (s *CheckoutService) ResolveRailMerchantAccountID(ctx context.Context, name string) *uuid.UUID {
 	if s == nil || s.ProviderSecrets == nil {
 		return nil
 	}
-	scopes, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver)
-	if !ok {
+	target, err := s.resolveRailTarget(ctx, name)
+	if err != nil || target.Scope == nil || target.Scope.ID == uuid.Nil {
 		return nil
 	}
-	rail = strings.ToLower(strings.TrimSpace(rail))
-	if rail == "" {
-		return nil
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil
-	}
-	scope, found, err := scopes.ActiveRailMerchantAccountScope(ctx, tid, rail, s.railMerchantAccountEnvironment())
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("rail", rail).Debug("checkout: provider-account resolution failed; leaving provenance unstamped")
-		return nil
-	}
-	if !found || scope.ID == uuid.Nil {
-		return nil
-	}
-	id := scope.ID
+	id := target.Scope.ID
 	return &id
 }
 
 // stampRailMerchantAccount pins resolved account provenance into ctx so the
 // payment / subscription / payment-method writes downstream of this checkout
 // flow stamp rail_merchant_account_id (#704).
-func (s *CheckoutService) stampRailMerchantAccount(ctx context.Context, rail string) context.Context {
-	if id := s.ResolveRailMerchantAccountID(ctx, rail); id != nil {
+func (s *CheckoutService) stampRailMerchantAccount(ctx context.Context, name string) context.Context {
+	if id := s.ResolveRailMerchantAccountID(ctx, name); id != nil {
 		return db.WithRailMerchantAccountID(ctx, *id)
 	}
 	return ctx
 }
 
-// resolveNMIClient arms the ctx merchant's NMI client from the armed rail
-// state (#788): the active scoped account's security_key. Fail closed — a
-// missing scope/secret errors; there is no boot-config fallback.
+// resolveNMIClient arms the ctx merchant's NMI client for the given provider
+// name (account key or bare rail): the resolved account's security_key. Fail
+// closed — a missing scope/secret errors; there is no boot-config fallback.
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	if s.ResolveNMIClientOverride != nil {
 		return s.ResolveNMIClientOverride(ctx, provider)
 	}
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider == "" {
-		return nil, errors.New("rail is required")
-	}
-	if !rails.IsNMI(models.Rail(provider)) {
-		return nil, fmt.Errorf("missing client")
-	}
 	if !s.scopedProviderSecretsEnabled() {
 		return nil, fmt.Errorf("merchant rail resolution is not configured")
 	}
-	// Environment follows test_mode (#681), same as the CCBill leg.
-	value, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key")
+	target, err := s.resolveRailTarget(ctx, provider)
 	if err != nil {
-		return nil, fmt.Errorf("load merchant NMI secret: %w", err)
+		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		return nil, fmt.Errorf("missing client")
+	}
+	var value string
+	if target.Scope != nil {
+		// Pinned to the resolved account's own secret.
+		name, err := merchants.RailMerchantAccountSecretName(target.Scope.Rail, target.Scope.Environment, target.Scope.AccountID, "security_key")
+		if err != nil {
+			return nil, err
+		}
+		v, ok, err := s.merchantSecret(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+		}
+		value = v
+	} else {
+		// Environment follows test_mode, same as the CCBill leg.
+		v, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key")
+		if err != nil {
+			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+		}
+		value = v
 	}
 	proc := &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
-	client, err := nmi.NewClient(provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
+	client, err := nmi.NewClient(target.Provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
 	if err != nil {
 		return nil, err
 	}
