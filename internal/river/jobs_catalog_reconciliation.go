@@ -401,7 +401,7 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 	priceByPlanID := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
-		// Account-keyed (#799): register every NMI account's plan link.
+		// Register every NMI account's plan link.
 		for _, nmiLink := range pr.RailAccountConfigs(models.RailNMI) {
 			if planID := strings.TrimSpace(nmiLink[models.RailKeyPlanID]); planID != "" {
 				planIDByOpenRailsPrice[pr.ID.String()] = planID

@@ -756,13 +756,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		mutable := mutableUpdate{IsActive: &active}
 		if !s.catalogRemoteWritesDisabled() {
 			adapters := s.providerAdapters()
-			for provider, ids := range updated.Rails {
-				// Account-keyed entry (#799): rail from the entry, key as fallback.
-				rail := strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))
-				if rail == "" {
-					rail = strings.ToLower(strings.TrimSpace(provider))
-				}
-				adapter, ok := adapters[rail]
+			for _, ids := range updated.Rails {
+				// Entries are account-keyed; the rail lives in the entry.
+				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
 				if !ok {
 					continue
 				}

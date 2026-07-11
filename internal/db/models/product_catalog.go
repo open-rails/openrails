@@ -218,16 +218,14 @@ const (
 	RailKeyCCBillRecurringBillingOption = "recurring_billing_option_id"
 	RailKeyStripePriceID                = "price_id"
 	RailKeyStripeProductID              = "product_id"
-	// RailKeyRail records the entry's rail inside an ACCOUNT-keyed entry
-	// (#799: prices.rails keys on the merchant's account key, e.g. "mobius";
-	// the rail lives in the entry so several accounts can share one rail).
+	// RailKeyRail is the rail (gateway) an entry's provider objects live on.
+	// prices.rails keys on the merchant's ACCOUNT key (e.g. "mobius") so
+	// several accounts can share one rail; every entry records its rail here.
 	RailKeyRail = "rail"
 )
 
 // RailLinkEntries returns every provider-link entry on the given rail, keyed
-// by account key (#799). An entry matches when its RailKeyRail field names the
-// rail, or its account key IS the rail name — the reserved gateways (stripe,
-// ccbill, solana) are their own account names.
+// by account key. Only the entry's RailKeyRail field decides membership.
 func RailLinkEntries(rails map[string]map[string]string, rail Rail) map[string]map[string]string {
 	if len(rails) == 0 {
 		return nil
@@ -235,10 +233,7 @@ func RailLinkEntries(rails map[string]map[string]string, rail Rail) map[string]m
 	want := string(rail)
 	var out map[string]map[string]string
 	for key, cfg := range rails {
-		if cfg == nil {
-			continue
-		}
-		if key != want && strings.TrimSpace(cfg[RailKeyRail]) != want {
+		if cfg == nil || strings.TrimSpace(cfg[RailKeyRail]) != want {
 			continue
 		}
 		if out == nil {
@@ -274,8 +269,10 @@ func (p *Price) HasRail(rail Rail) bool {
 	return len(RailLinkEntries(p.Rails, rail)) > 0
 }
 
-// GetNMIConfigForRail returns the NMI plan link for the given rail key (the
-// gateway rail, e.g. "nmi").
+// GetNMIConfigForRail returns the NMI plan link for the given rail (e.g.
+// "nmi"), whichever account key carries it. Several accounts on the rail is
+// ambiguous and reports no link — the caller fails loudly rather than
+// charging a plan on the wrong account.
 func (p *Price) GetNMIConfigForRail(railName string) (planID string, ok bool) {
 	config := p.GetRailConfig(Rail(railName))
 	if config == nil {
@@ -339,11 +336,18 @@ func (p *Price) GetStripeConfig() (priceID string, ok bool) {
 	return priceID, priceID != ""
 }
 
-// SetRailConfig sets the configuration for a specific rail
+// SetRailConfig sets the rail's provider-link entry under the rail-named
+// account key, stamping the rail into the entry (readers match on RailKeyRail
+// only). Account-named entries are written by the catalog apply, which knows
+// the account key.
 func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
 	if p.Rails == nil {
 		p.Rails = make(map[string]map[string]string)
 	}
+	if config == nil {
+		config = map[string]string{}
+	}
+	config[RailKeyRail] = string(rail)
 	p.Rails[string(rail)] = config
 }
 

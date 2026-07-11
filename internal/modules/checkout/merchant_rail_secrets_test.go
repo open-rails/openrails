@@ -226,6 +226,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 		ID: uuid.New(),
 		Rails: map[string]map[string]string{
 			"ccbill": {
+				models.RailKeyRail:           "ccbill",
 				models.RailKeyCCBillFormName: "premium",
 				models.RailKeyCCBillFlexID:   "flex-123",
 			},
