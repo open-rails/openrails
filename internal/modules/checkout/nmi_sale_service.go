@@ -77,9 +77,11 @@ func NewCheckoutNMISaleService(
 // A crash/timeout at ANY point leaves a pending/unknown intent the scheduled
 // executor/verifier resolves against the SAME order id — never a blind retry
 // under a fresh key, never a charged-but-unrecorded sale.
-func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, provider string) (*CheckoutResponse, error) {
+func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, target railTarget) (*CheckoutResponse, error) {
 	const idempOp = "nmi_sale"
-	provider = strings.TrimSpace(strings.ToLower(provider))
+	// Rows and intents speak rail vocabulary; the provider (account key) pins
+	// the NMI client.
+	provider := target.Rail
 	if provider == "" {
 		return nil, errors.New("rail is required")
 	}
@@ -87,8 +89,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("checkout sale intent executor not wired")
 	}
 	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.nmiClient(ctx, provider); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
+	if _, err := s.nmiClient(ctx, target.Provider); err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
 	}
 	if _, err := customerIDFromUser(user.ID); err != nil {
 		return nil, err
@@ -141,6 +143,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		PriceID:    &price.ID,
 		Payload: NMISalePayload{
 			Provider:            provider,
+			ProviderAccount:     target.Provider,
 			CustomerVaultID:     customerVaultID,
 			BillingID:           vaultBillingID,
 			AmountMicros:        price.Amount,

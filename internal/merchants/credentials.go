@@ -166,6 +166,7 @@ type railMerchantAccountSecretScope struct {
 	rail        string
 	environment string
 	accountID   string
+	displayName string
 	settings    map[string]any
 }
 
@@ -198,6 +199,7 @@ func (s railMerchantAccountSecretScope) exported() RailMerchantAccountScope {
 		Rail:        s.rail,
 		Environment: s.environment,
 		AccountID:   s.accountID,
+		DisplayName: s.displayName,
 		Settings:    settings,
 	}
 }
@@ -291,7 +293,47 @@ func (s *Service) activeRailMerchantAccountSecretScope(ctx context.Context, id m
 		accountID:   row.AccountID,
 		settings:    railMerchantAccountSettings(row.Evidence),
 	}
+	if row.DisplayName != nil {
+		scope.displayName = strings.TrimSpace(*row.DisplayName)
+	}
 	return scope, true, nil
+}
+
+// RailMerchantAccountScopeByKey resolves a declared, non-archived account by
+// its manifest account KEY (display_name, e.g. "mobius") for the given
+// environment. This is how the payment-provider vocabulary used by the catalog
+// and checkout resolves to a concrete account.
+func (s *Service) RailMerchantAccountScopeByKey(ctx context.Context, id merchant.ID, key, environment string) (RailMerchantAccountScope, bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(key) == "" {
+		return RailMerchantAccountScope{}, false, nil
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return RailMerchantAccountScope{}, false, fmt.Errorf("provider account environment must be live or test")
+	}
+	var scope railMerchantAccountSecretScope
+	var evidence []byte
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+				SELECT id, rail, environment, account_id, COALESCE(display_name, ''), evidence
+				  FROM openrails.rail_merchant_accounts
+				 WHERE merchant_id = $1::uuid
+				   AND lower(display_name) = lower($2)
+				   AND environment = $3
+				   AND archived = false
+				 ORDER BY created_at DESC, id DESC
+				 LIMIT 1
+			`, id.String(), strings.TrimSpace(key), environment).
+			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.displayName, &evidence)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RailMerchantAccountScope{}, false, nil
+	}
+	if err != nil {
+		return RailMerchantAccountScope{}, false, fmt.Errorf("load provider account by key %s/%s: %w", key, environment, err)
+	}
+	scope.settings = railMerchantAccountSettings(evidence)
+	return scope.exported(), true, nil
 }
 
 // railMerchantAccountSecretScopeByAccountID resolves the secret scope for a specific
@@ -306,13 +348,13 @@ func (s *Service) railMerchantAccountSecretScopeByAccountID(ctx context.Context,
 	var evidence []byte
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-				SELECT rail, environment, account_id, evidence
+				SELECT rail, environment, account_id, COALESCE(display_name, ''), evidence
 				  FROM openrails.rail_merchant_accounts
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND account_id = $3
 				 LIMIT 1
-			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &evidence)
+			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &scope.displayName, &evidence)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return railMerchantAccountSecretScope{}, false, nil

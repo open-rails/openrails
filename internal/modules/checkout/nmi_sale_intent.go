@@ -39,7 +39,11 @@ func NMISaleIdempotencyKey(checkoutIdempotencyKey string) string {
 // and the async verifier need to charge AND locally register the purchase
 // without the originating HTTP request.
 type NMISalePayload struct {
-	Provider        string `json:"provider"`
+	// Provider is the RAIL ("nmi") — local row vocabulary.
+	Provider string `json:"provider"`
+	// ProviderAccount is the payment provider (account key, e.g. "mobius")
+	// this charge runs through; "" resolves the rail's active account.
+	ProviderAccount string `json:"provider_account,omitempty"`
 	CustomerVaultID string `json:"customer_vault_id"`
 	// BillingID targets the exact stored card in the vault (#682); "" charges
 	// the vault's priority-1 entry (always correct for one-card-per-vault).
@@ -126,7 +130,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Rail))
+	client, err := h.Sale.nmiClient(ctx, nmiIntentClientName(p.ProviderAccount, intent.Rail))
 	if err != nil {
 		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
@@ -197,7 +201,7 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Sale.nmiClient(ctx, strings.ToLower(intent.Rail))
+	client, err := h.Sale.nmiClient(ctx, nmiIntentClientName(p.ProviderAccount, intent.Rail))
 	if err != nil {
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}

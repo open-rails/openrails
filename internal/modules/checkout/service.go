@@ -35,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -415,19 +414,23 @@ func (s *CheckoutService) processSubscription(
 	coverage *CoverageInfo,
 	rail string,
 ) (*CheckoutResponse, error) {
-	// Route to rail-specific handler based on config type detection
-	// This allows adding new NMI providers via config without code changes
+	// The requested name is a payment PROVIDER (account key, e.g. "mobius") or
+	// a rail; dispatch on the resolved rail, hand the provider to the leg.
+	target, err := s.resolveRailTarget(ctx, rail)
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case rail == "ccbill":
+	case target.Rail == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
-	case rails.IsNMI(models.Rail(rail)):
-		return s.processNMISubscription(ctx, req, user, price, product, coverage, rail)
-	case rail == "stripe":
+	case rails.IsNMI(models.Rail(target.Rail)):
+		return s.processNMISubscription(ctx, req, user, price, product, coverage, target)
+	case target.Rail == "stripe":
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
-	case rail == "solana":
+	case target.Rail == "solana":
 		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
 	default:
-		return nil, fmt.Errorf("unsupported rail: %s", rail)
+		return nil, fmt.Errorf("unsupported rail: %s", target.Rail)
 	}
 }
 
@@ -441,19 +444,23 @@ func (s *CheckoutService) processOneTimePurchase(
 	coverage *CoverageInfo,
 	rail string,
 ) (*CheckoutResponse, error) {
-	// Route to rail-specific handler based on config type detection
-	// This allows adding new NMI providers via config without code changes
+	// The requested name is a payment PROVIDER (account key) or a rail;
+	// dispatch on the resolved rail, hand the provider to the leg.
+	target, err := s.resolveRailTarget(ctx, rail)
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case rails.IsNMI(models.Rail(rail)):
-		return s.processNMISale(ctx, req, user, price, product, coverage, rail)
-	case rail == "solana":
+	case rails.IsNMI(models.Rail(target.Rail)):
+		return s.processNMISale(ctx, req, user, price, product, coverage, target)
+	case target.Rail == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
-	case rail == "ccbill":
+	case target.Rail == "ccbill":
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
-	case rail == "stripe":
+	case target.Rail == "stripe":
 		return s.processStripePayment(ctx, req, user, price)
 	default:
-		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", rail)
+		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", target.Rail)
 	}
 }
 
@@ -601,20 +608,19 @@ func (s *CheckoutService) processNMISubscription(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	rail string,
+	target railTarget,
 ) (*CheckoutResponse, error) {
-	provider := normalize.Lower(rail)
-	if provider == "" {
-		return nil, errors.New("rail is required")
-	}
-	nmiPlanID, err := requireNMIPlanForRail(price, provider)
+	// Rows and intents speak rail vocabulary; the provider (account key) picks
+	// the plan link and pins the NMI client.
+	provider := target.Rail
+	nmiPlanID, err := requireNMIPlanForTarget(price, target)
 	if err != nil {
 		return nil, err
 	}
 
 	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.resolveNMIClient(ctx, provider); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
+	if _, err := s.resolveNMIClient(ctx, target.Provider); err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
 	}
 
 	// Get idempotency key (client-provided or generated)
@@ -716,6 +722,7 @@ func (s *CheckoutService) processNMISubscription(
 		PriceID:    &price.ID,
 		Payload: NMISubscriptionCreatePayload{
 			Provider:               provider,
+			ProviderAccount:        target.Provider,
 			PlanID:                 nmiPlanID,
 			CustomerVaultID:        customerVaultID,
 			BillingID:              vaultBillingID,
@@ -1166,18 +1173,14 @@ func (s *CheckoutService) processNMISale(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
-	rail string,
+	target railTarget,
 ) (*CheckoutResponse, error) {
 	_ = coverage
 	if s.NMISaleService == nil {
 		return nil, errors.New("NMI sale service unavailable")
 	}
 	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_sale")
-	provider := normalize.Lower(rail)
-	if provider == "" {
-		return nil, errors.New("rail is required")
-	}
-	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey, provider)
+	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey, target)
 }
 
 // processSolanaPurchase handles Solana one-time purchases
@@ -1662,7 +1665,7 @@ func (s *CheckoutService) processUpgrade(
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
-	rail string,
+	target railTarget,
 ) (*CheckoutResponse, error) {
 	now := s.now()
 
@@ -1674,18 +1677,18 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// CCBill handles upgrades via their own Package Upgrade flow
-	if rail == "ccbill" {
+	if target.Rail == "ccbill" {
 		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
 	}
 
 	// Solana doesn't support subscriptions
-	if rail == "solana" {
+	if target.Rail == "solana" {
 		return nil, errors.New("solana does not support subscription upgrades")
 	}
 
 	// Only NMI-backed rails support programmatic upgrades
-	if !rails.IsNMI(models.Rail(rail)) {
-		return nil, fmt.Errorf("unsupported rail for upgrades: %s", rail)
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
 	}
 
 	// Get idempotency key (client-provided or generated)
@@ -1775,19 +1778,14 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
-	provider := normalize.Lower(rail)
-	if provider == "" {
-		err := errors.New("rail is required for upgrades")
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
+	provider := target.Rail
 	if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
 		err := errors.New("existing subscription missing current period end")
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 
-	nmiPlanID, err := requireNMIPlanForRail(newPrice, provider)
+	nmiPlanID, err := requireNMIPlanForTarget(newPrice, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1801,9 +1799,9 @@ func (s *CheckoutService) processUpgrade(
 	newPeriodEnd := now.Add(time.Duration(cycleHours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
 
-	client, err := s.resolveNMIClient(ctx, provider)
+	client, err := s.resolveNMIClient(ctx, target.Provider)
 	if err != nil {
-		err := fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
+		err := fmt.Errorf("NMI provider '%s' is not configured: %w", target.Provider, err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
@@ -2212,10 +2210,10 @@ func (s *CheckoutService) processDowngrade(
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
-	rail string,
+	target railTarget,
 ) (*CheckoutResponse, error) {
 	// CCBill handles downgrades via their own flow
-	if rail == "ccbill" {
+	if target.Rail == "ccbill" {
 		return &CheckoutResponse{
 			Status:  "blocked",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
@@ -2223,22 +2221,17 @@ func (s *CheckoutService) processDowngrade(
 	}
 
 	// Solana doesn't support subscriptions
-	if rail == "solana" {
+	if target.Rail == "solana" {
 		return nil, errors.New("solana does not support subscription downgrades")
 	}
 
 	// Only NMI-backed rails support programmatic downgrades
-	if !rails.IsNMI(models.Rail(rail)) {
-		return nil, fmt.Errorf("unsupported rail for downgrades: %s", rail)
-	}
-
-	provider := normalize.Lower(rail)
-	if provider == "" {
-		return nil, errors.New("rail is required for downgrades")
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		return nil, fmt.Errorf("unsupported rail for downgrades: %s", target.Rail)
 	}
 
 	// Validate the new price has NMI configuration
-	if _, err := requireNMIPlanForRail(newPrice, provider); err != nil {
+	if _, err := requireNMIPlanForTarget(newPrice, target); err != nil {
 		return nil, err
 	}
 
@@ -2849,14 +2842,17 @@ func (s *CheckoutService) processTierChangeNMI(
 		checkoutReq.PaymentMethodID = api.FormatPaymentMethodID(*existingSub.PaymentMethodID)
 	}
 
-	// Route to existing methods which handle the heavy lifting
+	// Route to existing methods which handle the heavy lifting. The existing
+	// subscription's rail resolves through arming to its payment provider.
+	target, err := s.resolveRailTarget(ctx, string(existingSub.Rail))
+	if err != nil {
+		return nil, err
+	}
 	var checkoutResp *CheckoutResponse
-	var err error
-
 	if action == "upgrade" {
-		checkoutResp, err = s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Rail))
+		checkoutResp, err = s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
 	} else {
-		checkoutResp, err = s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, string(existingSub.Rail))
+		checkoutResp, err = s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
 	}
 
 	if err != nil {
@@ -2975,19 +2971,32 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 	return tierResp
 }
 
-func requireNMIPlanForRail(price *models.Price, provider string) (string, error) {
-	provider = normalize.Lower(provider)
-	if provider == "" {
-		return "", errors.New("rail is required")
-	}
+// requireNMIPlanForTarget returns the NMI plan the resolved payment provider
+// charges for this price: the provider's own link entry (by account key), or
+// the rail-named entry when the manifest declared it under the rail. Never a
+// rail-wide scan — with several accounts on a rail, each provider's plan is
+// its own.
+func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, error) {
 	if price == nil {
 		return "", errors.New("price is required")
 	}
-	planID, ok := price.GetNMIConfigForRail(provider)
-	if !ok || strings.TrimSpace(planID) == "" {
-		return "", fmt.Errorf("price %s is missing NMI plan configuration for rail %s", price.ID, provider)
+	lookup := func(key string) (string, bool) {
+		cfg := price.Rails[key]
+		if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg[models.RailKeyRail]), target.Rail) {
+			return "", false
+		}
+		id := strings.TrimSpace(cfg[models.RailKeyPlanID])
+		return id, id != ""
 	}
-	return planID, nil
+	if id, ok := lookup(target.Provider); ok {
+		return id, nil
+	}
+	if target.Provider != target.Rail {
+		if id, ok := lookup(target.Rail); ok {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.Provider, target.Rail)
 }
 
 // captureStoredCredentialRef persists a stored-credential sequence anchor for

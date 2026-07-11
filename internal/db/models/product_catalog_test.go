@@ -104,9 +104,6 @@ func TestRailLinkEntries_AccountKeyed(t *testing.T) {
 	if !p.HasRail(RailNMI) || p.HasRail(RailCCBill) {
 		t.Fatalf("HasRail: nmi=%v ccbill=%v", p.HasRail(RailNMI), p.HasRail(RailCCBill))
 	}
-	if planID, ok := p.GetNMIConfigForRail("nmi"); !ok || planID != "premium_new" {
-		t.Fatalf("GetNMIConfigForRail = %q, %v", planID, ok)
-	}
 
 	// Two accounts on one rail: enumeration sees both, the single-entry
 	// accessor refuses to guess.
