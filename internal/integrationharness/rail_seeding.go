@@ -23,7 +23,7 @@ import (
 // rail_merchant_accounts rows + scoped secrets in the runtime's merchant
 // secret store. Everything downstream (checkout, webhooks, pulls, rebills)
 // then resolves it through the ONE Layer-C seam exactly like production.
-func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.RailMerchantAccountSet) {
+func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {
 	t.Helper()
 	if len(set) == 0 {
 		return
@@ -51,11 +51,11 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 			evidence = raw
 		}
 
-		id, nRail, nEnv, nAccount := merchants.RailMerchantAccountNaturalKey(rail, environment, accountID)
+		id, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
 		mctx := merchant.WithID(ctx, mid)
 		archived := proc.Archived
 		require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-			_, err := rt.DB.Gen(cctx).UpsertRailMerchantAccount(cctx, gen.UpsertRailMerchantAccountParams{
+			_, err := rt.DB.Gen(cctx).UpsertPSP(cctx, gen.UpsertPSPParams{
 				ID:          id,
 				MerchantID:  mid.UUID(),
 				Rail:        nRail,
@@ -71,7 +71,7 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 			if strings.TrimSpace(value) == "" {
 				continue
 			}
-			secretName, err := merchants.RailMerchantAccountSecretName(nRail, nEnv, nAccount, key)
+			secretName, err := merchants.PSPSecretName(nRail, nEnv, nAccount, key)
 			require.NoError(t, err)
 			_, err = store.Put(ctx, mid, secretName, value)
 			require.NoError(t, err, "seed secret %s", secretName)
@@ -81,7 +81,7 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 
 // railAccountSecrets maps a typed rail credential block onto the canonical
 // per-rail secret keys (#711 — same names the manifest/API writers store).
-func railAccountSecrets(proc *config.RailMerchantAccountConfig) map[string]string {
+func railAccountSecrets(proc *config.PSPConfig) map[string]string {
 	out := map[string]string{}
 	switch {
 	case proc.Stripe != nil:
@@ -101,7 +101,7 @@ func railAccountSecrets(proc *config.RailMerchantAccountConfig) map[string]strin
 
 // railAccountSettings maps the typed Solana block onto the rail-account
 // settings evidence shape (#711).
-func railAccountSettings(proc *config.RailMerchantAccountConfig) map[string]any {
+func railAccountSettings(proc *config.PSPConfig) map[string]any {
 	if proc.Solana == nil {
 		return nil
 	}

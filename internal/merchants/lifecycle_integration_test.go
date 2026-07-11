@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
 );
 
 
-CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
+CREATE TABLE IF NOT EXISTS openrails.psps (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -91,21 +91,21 @@ CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    rail_merchant_account_id uuid,
+    psp_id uuid,
     status text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.payments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    rail_merchant_account_id uuid,
+    psp_id uuid,
     status text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    rail_merchant_account_id uuid,
+    psp_id uuid,
     status text NOT NULL
 );
 
@@ -190,7 +190,7 @@ func newSvc(t *testing.T) *Service {
 func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, false)
 		ON CONFLICT (rail, environment, account_id) DO NOTHING
 	`, merchantID.String(), rail, environment, accountID)
@@ -200,7 +200,7 @@ func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID,
 func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, true)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = true
 	`, merchantID.String(), rail, environment, accountID)
@@ -215,12 +215,12 @@ func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *test
 
 	const accountID = "archived-nmi-account"
 	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
-	secretName, err := RailMerchantAccountSecretName("nmi", "live", accountID, "webhook_signing_secret")
+	secretName, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
-	_, ok, err := svc.ActiveRailMerchantAccountSecretName(ctx, tn.ID, "nmi", "live", "security_key")
+	_, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "live", "security_key")
 	require.ErrorIs(t, err, ErrNoActiveRailMerchantAccount)
 	require.False(t, ok)
 
@@ -247,7 +247,7 @@ func TestArchivedRailMerchantAccountDrainState(t *testing.T) {
 	require.Equal(t, int64(0), items[0].OpenObligations)
 
 	_, err = svc.pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, rail_merchant_account_id, status)
+		INSERT INTO openrails.subscriptions (merchant_id, psp_id, status)
 		VALUES ($1::uuid, $2::uuid, 'active')
 	`, tn.ID.String(), items[0].ID)
 	require.NoError(t, err)
@@ -337,7 +337,7 @@ func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
 	require.NoError(t, err)
 
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
-	secretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_test", "secret_key")
+	secretName, err := PSPSecretName("stripe", "live", "acct_test", "secret_key")
 	require.NoError(t, err)
 	sec, err := svc.secrets.Put(ctx, tn.ID, secretName, "sk_1")
 	require.NoError(t, err)
@@ -372,7 +372,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	// After resolution the caller loads THAT merchant's signing secret (the trust
 	// boundary), which is namespaced to the merchant.
 	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
-	secretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
+	secretName, err := PSPSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "whsec_acme")
 	require.NoError(t, err)

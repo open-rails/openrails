@@ -10,7 +10,7 @@ import (
 func TestParseMerchantConfigStrict(t *testing.T) {
 	valid := []byte(`
 display_name: Doujins
-accounts:
+psps:
   mobius:
     nmi:
       account_id: "579145"
@@ -22,8 +22,8 @@ accounts:
 	if err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
-	if len(m.RailMerchantAccounts) != 1 {
-		t.Fatalf("accounts = %d, want 1", len(m.RailMerchantAccounts))
+	if len(m.PSPs) != 1 {
+		t.Fatalf("accounts = %d, want 1", len(m.PSPs))
 	}
 
 	typo := []byte(`
@@ -45,7 +45,7 @@ rail_merchant_accounts:
       account_id: "579145"
 `)
 	_, err = ParseMerchantConfig(renamed)
-	if err == nil || !strings.Contains(err.Error(), "renamed to accounts") {
+	if err == nil || !strings.Contains(err.Error(), "renamed to psps") {
 		t.Fatalf("retired key must get a rename pointer, got: %v", err)
 	}
 }

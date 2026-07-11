@@ -109,7 +109,7 @@ func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscripti
 	if w.NMIResolver == nil {
 		return false
 	}
-	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, sub.RailMerchantAccountID)
+	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, sub.PspID)
 	return ok || err != nil
 }
 
@@ -323,11 +323,11 @@ func (w *DunningWorker) processSubscription(
 		}
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
-			MerchantID:            genSub.MerchantID,
-			Provider:              providerKey,
-			IntentType:            intents.TypeManualRebill,
-			SubscriptionID:        &sub.ID,
-			RailMerchantAccountID: sub.RailMerchantAccountID,
+			MerchantID:     genSub.MerchantID,
+			Provider:       providerKey,
+			IntentType:     intents.TypeManualRebill,
+			SubscriptionID: &sub.ID,
+			PspID:          sub.PspID,
 			Payload: intents.ManualRebillPayload{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
@@ -396,11 +396,11 @@ func (w *DunningWorker) processSubscription(
 	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:            genSub.MerchantID,
-		Provider:              providerKey,
-		IntentType:            intents.TypeManualRebill,
-		SubscriptionID:        &sub.ID,
-		RailMerchantAccountID: sub.RailMerchantAccountID,
+		MerchantID:     genSub.MerchantID,
+		Provider:       providerKey,
+		IntentType:     intents.TypeManualRebill,
+		SubscriptionID: &sub.ID,
+		PspID:          sub.PspID,
 		Payload: intents.ManualRebillPayload{
 			SubscriptionID: sub.ID,
 			PeriodEnd:      periodEnd,

@@ -13,12 +13,12 @@ import (
 
 func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	secretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	secretName, err := PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got := paymentProviderConfigFromRow(gen.OpenrailsRailMerchantAccount{
+	got := paymentProviderConfigFromRow(gen.OpenrailsPsp{
 		ID:             uuid.New(),
 		MerchantID:     uuid.New(),
 		Rail:           "stripe",
@@ -50,7 +50,7 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 }
 
 func TestRailMerchantAccountSecretNameRejectsMerchantWritableSolanaPrivateKey(t *testing.T) {
-	name, err := RailMerchantAccountSecretName("solana", "live", "authority", "private_key")
+	name, err := PSPSecretName("solana", "live", "authority", "private_key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestValidateScopedStripeCredentialDoesNotPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name, err := RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	name, err := PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	if err != nil {
 		t.Fatal(err)
 	}

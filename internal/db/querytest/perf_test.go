@@ -292,7 +292,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 		require.NoError(t, err)
 		_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 			ID: prid, ProductID: pid, MerchantID: merchantID, Amount: 1999, Currency: perfCurrency,
-			AutoRenew: false, Rails: []byte(`{}`), CreatedAt: now, UpdatedAt: now,
+			AutoRenew: false, PspLinks: []byte(`{}`), CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
 	}

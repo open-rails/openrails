@@ -25,7 +25,7 @@ type MerchantConfig = boot.MerchantConfig
 // embedded hosts can set it programmatically (#798).
 type InvoiceConfig = boot.InvoiceConfig
 type MerchantProfileConfig = boot.MerchantProfileConfig
-type RailMerchantAccountConfig = boot.RailMerchantAccountConfig
+type PSPConfig = boot.PSPConfig
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type RailMerchantAccountSignerConfig = boot.RailMerchantAccountSignerConfig
 type RemoteApplicationConfig = boot.RemoteApplicationConfig
@@ -136,7 +136,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 // policy, spend windows, remote-application trust) as opposed to a bare
 // identity bind.
 func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
-	return len(m.RailMerchantAccounts) > 0 ||
+	return len(m.PSPs) > 0 ||
 		m.RemoteApplication != nil ||
 		m.Invoice != nil ||
 		len(m.DelegatedInvokerWastedSpendWindows) > 0 ||

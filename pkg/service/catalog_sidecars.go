@@ -65,7 +65,7 @@ type CatalogCreditPurchasePriceSpec struct {
 	Ordinal    int             `json:"ordinal"`
 	CreditKey  string          `json:"credit_key"`
 	Currency   string          `json:"currency"`
-	Providers  []string        `json:"providers,omitempty"`
+	PSPs       []string        `json:"psps,omitempty"`
 	InputMin   int64           `json:"input_min,omitempty"`
 	InputMax   int64           `json:"input_max,omitempty"`
 	Round      string          `json:"round,omitempty"`
@@ -287,7 +287,7 @@ func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p
 		}
 		// rails is NOT NULL with a '{}' default; a nil slice encodes as SQL NULL
 		// and would violate the constraint, so coalesce to an empty array.
-		providers := spec.Providers
+		providers := spec.PSPs
 		if providers == nil {
 			providers = []string{}
 		}

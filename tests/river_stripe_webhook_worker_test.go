@@ -39,7 +39,7 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 	const accountID = "acct_river_e2e"
 	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")
 
-	keyName, err := merchants.RailMerchantAccountSecretName("stripe", env, accountID, "secret_key")
+	keyName, err := merchants.PSPSecretName("stripe", env, accountID, "secret_key")
 	require.NoError(t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, keyName, "sk_test_river_e2e")
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 
 	// Handler effect 2: the returned signing secret was persisted so inbound
 	// deliveries to this account verify.
-	secretName, err := merchants.RailMerchantAccountSecretName("stripe", env, accountID, "webhook_signing_secret")
+	secretName, err := merchants.PSPSecretName("stripe", env, accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	sec, err := suite.App.Runtime.Merchants.Secrets().Get(ctx, dbtest.TestMerchantID, secretName)
 	require.NoError(t, err)

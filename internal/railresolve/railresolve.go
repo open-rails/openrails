@@ -43,7 +43,7 @@ type Source interface {
 	// the ACTIVE account for new work; non-empty pins a declared account
 	// (inbound webhook routing #641 — may address archived accounts).
 	// Returns ErrRailNotArmed (wrapped) when nothing is armed.
-	RailConfig(ctx context.Context, rail string, accountID string) (*config.RailMerchantAccountConfig, error)
+	RailConfig(ctx context.Context, rail string, accountID string) (*config.PSPConfig, error)
 }
 
 // MerchantsSource is the production Source: scope rows via merchants.Service
@@ -92,38 +92,38 @@ func (s *MerchantsSource) Armed(ctx context.Context, rail string) (bool, error) 
 
 // scope resolves the merchant + account row. ok=false (nil err) means "no
 // account declared" — Armed treats that as unarmed; RailConfig fails closed.
-func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (merchant.ID, merchants.RailMerchantAccountScope, bool, error) {
+func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (merchant.ID, merchants.PSPScope, bool, error) {
 	rail = strings.ToLower(strings.TrimSpace(rail))
 	if rail == "" {
-		return merchant.ID{}, merchants.RailMerchantAccountScope{}, false, fmt.Errorf("rail is required")
+		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("rail is required")
 	}
 	svc := s.service()
 	if svc == nil {
-		return merchant.ID{}, merchants.RailMerchantAccountScope{}, false, fmt.Errorf("resolve rail %s: merchants service is not armed: %w", rail, ErrRailNotArmed)
+		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: merchants service is not armed: %w", rail, ErrRailNotArmed)
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return merchant.ID{}, merchants.RailMerchantAccountScope{}, false, fmt.Errorf("resolve rail %s: %w", rail, err)
+		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: %w", rail, err)
 	}
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
-		scope, ok, err := svc.RailMerchantAccountScopeByAccountID(ctx, mid, rail, accountID)
+		scope, ok, err := svc.PSPScopeByAccountID(ctx, mid, rail, accountID)
 		return mid, scope, ok, err
 	}
-	scope, ok, err := svc.ActiveRailMerchantAccountScope(ctx, mid, rail, s.environment())
+	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail, s.environment())
 	if errors.Is(err, merchants.ErrNoActiveRailMerchantAccount) {
-		return mid, merchants.RailMerchantAccountScope{}, false, nil
+		return mid, merchants.PSPScope{}, false, nil
 	}
 	return mid, scope, ok, err
 }
 
 // secret loads one scoped secret. found=false with nil err means genuinely
 // absent; backend errors surface as err.
-func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, bool, error) {
+func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
 	svc := s.service()
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 	if err != nil {
 		return "", false, err
 	}
@@ -141,7 +141,7 @@ func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope mer
 	return value, true, nil
 }
 
-func (s *MerchantsSource) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, error) {
+func (s *MerchantsSource) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
 	value, found, err := s.secret(ctx, mid, scope, key)
 	if err != nil {
 		return "", fmt.Errorf("load %s secret %s: %w", scope.Rail, key, err)
@@ -152,7 +152,7 @@ func (s *MerchantsSource) requireSecret(ctx context.Context, mid merchant.ID, sc
 	return value, nil
 }
 
-func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string) (*config.RailMerchantAccountConfig, error) {
+func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string) (*config.PSPConfig, error) {
 	mid, scope, ok, err := s.scope(ctx, rail, accountID)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 	if !ok {
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
-	out := &config.RailMerchantAccountConfig{
+	out := &config.PSPConfig{
 		Rail:        models.Rail(scope.Rail),
 		AccountID:   scope.AccountID,
 		Environment: scope.Environment,
@@ -250,21 +250,21 @@ func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMod
 	return out
 }
 
-// FixedSet is a static Source over an in-memory RailMerchantAccountSet — a
+// FixedSet is a static Source over an in-memory PSPSet — a
 // test stand-in for Layer B. Production graphs must never construct one.
-type FixedSet config.RailMerchantAccountSet
+type FixedSet config.PSPSet
 
 func (f FixedSet) Armed(_ context.Context, rail string) (bool, error) {
 	railType := models.Rail(strings.ToLower(strings.TrimSpace(rail)))
-	_, proc, err := config.RailMerchantAccountSet(f).ActiveRailByType(railType)
+	_, proc, err := config.PSPSet(f).ActiveRailByType(railType)
 	if err != nil {
 		return false, err
 	}
 	return proc != nil, nil
 }
 
-func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config.RailMerchantAccountConfig, error) {
-	set := config.RailMerchantAccountSet(f)
+func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config.PSPConfig, error) {
+	set := config.PSPSet(f)
 	railType := models.Rail(strings.ToLower(strings.TrimSpace(rail)))
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
 		if proc, ok := set.FindByAccountID(railType, accountID); ok && proc != nil {

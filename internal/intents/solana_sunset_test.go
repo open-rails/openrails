@@ -231,7 +231,7 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 		return &models.Price{
 			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "usd",
 			AccessDurationHours: &cycle, AutoRenew: true, Archived: archived,
-			Rails: map[string]map[string]string{
+			PSPLinks: map[string]map[string]string{
 				string(models.RailSolana): {models.RailKeyRail: "solana", "plan_pda": fx.pda},
 			},
 		}

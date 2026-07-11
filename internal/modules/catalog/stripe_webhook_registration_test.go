@@ -35,23 +35,23 @@ func TestReconcileManagedStripeWebhookStoresRailMerchantAccountSecret(t *testing
 	svc := newWebhookTestSvc(t, fake)
 	store := merchants.NewMemorySecretStore()
 	merchantID := merchant.ID(uuid.New())
-	secretKeyName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	secretKeyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
-	webhookName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
+	webhookName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		// Mint+persist is mode-2 (api) behavior; manifest mode refuses (#723).
-		Config:                &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
-		SecretStore:           store,
-		MerchantID:            merchantID,
-		MerchantSlug:          "acme",
-		ProviderEnvironment:   "live",
-		RailMerchantAccountID: "acct_123",
-		EnabledEvents:         []string{"invoice.paid"},
-		StripeBaseURL:         svc.BaseURL,
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
+		SecretStore:         store,
+		MerchantID:          merchantID,
+		MerchantSlug:        "acme",
+		ProviderEnvironment: "live",
+		PspID:               "acct_123",
+		EnabledEvents:       []string{"invoice.paid"},
+		StripeBaseURL:       svc.BaseURL,
 	})
 	require.NoError(t, err)
 	require.False(t, res.Skipped)
@@ -91,21 +91,21 @@ func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
 	svc := newWebhookTestSvc(t, fake)
 	store := merchants.NewMemorySecretStore()
 	merchantID := merchant.ID(uuid.New())
-	secretKeyName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	secretKeyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
 
 	// Empty MerchantSource = manifest (the default).
 	_, err = ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:                &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
-		SecretStore:           store,
-		MerchantID:            merchantID,
-		MerchantSlug:          "acme",
-		ProviderEnvironment:   "live",
-		RailMerchantAccountID: "acct_123",
-		EnabledEvents:         []string{"invoice.paid"},
-		StripeBaseURL:         svc.BaseURL,
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
+		SecretStore:         store,
+		MerchantID:          merchantID,
+		MerchantSlug:        "acme",
+		ProviderEnvironment: "live",
+		PspID:               "acct_123",
+		EnabledEvents:       []string{"invoice.paid"},
+		StripeBaseURL:       svc.BaseURL,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "webhook_signing_secret")
@@ -122,9 +122,9 @@ func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t 
 	svc := newWebhookTestSvc(t, fake)
 	store := merchants.NewMemorySecretStore()
 	merchantID := merchant.ID(uuid.New())
-	secretKeyName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "secret_key")
+	secretKeyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
-	webhookName, err := merchants.RailMerchantAccountSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
+	webhookName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
@@ -140,14 +140,14 @@ func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t 
 	}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:                &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
-		SecretStore:           store,
-		MerchantID:            merchantID,
-		MerchantSlug:          "acme",
-		ProviderEnvironment:   "live",
-		RailMerchantAccountID: "acct_123",
-		EnabledEvents:         []string{"invoice.paid"},
-		StripeBaseURL:         svc.BaseURL,
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
+		SecretStore:         store,
+		MerchantID:          merchantID,
+		MerchantSlug:        "acme",
+		ProviderEnvironment: "live",
+		PspID:               "acct_123",
+		EnabledEvents:       []string{"invoice.paid"},
+		StripeBaseURL:       svc.BaseURL,
 	})
 	require.NoError(t, err)
 	require.False(t, res.Skipped)

@@ -39,7 +39,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.rail_merchant_accounts (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-"+suffix)
 		// One product+price per sub (uq_subscriptions_customer_product_lifecycle
 		// forbids multiple live subs per customer/product).
@@ -47,7 +47,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 			exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				prodID, "prune-"+tag+"-"+suffix, "prune-tier-"+tag+"-"+suffix, merchantID)
 			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`, priceID, prodID, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, rail_merchant_account_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 			      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 				id, priceID, prodID, psub, paID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), customer, merchantID)
 		}
@@ -66,7 +66,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subKeep, subGone, subGrant})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceKeep, priceGone, priceGrant})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodKeep, prodGone, prodGrant})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_merchant_accounts WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, paID)
 			return nil
 		})
 	})
@@ -160,16 +160,16 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.rail_merchant_accounts (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-pay-"+suffix)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, rail_merchant_account_id)
+		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
 			payKeep, priceID, suffix, since.Add(24*time.Hour), customer, merchantID, paID)
-		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, rail_merchant_account_id)
+		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
 			payGone, priceID, suffix, since.Add(48*time.Hour), customer, merchantID, paID)
 		return nil
@@ -179,7 +179,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payKeep, payGone})
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_merchant_accounts WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, paID)
 			return nil
 		})
 	})

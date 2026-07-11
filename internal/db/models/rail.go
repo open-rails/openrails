@@ -4,7 +4,7 @@ package models
 
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
 // adapter per rail under internal/integrations/<rail>. A rail hosts 1..N
-// credentialed provider accounts (openrails.rail_merchant_accounts); e.g. "mobius"
+// credentialed provider accounts (openrails.psps); e.g. "mobius"
 // and "paykings" are provider-account NAMES on rail "nmi", not rails themselves.
 type Rail string
 

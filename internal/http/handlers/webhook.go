@@ -184,8 +184,8 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 			return
 		}
 		if err == nil && found {
-			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(db.WithRailMerchantAccountID(r.Request.Context(), pid))
+			if pid, ok, rerr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -367,7 +367,7 @@ func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment
 		return merchants.RailMerchantAccountIdentity{}, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
-	ctx = db.WithRailMerchantAccountID(ctx, account.ID)
+	ctx = db.WithPSPID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
 	return account, true
 }
@@ -395,8 +395,8 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		// Pin the routed account so records this event creates are stamped with it
 		// (overriding the repo's primary-default stamping).
 		if err == nil && found {
-			if pid, ok, rerr := r.State.Merchants.ResolveRailMerchantAccountID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-				r.Request = r.Request.WithContext(db.WithRailMerchantAccountID(r.Request.Context(), pid))
+			if pid, ok, rerr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
 			}
 		}
 	} else {
@@ -437,16 +437,16 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	}
 	signatureVerified := true
 	msg := &webhooks.WebhookMessage{
-		Rail:                  prepared.Rail,
-		EventID:               prepared.EventID,
-		EventType:             prepared.EventType,
-		Payload:               prepared.Body,
-		IPAddress:             r.ClientIP(),
-		Signature:             prepared.Signature,
-		SigningSecret:         signingKey,
-		SignatureValid:        &signatureVerified,
-		ReceivedAt:            time.Now(),
-		RailMerchantAccountID: accountID,
+		Rail:           prepared.Rail,
+		EventID:        prepared.EventID,
+		EventType:      prepared.EventType,
+		Payload:        prepared.Body,
+		IPAddress:      r.ClientIP(),
+		Signature:      prepared.Signature,
+		SigningSecret:  signingKey,
+		SignatureValid: &signatureVerified,
+		ReceivedAt:     time.Now(),
+		PspID:          accountID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
@@ -528,7 +528,7 @@ func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accoun
 		ReceivedAt: time.Now(),
 	}
 	if accountID != "" {
-		msg.RailMerchantAccountID = accountID
+		msg.PspID = accountID
 	}
 	return msg
 }

@@ -33,7 +33,7 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretR
 	}
 }
 
-func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchants.RailMerchantAccountSecretResolver) {
+func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -70,7 +70,7 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, envi
 	if err != nil {
 		return "", false, err
 	}
-	name, ok, err := s.ProviderSecrets.ActiveRailMerchantAccountSecretName(ctx, tid, rail, environment, key)
+	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, environment, key)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -81,9 +81,9 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
-// railMerchantAccountEnvironment is the environment provider-account rows carry in
+// pspEnvironment is the environment provider-account rows carry in
 // this deployment: test under test_mode, live otherwise (#641).
-func (s *CheckoutService) railMerchantAccountEnvironment() string {
+func (s *CheckoutService) pspEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
 }
 
@@ -92,9 +92,9 @@ func (s *CheckoutService) railMerchantAccountEnvironment() string {
 // requests name the provider; a bare rail name resolves through arming to THE
 // active provider on that rail, so the provider is always picked.
 type railTarget struct {
-	Provider string // account key: catalog provider_links key, plan lookup key
-	Rail     string // gateway rail: dispatch, row vocabulary (subscriptions.rail)
-	Scope    *merchants.RailMerchantAccountScope
+	PSP   string // PSP key: catalog psp_links key, plan lookup key
+	Rail  string // gateway rail: dispatch, row vocabulary (subscriptions.rail)
+	Scope *merchants.PSPScope
 }
 
 // knownRails are the gateway rails checkout can dispatch to.
@@ -117,14 +117,14 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	_, isRail := knownRails[name]
 
 	// Declared account key wins (a rail-named account resolves identically).
-	if keys, ok := s.ProviderSecrets.(merchants.RailMerchantAccountKeyResolver); ok {
+	if keys, ok := s.ProviderSecrets.(merchants.PSPKeyResolver); ok {
 		if tid, err := merchant.Require(ctx); err == nil {
-			scope, found, err := keys.RailMerchantAccountScopeByKey(ctx, tid, name, s.railMerchantAccountEnvironment())
+			scope, found, err := keys.PSPScopeByKey(ctx, tid, name, s.pspEnvironment())
 			if err != nil {
 				return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
 			}
 			if found {
-				return railTarget{Provider: name, Rail: scope.Rail, Scope: &scope}, nil
+				return railTarget{PSP: name, Rail: scope.Rail, Scope: &scope}, nil
 			}
 		}
 	}
@@ -136,16 +136,16 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	// Bare rail: arming picks the provider. The active account's key becomes
 	// the provider so plan links resolve; an unwired resolver leaves the rail
 	// name (single-account deployments declare links under it).
-	target := railTarget{Provider: name, Rail: name}
-	if scopes, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver); ok {
+	target := railTarget{PSP: name, Rail: name}
+	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
 		if tid, err := merchant.Require(ctx); err == nil {
-			scope, found, err := scopes.ActiveRailMerchantAccountScope(ctx, tid, name, s.railMerchantAccountEnvironment())
+			scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
 			if err != nil {
 				log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
 			} else if found {
 				target.Scope = &scope
 				if key := strings.ToLower(strings.TrimSpace(scope.DisplayName)); key != "" {
-					target.Provider = key
+					target.PSP = key
 				}
 			}
 		}
@@ -153,12 +153,12 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	return target, nil
 }
 
-// ResolveRailMerchantAccountID resolves the provider account for new work on
+// ResolvePSPID resolves the provider account for new work on
 // the given provider/rail name for provenance stamping. Returns nil when no resolver
 // is wired or nothing is armed — provenance is only ever stamped with a REAL
 // resolved account, never invented. Resolution failures are logged and
 // swallowed: stamping is metadata and must not block a sale.
-func (s *CheckoutService) ResolveRailMerchantAccountID(ctx context.Context, name string) *uuid.UUID {
+func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) *uuid.UUID {
 	if s == nil || s.ProviderSecrets == nil {
 		return nil
 	}
@@ -170,12 +170,12 @@ func (s *CheckoutService) ResolveRailMerchantAccountID(ctx context.Context, name
 	return &id
 }
 
-// stampRailMerchantAccount pins resolved account provenance into ctx so the
+// stampPSP pins resolved account provenance into ctx so the
 // payment / subscription / payment-method writes downstream of this checkout
-// flow stamp rail_merchant_account_id (#704).
-func (s *CheckoutService) stampRailMerchantAccount(ctx context.Context, name string) context.Context {
-	if id := s.ResolveRailMerchantAccountID(ctx, name); id != nil {
-		return db.WithRailMerchantAccountID(ctx, *id)
+// flow stamp psp_id (#704).
+func (s *CheckoutService) stampPSP(ctx context.Context, name string) context.Context {
+	if id := s.ResolvePSPID(ctx, name); id != nil {
+		return db.WithPSPID(ctx, *id)
 	}
 	return ctx
 }
@@ -200,7 +200,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	var value string
 	if target.Scope != nil {
 		// Pinned to the resolved account's own secret.
-		name, err := merchants.RailMerchantAccountSecretName(target.Scope.Rail, target.Scope.Environment, target.Scope.AccountID, "security_key")
+		name, err := merchants.PSPSecretName(target.Scope.Rail, target.Scope.Environment, target.Scope.AccountID, "security_key")
 		if err != nil {
 			return nil, err
 		}
@@ -214,7 +214,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		value = v
 	} else {
 		// Environment follows test_mode, same as the CCBill leg.
-		v, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.railMerchantAccountEnvironment(), "security_key")
+		v, ok, err := s.merchantProviderSecret(ctx, string(models.RailNMI), s.pspEnvironment(), "security_key")
 		if err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
@@ -223,8 +223,8 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		}
 		value = v
 	}
-	proc := &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
-	client, err := nmi.NewClient(target.Provider, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
+	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
+	client, err := nmi.NewClient(target.PSP, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 }
 
 func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
-	scopeResolver, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver)
+	scopeResolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver)
 	if !ok {
 		return nil, errors.New("missing scoped merchant CCBill provider account resolver")
 	}
@@ -263,8 +263,8 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	// Environment follows test_mode (#641/#668): sandbox deployments declare
 	// environment=test rows (ValidateRailSet enforces it), so a hardcoded
 	// "live" here can never resolve under test_mode.
-	env := s.railMerchantAccountEnvironment()
-	scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailCCBill), env)
+	env := s.pspEnvironment()
+	scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill), env)
 	if err != nil {
 		return nil, err
 	}

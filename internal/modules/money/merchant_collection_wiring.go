@@ -106,7 +106,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
 	mid := merchant.ID(method.MerchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.RailMerchantAccountID)
+	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.PspID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -129,16 +129,16 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 // provenance account when present (archived stays addressable for existing
 // obligations, #655), else the pull scope (active for new work, else newest
 // archived for drain — the #699 resolver).
-func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc *merchants.Service, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.RailMerchantAccountScope, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc *merchants.Service, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
 	if stamped != nil {
-		row, err := b.DB.Gen(ctx).GetRailMerchantAccount(ctx, *stamped)
+		row, err := b.DB.Gen(ctx).GetPSP(ctx, *stamped)
 		if err != nil {
-			return merchants.RailMerchantAccountScope{}, false, fmt.Errorf("load stamped provider account: %w", err)
+			return merchants.PSPScope{}, false, fmt.Errorf("load stamped provider account: %w", err)
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
-			return merchants.RailMerchantAccountScope{}, false, fmt.Errorf("stamped provider account %s is on rail %s, not %s", row.ID, row.Rail, rail)
+			return merchants.PSPScope{}, false, fmt.Errorf("stamped provider account %s is on rail %s, not %s", row.ID, row.Rail, rail)
 		}
-		return merchants.RailMerchantAccountScope{
+		return merchants.PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
 		}, true, nil
 	}
@@ -173,7 +173,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 	return client, true, nil
 }
 
-func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.RailMerchantAccountScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	secretKey, err := b.requireSecret(ctx, svc, mid, scope, "secret_key")
 	if err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 	return NewStripeCollectionAdapter(b.DB, service), nil
 }
 
-func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.RailMerchantAccountScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	client, err := b.nmiClient(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
@@ -208,7 +208,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *
 
 // nmiClient builds the store-armed NMI client for scope — shared by the
 // collection adapter and the #727 manual-rebill leg.
-func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.RailMerchantAccountScope) (*nmi.NMIClient, error) {
+func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	securityKey, err := b.requireSecret(ctx, svc, mid, scope, "security_key")
 	if err != nil {
 		return nil, err
@@ -238,11 +238,11 @@ func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, svc *m
 
 // secret loads one scoped secret. found=false with nil err means the secret is
 // genuinely absent; backend errors surface as err.
-func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
 	if svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 	if err != nil {
 		return "", false, err
 	}
@@ -262,9 +262,9 @@ func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merc
 
 // requireSecret is secret plus the fail-closed contract: a declared account
 // with a missing/unreadable secret errors the charge — never boot fallback.
-func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, error) {
+func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
 	value, found, err := b.secret(ctx, svc, mid, scope, key)
-	name, _ := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 	if err != nil {
 		return "", fmt.Errorf("merchant %s rail %s: secret %s backend failed: %w", mid.String(), scope.Rail, name, err)
 	}

@@ -220,8 +220,8 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	reviewText := buildPriceChangeReviewText(current.Currency, current.Amount, args.NewAmount, affected, mode, effectiveAt, now)
 
-	providers := make([]string, 0, len(current.Rails))
-	for provider := range current.Rails {
+	providers := make([]string, 0, len(current.PSPLinks))
+	for provider := range current.PSPLinks {
 		providers = append(providers, provider)
 	}
 

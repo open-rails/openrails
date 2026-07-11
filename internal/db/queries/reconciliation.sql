@@ -321,7 +321,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, status,
@@ -329,7 +329,7 @@ SELECT id, customer_id, rail, transaction_id, amount, status,
 FROM openrails.payments
 WHERE rail::text = ANY (sqlc.arg(rails)::text[])
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
-  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
 
 -- name: ReconcileListPaymentMethodsByRails :many
 -- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
@@ -338,7 +338,7 @@ SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_typ
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid);
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -348,10 +348,10 @@ FROM openrails.solana_subscriptions;
 -- materializer maps a remote plan id onto the local price whose rails
 -- jsonb carries that id under the provider's key. Archived prices stay
 -- (grandfathered subscriptions bill them).
--- name: ReconcileListPricesWithRails :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, rails
+-- name: ReconcileListPricesWithPSPLinks :many
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, psp_links
 FROM openrails.prices
-WHERE rails IS NOT NULL;
+WHERE psp_links IS NOT NULL;
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
@@ -392,7 +392,7 @@ WHERE NOT EXISTS (
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, rail_merchant_account_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -400,7 +400,7 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
+    sqlc.arg(customer_id), sqlc.narg(psp_id)
 )
 ON CONFLICT DO NOTHING;
 
@@ -410,7 +410,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, rail_merchant_account_id, reversal_kind
+    customer_id, psp_id, reversal_kind
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -419,7 +419,7 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id), 'refund'
+    sqlc.arg(customer_id), sqlc.narg(psp_id), 'refund'
 )
 ON CONFLICT DO NOTHING;
 
@@ -439,7 +439,7 @@ WHERE id = sqlc.arg(id) AND status <> 'refunded';
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, rail_merchant_account_id
+    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, psp_id
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
        sqlc.arg(rail), sqlc.arg(rail_subscription_id),
@@ -447,7 +447,7 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(rail_merchant_account_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(psp_id)
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
@@ -455,7 +455,7 @@ WHERE pr.id = sqlc.arg(price_id)
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.rail = ANY (sqlc.arg(rails)::text[])
-        AND (sqlc.narg(rail_merchant_account_id)::uuid IS NULL OR s.rail_merchant_account_id = sqlc.narg(rail_merchant_account_id)::uuid)
+        AND (sqlc.narg(psp_id)::uuid IS NULL OR s.psp_id = sqlc.narg(psp_id)::uuid)
   )
 RETURNING id, entitlements_spec_snapshot;
 
@@ -534,7 +534,7 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.rail_merchant_account_id IS NULL OR w.rail_merchant_account_id = s.rail_merchant_account_id)
+              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s

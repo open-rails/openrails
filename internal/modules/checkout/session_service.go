@@ -81,7 +81,7 @@ type checkoutSessionExecutor interface {
 // resolve the active provider account for new work on a rail, or nil.
 // Satisfied by *CheckoutService; test fakes may omit it.
 type railMerchantAccountIDResolver interface {
-	ResolveRailMerchantAccountID(ctx context.Context, rail string) *uuid.UUID
+	ResolvePSPID(ctx context.Context, rail string) *uuid.UUID
 }
 
 type solanaPaymentService interface {
@@ -399,14 +399,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 
 	// #704: resolve the active provider account for the selected rail and pin it
 	// on the session + into ctx so payment/subscription/payment-method rows this
-	// flow creates carry rail_merchant_account_id provenance. nil when no
+	// flow creates carry psp_id provenance. nil when no
 	// resolver / no active account — never invented.
-	var railMerchantAccountID *uuid.UUID
+	var pspID *uuid.UUID
 	if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-		railMerchantAccountID = resolver.ResolveRailMerchantAccountID(ctx, rail)
+		pspID = resolver.ResolvePSPID(ctx, rail)
 	}
-	if railMerchantAccountID != nil {
-		ctx = db.WithRailMerchantAccountID(ctx, *railMerchantAccountID)
+	if pspID != nil {
+		ctx = db.WithPSPID(ctx, *pspID)
 	}
 
 	now := s.now()
@@ -415,24 +415,24 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ttl = redirectCheckoutSessionTTL
 	}
 	session := &models.CheckoutSession{
-		ID:                    uuidutil.NewV7(),
-		CustomerID:            identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:               price.ID,
-		Mode:                  mode,
-		Rail:                  models.Rail(rail),
-		Status:                models.CheckoutSessionStatusCreated,
-		Amount:                price.Amount,
-		Currency:              price.Currency,
-		ExpiresAt:             timePtr(now.Add(ttl)),
-		Metadata:              normalizeMetadata(req.Metadata),
-		RailFields:            s.buildRailFields(rail, &req.Payment),
-		RailState:             map[string]any{},
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		RailMerchantAccountID: railMerchantAccountID,
-		LastFour:              &req.Payment.LastFour,
-		CardType:              &req.Payment.CardType,
-		ExpiryDate:            &req.Payment.ExpiryDate,
+		ID:         uuidutil.NewV7(),
+		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
+		PriceID:    price.ID,
+		Mode:       mode,
+		Rail:       models.Rail(rail),
+		Status:     models.CheckoutSessionStatusCreated,
+		Amount:     price.Amount,
+		Currency:   price.Currency,
+		ExpiresAt:  timePtr(now.Add(ttl)),
+		Metadata:   normalizeMetadata(req.Metadata),
+		RailFields: s.buildRailFields(rail, &req.Payment),
+		RailState:  map[string]any{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		PspID:      pspID,
+		LastFour:   &req.Payment.LastFour,
+		CardType:   &req.Payment.CardType,
+		ExpiryDate: &req.Payment.ExpiryDate,
 	}
 
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
@@ -514,14 +514,14 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 
 	// #704: carry the session's pinned provider-account provenance into the
 	// confirm flow (falling back to a fresh resolution for older sessions).
-	stampID := session.RailMerchantAccountID
+	stampID := session.PspID
 	if stampID == nil {
 		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-			stampID = resolver.ResolveRailMerchantAccountID(ctx, rail)
+			stampID = resolver.ResolvePSPID(ctx, rail)
 		}
 	}
 	if stampID != nil {
-		ctx = db.WithRailMerchantAccountID(ctx, *stampID)
+		ctx = db.WithPSPID(ctx, *stampID)
 	}
 
 	switch rail {
@@ -775,7 +775,7 @@ func priceHasSolanaRecurring(price *models.Price) bool {
 	if price == nil {
 		return false
 	}
-	cfg := price.GetRailConfig(models.RailSolana)
+	cfg := price.PSPLinkForRail(models.RailSolana)
 	if cfg == nil {
 		return false
 	}
@@ -891,7 +891,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.GetRailConfig(models.RailSolana))
+	terms, err := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -965,7 +965,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.GetRailConfig(models.RailSolana))
+	terms, err := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -1293,7 +1293,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 	if !newPrice.IsPurchasable() {
 		return nil, fmt.Errorf("%w: target price is not available", ErrCheckoutSessionValidation)
 	}
-	newTerms, err := parseSolanaPlanTerms(newPrice.GetRailConfig(models.RailSolana))
+	newTerms, err := parseSolanaPlanTerms(newPrice.PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return nil, fmt.Errorf("%w: target price is not configured for Solana recurring billing", ErrCheckoutSessionValidation)
 	}

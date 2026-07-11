@@ -37,7 +37,7 @@ func newSolanaTestMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 		id.UUID(), slug)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`, id.UUID())
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE merchant_id = $1`, id.UUID())
 		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, id.UUID())
 	})
 	return id
@@ -52,7 +52,7 @@ func seedSolanaRailAccount(t *testing.T, dbi *db.DB, mid merchant.ID, accountID 
 	raw, err := json.Marshal(evidence)
 	require.NoError(t, err)
 	_, err = dbi.Pool().Exec(context.Background(), `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'solana', 'live', $2, false, $3::jsonb)
 	`, mid.String(), accountID, raw)
 	require.NoError(t, err)

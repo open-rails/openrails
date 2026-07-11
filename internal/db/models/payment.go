@@ -31,9 +31,9 @@ type Payment struct {
 	Currency   string `json:"currency"`
 	Status     string `json:"status"`
 
-	// RailMerchantAccountID is the provider account (openrails.rail_merchant_accounts.id)
+	// PspID is the provider account (openrails.psps.id)
 	// that processed this charge (#641). Nil for legacy rows / unresolved accounts.
-	RailMerchantAccountID *uuid.UUID `json:"rail_merchant_account_id,omitempty"`
+	PspID *uuid.UUID `json:"psp_id,omitempty"`
 
 	// Card snapshot of the payment method used for this charge, captured from
 	// Stripe charge.succeeded / payment_method.attached webhooks. Immutable per

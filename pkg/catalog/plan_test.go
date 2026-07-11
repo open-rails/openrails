@@ -167,13 +167,13 @@ products:
     tier_group: cozy
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1200, duration: 30d, auto_renew: true, providers: [stripe]}
+      - {currency: usd, unit_amount: 1200, duration: 30d, auto_renew: true, psps: [stripe]}
   - key: craftsman
     display_name: Craftsman
     tier_group: cozy
     tier_rank: 2
     prices:
-      - {currency: usd, unit_amount: 1300, duration: 30d, auto_renew: true, providers: [stripe]}
+      - {currency: usd, unit_amount: 1300, duration: 30d, auto_renew: true, psps: [stripe]}
 `
 
 func TestPlan_CreateWhenEmpty(t *testing.T) {
@@ -193,7 +193,7 @@ func TestPlan_CreateWhenEmpty(t *testing.T) {
 			t.Fatalf("%s: want 1 price create, got %+v", key, pp.Prices)
 		}
 		// providers are carried explicitly from the price onto the create request.
-		if got := pp.Prices[0].CreateReq.Providers; len(got) != 1 || got[0] != "stripe" {
+		if got := pp.Prices[0].CreateReq.PSPs; len(got) != 1 || got[0] != "stripe" {
 			t.Fatalf("%s: providers not set on create req: %v", key, got)
 		}
 	}
@@ -306,7 +306,7 @@ products:
   - key: premium
     display_name: Premium
     prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [solana], archived: true}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [solana], archived: true}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)
@@ -335,7 +335,7 @@ products:
   - key: premium
     display_name: Premium
     prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, providers: [mobius], trial: {unit_amount: 100, duration: 7d}}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius], trial: {unit_amount: 100, duration: 7d}}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)

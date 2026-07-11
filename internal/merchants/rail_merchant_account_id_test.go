@@ -8,7 +8,7 @@ import "testing"
 // unique index canonicalize it — so the id is identical across environments and
 // fresh rebuilds, and the returned components are exactly what the row stores.
 func TestRailMerchantAccountID(t *testing.T) {
-	base := RailMerchantAccountID("nmi", "live", "945280-0000")
+	base := PspID("nmi", "live", "945280-0000")
 
 	// Canonicalization: rail case/whitespace, and environment aliases, are
 	// normalized before hashing (matching lower(rail) + the live/test mapping).
@@ -22,27 +22,27 @@ func TestRailMerchantAccountID(t *testing.T) {
 		{"nmi", "live", " 945280-0000 "},     // account_id trimmed
 	}
 	for _, c := range same {
-		if got := RailMerchantAccountID(c.rail, c.env, c.acct); got != base {
+		if got := PspID(c.rail, c.env, c.acct); got != base {
 			t.Fatalf("(%q,%q,%q) must derive the same id as the canonical key", c.rail, c.env, c.acct)
 		}
 	}
 
 	// Each natural-key component participates.
-	if RailMerchantAccountID("stripe", "live", "945280-0000") == base {
+	if PspID("stripe", "live", "945280-0000") == base {
 		t.Fatal("rail must change the id")
 	}
-	if RailMerchantAccountID("nmi", "test", "945280-0000") == base {
+	if PspID("nmi", "test", "945280-0000") == base {
 		t.Fatal("environment must change the id")
 	}
-	if RailMerchantAccountID("nmi", "live", "945280-0001") == base {
+	if PspID("nmi", "live", "945280-0001") == base {
 		t.Fatal("account_id must change the id")
 	}
 
 	// The natural-key helper returns the id plus the exact normalized components
 	// the upsert stores, so the id corresponds 1:1 to the unique index.
-	id, nRail, nEnv, nAcct := RailMerchantAccountNaturalKey("NMI", "production", " 945280-0000 ")
+	id, nRail, nEnv, nAcct := PSPNaturalKey("NMI", "production", " 945280-0000 ")
 	if id != base {
-		t.Fatal("RailMerchantAccountNaturalKey id must match RailMerchantAccountID")
+		t.Fatal("PSPNaturalKey id must match PspID")
 	}
 	if nRail != "nmi" || nEnv != "live" || nAcct != "945280-0000" {
 		t.Fatalf("normalized components = (%q,%q,%q); want (nmi,live,945280-0000)", nRail, nEnv, nAcct)

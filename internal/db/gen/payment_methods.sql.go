@@ -154,7 +154,7 @@ const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
-    metadata, created_at, updated_at, rail_merchant_account_id, rebill_driver
+    metadata, created_at, updated_at, psp_id, rebill_driver
 ) VALUES (
     $1, $4::uuid, $2, $3, $5, $6,
     $7, $8, $9, $10,
@@ -167,21 +167,21 @@ INSERT INTO openrails.payment_methods (
 `
 
 type CreatePaymentMethodParams struct {
-	ID                    uuid.UUID
-	CustomerID            uuid.UUID
-	Rail                  string
-	MerchantID            uuid.UUID
-	RailCustomerRef       string
-	RailMethodRef         string
-	InitialTransactionID  string
-	LastFour              *string
-	CardType              *string
-	ExpiryDate            *string
-	Metadata              []byte
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	RailMerchantAccountID *uuid.UUID
-	RebillDriver          string
+	ID                   uuid.UUID
+	CustomerID           uuid.UUID
+	Rail                 string
+	MerchantID           uuid.UUID
+	RailCustomerRef      string
+	RailMethodRef        string
+	InitialTransactionID string
+	LastFour             *string
+	CardType             *string
+	ExpiryDate           *string
+	Metadata             []byte
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	PspID                *uuid.UUID
+	RebillDriver         string
 }
 
 // openrails.payment_methods.
@@ -200,7 +200,7 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 		arg.Metadata,
 		arg.CreatedAt,
 		arg.UpdatedAt,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.RebillDriver,
 	)
 	if err != nil {
@@ -222,7 +222,7 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, id uuid.UUID) (int64,
 }
 
 const getPaymentMethodByID = `-- name: GetPaymentMethodByID :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1
 `
 
 func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (OpenrailsPaymentMethod, error) {
@@ -240,7 +240,7 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (Openr
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.RailMerchantAccountID,
+		&i.PspID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.RebillDriver,
@@ -251,7 +251,7 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (Openr
 }
 
 const getPaymentMethodByRailInstrument = `-- name: GetPaymentMethodByRailInstrument :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.merchant_id = $1
   AND pm.rail = $2
   AND pm.rail_customer_ref = $3
@@ -294,7 +294,7 @@ func (q *Queries) GetPaymentMethodByRailInstrument(ctx context.Context, arg GetP
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.RailMerchantAccountID,
+		&i.PspID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.RebillDriver,
@@ -305,7 +305,7 @@ func (q *Queries) GetPaymentMethodByRailInstrument(ctx context.Context, arg GetP
 }
 
 const getPaymentMethodByRailMethodRef = `-- name: GetPaymentMethodByRailMethodRef :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.rail = $1 AND pm.rail_method_ref = $2
 LIMIT 1
 `
@@ -330,7 +330,7 @@ func (q *Queries) GetPaymentMethodByRailMethodRef(ctx context.Context, arg GetPa
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.RailMerchantAccountID,
+		&i.PspID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.RebillDriver,
@@ -382,7 +382,7 @@ func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, ids []
 }
 
 const listPaymentMethodsByCustomer = `-- name: ListPaymentMethodsByCustomer :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 `
@@ -408,7 +408,7 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, customerID u
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,
@@ -426,7 +426,7 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, customerID u
 }
 
 const listPaymentMethodsByCustomerPaged = `-- name: ListPaymentMethodsByCustomerPaged :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 LIMIT NULLIF($3::int, 0) OFFSET $2::int
@@ -459,7 +459,7 @@ func (q *Queries) ListPaymentMethodsByCustomerPaged(ctx context.Context, arg Lis
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,
@@ -477,7 +477,7 @@ func (q *Queries) ListPaymentMethodsByCustomerPaged(ctx context.Context, arg Lis
 }
 
 const listPaymentMethodsByCustomerRails = `-- name: ListPaymentMethodsByCustomerRails :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
   AND pm.rail = ANY($2::text[])
 ORDER BY pm.created_at DESC
@@ -509,7 +509,7 @@ func (q *Queries) ListPaymentMethodsByCustomerRails(ctx context.Context, arg Lis
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,
@@ -527,7 +527,7 @@ func (q *Queries) ListPaymentMethodsByCustomerRails(ctx context.Context, arg Lis
 }
 
 const listPaymentMethodsByIDs = `-- name: ListPaymentMethodsByIDs :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPaymentMethod, error) {
@@ -551,7 +551,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,
@@ -569,7 +569,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 }
 
 const listPaymentMethodsByRail = `-- name: ListPaymentMethodsByRail :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.rail = $1
 ORDER BY pm.created_at DESC
 `
@@ -595,7 +595,7 @@ func (q *Queries) ListPaymentMethodsByRail(ctx context.Context, rail string) ([]
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,
@@ -613,7 +613,7 @@ func (q *Queries) ListPaymentMethodsByRail(ctx context.Context, rail string) ([]
 }
 
 const listPaymentMethodsByRails = `-- name: ListPaymentMethodsByRails :many
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, rail_merchant_account_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref FROM openrails.payment_methods pm
 WHERE pm.rail = ANY($1::text[])
 ORDER BY pm.created_at DESC
 `
@@ -639,7 +639,7 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, rails []string)
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
 			&i.RebillDriver,

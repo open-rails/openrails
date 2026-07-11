@@ -12,9 +12,9 @@ const MerchantBillingEnvPrefix = "BILLING_"
 // It is schema-aware so single underscores can be used without array indexes:
 //
 //	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME
-//	-> merchants.doujins.accounts.ccbill.ccbill.secrets.datalink_username
+//	-> merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username
 //	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
-//	-> merchants.doujins.accounts.mobius.nmi.secrets.security_key
+//	-> merchants.doujins.psps.mobius.nmi.secrets.security_key
 //	BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS
 //	-> merchants.doujins.delegated_invoker_wasted_spend_windows (JSON list value)
 //
@@ -50,7 +50,7 @@ func MerchantBillingEnvKey(envName string) string {
 		if len(rest) > 0 {
 			return base + "." + strings.ToLower(strings.Join(rest, "_"))
 		}
-	case "accounts":
+	case "psps":
 		return providerAccountEnvKey(base, rest)
 	}
 	return ""
@@ -64,7 +64,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		{"DISPLAY_NAME", "display_name"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
-		{"ACCOUNTS", "accounts"},
+		{"PSPS", "psps"},
 		{"DELEGATED_INVOKER_WASTED_SPEND_WINDOWS", "delegated_invoker_wasted_spend_windows"},
 	}
 	for i := range tokens {
@@ -116,9 +116,9 @@ func providerAccountEnvKey(base string, tokens []string) string {
 }
 
 // rejectRenamedMerchantEnvVars fails loudly when a BILLING_MERCHANTS_* env var
-// still uses a retired accounts anchor (#698: ACCOUNTS <- RAIL_MERCHANT_ACCOUNTS;
-// #683: RAIL_MERCHANT_ACCOUNTS <- PROVIDER_ACCOUNTS). Without this the old var
-// would not just be dropped — the single-token ACCOUNTS anchor would mis-split
+// still uses a retired PSP anchor (PSPS <- ACCOUNTS <- RAIL_MERCHANT_ACCOUNTS
+// <- PROVIDER_ACCOUNTS). Without this the old var
+// would not just be dropped — the single-token PSPS anchor would mis-split
 // it into a wrong merchant key ("doujins-rail-merchant") and overlay config
 // nobody declared. The retired anchors are therefore poison token sequences
 // anywhere in the name (which also means a merchant key span must not contain
@@ -148,10 +148,11 @@ func rejectRenamedMerchantEnvName(source, name string) error {
 	for _, old := range [][]string{
 		{"RAIL", "MERCHANT", "ACCOUNTS"},
 		{"PROVIDER", "ACCOUNTS"},
+		{"ACCOUNTS"},
 	} {
 		for i := range tokens {
 			if hasPrefixTokens(tokens[i:], old) {
-				return fmt.Errorf("%s %s: %s was renamed to ACCOUNTS (merchants.<slug>.accounts, #698); use BILLING_MERCHANTS_<MERCHANT>_ACCOUNTS_...", source, name, strings.Join(old, "_"))
+				return fmt.Errorf("%s %s: %s was renamed to PSPS (merchants.<slug>.psps); use BILLING_MERCHANTS_<MERCHANT>_PSPS_...", source, name, strings.Join(old, "_"))
 			}
 		}
 	}

@@ -37,7 +37,7 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 
 	m := embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {Environment: "live", AccountID: "579145"},
 			},
@@ -61,7 +61,7 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, conn.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = ANY($1)`,
+			`SELECT count(*) FROM openrails.psps WHERE rail = ANY($1)`,
 			[]string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}

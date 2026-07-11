@@ -35,7 +35,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 		"webhook_signing_secret":      "whsec_681",
 		"webhook_signing_secret_thin": "whsec_thin_681",
 	} {
-		name, err := RailMerchantAccountSecretName("stripe", "test", "acct_sandbox681", key)
+		name, err := PSPSecretName("stripe", "test", "acct_sandbox681", key)
 		require.NoError(t, err)
 		_, err = store.Put(ctx, tn.ID, name, value)
 		require.NoError(t, err)
@@ -48,11 +48,11 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 
 	// NMI: test-env account (with tokenization settings) + webhook secret row.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'nmi', 'test', $2, false, $3::jsonb)
 	`, tn.ID.String(), "681902", `{"settings":{"tokenization_key":"tok_sandbox_681"}}`)
 	require.NoError(t, err)
-	nmiWebhookName, err := RailMerchantAccountSecretName("nmi", "test", "681902", "webhook_signing_secret")
+	nmiWebhookName, err := PSPSecretName("nmi", "test", "681902", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, tn.ID, nmiWebhookName, "nmi_whsec_681")
 	require.NoError(t, err)
@@ -66,9 +66,9 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	require.Equal(t, "tok_sandbox_681", tok.TokenizationKey)
 
 	// The checkout-session availability probe path.
-	wantKeyName, err := RailMerchantAccountSecretName("nmi", "test", "681902", "security_key")
+	wantKeyName, err := PSPSecretName("nmi", "test", "681902", "security_key")
 	require.NoError(t, err)
-	gotKeyName, ok, err := svc.ActiveRailMerchantAccountSecretName(ctx, tn.ID, "nmi", "test", "security_key")
+	gotKeyName, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "test", "security_key")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, wantKeyName, gotKeyName)
@@ -78,7 +78,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	liveOnly, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "live-only-681", PermissionGroupID: "group-live-only-681"})
 	require.NoError(t, err)
 	seedRailMerchantAccount(t, svc, liveOnly.ID, "stripe", "live", "acct_liveonly681")
-	liveSecretName, err := RailMerchantAccountSecretName("stripe", "live", "acct_liveonly681", "secret_key")
+	liveSecretName, err := PSPSecretName("stripe", "live", "acct_liveonly681", "secret_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, liveOnly.ID, liveSecretName, "sk_live_681")
 	require.NoError(t, err)

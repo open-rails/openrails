@@ -62,7 +62,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		q := appDB.Gen(ctx)
 		scope := Scope{Merchant: gateMerchant}
-		_, err := q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err := q.UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID: gateMerchant.UUID(), Rail: "nmi", AccountID: "gate-nmi-" + suffix,
 		})
 		require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 		// A second account on the rail: a single-credential pull can no longer
 		// prove anything — payments stays unproven even with full coverage, and
 		// the already-proven subscriptions domain stays true (ratchet).
-		_, err = q.UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err = q.UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID: gateMerchant.UUID(), Rail: "nmi", AccountID: "gate-nmi-b-" + suffix,
 		})
 		require.NoError(t, err)

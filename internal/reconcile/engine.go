@@ -68,10 +68,10 @@ type RunParams struct {
 	Mutations *LocalMutationPolicy
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
-	// RailMerchantAccounts optionally binds each provider section to one
+	// PSPs optionally binds each provider section to one
 	// merchant-scoped provider account. When set, the engine scopes local mirror
 	// reads and local materialization writes to that account id.
-	RailMerchantAccounts map[Provider]RailMerchantAccountBinding
+	PSPs map[Provider]RailMerchantAccountBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
@@ -103,7 +103,7 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 }
 
 // RailMerchantAccountBinding is the account row a provider-pull is authorized to
-// treat as authoritative. ID is openrails.rail_merchant_accounts.id; AccountID is
+// treat as authoritative. ID is openrails.psps.id; AccountID is
 // the raw provider-returned account identifier.
 type RailMerchantAccountBinding struct {
 	ID        uuid.UUID `json:"id"`
@@ -113,26 +113,26 @@ type RailMerchantAccountBinding struct {
 
 // ProviderReport is one provider's section of the run summary.
 type ProviderReport struct {
-	Provider              Provider          `json:"provider"`
-	RailMerchantAccountID string            `json:"rail_merchant_account_id,omitempty"`
-	Aborted               bool              `json:"aborted,omitempty"`
-	Error                 string            `json:"error,omitempty"`
-	Coverage              SnapshotCoverage  `json:"coverage"`
-	RemoteSubscriptions   int               `json:"remote_subscriptions"`
-	RemoteTransactions    int               `json:"remote_transactions"`
-	RemoteVaultEntries    int               `json:"remote_vault_entries"`
-	LocalSubscriptions    int               `json:"local_subscriptions"`
-	FindingsByType        map[string]int    `json:"findings_by_type,omitempty"`
-	FindingsBySeverity    map[string]int    `json:"findings_by_severity,omitempty"`
-	NewFindings           int               `json:"new_findings"`
-	UpdatedFindings       int               `json:"updated_findings"`
-	RequiresReview        int               `json:"requires_review"`
-	AdminRequired         int               `json:"-"`
-	AutoResolved          int64             `json:"auto_resolved"`
-	AutoFixed             int               `json:"auto_fixed"`
-	ApplySkipped          int               `json:"apply_skipped,omitempty"`
-	ApplyErrors           []string          `json:"apply_errors,omitempty"`
-	Dunning               *DunningForensics `json:"dunning_forensics,omitempty"`
+	Provider            Provider          `json:"provider"`
+	PspID               string            `json:"psp_id,omitempty"`
+	Aborted             bool              `json:"aborted,omitempty"`
+	Error               string            `json:"error,omitempty"`
+	Coverage            SnapshotCoverage  `json:"coverage"`
+	RemoteSubscriptions int               `json:"remote_subscriptions"`
+	RemoteTransactions  int               `json:"remote_transactions"`
+	RemoteVaultEntries  int               `json:"remote_vault_entries"`
+	LocalSubscriptions  int               `json:"local_subscriptions"`
+	FindingsByType      map[string]int    `json:"findings_by_type,omitempty"`
+	FindingsBySeverity  map[string]int    `json:"findings_by_severity,omitempty"`
+	NewFindings         int               `json:"new_findings"`
+	UpdatedFindings     int               `json:"updated_findings"`
+	RequiresReview      int               `json:"requires_review"`
+	AdminRequired       int               `json:"-"`
+	AutoResolved        int64             `json:"auto_resolved"`
+	AutoFixed           int               `json:"auto_fixed"`
+	ApplySkipped        int               `json:"apply_skipped,omitempty"`
+	ApplyErrors         []string          `json:"apply_errors,omitempty"`
+	Dunning             *DunningForensics `json:"dunning_forensics,omitempty"`
 }
 
 // RunSummary is the persisted summary jsonb of a run.
@@ -318,22 +318,22 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	fetcher := e.Fetchers[provider]
-	binding := params.RailMerchantAccounts[provider]
+	binding := params.PSPs[provider]
 	if binding.ID != uuid.Nil {
-		rep.RailMerchantAccountID = binding.ID.String()
+		rep.PspID = binding.ID.String()
 	}
 	snap, err := fetcher.Fetch(ctx, FetchParams{
-		Since:                 params.Since,
-		Until:                 params.Until,
-		RailMerchantAccountID: binding.ID.String(),
-		Rail:                  binding.Rail,
-		AccountID:             binding.AccountID,
+		Since:     params.Since,
+		Until:     params.Until,
+		PspID:     binding.ID.String(),
+		Rail:      binding.Rail,
+		AccountID: binding.AccountID,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	if binding.ID != uuid.Nil {
-		snap.RailMerchantAccountID = binding.ID.String()
+		snap.PspID = binding.ID.String()
 	}
 	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
@@ -539,8 +539,8 @@ func nullableRailMerchantAccountID(binding RailMerchantAccountBinding) *uuid.UUI
 	return &binding.ID
 }
 
-func bindApplyActions(findings []Finding, railMerchantAccountID *uuid.UUID) {
-	if railMerchantAccountID == nil {
+func bindApplyActions(findings []Finding, pspID *uuid.UUID) {
+	if pspID == nil {
 		return
 	}
 	for i := range findings {
@@ -549,15 +549,15 @@ func bindApplyActions(findings []Finding, railMerchantAccountID *uuid.UUID) {
 			continue
 		}
 		if a.BackfillPayment != nil {
-			a.BackfillPayment.RailMerchantAccountID = railMerchantAccountID
+			a.BackfillPayment.PspID = pspID
 		}
 		if a.RecordRefund != nil {
-			a.RecordRefund.RailMerchantAccountID = railMerchantAccountID
+			a.RecordRefund.PspID = pspID
 		}
 		if a.Materialize != nil {
-			a.Materialize.RailMerchantAccountID = railMerchantAccountID
+			a.Materialize.PspID = pspID
 			if a.Materialize.Backfill != nil {
-				a.Materialize.Backfill.RailMerchantAccountID = railMerchantAccountID
+				a.Materialize.Backfill.PspID = pspID
 			}
 		}
 	}

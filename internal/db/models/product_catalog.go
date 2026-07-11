@@ -157,11 +157,11 @@ type Price struct {
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
-	// Rails is a JSONB map of rail -> rail-specific link configuration.
+	// PSPLinks is a JSONB map of PSP key -> link entry (rail recorded inside).
 	// Keys: "nmi", "ccbill", "solana", "stripe" (the gateway rail).
 	// Values: rail-specific data (e.g., plan_id, price_id, provider account name)
 	// Example: {"nmi": {"plan_id": "123", "provider": "mobius"}, "ccbill": {"price_id": "456"}}
-	Rails map[string]map[string]string `json:"rails,omitempty"`
+	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -204,7 +204,7 @@ func (p *Price) RecurringCycleDays() *int {
 	return &days
 }
 
-// Rail config key constants (used in the Rails JSONB map)
+// Link entry key constants (used in the PSPLinks JSONB map)
 const (
 	RailKeyPlanID         = "plan_id"
 	RailKeyProvider       = "provider"
@@ -224,9 +224,9 @@ const (
 	RailKeyRail = "rail"
 )
 
-// RailLinkEntries returns every provider-link entry on the given rail, keyed
+// PSPLinksOnRail returns every provider-link entry on the given rail, keyed
 // by account key. Only the entry's RailKeyRail field decides membership.
-func RailLinkEntries(rails map[string]map[string]string, rail Rail) map[string]map[string]string {
+func PSPLinksOnRail(rails map[string]map[string]string, rail Rail) map[string]map[string]string {
 	if len(rails) == 0 {
 		return nil
 	}
@@ -244,11 +244,11 @@ func RailLinkEntries(rails map[string]map[string]string, rail Rail) map[string]m
 	return out
 }
 
-// GetRailConfig returns the rail's single provider-link entry, or nil when the
+// PSPLinkForRail returns the rail's single provider-link entry, or nil when the
 // rail is unlinked. Several accounts linked on one rail also yield nil (never
-// guess between accounts) — enumerate RailAccountConfigs there.
-func (p *Price) GetRailConfig(rail Rail) map[string]string {
-	entries := RailLinkEntries(p.Rails, rail)
+// guess between accounts) — enumerate PSPLinksForRail there.
+func (p *Price) PSPLinkForRail(rail Rail) map[string]string {
+	entries := PSPLinksOnRail(p.PSPLinks, rail)
 	if len(entries) != 1 {
 		return nil
 	}
@@ -258,20 +258,20 @@ func (p *Price) GetRailConfig(rail Rail) map[string]string {
 	return nil
 }
 
-// RailAccountConfigs returns every provider-link entry on the rail, keyed by
+// PSPLinksForRail returns every provider-link entry on the rail, keyed by
 // account key.
-func (p *Price) RailAccountConfigs(rail Rail) map[string]map[string]string {
-	return RailLinkEntries(p.Rails, rail)
+func (p *Price) PSPLinksForRail(rail Rail) map[string]map[string]string {
+	return PSPLinksOnRail(p.PSPLinks, rail)
 }
 
 // HasRail checks if a specific rail is configured for this price
 func (p *Price) HasRail(rail Rail) bool {
-	return len(RailLinkEntries(p.Rails, rail)) > 0
+	return len(PSPLinksOnRail(p.PSPLinks, rail)) > 0
 }
 
 // GetCCBillFlexForm returns the CCBill flexform configuration (form name + flex ID)
 func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
-	config := p.GetRailConfig(RailCCBill)
+	config := p.PSPLinkForRail(RailCCBill)
 	if config == nil {
 		return "", "", false
 	}
@@ -287,7 +287,7 @@ func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
 // GetCCBillRecurringBillingOption returns the CCBill Recurring Billing Option id
 // (the price/product/plan identity, #601), independent of the FlexForm.
 func (p *Price) GetCCBillRecurringBillingOption() (rboID string, ok bool) {
-	config := p.GetRailConfig(RailCCBill)
+	config := p.PSPLinkForRail(RailCCBill)
 	if config == nil {
 		return "", false
 	}
@@ -315,7 +315,7 @@ func (p *Price) GetTrial() (trialUnitAmount int64, trialDurationHours int, ok bo
 
 // GetStripeConfig returns Stripe price ID
 func (p *Price) GetStripeConfig() (priceID string, ok bool) {
-	config := p.GetRailConfig(RailStripe)
+	config := p.PSPLinkForRail(RailStripe)
 	if config == nil {
 		return "", false
 	}
@@ -328,14 +328,14 @@ func (p *Price) GetStripeConfig() (priceID string, ok bool) {
 // only). Account-named entries are written by the catalog apply, which knows
 // the account key.
 func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
-	if p.Rails == nil {
-		p.Rails = make(map[string]map[string]string)
+	if p.PSPLinks == nil {
+		p.PSPLinks = make(map[string]map[string]string)
 	}
 	if config == nil {
 		config = map[string]string{}
 	}
 	config[RailKeyRail] = string(rail)
-	p.Rails[string(rail)] = config
+	p.PSPLinks[string(rail)] = config
 }
 
 // SetNMIConfig sets the NMI link under the "nmi" rail key. provider is the

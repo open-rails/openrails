@@ -13,7 +13,7 @@ func TestResolveRailMerchantAccountIDForStampOnlyUsesPinnedContext(t *testing.T)
 	}
 
 	id := uuid.New()
-	got := ResolveRailMerchantAccountIDForStamp(WithRailMerchantAccountID(context.Background(), id))
+	got := ResolveRailMerchantAccountIDForStamp(WithPSPID(context.Background(), id))
 	if got == nil || *got != id {
 		t.Fatalf("pinned provider account = %v, want %s", got, id)
 	}

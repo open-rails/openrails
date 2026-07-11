@@ -95,7 +95,7 @@ CREATE POLICY merchant_isolation ON openrails.merchant_deks
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
-CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
+CREATE TABLE IF NOT EXISTS openrails.psps (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -114,13 +114,13 @@ CREATE TABLE IF NOT EXISTS openrails.rail_merchant_accounts (
     CONSTRAINT payment_provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
     CONSTRAINT payment_provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
-ALTER TABLE ONLY openrails.rail_merchant_accounts FORCE ROW LEVEL SECURITY;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_identity ON openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_global_identity ON openrails.rail_merchant_accounts (rail, environment, account_id);
-CREATE INDEX IF NOT EXISTS idx_payment_provider_accounts_new_work ON openrails.rail_merchant_accounts (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
-ALTER TABLE openrails.rail_merchant_accounts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.rail_merchant_accounts;
-CREATE POLICY merchant_isolation ON openrails.rail_merchant_accounts
+ALTER TABLE ONLY openrails.psps FORCE ROW LEVEL SECURITY;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_identity ON openrails.psps (merchant_id, rail, environment, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_global_identity ON openrails.psps (rail, environment, account_id);
+CREATE INDEX IF NOT EXISTS idx_payment_provider_accounts_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
+ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.psps;
+CREATE POLICY merchant_isolation ON openrails.psps
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
@@ -174,7 +174,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 		FromEmail:   "billing@example.com",
 		SupportURL:  "https://example.com/support",
 	}
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
 				Environment: "test",
@@ -208,7 +208,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	require.Equal(t, "https://example.com/support", supportURL)
 
 	var secretValue string
-	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "test", "acct_test_123", "secret_key")
+	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_test_123", "secret_key")
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT value
@@ -221,7 +221,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	var archived bool
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT rail, environment, account_id, archived
-		FROM openrails.rail_merchant_accounts
+		FROM openrails.psps
 		WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&rail, &environment, &accountID, &archived))
 	require.Equal(t, "stripe", rail)
@@ -236,7 +236,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	cp := newMerchantManifestControlPlane(t, pool)
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
 				Environment: "live",
@@ -258,7 +258,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	var accountID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT account_id
-		FROM openrails.rail_merchant_accounts
+		FROM openrails.psps
 		WHERE merchant_id = $1::uuid AND rail = 'ccbill'
 	`, merchantID).Scan(&accountID))
 	require.Equal(t, "900000-0000", accountID)
@@ -268,7 +268,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 		"datalink_username": "merchant-user",
 		"datalink_password": "merchant-pass",
 	} {
-		secretName, err := merchants.RailMerchantAccountSecretName("ccbill", "live", "900000-0000", key)
+		secretName, err := merchants.PSPSecretName("ccbill", "live", "900000-0000", key)
 		require.NoError(t, err)
 		var secretValue string
 		require.NoError(t, pool.QueryRow(ctx, `
@@ -288,7 +288,7 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	cp := newMerchantManifestControlPlane(t, pool)
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
 				Environment: "live",
@@ -322,7 +322,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 		recipientWallet = "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu"
 		privateKey      = "2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT"
 	)
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"solana": {
 			"solana": {
 				Environment: "live",
@@ -346,7 +346,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	var evidenceBytes []byte
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT evidence
-		FROM openrails.rail_merchant_accounts
+		FROM openrails.psps
 		WHERE merchant_id = $1::uuid AND rail = 'solana' AND environment = 'live' AND account_id = $2
 	`, merchantID, accountID).Scan(&evidenceBytes))
 	var evidence map[string]any
@@ -354,7 +354,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	require.Equal(t, map[string]any{"mode": "local_keypair"}, evidence["signer"])
 	require.Equal(t, map[string]any{"recipient_wallet": recipientWallet}, evidence["settings"])
 
-	secretName, err := merchants.RailMerchantAccountSecretName("solana", "live", accountID, "private_key")
+	secretName, err := merchants.PSPSecretName("solana", "live", accountID, "private_key")
 	require.NoError(t, err)
 	backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
 	require.NoError(t, err)
@@ -390,7 +390,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		{Key: "sustained", Window: "5h", Limit: 20_000_000},
 	}
 	// NMI gateway "mobius": live and sandbox accounts side by side (#646).
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
 				Environment: "live",
@@ -451,7 +451,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	// the manifest `name` persisted as the provider account display_name.
 	var liveDisplayName string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT display_name FROM openrails.rail_merchant_accounts
+		SELECT display_name FROM openrails.psps
 		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND environment = 'live'
 	`, merchantID).Scan(&liveDisplayName))
 	require.Equal(t, "mobius", liveDisplayName)
@@ -486,10 +486,10 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, int64(5_000_000), gotWindows["burst"].Limit)
 	require.Equal(t, "5h", gotWindows["sustained"].Window)
 
-	require.Len(t, d.RailMerchantAccounts, 3)
+	require.Len(t, d.PSPs, 3)
 	byEnv := map[string]ProviderRailAccountConfig{}
 	var ccbillDump ProviderRailAccountConfig
-	for _, account := range d.RailMerchantAccounts {
+	for _, account := range d.PSPs {
 		require.Len(t, account, 1)
 		for rail, a := range account {
 			if rail == "ccbill" {
@@ -515,8 +515,8 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
 	require.NotNil(t, reparsed.Merchants["cozy-art"].Invoice)
-	require.Len(t, reparsed.Merchants["cozy-art"].RailMerchantAccounts, 3)
-	require.Equal(t, "945280-0000", reparsed.Merchants["cozy-art"].RailMerchantAccounts["ccbill"]["ccbill"].AccountID)
+	require.Len(t, reparsed.Merchants["cozy-art"].PSPs, 3)
+	require.Equal(t, "945280-0000", reparsed.Merchants["cozy-art"].PSPs["ccbill"]["ccbill"].AccountID)
 }
 
 func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T) {
@@ -533,7 +533,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
 				Environment: "test",
@@ -550,7 +550,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 
 	var merchantIDText string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
-	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "test", "acct_vault_123", "secret_key")
+	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_vault_123", "secret_key")
 	require.NoError(t, err)
 	vaultPath := "secret/openrails/merchants/cozy-art/" + secretName
 	require.Equal(t, "sk_test_vault_bootstrap", readVaultKV2Value(t, vault, vaultPath))
@@ -586,7 +586,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
 				Environment: "test",
@@ -603,7 +603,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 
 	var merchantIDText string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
-	secretName, err := merchants.RailMerchantAccountSecretName("stripe", "test", "acct_db_123", "secret_key")
+	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_db_123", "secret_key")
 	require.NoError(t, err)
 
 	var storedValue string

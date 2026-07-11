@@ -268,11 +268,11 @@ func (h *NMIVaultDeleteHandler) loadPaymentMethod(ctx context.Context, intent ge
 		return nil, err
 	}
 	return &models.PaymentMethod{
-		ID:                    p.PaymentMethodID,
-		Rail:                  models.Rail(strings.ToLower(intent.Rail)),
-		RailCustomerRef:       p.RailCustomerRef,
-		RailMethodRef:         p.RailMethodRef,
-		RailMerchantAccountID: intent.RailMerchantAccountID,
+		ID:              p.PaymentMethodID,
+		Rail:            models.Rail(strings.ToLower(intent.Rail)),
+		RailCustomerRef: p.RailCustomerRef,
+		RailMethodRef:   p.RailMethodRef,
+		PspID:           intent.PspID,
 	}, nil
 }
 
@@ -343,10 +343,10 @@ func (t *VaultDeleteThrough) ExecuteVaultDelete(ctx context.Context, pm *models.
 		return paymentmethods.VaultDeleteOutcome{}, err
 	}
 	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
-		MerchantID:            tid.UUID(),
-		Provider:              strings.ToLower(string(pm.Rail)),
-		IntentType:            TypeNMIVaultDelete,
-		RailMerchantAccountID: pm.RailMerchantAccountID,
+		MerchantID: tid.UUID(),
+		Provider:   strings.ToLower(string(pm.Rail)),
+		IntentType: TypeNMIVaultDelete,
+		PspID:      pm.PspID,
 		Payload: NMIVaultDeletePayload{
 			UserID:          pm.CustomerID.String(),
 			PaymentMethodID: pm.ID,

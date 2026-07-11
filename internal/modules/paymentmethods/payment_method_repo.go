@@ -36,26 +36,26 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	if err != nil {
 		return err
 	}
-	railMerchantAccountID := m.RailMerchantAccountID
-	if railMerchantAccountID == nil {
-		railMerchantAccountID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	pspID := m.PspID
+	if pspID == nil {
+		pspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID:                    m.ID,
-		MerchantID:            tid.UUID(),
-		CustomerID:            m.CustomerID,
-		Rail:                  string(m.Rail),
-		RailMerchantAccountID: railMerchantAccountID,
-		RailCustomerRef:       m.RailCustomerRef,
-		RailMethodRef:         m.RailMethodRef,
-		RebillDriver:          m.RebillDriver, // "" -> DB default 'provider'
-		InitialTransactionID:  m.InitialTransactionID,
-		LastFour:              m.LastFour,
-		CardType:              m.CardType,
-		ExpiryDate:            m.ExpiryDate,
-		Metadata:              meta,
-		CreatedAt:             m.CreatedAt,
-		UpdatedAt:             m.UpdatedAt,
+		ID:                   m.ID,
+		MerchantID:           tid.UUID(),
+		CustomerID:           m.CustomerID,
+		Rail:                 string(m.Rail),
+		PspID:                pspID,
+		RailCustomerRef:      m.RailCustomerRef,
+		RailMethodRef:        m.RailMethodRef,
+		RebillDriver:         m.RebillDriver, // "" -> DB default 'provider'
+		InitialTransactionID: m.InitialTransactionID,
+		LastFour:             m.LastFour,
+		CardType:             m.CardType,
+		ExpiryDate:           m.ExpiryDate,
+		Metadata:             meta,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
 	})
 	if err != nil {
 		return err

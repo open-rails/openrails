@@ -47,9 +47,9 @@ type WebhookMessage struct {
 	SigningSecret  string
 	SignatureValid *bool
 	ReceivedAt     time.Time
-	// RailMerchantAccountID (#641) is the account_id the event was routed to, so
+	// PspID (#641) is the account_id the event was routed to, so
 	// dispatch selects that account's rail client. Empty = primary.
-	RailMerchantAccountID string
+	PspID string
 }
 
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.
@@ -113,7 +113,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 	if d.RailConfigs == nil {
 		return fmt.Errorf("ccbill webhook rejected: rail resolution is not configured")
 	}
-	proc, err := d.RailConfigs.RailConfig(ctx, string(models.RailCCBill), event.RailMerchantAccountID)
+	proc, err := d.RailConfigs.RailConfig(ctx, string(models.RailCCBill), event.PspID)
 	if err != nil {
 		return fmt.Errorf("ccbill webhook rejected: %w", err)
 	}

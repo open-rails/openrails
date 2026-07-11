@@ -49,7 +49,7 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	env := config.ExpectedProviderEnvironment(true)
 	rail := string(models.RailNMI)
 	for key, value := range secrets {
-		name, err := merchants.RailMerchantAccountSecretName(rail, env, accountID, key)
+		name, err := merchants.PSPSecretName(rail, env, accountID, key)
 		require.NoError(t, err)
 		_, err = svc.Secrets().Put(ctx, dbtest.TestMerchantID, name, value)
 		require.NoError(t, err)
@@ -60,7 +60,7 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	var rowID uuid.UUID
 	mctx := merchant.WithID(ctx, dbtest.TestMerchantID)
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		row, err := dbi.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		row, err := dbi.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID:  dbtest.TestMerchantID.UUID(),
 			Rail:        rail,
 			Environment: &env,
@@ -71,7 +71,7 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	}))
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
-			`DELETE FROM openrails.rail_merchant_accounts WHERE id = $1`, rowID)
+			`DELETE FROM openrails.psps WHERE id = $1`, rowID)
 	})
 	return rowID
 }
@@ -109,7 +109,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.RailMerchantAccountID = &accountRowID // #704 provenance stamp (what dunning enqueues)
+	params.PspID = &accountRowID // #704 provenance stamp (what dunning enqueues)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.RailMerchantAccountID = &accountRowID
+	params.PspID = &accountRowID
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)

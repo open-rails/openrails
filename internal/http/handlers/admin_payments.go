@@ -273,7 +273,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		if merr != nil {
 			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
 		}
-		client, ok, cerr := r.State.CollectionResolver.ResolveNMIClient(ctx, mid.UUID(), payment.RailMerchantAccountID)
+		client, ok, cerr := r.State.CollectionResolver.ResolveNMIClient(ctx, mid.UUID(), payment.PspID)
 		if cerr != nil || !ok || client == nil {
 			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
 		}

@@ -51,7 +51,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 
 	m := embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
 					Environment: "live",
@@ -77,7 +77,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
@@ -186,7 +186,7 @@ func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
@@ -214,7 +214,7 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 
 	m := embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
 					Environment: "live",
@@ -259,7 +259,7 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 	// Declared account, NO security_key anywhere.
 	m := embed.MerchantConfig{
 		DisplayName: slug,
-		RailMerchantAccounts: map[string]embed.RailMerchantAccountConfig{
+		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
 					Environment: "live",

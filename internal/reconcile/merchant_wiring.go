@@ -96,16 +96,16 @@ func (b MerchantFetcherBuilder) environment() string {
 // scope (active for new work, else newest archived for drain — #655). ok=false
 // means the merchant declares NO account on the rail → nothing is armed for
 // this pass (no boot-config plane exists to fall back to, #788).
-func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.ID, provider Provider) (merchants.RailMerchantAccountScope, bool) {
+func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.ID, provider Provider) (merchants.PSPScope, bool) {
 	if b.Merchants == nil {
-		return merchants.RailMerchantAccountScope{}, false
+		return merchants.PSPScope{}, false
 	}
 	rail := string(provider)
 	if pin := strings.TrimSpace(b.AccountIDs[provider]); pin != "" {
-		scope, ok, err := b.Merchants.RailMerchantAccountScopeByAccountID(ctx, mid, rail, pin)
+		scope, ok, err := b.Merchants.PSPScopeByAccountID(ctx, mid, rail, pin)
 		if err != nil {
 			b.warnScopeError(ctx, mid, provider, err)
-			return merchants.RailMerchantAccountScope{}, false
+			return merchants.PSPScope{}, false
 		}
 		if !ok {
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -117,7 +117,7 @@ func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.I
 	scope, ok, err := b.Merchants.PullRailMerchantAccountScope(ctx, mid, rail, b.environment())
 	if err != nil {
 		b.warnScopeError(ctx, mid, provider, err)
-		return merchants.RailMerchantAccountScope{}, false
+		return merchants.PSPScope{}, false
 	}
 	return scope, ok
 }
@@ -130,11 +130,11 @@ func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid merchant
 
 // secret loads one scoped secret. found=false with nil err means the secret is
 // genuinely absent (terminal for this pass); backend errors surface as err.
-func (b MerchantFetcherBuilder) secret(ctx context.Context, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, bool, error) {
+func (b MerchantFetcherBuilder) secret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
 	if b.Merchants == nil || b.Merchants.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 	if err != nil {
 		return "", false, err
 	}
@@ -154,17 +154,17 @@ func (b MerchantFetcherBuilder) secret(ctx context.Context, mid merchant.ID, sco
 
 // requireSecret is secret plus the #699 fail-loud contract: absence or a
 // backend failure logs ONE WARN naming merchant, rail and the secret name.
-func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.RailMerchantAccountScope, key string) (string, bool) {
+func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool) {
 	value, found, err := b.secret(ctx, mid, scope, key)
 	if err != nil {
-		name, _ := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
 		}).Warn("provider pull: rail not armed — merchant secret backend failed (retried next pass)")
 		return "", false
 	}
 	if !found {
-		name, _ := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
 		}).Warn("provider pull: rail not armed — merchant secret missing (#699)")

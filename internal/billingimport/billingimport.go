@@ -104,15 +104,15 @@ type DeclaredSubscription struct {
 	Price              uuid.UUID `json:"price"`
 	Rail               string    `json:"rail"`
 	RailSubscriptionID string    `json:"rail_subscription_id"` // required; synthesize a stable id for rail-less legacy rows
-	// RailMerchantAccountID binds the row to its operator-declared
-	// openrails.rail_merchant_accounts row (nil = unbound legacy lane).
-	RailMerchantAccountID *uuid.UUID        `json:"rail_merchant_account_id,omitempty"`
-	UserEmail             string            `json:"user_email,omitempty"`
-	StartedAt             time.Time         `json:"started_at"`
-	PaidThrough           *time.Time        `json:"paid_through,omitempty"`
-	Cancel                CancelEvidence    `json:"cancel,omitempty"`
-	Dunning               *DunningEvidence  `json:"dunning,omitempty"`
-	PaymentMethod         *PaymentMethodRef `json:"payment_method,omitempty"`
+	// PspID binds the row to its operator-declared
+	// openrails.psps row (nil = unbound legacy lane).
+	PspID         *uuid.UUID        `json:"psp_id,omitempty"`
+	UserEmail     string            `json:"user_email,omitempty"`
+	StartedAt     time.Time         `json:"started_at"`
+	PaidThrough   *time.Time        `json:"paid_through,omitempty"`
+	Cancel        CancelEvidence    `json:"cancel,omitempty"`
+	Dunning       *DunningEvidence  `json:"dunning,omitempty"`
+	PaymentMethod *PaymentMethodRef `json:"payment_method,omitempty"`
 	// Evidence is the host's verbatim legacy payload, stored on
 	// subscriptions.gateway_response at seed (forensics; never re-parsed).
 	Evidence json.RawMessage `json:"evidence,omitempty"`
@@ -285,19 +285,19 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
 		for _, s := range opts.Book.Subscriptions {
 			f := reconcile.DeclaredSubscriptionFact{
-				SourceID:              s.SourceID,
-				Customer:              s.Customer,
-				PriceID:               s.Price,
-				Rail:                  s.Rail,
-				RailSubscriptionID:    s.RailSubscriptionID,
-				RailMerchantAccountID: s.RailMerchantAccountID,
-				UserEmail:             nilIfEmpty(s.UserEmail),
-				StartedAt:             s.StartedAt.UTC(),
-				PaidThrough:           s.PaidThrough,
-				CancelKind:            reconcile.DeclaredCancelKind(s.Cancel.Kind),
-				CancelAt:              s.Cancel.At,
-				CancelScheduleLive:    s.Cancel.ScheduleLive,
-				Evidence:              s.Evidence,
+				SourceID:           s.SourceID,
+				Customer:           s.Customer,
+				PriceID:            s.Price,
+				Rail:               s.Rail,
+				RailSubscriptionID: s.RailSubscriptionID,
+				PspID:              s.PspID,
+				UserEmail:          nilIfEmpty(s.UserEmail),
+				StartedAt:          s.StartedAt.UTC(),
+				PaidThrough:        s.PaidThrough,
+				CancelKind:         reconcile.DeclaredCancelKind(s.Cancel.Kind),
+				CancelAt:           s.Cancel.At,
+				CancelScheduleLive: s.Cancel.ScheduleLive,
+				Evidence:           s.Evidence,
 			}
 			if s.Dunning != nil {
 				f.DunningLive = s.Dunning.ScheduleLive

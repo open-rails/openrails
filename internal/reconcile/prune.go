@@ -37,7 +37,7 @@ type PruneResult struct {
 // PruneRailMerchantAccountExcess fetches the provider's current snapshot for the
 // bound account and prunes local mirror rows attributed to that provider account
 // that are ABSENT from the snapshot. It is account-bound (legacy NULL-binding
-// import rows are never touched — they fall outside the rail_merchant_account_id
+// import rows are never touched — they fall outside the psp_id
 // filter) and safe by construction:
 //
 //   - A subscription that fed the #514 grant ledger is SKIPPED — deleting its row
@@ -58,7 +58,7 @@ func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetche
 	}
 	mid := merchantID.UUID()
 
-	snap, err := fetcher.Fetch(ctx, FetchParams{Since: params.Since, Until: params.Until, RailMerchantAccountID: binding.ID.String()})
+	snap, err := fetcher.Fetch(ctx, FetchParams{Since: params.Since, Until: params.Until, PspID: binding.ID.String()})
 	if err != nil {
 		return res, fmt.Errorf("fetch snapshot: %w", err)
 	}
@@ -83,8 +83,8 @@ func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetche
 
 	// --- excess subscriptions (head state: a snapshot lists every active sub) ---
 	if !snap.Coverage.CanPruneSubscriptions() {
-		skipped, err := q.ListExcessSubscriptionsForRailMerchantAccount(ctx, gen.ListExcessSubscriptionsForRailMerchantAccountParams{
-			MerchantID: mid, RailMerchantAccountID: binding.ID, PresentIds: nil,
+		skipped, err := q.ListExcessSubscriptionsForPSP(ctx, gen.ListExcessSubscriptionsForPSPParams{
+			MerchantID: mid, PspID: binding.ID, PresentIds: nil,
 		})
 		if err != nil {
 			return res, fmt.Errorf("list subscription prune skips: %w", err)
@@ -93,8 +93,8 @@ func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetche
 		res.SkippedSubscriptionIDs = append(res.SkippedSubscriptionIDs, skipped...)
 		res.SubscriptionSkipReason = "snapshot_not_complete"
 	} else {
-		excessSubs, err := q.ListExcessSubscriptionsForRailMerchantAccount(ctx, gen.ListExcessSubscriptionsForRailMerchantAccountParams{
-			MerchantID: mid, RailMerchantAccountID: binding.ID, PresentIds: presentSubs,
+		excessSubs, err := q.ListExcessSubscriptionsForPSP(ctx, gen.ListExcessSubscriptionsForPSPParams{
+			MerchantID: mid, PspID: binding.ID, PresentIds: presentSubs,
 		})
 		if err != nil {
 			return res, fmt.Errorf("list excess subscriptions: %w", err)
@@ -147,8 +147,8 @@ func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetche
 		until = &u
 	}
 	if !canPruneTransactionWindow(snap.Coverage, params.Since, params.Until) {
-		skipped, err := q.ListExcessPaymentsForRailMerchantAccount(ctx, gen.ListExcessPaymentsForRailMerchantAccountParams{
-			MerchantID: mid, RailMerchantAccountID: binding.ID, PresentTxns: nil, Since: since, Until: until,
+		skipped, err := q.ListExcessPaymentsForPSP(ctx, gen.ListExcessPaymentsForPSPParams{
+			MerchantID: mid, PspID: binding.ID, PresentTxns: nil, Since: since, Until: until,
 		})
 		if err != nil {
 			return res, fmt.Errorf("list payment prune skips: %w", err)
@@ -157,8 +157,8 @@ func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetche
 		res.SkippedPaymentIDs = append(res.SkippedPaymentIDs, skipped...)
 		res.PaymentSkipReason = "snapshot_not_complete"
 	} else {
-		excessPays, err := q.ListExcessPaymentsForRailMerchantAccount(ctx, gen.ListExcessPaymentsForRailMerchantAccountParams{
-			MerchantID: mid, RailMerchantAccountID: binding.ID, PresentTxns: presentTxns, Since: since, Until: until,
+		excessPays, err := q.ListExcessPaymentsForPSP(ctx, gen.ListExcessPaymentsForPSPParams{
+			MerchantID: mid, PspID: binding.ID, PresentTxns: presentTxns, Since: since, Until: until,
 		})
 		if err != nil {
 			return res, fmt.Errorf("list excess payments: %w", err)

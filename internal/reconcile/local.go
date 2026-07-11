@@ -107,9 +107,9 @@ type LocalPrice struct {
 	Currency         string
 	BillingCycleDays *int
 	Archived         bool
-	// Rails is the provider-links blob: rail name -> config map
-	// (plan_id / price_id / ...), as written by catalog bootstrap.
-	Rails map[string]map[string]string
+	// PSPLinks is the provider-links blob: PSP key -> link entry
+	// (rail / plan_id / price_id / ...), as written by catalog apply.
+	PSPLinks map[string]map[string]string
 }
 
 // LocalState is one provider's local billing state, loaded merchant-scoped.
@@ -145,8 +145,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	state := &LocalState{}
 
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
-		Rails:                 names,
-		RailMerchantAccountID: providerAccountID,
+		Rails: names,
+		PspID: providerAccountID,
 	})
 	if err != nil {
 		return nil, err
@@ -193,7 +193,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 
-	prices, err := q.ReconcileListPricesWithRails(ctx)
+	prices, err := q.ReconcileListPricesWithPSPLinks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -212,17 +212,17 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 			days := int(*row.AccessDurationHours) / 24
 			p.BillingCycleDays = &days
 		}
-		if len(row.Rails) > 0 {
+		if len(row.PspLinks) > 0 {
 			// Tolerate malformed blobs: a price whose links can't decode simply
 			// never matches a remote plan (PS-1 stays requires_review).
-			_ = json.Unmarshal(row.Rails, &p.Rails)
+			_ = json.Unmarshal(row.PspLinks, &p.PSPLinks)
 		}
 		state.Prices = append(state.Prices, p)
 	}
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
-		Rails:                 names,
-		RailMerchantAccountID: providerAccountID,
+		Rails: names,
+		PspID: providerAccountID,
 	})
 	if err != nil {
 		return nil, err
@@ -254,9 +254,9 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
-		Rails:                 localRailNames(provider),
-		RailMerchantAccountID: providerAccountID,
-		TransactionIds:        transactionIDs,
+		Rails:          localRailNames(provider),
+		PspID:          providerAccountID,
+		TransactionIds: transactionIDs,
 	})
 	if err != nil {
 		return nil, err
@@ -316,16 +316,16 @@ func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 				set[pda] = struct{}{}
 			}
 		}
-		prices, err := d.Gen(ctx).ReconcileListPricesWithRails(ctx)
+		prices, err := d.Gen(ctx).ReconcileListPricesWithPSPLinks(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, row := range prices {
-			if len(row.Rails) == 0 {
+			if len(row.PspLinks) == 0 {
 				continue
 			}
 			var rails map[string]map[string]string
-			if err := json.Unmarshal(row.Rails, &rails); err != nil {
+			if err := json.Unmarshal(row.PspLinks, &rails); err != nil {
 				continue // malformed links never match; same tolerance as Load
 			}
 			if pda := strings.TrimSpace(rails["solana"]["plan_pda"]); pda != "" {

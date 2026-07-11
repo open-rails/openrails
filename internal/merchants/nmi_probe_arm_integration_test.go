@@ -43,7 +43,7 @@ func countNMIAccounts(t *testing.T, svc *Service, accountID string) int {
 	t.Helper()
 	var count int
 	require.NoError(t, svc.pool.QueryRow(context.Background(), `
-		SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = 'nmi' AND account_id = $1
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = $1
 	`, accountID).Scan(&count))
 	return count
 }
@@ -210,7 +210,7 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	// (a merchant editing the raw secret store directly is out of scope for
 	// this codebase, but a follow-up arm that forgets to resend
 	// security_key must still be checked against what's on file).
-	name, err := RailMerchantAccountSecretName("nmi", "test", "arm-348-existing", "security_key")
+	name, err := PSPSecretName("nmi", "test", "arm-348-existing", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, tn.ID, name, "now-a-live-key")
 	require.NoError(t, err)

@@ -110,10 +110,10 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 
 	// provider accounts (identity + lifecycle + secret references).
-	var accounts []gen.OpenrailsRailMerchantAccount
+	var accounts []gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
-		accounts, lerr = database.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+		accounts, lerr = database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 			MerchantID: mid.UUID(),
 		})
 		return lerr
@@ -124,11 +124,11 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if err != nil {
 		return nil, err
 	}
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{}
+	mt.PSPs = map[string]PSPConfig{}
 	for _, a := range accounts {
 		localKey := ""
-		if a.DisplayName != nil {
-			localKey = strings.TrimSpace(*a.DisplayName)
+		if a.Key != nil {
+			localKey = strings.TrimSpace(*a.Key)
 		}
 		if localKey == "" {
 			localKey = railMerchantAccountDumpKey(a.Rail, a.Environment, a.AccountID)
@@ -148,7 +148,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if values := secretValuesByAccount[key]; len(values) > 0 {
 			account.Secrets = values
 		}
-		mt.RailMerchantAccounts[localKey] = RailMerchantAccountConfig{a.Rail: account}
+		mt.PSPs[localKey] = PSPConfig{a.Rail: account}
 	}
 
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
@@ -203,7 +203,7 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 	}
 	out := map[string]map[string]string{}
 	for _, name := range names {
-		rail, environment, accountID, key, ok, perr := merchants.ParseRailMerchantAccountSecretName(name)
+		rail, environment, accountID, key, ok, perr := merchants.ParsePSPSecretName(name)
 		if perr != nil || !ok {
 			continue
 		}

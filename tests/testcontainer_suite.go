@@ -58,7 +58,7 @@ type TestContainerSuite struct {
 	RedisClient *redis.Client
 	// Config is the app's live *config.Config (tests mutate e.g. APIURL).
 	Config *config.Config
-	Rails  config.RailMerchantAccountSet
+	Rails  config.PSPSet
 	// ServerURL is a real HTTP base URL (httptest-owned port).
 	ServerURL string
 
@@ -172,8 +172,8 @@ func (suite *TestContainerSuite) boot() {
 
 // defaultSuiteRails is the construction-time payment-rail merchant-account
 // state (not infrastructure config.yaml state) every suite boots with.
-func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
-	rails := config.RailMerchantAccountSet{
+func defaultSuiteRails(stripeSecretKey string) config.PSPSet {
+	rails := config.PSPSet{
 		"ccbill": {
 			Rail: models.RailCCBill,
 			// #711: the clientAccnum/clientSubacc pair derives from the account_id.
@@ -203,7 +203,7 @@ func defaultSuiteRails(stripeSecretKey string) config.RailMerchantAccountSet {
 		},
 	}
 	if stripeSecretKey != "" {
-		rails["stripe"] = &config.RailMerchantAccountConfig{
+		rails["stripe"] = &config.PSPConfig{
 			Rail:      models.RailStripe,
 			AccountID: "acct_openrails_test",
 			Stripe: &config.StripeRailConfig{
@@ -276,7 +276,7 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	ccbillAccountID := "945280-0000"
 	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	suite.seedRailMerchantAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
-	ccbillSecret, err := merchants.RailMerchantAccountSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
+	ccbillSecret, err := merchants.PSPSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
@@ -294,7 +294,7 @@ func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.rail_merchant_accounts
+		INSERT INTO openrails.psps
 		    (merchant_id, rail, environment, account_id, archived, evidence, last_verified_at)
 		VALUES ($1::uuid, $2, $3, $4, false, $5::jsonb, now())
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
@@ -302,7 +302,7 @@ func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
 		       updated_at = now()
-		 WHERE openrails.rail_merchant_accounts.merchant_id = EXCLUDED.merchant_id
+		 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.UUID(), rail, environment, accountID, evidence)
 	require.NoError(suite.t, err)
 	require.NoError(suite.t, tx.Commit(ctx))
@@ -382,7 +382,7 @@ func (suite *TestContainerSuite) SetNMIGateway(url string) {
 // keeps its default active account for later tests.
 func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID, securityKey string) {
 	t.Helper()
-	integrationharness.SeedRailMerchantAccounts(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.RailMerchantAccountSet{
+	integrationharness.SeedRailMerchantAccounts(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.PSPSet{
 		accountID: {
 			Rail:      models.RailNMI,
 			AccountID: accountID,
@@ -390,19 +390,19 @@ func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID,
 		},
 	})
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	rowID, _, _, _ := merchants.RailMerchantAccountNaturalKey(string(models.RailNMI), env, accountID)
+	rowID, _, _, _ := merchants.PSPNaturalKey(string(models.RailNMI), env, accountID)
 	t.Cleanup(func() {
 		ctx := dbtest.WithTestMerchant(context.Background())
 		if store := suite.App.Runtime.Merchants.Secrets(); store != nil {
 			for _, key := range []string{"security_key", "webhook_signing_secret"} {
-				if name, err := merchants.RailMerchantAccountSecretName(string(models.RailNMI), env, accountID, key); err == nil {
+				if name, err := merchants.PSPSecretName(string(models.RailNMI), env, accountID, key); err == nil {
 					_ = store.Delete(ctx, dbtest.TestMerchantID, name)
 				}
 			}
 		}
 		// Archive (not delete): rows this test stamped (payments/subscriptions)
 		// hold FK references; archived accounts drop out of active resolution.
-		_, _ = suite.Pool.Exec(ctx, `UPDATE openrails.rail_merchant_accounts SET archived = true WHERE id = $1`, rowID)
+		_, _ = suite.Pool.Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
 	})
 }
 

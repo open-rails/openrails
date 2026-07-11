@@ -441,7 +441,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
 	}
 	if price.Model != "" {
-		price.Providers = normalizeProviders(price.Providers)
+		price.PSPs = normalizePSPs(price.PSPs)
 		return nil
 	}
 	if price.Flat != nil || price.PerUnit != nil || price.Tiered != nil || price.Package != nil {
@@ -485,18 +485,21 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		}
 		price.Trial.Duration = formatDurationHours(*trialHours)
 	}
-	if price.Providers != nil {
-		price.Providers = normalizeProviders(price.Providers)
+	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
+		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
 	}
-	if len(price.ProviderLinks) > 0 {
+	if price.PSPs != nil {
+		price.PSPs = normalizePSPs(price.PSPs)
+	}
+	if len(price.PSPLinks) > 0 {
 		declared := map[string]struct{}{}
-		for _, provider := range price.Providers {
+		for _, provider := range price.PSPs {
 			declared[provider] = struct{}{}
 		}
-		for provider := range price.ProviderLinks {
+		for provider := range price.PSPLinks {
 			key := strings.ToLower(strings.TrimSpace(provider))
 			if _, ok := declared[key]; !ok {
-				return fmt.Errorf("product %q price %s: provider_links.%s requires providers to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
+				return fmt.Errorf("product %q price %s: psp_links.%s requires psps to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
 			}
 		}
 	}
@@ -504,10 +507,10 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	// Per-provider eligibility (shape-only; no chain calls). Solana settles
 	// on-chain in $1-pegged stablecoins, so a Solana price must be priced in a
 	// stablecoin currency (one-off finite windows and recurring are both allowed).
-	if price.Metered != nil && len(price.Providers) > 0 {
+	if price.Metered != nil && len(price.PSPs) > 0 {
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
-	for _, provider := range price.Providers {
+	for _, provider := range price.PSPs {
 		if provider == "solana" {
 			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
 				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (usd/usdc/usdg), got %q",
@@ -523,7 +526,7 @@ func validateCreditTopUpOffer(productKey string, price *Price, idx int) error {
 	if price.UnitAmount != 0 || price.Duration != "" || price.AutoRenew || price.Trial != nil || price.Metered != nil {
 		return fmt.Errorf("%s must use typed charge-model fields, not fixed price fields", where)
 	}
-	if len(price.ProviderLinks) > 0 {
+	if len(price.PSPLinks) > 0 {
 		return fmt.Errorf("%s provider_links are not supported for credit top-ups", where)
 	}
 	if price.InputMin < 0 || price.InputMax < 0 {
@@ -557,7 +560,7 @@ func validateCreditTopUpOffer(productKey string, price *Price, idx int) error {
 }
 
 func topUpOfferKeys(price Price) []string {
-	providers := price.Providers
+	providers := price.PSPs
 	if len(providers) == 0 {
 		providers = []string{""}
 	}
@@ -733,7 +736,7 @@ func validPriceCurrency(value string) bool {
 
 // priceTermsKey is the manifest identity key for a declared price — the same
 // financial substance the DB's unique_prices_product_amount_window key enforces.
-// Providers are excluded so two declarations that differ only by provider are
+// PSPs are excluded so two declarations that differ only by PSP are
 // rejected here with a clear message instead of colliding on the unique key at
 // apply time.
 func priceTermsKey(p Price) string {
@@ -748,7 +751,7 @@ func priceTermsKey(p Price) string {
 	return fmt.Sprintf("%s|%d|%s|renew:%t%s%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, trial, metered)
 }
 
-func normalizeProviders(in []string) []string {
+func normalizePSPs(in []string) []string {
 	if in == nil {
 		return nil
 	}

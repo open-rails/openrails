@@ -42,9 +42,9 @@ func TestNMIClientForExistingSubscriptionResolvesThroughStampedScope(t *testing.
 	src := &recordingNMISource{client: client}
 
 	got, _, ok, err := NMIClientForExistingSubscription(context.Background(), src, &models.Subscription{
-		Rail:                  models.RailNMI,
-		MerchantID:            mid,
-		RailMerchantAccountID: &stamped,
+		Rail:       models.RailNMI,
+		MerchantID: mid,
+		PspID:      &stamped,
 	})
 	require.NoError(t, err)
 	require.True(t, ok)

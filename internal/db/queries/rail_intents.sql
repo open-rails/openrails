@@ -23,14 +23,14 @@
 INSERT INTO openrails.rail_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, expires_at, rail_merchant_account_id
+    actor, expires_at, psp_id
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(expires_at),
-    sqlc.narg(rail_merchant_account_id)
+    sqlc.narg(psp_id)
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -45,9 +45,9 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
-    rail_merchant_account_id = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.rail_merchant_account_id
-        ELSE openrails.rail_intents.rail_merchant_account_id
+    psp_id = CASE
+        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.psp_id
+        ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
         WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin

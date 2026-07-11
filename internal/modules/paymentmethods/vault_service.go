@@ -30,8 +30,8 @@ type VaultService struct {
 	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
 	// (test seam; empty = real endpoints).
 	NMIEndpointOverride string
-	ProviderSecrets     merchants.RailMerchantAccountSecretResolver
-	ProviderScopes      merchants.RailMerchantAccountScopeResolver
+	ProviderSecrets     merchants.PSPSecretResolver
+	ProviderScopes      merchants.PSPScopeResolver
 	Config              *config.Config
 	DB                  *db.DB
 	// DeleteIntents routes DeleteVault through the durable nmi_vault_delete
@@ -67,12 +67,12 @@ func (s *VaultService) SetMerchantSecretStore(store merchants.MerchantSecretRead
 	s.MerchantSecrets = store
 }
 
-func (s *VaultService) SetRailMerchantAccountSecretResolver(resolver merchants.RailMerchantAccountSecretResolver) {
+func (s *VaultService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
 	s.ProviderSecrets = resolver
-	if scopes, ok := resolver.(merchants.RailMerchantAccountScopeResolver); ok {
+	if scopes, ok := resolver.(merchants.PSPScopeResolver); ok {
 		s.ProviderScopes = scopes
 	}
 }
@@ -157,16 +157,28 @@ func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.D
 	}
 }
 
-// CreateVault creates a NMI customer vault and stores a local PaymentMethod
+// CreateVault creates a NMI customer vault and stores a local PaymentMethod.
+// req.Provider names the PSP (account key, e.g. "mobius") or a bare rail — the
+// vault is created IN that PSP's account, and the row's rail comes from the
+// resolved scope.
 func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
-	rail := strings.TrimSpace(strings.ToLower(req.Provider))
-	if rail == "" {
+	psp := strings.TrimSpace(strings.ToLower(req.Provider))
+	if psp == "" {
 		return nil, errors.New("provider is required")
 	}
 
-	client, railMerchantAccountID, err := s.resolveNMIClient(ctx, rail)
+	client, scope, err := s.resolveNMIClientByName(ctx, psp)
 	if err != nil {
-		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
+		return nil, fmt.Errorf("PSP '%s' is not configured: %w", psp, err)
+	}
+	rail := psp
+	var pspID *uuid.UUID
+	if scope != nil {
+		rail = scope.Rail
+		if scope.ID != uuid.Nil {
+			id := scope.ID
+			pspID = &id
+		}
 	}
 
 	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
@@ -220,8 +232,8 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		CardType:             stringPtrOrNil(sanitizeCardType(req.CardType)),
 		Metadata:             req.Metadata,
 	}
-	if railMerchantAccountID != nil {
-		pm.RailMerchantAccountID = railMerchantAccountID
+	if pspID != nil {
+		pm.PspID = pspID
 	}
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
@@ -237,24 +249,24 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	return pm, nil
 }
 
-func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, railMerchantAccountID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
+func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, pspID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, nil, errors.New("rail is required")
 	}
 
-	if len(railMerchantAccountID) > 0 && railMerchantAccountID[0] != nil {
+	if len(pspID) > 0 && pspID[0] != nil {
 		if s == nil || s.DB == nil {
 			return nil, nil, errors.New("provider account lookup unavailable")
 		}
-		row, err := s.DB.Gen(ctx).GetRailMerchantAccount(ctx, *railMerchantAccountID[0])
+		row, err := s.DB.Gen(ctx).GetPSP(ctx, *pspID[0])
 		if err != nil {
 			return nil, nil, err
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
 			return nil, nil, fmt.Errorf("provider account %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
 		}
-		client, err := s.resolveNMIClientForScope(ctx, merchants.RailMerchantAccountScope{
+		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScope{
 			ID:          row.ID,
 			Rail:        row.Rail,
 			Environment: row.Environment,
@@ -263,11 +275,11 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 		return client, &row.ID, err
 	}
 
-	var scopeResolver merchants.RailMerchantAccountScopeResolver
+	var scopeResolver merchants.PSPScopeResolver
 	if s != nil {
 		scopeResolver = s.ProviderScopes
 		if scopeResolver == nil {
-			if resolver, ok := s.ProviderSecrets.(merchants.RailMerchantAccountScopeResolver); ok {
+			if resolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
 				scopeResolver = resolver
 			}
 		}
@@ -279,7 +291,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 		}
 		// Environment follows deployment posture (#681): test rows under test_mode.
 		env := config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
-		scope, ok, err := scopeResolver.ActiveRailMerchantAccountScope(ctx, tid, string(models.RailNMI), env)
+		scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailNMI), env)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
@@ -296,7 +308,53 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ra
 	return nil, nil, errors.New("missing client")
 }
 
-func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.RailMerchantAccountScope) (*nmi.NMIClient, error) {
+// resolveNMIClientByName resolves the client for a PSP key or a bare rail
+// name: a declared PSP key pins its own account; a rail resolves to the
+// active armed account. Returns the resolved scope (nil when only static
+// resolution was possible).
+func (s *VaultService) resolveNMIClientByName(ctx context.Context, name string) (*nmi.NMIClient, *merchants.PSPScope, error) {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return nil, nil, errors.New("psp is required")
+	}
+	var keyResolver merchants.PSPKeyResolver
+	if s != nil {
+		if kr, ok := s.ProviderScopes.(merchants.PSPKeyResolver); ok {
+			keyResolver = kr
+		} else if kr, ok := s.ProviderSecrets.(merchants.PSPKeyResolver); ok {
+			keyResolver = kr
+		}
+	}
+	if keyResolver != nil {
+		if tid, err := merchant.Require(ctx); err == nil {
+			env := config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
+			scope, found, err := keyResolver.PSPScopeByKey(ctx, tid, name, env)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve PSP %q: %w", name, err)
+			}
+			if found {
+				if !rails.IsNMI(models.Rail(scope.Rail)) {
+					return nil, nil, fmt.Errorf("PSP %q is on rail %s, not an NMI rail", name, scope.Rail)
+				}
+				client, err := s.resolveNMIClientForScope(ctx, scope)
+				if err != nil {
+					return nil, nil, err
+				}
+				return client, &scope, nil
+			}
+		}
+	}
+	client, pspID, err := s.resolveNMIClient(ctx, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pspID != nil {
+		return client, &merchants.PSPScope{ID: *pspID, Rail: name}, nil
+	}
+	return client, nil, nil
+}
+
+func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	provider := strings.TrimSpace(scope.AccountID)
 	if provider == "" {
 		return nil, errors.New("provider account_id required")
@@ -308,7 +366,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	if err != nil {
 		return nil, err
 	}
-	secretName, err := merchants.RailMerchantAccountSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
+	secretName, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +381,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	if value == "" {
 		return nil, errors.New("missing scoped merchant NMI secret for provider account")
 	}
-	proc := &config.RailMerchantAccountConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
+	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
 	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
 }
 
@@ -418,7 +476,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, errors.New("payment method rail is required")
 	}
 
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -615,7 +673,7 @@ func (s *VaultService) deleteVaultGuards(ctx context.Context, pm *models.Payment
 		return shared, nil, fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
 	}
 
-	client, _, err = s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
+	client, _, err = s.resolveNMIClient(ctx, rail, pm.PspID)
 	if err != nil {
 		return shared, nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -655,7 +713,7 @@ func (s *VaultService) ResolveClientForPaymentMethod(ctx context.Context, pm *mo
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
 	}
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.RailMerchantAccountID)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
 	return client, err
 }
 

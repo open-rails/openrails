@@ -21,7 +21,7 @@ WHERE pr.auto_renew
   AND s.cancelled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
   AND EXISTS (
-      SELECT 1 FROM openrails.rail_merchant_accounts rma
+      SELECT 1 FROM openrails.psps rma
       WHERE rma.merchant_id = s.merchant_id AND rma.rail = s.rail
   )
 GROUP BY s.rail
@@ -33,7 +33,7 @@ type ListWebhookExpectedRailsRow struct {
 }
 
 // Expectation gate for the webhook_silence template: rails that are ARMED
-// (declared in rail_merchant_accounts; archived rows count — drain accounts
+// (declared in psps; archived rows count — drain accounts
 // still receive provider events, #655) AND carry subscriptions projected to
 // keep billing (billable_subscriptions doctrine). RLS-scoped.
 func (q *Queries) ListWebhookExpectedRails(ctx context.Context) ([]ListWebhookExpectedRailsRow, error) {

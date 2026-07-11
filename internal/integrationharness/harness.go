@@ -292,7 +292,7 @@ type StandaloneOption func(*standaloneConfig)
 type standaloneConfig struct {
 	workers                bool
 	clock                  clockwork.Clock
-	rails                  config.RailMerchantAccountSet
+	rails                  config.PSPSet
 	configuredMerchant     merchant.ID
 	authenticator          billingauth.Authenticator
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
@@ -331,7 +331,7 @@ func WithClock(clock clockwork.Clock) StandaloneOption {
 // WithRails arms the test merchant's rails (#788): the set is converged into
 // the SAME armed state production writers produce (rail_merchant_accounts
 // rows + scoped secrets) right after boot — never a boot-config bridge.
-func WithRails(rails config.RailMerchantAccountSet) StandaloneOption {
+func WithRails(rails config.PSPSet) StandaloneOption {
 	return func(c *standaloneConfig) { c.rails = rails }
 }
 

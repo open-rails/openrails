@@ -47,7 +47,7 @@ func testModeReconcileConfig() *config.Config {
 func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
 				Environment: "test",
@@ -85,7 +85,7 @@ func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
 	require.Zero(t, count, "a refused arm must never persist the provider account row")
 }
@@ -110,7 +110,7 @@ func TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
 	require.Equal(t, 1, count, "a simulated (sandbox) account arms normally")
 }
@@ -137,7 +137,7 @@ func TestReconcileMerchantManifestNMIProbeIndeterminateNeverRefuses(t *testing.T
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
 }
@@ -189,7 +189,7 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
-	mt.RailMerchantAccounts = map[string]RailMerchantAccountConfig{
+	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
 				Environment: "live",
@@ -209,7 +209,7 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.rail_merchant_accounts WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
 }

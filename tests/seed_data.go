@@ -97,7 +97,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              9_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_usd_999",
 						},
@@ -118,7 +118,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              24_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(2160), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_quarterly_usd_2499",
 						},
@@ -142,7 +142,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              8_990_000,
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_eur_899",
 						},
@@ -160,7 +160,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              1_200_000_000,
 					Currency:            "jpy",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_monthly_jpy_1200",
 						},
@@ -173,7 +173,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              79_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(8760), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_yearly_usd_7999",
 						},
@@ -208,7 +208,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              19_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_monthly_usd_1999",
 						},
@@ -227,7 +227,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              149_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(8760), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_yearly_usd_14999",
 						},
@@ -249,7 +249,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              17_990_000,
 					Currency:            "eur",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_pro_monthly_eur_1799",
 						},
@@ -280,7 +280,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              299_990_000,
 					Currency:            "usd",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase, no recurring billing
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_usd_29999",
 						},
@@ -302,7 +302,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              269_990_000,
 					Currency:            "eur",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_eur_26999",
 						},
@@ -320,7 +320,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              39_800_000_000,
 					Currency:            "jpy",
 					AccessDurationHours: nil, AutoRenew: false, // One-time purchase
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_lifetime_jpy_39800",
 						},
@@ -347,7 +347,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 					Amount:              4_990_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_basic_monthly_usd_499",
 						},
@@ -424,7 +424,7 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, price.Archived, price.Amount, price.Currency,
 		price.AccessDurationHours, price.AutoRenew,
-		suite.mustJSONB(price.Rails, len(price.Rails) == 0), price.Key,
+		suite.mustJSONB(price.PSPLinks, len(price.PSPLinks) == 0), price.Key,
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
 }
@@ -452,7 +452,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:              10_000_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_basic_1000",
 						},
@@ -479,7 +479,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:              20_000_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_plus_2000",
 						},
@@ -507,7 +507,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 					Amount:              30_000_000,
 					Currency:            "usd",
 					AccessDurationHours: intPtr(720), AutoRenew: true,
-					Rails: map[string]map[string]string{
+					PSPLinks: map[string]map[string]string{
 						string(models.RailNMI): {
 							models.RailKeyPlanID: "plan_premium_ultimate_3000",
 						},

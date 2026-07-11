@@ -85,7 +85,7 @@ func TestRailMerchantAccountSignerUsesVaultTransitEvidence(t *testing.T) {
 	const vaultKey = "openrails-solana-it"
 	now := time.Now().UTC()
 	require.NoError(t, appDB.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
-		_, err := appDB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err := appDB.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID:     merchantUUID,
 			Rail:           "solana",
 			AccountID:      key.PublicKey().String(),
@@ -130,7 +130,7 @@ func TestRailMerchantAccountSignerUsesConfiguredEnvironment(t *testing.T) {
 	environment := "test"
 	now := time.Now().UTC()
 	require.NoError(t, appDB.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
-		_, err := appDB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err := appDB.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID:     merchantUUID,
 			Rail:           "solana",
 			Environment:    &environment,
@@ -140,7 +140,7 @@ func TestRailMerchantAccountSignerUsesConfiguredEnvironment(t *testing.T) {
 		})
 		return err
 	}))
-	secretName, err := merchants.RailMerchantAccountSecretName("solana", environment, key.PublicKey().String(), "private_key")
+	secretName, err := merchants.PSPSecretName("solana", environment, key.PublicKey().String(), "private_key")
 	require.NoError(t, err)
 
 	signer := NewSignerFromRailMerchantAccounts(signerTestSecretMap{secretName: key.String()}, nil, appDB, 0, environment)
@@ -174,7 +174,7 @@ func TestRailMerchantAccountSignerSignsForRecordedPublicKey(t *testing.T) {
 	now := time.Now().UTC()
 	require.NoError(t, appDB.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
 		for _, key := range []solanago.PrivateKey{oldKey, newKey} {
-			if _, err := appDB.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+			if _, err := appDB.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 				MerchantID:     merchantUUID,
 				Rail:           "solana",
 				Environment:    &environment,
@@ -187,9 +187,9 @@ func TestRailMerchantAccountSignerSignsForRecordedPublicKey(t *testing.T) {
 		}
 		return nil
 	}))
-	oldSecret, err := merchants.RailMerchantAccountSecretName("solana", environment, oldKey.PublicKey().String(), "private_key")
+	oldSecret, err := merchants.PSPSecretName("solana", environment, oldKey.PublicKey().String(), "private_key")
 	require.NoError(t, err)
-	newSecret, err := merchants.RailMerchantAccountSecretName("solana", environment, newKey.PublicKey().String(), "private_key")
+	newSecret, err := merchants.PSPSecretName("solana", environment, newKey.PublicKey().String(), "private_key")
 	require.NoError(t, err)
 
 	signer := NewSignerFromRailMerchantAccounts(signerTestSecretMap{

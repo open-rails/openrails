@@ -545,7 +545,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 				UnitAmount: 10_000,
 				Currency:   "usd",
 				Duration:   "indefinite",
-				Providers:  []string{},
+				PSPs:       []string{},
 			}},
 		}},
 	}
@@ -598,7 +598,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			Prices: []catalog.Price{{
 				UnitAmount: 0,
 				Currency:   "usd",
-				Providers:  []string{},
+				PSPs:       []string{},
 				Metered: &catalog.MeteredPrice{
 					Meter:    meterKey,
 					Rate:     250_000,
@@ -708,7 +708,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 					UnitAmount: 4_990_000,
 					Currency:   "usd",
 					Duration:   "indefinite",
-					Providers:  []string{},
+					PSPs:       []string{},
 				}},
 			},
 			{
@@ -719,7 +719,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 					UnitAmount: 9_990_000,
 					Currency:   "usd",
 					Duration:   "indefinite",
-					Providers:  []string{},
+					PSPs:       []string{},
 				}},
 			},
 		},
@@ -811,7 +811,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 					Currency:   "usd",
 					Duration:   "30d",
 					AutoRenew:  true,
-					Providers:  []string{},
+					PSPs:       []string{},
 				}},
 			},
 			{
@@ -825,7 +825,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 					Currency:   "usd",
 					Duration:   "30d",
 					AutoRenew:  true,
-					Providers:  []string{},
+					PSPs:       []string{},
 				}},
 			},
 		},
@@ -1525,8 +1525,8 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 			entry.Products[i].Includes[j] += suffix
 		}
 		for j := range entry.Products[i].Prices {
-			entry.Products[i].Prices[j].Providers = nil
-			entry.Products[i].Prices[j].ProviderLinks = nil
+			entry.Products[i].Prices[j].PSPs = nil
+			entry.Products[i].Prices[j].PSPLinks = nil
 			if mp := entry.Products[i].Prices[j].Metered; mp != nil {
 				mp.Meter = meterKeys[mp.Meter]
 			}

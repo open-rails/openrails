@@ -876,7 +876,7 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
-	var solanaProc *config.RailMerchantAccountConfig
+	var solanaProc *config.PSPConfig
 	if s.rt != nil && s.rt.RailConfigs != nil {
 		proc, err := s.rt.RailConfigs.RailConfig(ctx, string(models.RailSolana), "")
 		if err == nil {

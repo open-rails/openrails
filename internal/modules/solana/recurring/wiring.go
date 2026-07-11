@@ -30,7 +30,7 @@ type secretStoreGetter struct {
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
 	if name == "private_key" && g.database != nil {
 		var (
-			account gen.OpenrailsRailMerchantAccount
+			account gen.OpenrailsPsp
 			ok      bool
 			err     error
 		)
@@ -45,7 +45,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 		if !ok {
 			return "", fmt.Errorf("solana: no active provider account for signing key")
 		}
-		secretName, err := merchants.RailMerchantAccountSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
+		secretName, err := merchants.PSPSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
 		if err != nil {
 			return "", err
 		}
@@ -173,18 +173,18 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsRailMerchantAccount, bool, error) {
+func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPsp, bool, error) {
 	if database == nil || merchantID.IsZero() {
-		return gen.OpenrailsRailMerchantAccount{}, false, nil
+		return gen.OpenrailsPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: provider account environment is required")
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: provider account environment is required")
 	}
-	var row gen.OpenrailsRailMerchantAccount
+	var row gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		row, err = database.Gen(ctx).GetActiveRailMerchantAccountForNewWork(ctx, gen.GetActiveRailMerchantAccountForNewWorkParams{
+		row, err = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        "solana",
 			Environment: &environment,
@@ -192,25 +192,25 @@ func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merc
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsRailMerchantAccount{}, false, nil
+			return gen.OpenrailsPsp{}, false, nil
 		}
-		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
 	}
 	return row, true, nil
 }
 
-func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsRailMerchantAccount, bool, error) {
+func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPsp, bool, error) {
 	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
-		return gen.OpenrailsRailMerchantAccount{}, false, nil
+		return gen.OpenrailsPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: provider account environment is required")
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: provider account environment is required")
 	}
-	var row gen.OpenrailsRailMerchantAccount
+	var row gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
-		row, err = database.Gen(ctx).GetRailMerchantAccountByIdentity(ctx, gen.GetRailMerchantAccountByIdentityParams{
+		row, err = database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        "solana",
 			Environment: &environment,
@@ -219,9 +219,9 @@ func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, m
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsRailMerchantAccount{}, false, nil
+			return gen.OpenrailsPsp{}, false, nil
 		}
-		return gen.OpenrailsRailMerchantAccount{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
 	}
 	return row, true, nil
 }

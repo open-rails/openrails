@@ -84,10 +84,10 @@ func seedChargebackBase(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) (acctLa
 	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	exec(t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,'P',$3)`, prod, "k-"+uuid.NewString()[:8], mid)
 	exec(t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,10000000,'usd',$3)`, price, prod, mid)
-	exec(t, pool, `INSERT INTO openrails.rail_merchant_accounts (id, merchant_id, rail, account_id) VALUES ($1,$2,'nmi',$3)`, acct, mid, acctLabel)
+	exec(t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1,$2,'nmi',$3)`, acct, mid, acctLabel)
 	now := time.Now().UTC()
 	p1, p2 := uuid.New(), uuid.New()
-	ins := `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, rail_merchant_account_id, transaction_id, amount, list_amount, currency, status, attempt_kind, purchased_at, created_at)
+	ins := `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, attempt_kind, purchased_at, created_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,$6,10000000,10000000,'usd','completed','initial',$7,$7)`
 	exec(t, pool, ins, p1, mid, cust, price, acct, "tx-"+uuid.NewString()[:8], now.AddDate(0, 0, -3))
 	exec(t, pool, ins, p2, mid, cust, price, acct, "tx-"+uuid.NewString()[:8], now.AddDate(0, 0, -2))
@@ -101,8 +101,8 @@ func addChargeback(t *testing.T, pool *pgxpool.Pool, mid, refPay uuid.UUID) {
 	cust := uuid.New()
 	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	now := time.Now().UTC()
-	exec(t, pool, `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, refunded_payment_id, rail, rail_merchant_account_id, transaction_id, amount, list_amount, currency, status, reversal_kind, purchased_at, created_at)
-		SELECT $1,$2,$3, price_id, $4, 'nmi', rail_merchant_account_id, $5, -10000000, 10000000, 'usd', 'completed', 'chargeback', $6, $6
+	exec(t, pool, `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, refunded_payment_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, reversal_kind, purchased_at, created_at)
+		SELECT $1,$2,$3, price_id, $4, 'nmi', psp_id, $5, -10000000, 10000000, 'usd', 'completed', 'chargeback', $6, $6
 		FROM openrails.payments WHERE id=$4`,
 		uuid.New(), mid, cust, refPay, "cb-"+uuid.NewString()[:8], now.AddDate(0, 0, -1))
 }

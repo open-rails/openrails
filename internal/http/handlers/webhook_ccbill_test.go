@@ -128,7 +128,7 @@ func TestCCBillWebhookMessageNeverClaimsSignatureValid(t *testing.T) {
 
 	msg := ccbillWebhookMessage("64.38.212.5", prepared, "900000-0000")
 	require.Nil(t, msg.SignatureValid)
-	require.Equal(t, "900000-0000", msg.RailMerchantAccountID)
+	require.Equal(t, "900000-0000", msg.PspID)
 }
 
 // newCCBillWebhookRequestBehindProxy builds a webhook request that physically

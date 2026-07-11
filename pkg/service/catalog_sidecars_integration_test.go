@@ -70,7 +70,7 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			CreditKey:  "image-credit",
 			Currency:   "USD",
 			InputMin:   1_000_000,
-			Providers:  []string{"stripe"},
+			PSPs:       []string{"stripe"},
 			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`),
 		}},
 	}))

@@ -39,7 +39,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 		Currency:            "usd",
 		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			"stripe": {
 				models.RailKeyRail:            "stripe",
 				models.RailKeyStripePriceID:   "price_local",
@@ -443,7 +443,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 		return &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
 			AccessDurationHours: &cycleHours, AutoRenew: true, Archived: archived,
-			Rails: map[string]map[string]string{
+			PSPLinks: map[string]map[string]string{
 				string(models.RailSolana): {models.RailKeyRail: string(models.RailSolana), "plan_pda": pda},
 			},
 		}

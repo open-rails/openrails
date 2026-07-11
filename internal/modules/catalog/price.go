@@ -22,12 +22,12 @@ func NewPriceService(db *db.DB) *PriceService {
 	return &PriceService{db: db}
 }
 
-func priceRailsJSONB(p *models.Price) ([]byte, error) {
-	return models.ToJSONB(p.Rails)
+func pricePSPLinksJSONB(p *models.Price) ([]byte, error) {
+	return models.ToJSONB(p.PSPLinks)
 }
 
 func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
-	rails, err := priceRailsJSONB(price)
+	pspLinks, err := pricePSPLinksJSONB(price)
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 		AutoRenew:           price.AutoRenew,
 		TrialUnitAmount:     price.TrialUnitAmount,
 		TrialDurationHours:  models.IntPtrTo32(price.TrialDurationHours),
-		Rails:               rails,
+		PspLinks:            pspLinks,
 		Key:                 price.Key,
 		CreatedAt:           price.CreatedAt,
 		UpdatedAt:           price.UpdatedAt,
@@ -201,9 +201,8 @@ func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string)
 	// Archived prices must still resolve here so grandfathered subscriptions
 	// keep billing.
 	row, err := s.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
-		Rail:               rail,
-		PlanID:             nmiPlanID,
-		IncludeNmiFallback: rail != string(models.RailNMI),
+		Rail:   rail,
+		PlanID: nmiPlanID,
 	})
 	if err != nil {
 		return nil, err
@@ -229,9 +228,9 @@ func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID str
 
 // Update is not supported - prices are immutable to preserve historical payment accuracy.
 // To change pricing, create a new price and deactivate the old one.
-// Use UpdateRails() for non-financial fields.
+// Use UpdatePSPLinks() for non-financial fields.
 func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
-	return errors.New("prices are immutable; use UpdateRails() or Deactivate() for allowed changes")
+	return errors.New("prices are immutable; use UpdatePSPLinks() or Deactivate() for allowed changes")
 }
 
 // Delete is not supported - prices are immutable to preserve historical payment accuracy.
@@ -273,16 +272,16 @@ func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived b
 	return nil
 }
 
-// UpdateRails updates the rail mappings (external IDs, does not affect historical data).
-// This is useful when adding new rails or updating external price/plan IDs.
-func (s *PriceService) UpdateRails(ctx context.Context, id uuid.UUID, rails map[string]map[string]string) error {
-	railsJSONB, err := models.ToJSONB(rails)
+// UpdatePSPLinks updates the PSP link entries (external IDs, does not affect
+// historical data).
+func (s *PriceService) UpdatePSPLinks(ctx context.Context, id uuid.UUID, links map[string]map[string]string) error {
+	linksJSONB, err := models.ToJSONB(links)
 	if err != nil {
 		return err
 	}
-	rows, err := s.db.Gen(ctx).UpdatePriceRails(ctx, gen.UpdatePriceRailsParams{
-		ID:    id,
-		Rails: railsJSONB,
+	rows, err := s.db.Gen(ctx).UpdatePricePSPLinks(ctx, gen.UpdatePricePSPLinksParams{
+		ID:       id,
+		PspLinks: linksJSONB,
 	})
 	if err != nil {
 		return err

@@ -71,7 +71,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 
 	// Read the canonical, immutable plan terms from the price's Solana config —
 	// these were stamped at publish time and must not be client-supplied.
-	cfg := price.GetRailConfig(models.RailSolana)
+	cfg := price.PSPLinkForRail(models.RailSolana)
 	if cfg == nil {
 		r.ErrorJSON(http.StatusBadRequest, "price is not configured for Solana recurring billing")
 		return
@@ -341,7 +341,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if !newPrice.IsPurchasable() {
 		return nil, http.StatusBadRequest, "target price is not available"
 	}
-	newCfg := newPrice.GetRailConfig(models.RailSolana)
+	newCfg := newPrice.PSPLinkForRail(models.RailSolana)
 	newTerms, ok := parseResolvedPlanTerms(newCfg)
 	if !ok {
 		return nil, http.StatusBadRequest, "target price is not configured for Solana recurring billing"

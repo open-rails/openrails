@@ -44,7 +44,7 @@ products:
     display_name: Ambiguous
     prices:
       - {currency: usd, unit_amount: 999, duration: 30d, auto_renew: true}
-      - {currency: usd, unit_amount: 499, duration: 30d, auto_renew: true, providers: [stripe]}
+      - {currency: usd, unit_amount: 499, duration: 30d, auto_renew: true, psps: [stripe]}
 `)
 	_, err := Plan(context.Background(), newFakeApplier(), m)
 	if err == nil {

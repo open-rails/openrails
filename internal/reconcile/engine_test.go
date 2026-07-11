@@ -1357,7 +1357,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		ProductID: uuid.New(),
 		Amount:    999,
 		Currency:  "usd",
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			// The provider-link key is the merchant's ACCOUNT key with the
 			// rail recorded inside the entry.
 			"mobius": {"rail": "nmi", "plan_id": "plan-gold"},

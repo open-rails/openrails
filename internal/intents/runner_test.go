@@ -20,7 +20,7 @@ import (
 type fakeLedger struct {
 	due        []gen.OpenrailsRailIntent
 	dueVerify  []gen.OpenrailsRailIntent
-	accounts   map[uuid.UUID]gen.OpenrailsRailMerchantAccount
+	accounts   map[uuid.UUID]gen.OpenrailsPsp
 	transition map[uuid.UUID]string // id -> applied transition
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
@@ -40,17 +40,17 @@ type fakeLedger struct {
 func newFakeLedger() *fakeLedger {
 	return &fakeLedger{
 		transition: map[uuid.UUID]string{},
-		accounts:   map[uuid.UUID]gen.OpenrailsRailMerchantAccount{},
+		accounts:   map[uuid.UUID]gen.OpenrailsPsp{},
 		reasons:    map[uuid.UUID]string{},
 		nextAt:     map[uuid.UUID]time.Time{},
 		evidence:   map[uuid.UUID]map[string]any{},
 	}
 }
 
-func (f *fakeLedger) GetRailMerchantAccount(_ context.Context, id uuid.UUID) (gen.OpenrailsRailMerchantAccount, error) {
+func (f *fakeLedger) GetPSP(_ context.Context, id uuid.UUID) (gen.OpenrailsPsp, error) {
 	account, ok := f.accounts[id]
 	if !ok {
-		return gen.OpenrailsRailMerchantAccount{}, pgx.ErrNoRows
+		return gen.OpenrailsPsp{}, pgx.ErrNoRows
 	}
 	return account, nil
 }

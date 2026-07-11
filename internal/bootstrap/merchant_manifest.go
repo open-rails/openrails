@@ -201,8 +201,8 @@ func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
 }
 
 // rejectRenamedMerchantConfigKeys fails a manifest that still spells the
-// accounts key by a retired name (#698: accounts <- rail_merchant_accounts;
-// #683: rail_merchant_accounts <- provider_accounts). The strict parser would
+// psps key by a retired name (psps <- accounts <- rail_merchant_accounts <-
+// provider_accounts). The strict parser would
 // reject these as unknown fields anyway, but "unknown field" reads like a typo
 // — a rename deserves a pointer. Silent-ignore is the worst failure here: it
 // would apply an empty account set.
@@ -221,7 +221,7 @@ func rejectRenamedMerchantConfigKeys(raw []byte) error {
 	for _, slug := range slugs {
 		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
 			if _, ok := probe.Merchants[slug][old]; ok {
-				return fmt.Errorf("merchants.%s.%s was renamed to accounts", slug, old)
+				return fmt.Errorf("merchants.%s.%s was renamed to psps", slug, old)
 			}
 		}
 	}
@@ -265,21 +265,21 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	if len(src.DelegatedInvokerWastedSpendWindows) > 0 {
 		dst.DelegatedInvokerWastedSpendWindows = src.DelegatedInvokerWastedSpendWindows
 	}
-	if len(src.RailMerchantAccounts) > 0 {
-		if dst.RailMerchantAccounts == nil {
-			dst.RailMerchantAccounts = map[string]RailMerchantAccountConfig{}
+	if len(src.PSPs) > 0 {
+		if dst.PSPs == nil {
+			dst.PSPs = map[string]PSPConfig{}
 		}
-		for key, srcRails := range src.RailMerchantAccounts {
-			dstRails := dst.RailMerchantAccounts[key]
+		for key, srcRails := range src.PSPs {
+			dstRails := dst.PSPs[key]
 			if dstRails == nil {
-				dstRails = RailMerchantAccountConfig{}
+				dstRails = PSPConfig{}
 			}
 			for rail, srcAccount := range srcRails {
 				dstAccount := dstRails[rail]
 				mergeProviderRailAccountConfig(&dstAccount, srcAccount)
 				dstRails[rail] = dstAccount
 			}
-			dst.RailMerchantAccounts[key] = dstRails
+			dst.PSPs[key] = dstRails
 		}
 	}
 }
@@ -361,13 +361,13 @@ type MerchantConfig struct {
 	// delegated invokers (#646): per-window spend ceilings on wasted (failed/abused)
 	// generation. Empty leaves the service-default windows (burst 15m/$5, sustained 5h/$20).
 	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
-	// RailMerchantAccounts is the operator-declared rail account catalog. The
-	// CONFIG key is `accounts` (#698 — operators type it, and inside
+	// PSPs is the operator-declared PSP catalog: the merchant's payment
+	// service providers, keyed by PSP key (e.g. mobius), one rail each.
 	// merchants.<slug>. nothing else it could mean). DELIBERATE DIVERGENCE: the
 	// DB table and the merchant-secret name prefix REMAIN `rail_merchant_accounts`
 	// (#683 vocabulary; distinguishes rail_customer_accounts) — do not "fix" them
 	// to match this key.
-	RailMerchantAccounts map[string]RailMerchantAccountConfig `yaml:"accounts,omitempty" koanf:"accounts"`
+	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
 }
 
 // InvoiceConfig is the merchant invoice/collection policy block, mirroring
@@ -439,7 +439,7 @@ type MerchantProfileConfig struct {
 	SignupURL   string `yaml:"signup_url,omitempty" koanf:"signup_url"`
 }
 
-type RailMerchantAccountConfig map[string]ProviderRailAccountConfig
+type PSPConfig map[string]ProviderRailAccountConfig
 
 type ProviderRailAccountConfig struct {
 	// Environment (test|live) is an ASSERTION cross-checked against the
@@ -451,7 +451,7 @@ type ProviderRailAccountConfig struct {
 	Signer      *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
 	Secrets     map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
 	// Settings are per-account NON-SECRET runtime knobs, stored on the
-	// rail_merchant_accounts row (NMI: tokenization_key/tokenization_url;
+	// psps row (NMI: tokenization_key/tokenization_url;
 	// Solana: rpc_provider, rpc_api_key, tokens,
 	// recipient_wallet — see config.SolanaAccountSettings, #711).
 	Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
@@ -769,7 +769,7 @@ type railMerchantAccountEntry struct {
 	config ProviderRailAccountConfig
 }
 
-func railMerchantAccountEntries(in map[string]RailMerchantAccountConfig) []railMerchantAccountEntry {
+func pspEntries(in map[string]PSPConfig) []railMerchantAccountEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
@@ -844,7 +844,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		}
 	}
 
-	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
+	for _, entry := range pspEntries(mt.PSPs) {
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
 		}
@@ -868,7 +868,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // file. Names are derived exactly as Put derives them.
 func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore) error {
 	declared := map[string]struct{}{}
-	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
+	for _, entry := range pspEntries(mt.PSPs) {
 		rail := normalizeManifestRail(entry.rail)
 		environment, err := manifestProviderEnvironment(cfg, entry.config.Environment)
 		if err != nil {
@@ -895,7 +895,7 @@ func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID me
 			}
 		}
 		for key := range entry.config.Secrets {
-			name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
+			name, err := merchants.PSPSecretName(rail, environment, accountID, key)
 			if err != nil {
 				return err
 			}
@@ -1001,13 +1001,13 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	if store == nil {
 		return fmt.Errorf("merchant manifest secret plane: store is required")
 	}
-	for _, entry := range railMerchantAccountEntries(mt.RailMerchantAccounts) {
+	for _, entry := range pspEntries(mt.PSPs) {
 		ra, err := resolveManifestRailAccount(ctx, cfg, entry.rail, entry.config, transit, nil)
 		if err != nil {
 			return err
 		}
 		for key, fallback := range entry.config.Secrets {
-			name, err := merchants.RailMerchantAccountSecretName(ra.rail, ra.environment, ra.accountID, key)
+			name, err := merchants.PSPSecretName(ra.rail, ra.environment, ra.accountID, key)
 			if err != nil {
 				return err
 			}
@@ -1035,7 +1035,7 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 	identity := ra.identity
 	signerEvidence := ra.signerEvidence
 	for key, value := range account.Secrets {
-		name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, key)
+		name, err := merchants.PSPSecretName(rail, environment, accountID, key)
 		if err != nil {
 			return err
 		}
@@ -1071,13 +1071,13 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 			return nil
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			Config:                cfg,
-			SecretStore:           secretStore,
-			MerchantID:            merchantID,
-			MerchantSlug:          merchantSlug,
-			ProviderEnvironment:   environment,
-			RailMerchantAccountID: accountID,
-			EnabledEvents:         webhooks.HandledStripeEventTypes,
+			Config:              cfg,
+			SecretStore:         secretStore,
+			MerchantID:          merchantID,
+			MerchantSlug:        merchantSlug,
+			ProviderEnvironment: environment,
+			PspID:               accountID,
+			EnabledEvents:       webhooks.HandledStripeEventTypes,
 		})
 		if err != nil {
 			return fmt.Errorf("reconcile stripe webhook endpoint: %w", err)
@@ -1096,7 +1096,7 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 
 	found := false
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		_, err := database.Gen(ctx).GetRailMerchantAccountByIdentity(ctx, gen.GetRailMerchantAccountByIdentityParams{
+		_, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
 			MerchantID:  merchantID.UUID(),
 			Rail:        rail,
 			Environment: stringPtrIfNotEmpty(environment),
@@ -1140,21 +1140,21 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 	// #650: a provider account belongs to exactly one merchant. Fail with a clear
 	// error if another merchant already owns this identity, rather than letting the
 	// global-uniqueness upsert reject it with an opaque unique-violation under RLS.
-	if err := merchants.AssertRailMerchantAccountUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
+	if err := merchants.AssertPSPUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
 		return err
 	}
 	mctx := merchant.WithID(ctx, merchantID)
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		// #662: derive the id from the global natural key and store the SAME
 		// normalized (rail, environment, account_id) it is hashed from.
-		railAcctID, nRail, nEnv, nAccount := merchants.RailMerchantAccountNaturalKey(rail, environment, accountID)
-		_, err := database.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		railAcctID, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
+		_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			ID:          railAcctID,
 			MerchantID:  merchantID.UUID(),
 			Rail:        nRail,
 			Environment: &nEnv,
 			AccountID:   nAccount,
-			DisplayName: displayName,
+			Key:         displayName,
 			Archived:    &account.Archived,
 			Evidence:    evidenceJSON,
 		})
@@ -1184,7 +1184,7 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 // credential noise is not evidence of a live account. Production deployments
 // (test_mode=false) never reach this at all — probing charges a real card.
 func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
-	name, err := merchants.RailMerchantAccountSecretName(rail, environment, accountID, "security_key")
+	name, err := merchants.PSPSecretName(rail, environment, accountID, "security_key")
 	if err != nil {
 		return err
 	}
@@ -1357,7 +1357,7 @@ func newManifestSecretValues(rail string, sources map[string]string) (manifestSe
 		values:  map[string]string{},
 	}
 	for key, value := range sources {
-		canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(rail, key)
+		canonical, err := merchants.NormalizePSPSecretKey(rail, key)
 		if err != nil {
 			return out, err
 		}
@@ -1374,7 +1374,7 @@ func newManifestSecretValues(rail string, sources map[string]string) (manifestSe
 }
 
 func (v manifestSecretValues) Resolve(key string, fallback string) (string, error) {
-	canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(v.rail, key)
+	canonical, err := merchants.NormalizePSPSecretKey(v.rail, key)
 	if err != nil {
 		return "", err
 	}
@@ -1394,7 +1394,7 @@ func (v manifestSecretValues) Resolve(key string, fallback string) (string, erro
 }
 
 func (v manifestSecretValues) ResolveIfPresent(key string) (string, bool, error) {
-	canonical, err := merchants.NormalizeRailMerchantAccountSecretKey(v.rail, key)
+	canonical, err := merchants.NormalizePSPSecretKey(v.rail, key)
 	if err != nil {
 		return "", false, err
 	}

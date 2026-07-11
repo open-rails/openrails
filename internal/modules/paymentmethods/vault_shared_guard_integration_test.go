@@ -87,7 +87,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	// #788: the client arms from the scoped merchant secret store (the ONE
 	// armed-state plane); the boot-config bridge is gone.
 	secretStore := merchants.NewMemorySecretStore()
-	secretName, err := merchants.RailMerchantAccountSecretName("nmi", "live", "mobius-account", "security_key")
+	secretName, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, "test-key")
 	require.NoError(t, err)

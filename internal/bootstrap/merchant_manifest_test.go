@@ -38,7 +38,7 @@ merchants:
       logo_url: https://cdn.example/logo.png
       from_email: billing@example.com
       support_url: https://example.com/support
-    accounts:
+    psps:
       stripe:
         stripe:
           environment: test
@@ -62,8 +62,8 @@ merchants:
 	require.NotNil(t, m.RemoteApplication)
 	require.Equal(t, "https://auth.cozy.art", m.RemoteApplication.Issuer)
 	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
-	require.Len(t, m.RailMerchantAccounts, 2)
-	require.Equal(t, "acct_test_123", m.RailMerchantAccounts["stripe"]["stripe"].AccountID)
+	require.Len(t, m.PSPs, 2)
+	require.Equal(t, "acct_test_123", m.PSPs["stripe"]["stripe"].AccountID)
 }
 
 func TestExampleMerchantConfigManifestParses(t *testing.T) {
@@ -100,7 +100,7 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// #641/#646/#655/#660: multiple accounts per rail, each with a human name,
 	// account_id identity, lifecycle, and explicit signer/destination split for
 	// Solana.
-	accts := m.RailMerchantAccounts
+	accts := m.PSPs
 	require.Len(t, accts, 8)
 	type key struct{ name, env string }
 	byName := map[key]ProviderRailAccountConfig{}
@@ -279,46 +279,46 @@ merchants:
 		{
 			name: "renamed key rail_merchant_accounts rejected with pointer (#698)",
 			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.cozy-art.rail_merchant_accounts was renamed to accounts",
+			want: "merchants.cozy-art.rail_merchant_accounts was renamed to psps",
 		},
 		{
 			name: "pre-#683 key provider_accounts rejected with pointer",
 			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.cozy-art.provider_accounts was renamed to accounts",
+			want: "merchants.cozy-art.provider_accounts was renamed to psps",
 		},
 		{
 			name: "provider account routing removed",
-			body: base("    accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
+			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
 			want: "unknown field \"routing\"",
 		},
 		{
 			name: "provider account mode removed",
-			body: base("    accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
+			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
 			want: "unknown field \"mode\"",
 		},
 		{
 			name: "provider account role removed",
-			body: base("    accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
+			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
 			want: "unknown field \"role\"",
 		},
 		{
 			name: "invalid provider account environment",
-			body: base("    accounts:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
+			body: base("    psps:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
 			want: "environment must be live or test",
 		},
 		{
 			name: "solana network is not a provider-account knob",
-			body: base("    accounts:\n      solana:\n        solana:\n          network: devnet\n"),
+			body: base("    psps:\n      solana:\n        solana:\n          network: devnet\n"),
 			want: "unknown field \"network\"",
 		},
 		{
 			name: "invalid provider secret alias",
-			body: base("    accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
+			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
 			want: "unknown provider account secret",
 		},
 		{
 			name: "nmi tokenization key is a setting",
-			body: base("    accounts:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
+			body: base("    psps:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
 			want: "unknown provider account secret",
 		},
 	} {
@@ -330,28 +330,28 @@ merchants:
 	}
 }
 
-// #698: the dump emits the renamed `accounts:` key and round-trips through the
+// The dump emits the renamed `psps:` key and round-trips through the
 // strict parser. The DB table / secret-name prefix keep `rail_merchant_accounts`
 // on purpose — only the config surface is short.
-func TestMarshalMerchantManifestEmitsAccountsKey(t *testing.T) {
+func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 	encoded, err := MarshalMerchantManifest(&BillingConfig{
 		Version: 1,
 		Merchants: map[string]MerchantConfig{
 			"cozy-art": {
 				DisplayName: "Cozy Art",
-				RailMerchantAccounts: map[string]RailMerchantAccountConfig{
+				PSPs: map[string]PSPConfig{
 					"stripe": {"stripe": {Environment: "test", AccountID: "acct_test_123"}},
 				},
 			},
 		},
 	})
 	require.NoError(t, err)
-	require.Contains(t, string(encoded), "accounts:")
+	require.Contains(t, string(encoded), "psps:")
 	require.NotContains(t, string(encoded), "rail_merchant_accounts:")
 
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
-	require.Equal(t, "acct_test_123", reparsed.Merchants["cozy-art"].RailMerchantAccounts["stripe"]["stripe"].AccountID)
+	require.Equal(t, "acct_test_123", reparsed.Merchants["cozy-art"].PSPs["stripe"]["stripe"].AccountID)
 }
 
 // A declared Solana account_id is IGNORED, not rejected: parsing succeeds (it is
@@ -361,11 +361,11 @@ func TestParseMerchantConfigManifestSolanaAccountIDIgnored(t *testing.T) {
 	base := func(fragment string) string {
 		return "version: 1\nmerchants:\n  cozy-art:\n    display_name: Cozy Art\n" + fragment
 	}
-	withAccountID := base("    accounts:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
+	withAccountID := base("    psps:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
 	_, err := ParseMerchantConfigManifest([]byte(withAccountID))
 	require.NoError(t, err, "declared solana account_id is ignored, not a parse error")
 
-	noSigner := base("    accounts:\n      solana:\n        solana:\n          environment: live\n")
+	noSigner := base("    psps:\n      solana:\n        solana:\n          environment: live\n")
 	_, err = ParseMerchantConfigManifest([]byte(noSigner))
 	require.ErrorContains(t, err, "requires a signer", "solana with no signer has no key to derive account_id from")
 }

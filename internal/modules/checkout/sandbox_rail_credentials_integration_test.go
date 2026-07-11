@@ -35,14 +35,14 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 
 	seed := func(rail, accountID string) {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived, evidence)
+			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 			VALUES ($1::uuid, $2, 'test', $3, false, '{"source":"test_681"}'::jsonb)
 			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
 		`, dbtest.TestMerchantID.String(), rail, accountID)
 		require.NoError(t, err)
 	}
 	putSecret := func(rail, accountID, key, value string) {
-		name, err := merchants.RailMerchantAccountSecretName(rail, "test", accountID, key)
+		name, err := merchants.PSPSecretName(rail, "test", accountID, key)
 		require.NoError(t, err)
 		_, err = store.Put(ctx, dbtest.TestMerchantID, name, value)
 		require.NoError(t, err)

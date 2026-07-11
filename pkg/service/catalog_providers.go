@@ -244,17 +244,17 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 ) {
 	adapters := s.providerAdapters()
 
-	// Build the unique attach set: union of req.Providers and the keys of
-	// req.ProviderLinks. Lowercase + trimmed for stable dispatch.
+	// Build the unique attach set: union of req.PSPs and the keys of
+	// req.PSPLinks. Lowercase + trimmed for stable dispatch.
 	want := map[string]struct{}{}
-	for _, p := range req.Providers {
+	for _, p := range req.PSPs {
 		p = strings.ToLower(strings.TrimSpace(p))
 		if p == "" {
 			continue
 		}
 		want[p] = struct{}{}
 	}
-	for p := range req.ProviderLinks {
+	for p := range req.PSPLinks {
 		p = strings.ToLower(strings.TrimSpace(p))
 		if p == "" {
 			continue
@@ -340,7 +340,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	}
 
 	for _, t := range targets {
-		link := req.ProviderLinks[t.declared]
+		link := req.PSPLinks[t.declared]
 		// Pin provider calls to THIS account's credentials; empty means the
 		// rail's armed default.
 		tctx := pctx
@@ -458,7 +458,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 	if err != nil {
 		return out
 	}
-	rows, err := s.rt.DB.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: mid.UUID(),
 	})
 	if err != nil {
@@ -466,10 +466,10 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 		return out
 	}
 	for _, row := range rows {
-		if row.Archived || row.DisplayName == nil {
+		if row.Archived || row.Key == nil {
 			continue
 		}
-		name := strings.ToLower(strings.TrimSpace(*row.DisplayName))
+		name := strings.ToLower(strings.TrimSpace(*row.Key))
 		if name == "" {
 			continue
 		}
@@ -494,7 +494,7 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		return
 	}
 	railName := strings.ToLower(strings.TrimSpace(rail))
-	rows, err := s.rt.DB.Gen(ctx).ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: mid.UUID(),
 		Rail:       &railName,
 	})
@@ -512,7 +512,7 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		if _, err := adapter.AutoCreate(ctx, sctx); err != nil && !errors.Is(err, errPendingManualLink) {
 			log.WithContext(ctx).WithError(err).
 				WithField("rail", rail).
-				WithField("rail_merchant_account_id", sctx.TargetAccountID).
+				WithField("psp_id", sctx.TargetAccountID).
 				Warn("secondary catalog sync failed (best-effort); drift surfaces on reconcile")
 		}
 	}

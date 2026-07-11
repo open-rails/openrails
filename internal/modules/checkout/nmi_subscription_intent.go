@@ -42,9 +42,9 @@ func NMISubscriptionCreateIdempotencyKey(checkoutIdempotencyKey string) string {
 type NMISubscriptionCreatePayload struct {
 	// Provider is the RAIL ("nmi") — local row vocabulary.
 	Provider string `json:"provider"`
-	// ProviderAccount is the payment provider (account key, e.g. "mobius")
+	// PSP is the payment provider (account key, e.g. "mobius")
 	// this create charges through; "" resolves the rail's active account.
-	ProviderAccount string `json:"provider_account,omitempty"`
+	PSP             string `json:"psp,omitempty"`
 	PlanID          string `json:"plan_id"`
 	CustomerVaultID string `json:"customer_vault_id"`
 	// BillingID binds the subscription to ONE stored card in the vault (#682
@@ -143,9 +143,9 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.ProviderAccount, intent.Rail))
+	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
 	if err != nil {
-		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", nmiIntentClientName(p.ProviderAccount, intent.Rail), err))
+		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", nmiIntentClientName(p.PSP, intent.Rail), err))
 	}
 	if client.ReadOnly {
 		return intents.Parked("nmi client is read-only (mode=readonly)")
@@ -216,9 +216,9 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.ProviderAccount, intent.Rail))
+	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
 	if err != nil {
-		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.ProviderAccount, intent.Rail)))
+		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.PSP, intent.Rail)))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 	if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
@@ -312,9 +312,9 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 }
 
 // nmiIntentClientName picks the client-resolution name for an NMI intent: the
-// payload's pinned payment provider, else the intent's rail (active account).
-func nmiIntentClientName(providerAccount, rail string) string {
-	if name := strings.ToLower(strings.TrimSpace(providerAccount)); name != "" {
+// payload's pinned PSP, else the intent's rail (active account).
+func nmiIntentClientName(psp, rail string) string {
+	if name := strings.ToLower(strings.TrimSpace(psp)); name != "" {
 		return name
 	}
 	return strings.ToLower(strings.TrimSpace(rail))

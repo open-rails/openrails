@@ -364,8 +364,8 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			AutoRenew:           price.AutoRenew,
 			TrialUnitAmount:     trialAmount,
 			TrialDurationHours:  trialHours,
-			Providers:           price.Providers,
-			ProviderLinks:       price.ProviderLinks,
+			PSPs:                price.PSPs,
+			PSPLinks:            price.PSPLinks,
 			Archived:            price.Archived,
 		}
 		pp.Prices = append(pp.Prices, PricePlan{
@@ -400,7 +400,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 // as the declared price, preferring an unclaimed active match over an archived
 // one. Identity is exactly the unique_prices_product_amount_window key:
 // (currency, unit_amount, access_duration_hours, auto_renew, trial_unit_amount,
-// trial_duration_hours). Providers are NOT part of identity — the DB constraint
+// trial_duration_hours). PSPs are NOT part of identity — the DB constraint
 // forbids two prices that differ only by provider, so a provider-set drift is a
 // mutation of the matched price, never a reason to create a second row (doing so
 // collides on the unique key).

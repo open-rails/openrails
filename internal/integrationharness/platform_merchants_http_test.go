@@ -99,7 +99,7 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	c := surface.ProvisionOwnedMerchant(slugC)
 	t.Cleanup(func() {
 		for _, m := range []OwnedMerchant{a, b, c} {
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.psps WHERE merchant_id = $1", m.MerchantID.UUID())
 			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.payments WHERE merchant_id = $1", m.MerchantID.UUID())
 			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE merchant_id = $1", m.MerchantID.UUID())
 			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1", m.MerchantID.UUID())
@@ -116,12 +116,12 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 		{"stripe", "acct_" + suffix},
 	} {
 		_, err := h.Pool().Exec(ctx, `
-			INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id)
+			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id)
 			VALUES ($1, $2, 'test', $3)`, b.MerchantID.UUID(), row.rail, row.account)
 		require.NoError(t, err)
 	}
 	_, err := h.Pool().Exec(ctx, `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1, 'solana', 'test', $2, true)`, b.MerchantID.UUID(), "wallet-"+suffix)
 	require.NoError(t, err)
 

@@ -23,8 +23,8 @@ func timePtrIfSet(t time.Time) *time.Time {
 // declared and the account binding it ran under ("" = the rail's configured
 // credentials, account-agnostic).
 type PullProof struct {
-	Coverage              SnapshotCoverage
-	RailMerchantAccountID string
+	Coverage SnapshotCoverage
+	PspID    string
 }
 
 // PullProofs maps each proven provider to its pull proof.
@@ -47,7 +47,7 @@ func (r *RunResult) PullProofs() PullProofs {
 		if rep == nil || rep.Aborted || rep.Error != "" {
 			continue
 		}
-		out[Provider(name)] = PullProof{Coverage: rep.Coverage, RailMerchantAccountID: rep.RailMerchantAccountID}
+		out[Provider(name)] = PullProof{Coverage: rep.Coverage, PspID: rep.PspID}
 	}
 	return out
 }
@@ -75,7 +75,7 @@ func (r *RunResult) PullProofs() PullProofs {
 // (enforce insert+overwrite) — an advisory dry-run proves nothing about the
 // LOCAL mirror.
 func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs, now time.Time) ([]string, error) {
-	accounts, err := q.ListRailMerchantAccountsForMerchant(ctx, gen.ListRailMerchantAccountsForMerchantParams{
+	accounts, err := q.ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: merchantID,
 	})
 	if err != nil {
@@ -84,7 +84,7 @@ func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID
 	if len(accounts) == 0 {
 		return nil, nil
 	}
-	byRail := map[string][]gen.OpenrailsRailMerchantAccount{}
+	byRail := map[string][]gen.OpenrailsPsp{}
 	for i := range accounts {
 		byRail[accounts[i].Rail] = append(byRail[accounts[i].Rail], accounts[i])
 	}
@@ -93,7 +93,7 @@ func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID
 	for rail, accts := range byRail {
 		proof, ok := proofs[Provider(rail)]
 		if !ok || len(accts) != 1 ||
-			(proof.RailMerchantAccountID != "" && proof.RailMerchantAccountID != accts[0].ID.String()) {
+			(proof.PspID != "" && proof.PspID != accts[0].ID.String()) {
 			subsProven, paymentsProven = false, false
 			break
 		}

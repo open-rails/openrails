@@ -22,16 +22,16 @@ const (
 )
 
 type MutationLogParams struct {
-	MerchantID            uuid.UUID
-	Provider              string
-	RailMerchantAccountID *uuid.UUID
-	ProviderIntentID      *uuid.UUID
-	IntentType            string
-	IdempotencyKey        string
-	Attempt               int32
-	Phase                 MutationLogPhase
-	Reason                string
-	Evidence              map[string]any
+	MerchantID       uuid.UUID
+	Provider         string
+	PspID            *uuid.UUID
+	ProviderIntentID *uuid.UUID
+	IntentType       string
+	IdempotencyKey   string
+	Attempt          int32
+	Phase            MutationLogPhase
+	Reason           string
+	Evidence         map[string]any
 }
 
 type MutationLogger interface {
@@ -63,16 +63,16 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	intentType := emptyStringNil(p.IntentType)
 	idempotencyKey := emptyStringNil(p.IdempotencyKey)
 	return s.db.Gen(ctx).InsertRailMutationLog(ctx, gen.InsertRailMutationLogParams{
-		MerchantID:            p.MerchantID,
-		Rail:                  p.Provider,
-		RailMerchantAccountID: p.RailMerchantAccountID,
-		RailIntentID:          p.ProviderIntentID,
-		IntentType:            intentType,
-		IdempotencyKey:        idempotencyKey,
-		Attempt:               p.Attempt,
-		Phase:                 string(p.Phase),
-		Reason:                reason,
-		Evidence:              evidence,
+		MerchantID:     p.MerchantID,
+		Rail:           p.Provider,
+		PspID:          p.PspID,
+		RailIntentID:   p.ProviderIntentID,
+		IntentType:     intentType,
+		IdempotencyKey: idempotencyKey,
+		Attempt:        p.Attempt,
+		Phase:          string(p.Phase),
+		Reason:         reason,
+		Evidence:       evidence,
 	})
 }
 

@@ -157,7 +157,7 @@ func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripe
 		Currency:            "usd",
 		AutoRenew:           true,
 		AccessDurationHours: intPtr(720),
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			string(models.RailStripe): {
 				models.RailKeyRail:          string(models.RailStripe),
 				models.RailKeyStripePriceID: stripePriceID,

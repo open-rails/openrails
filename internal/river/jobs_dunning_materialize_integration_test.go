@@ -128,12 +128,12 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	// The decision is on the ledger: pending, system-origin, window-bounded.
 	// (#592 ripped out the #365/#518 provider-account binding/identity resolution,
-	// so the materialized intent carries no rail_merchant_account_id.)
+	// so the materialized intent carries no psp_id.)
 	var status, origin, intentType string
 	var providerAccountID *uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, origin, intent_type, rail_merchant_account_id, expires_at
+		`SELECT status, origin, intent_type, psp_id, expires_at
 		 FROM openrails.rail_intents WHERE subscription_id = $1`, subID).
 		Scan(&status, &origin, &intentType, &providerAccountID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)

@@ -11,14 +11,16 @@ identifiers OUT of committed files (code, trackers, this file).
 - A double-entry ledger is the source of truth for money; a separate grant ledger tracks
   credit lots. FX is forbidden inside the ledger (no cross-currency transfers).
 
-## Rails (payment providers)
+## Rails and PSPs
 - TERMINOLOGY (frozen 2026-07-11): a **rail** is the gateway KIND (nmi/ccbill/stripe/solana —
-  the `models.Rail` enum; row vocabulary: subscriptions.rail etc.). A **payment provider** is a
-  merchant's concrete ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi) — credentials +
-  account_id + manifest key (`rail_merchant_accounts.display_name`). Catalog provider_links,
-  prices.rails entry keys, and the checkout wire value speak PROVIDER vocabulary; a provider
+  the `models.Rail` enum; row vocabulary: subscriptions.rail etc.). A **PSP** (payment service
+  provider) is a merchant's concrete ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi) —
+  credentials + account_id + manifest key (`psps.key`). Catalog `psps:`/`psp_links:`,
+  `prices.psp_links` entry keys, and the checkout wire value speak PSP vocabulary; a PSP link
   entry records its rail inside (`rail:` field). Reserved gateways (stripe/ccbill/solana) are
-  their own provider names.
+  their own PSP names. A PSP is NOT the acquiring bank — it's the service layer (Stripe bundles
+  acquiring; MobiusPay is a high-risk ISO fronting NMI gateway tech; solana is the self-custody
+  wallet slot, the one deliberate stretch of the term).
 - By repo: doujins / hentai0 → mobius (NMI) + ccbill + solana; cozy-art → stripe; tensorhub → none.
 - ALL outbound Stripe HTTP goes through the choke-point client `internal/integrations/stripeapi`
   (readonly mode blocks writes at the transport). It pins the Stripe API version via
@@ -26,14 +28,15 @@ identifiers OUT of committed files (code, trackers, this file).
   webhook-endpoint registration. Bump it deliberately (re-run the breaking-change audit); don't float.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
 
-## Rail merchant-account identity
-- `openrails.rail_merchant_accounts` (#683; was provider_accounts) is an OPERATOR-DECLARED catalog (manifest `account_id`). There is
-  NO runtime "whoami"/identity resolution and NO account-mismatch guard — that whole subsystem was
-  ripped out (#592). `account_id` is an opaque, operator-declared label.
-- The merchant-config manifest key is the SHORT form `merchants.<slug>.accounts.<key>.<rail>` (#698;
-  env overlay `BILLING_MERCHANTS_<M>_ACCOUNTS_…`). Deliberate divergence: the DB table and the
-  merchant-secret name prefix stay `rail_merchant_accounts` (#683 vocabulary). The old config
-  key/env anchor fails loudly with a rename error — no aliases.
+## PSP identity
+- `openrails.psps` (was rail_merchant_accounts ← provider_accounts) is an OPERATOR-DECLARED
+  catalog (manifest `account_id`). There is NO runtime "whoami"/identity resolution and NO
+  account-mismatch guard — that whole subsystem was ripped out (#592). `account_id` is an
+  opaque, operator-declared label.
+- The merchant-config manifest key is `merchants.<slug>.psps.<key>.<rail>` (env overlay
+  `BILLING_MERCHANTS_<M>_PSPS_…`); the merchant-secret name prefix is `psps/…`. The retired
+  keys/anchors (accounts, rail_merchant_accounts, provider_accounts) fail loudly with a rename
+  error — no aliases.
 - Per rail, the declared `account_id` is:
   - **NMI / Mobius** — the dashboard **"Gateway ID"**. In NMI this IS the *merchant account* id
     (NMI provisions every merchant as a "gateway account"; its v4 API documents `{gateway_id}` as

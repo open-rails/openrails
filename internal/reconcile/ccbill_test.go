@@ -126,7 +126,7 @@ func TestCCBillPlanIndexUsesRecurringBillingOption(t *testing.T) {
 	idx := buildPlanIndex(ProviderCCBill, []LocalPrice{{
 		ID:        priceID,
 		ProductID: productID,
-		Rails: map[string]map[string]string{
+		PSPLinks: map[string]map[string]string{
 			"ccbill": {"rail": "ccbill", "recurring_billing_option_id": "0000007498"},
 		},
 	}})

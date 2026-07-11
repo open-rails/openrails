@@ -16,16 +16,16 @@ SELECT count(*) FROM openrails.rail_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
-  AND ($4::uuid IS NULL OR rail_merchant_account_id = $4::uuid)
+  AND ($4::uuid IS NULL OR psp_id = $4::uuid)
   AND ($5::text IS NULL OR phase = $5::text)
 `
 
 type CountRailMutationLogsParams struct {
-	MerchantID            uuid.UUID
-	Rail                  *string
-	RailIntentID          *uuid.UUID
-	RailMerchantAccountID *uuid.UUID
-	Phase                 *string
+	MerchantID   uuid.UUID
+	Rail         *string
+	RailIntentID *uuid.UUID
+	PspID        *uuid.UUID
+	Phase        *string
 }
 
 func (q *Queries) CountRailMutationLogs(ctx context.Context, arg CountRailMutationLogsParams) (int64, error) {
@@ -33,7 +33,7 @@ func (q *Queries) CountRailMutationLogs(ctx context.Context, arg CountRailMutati
 		arg.MerchantID,
 		arg.Rail,
 		arg.RailIntentID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.Phase,
 	)
 	var count int64
@@ -45,7 +45,7 @@ const insertRailMutationLog = `-- name: InsertRailMutationLog :exec
 INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
     rail,
-    rail_merchant_account_id,
+    psp_id,
     rail_intent_id,
     intent_type,
     idempotency_key,
@@ -59,23 +59,23 @@ INSERT INTO openrails.rail_mutation_logs (
 `
 
 type InsertRailMutationLogParams struct {
-	MerchantID            uuid.UUID
-	Rail                  string
-	RailMerchantAccountID *uuid.UUID
-	RailIntentID          *uuid.UUID
-	IntentType            *string
-	IdempotencyKey        *string
-	Attempt               int32
-	Phase                 string
-	Reason                *string
-	Evidence              []byte
+	MerchantID     uuid.UUID
+	Rail           string
+	PspID          *uuid.UUID
+	RailIntentID   *uuid.UUID
+	IntentType     *string
+	IdempotencyKey *string
+	Attempt        int32
+	Phase          string
+	Reason         *string
+	Evidence       []byte
 }
 
 func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutationLogParams) error {
 	_, err := q.db.Exec(ctx, insertRailMutationLog,
 		arg.MerchantID,
 		arg.Rail,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.RailIntentID,
 		arg.IntentType,
 		arg.IdempotencyKey,
@@ -89,23 +89,23 @@ func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutat
 
 const listRailMutationLogs = `-- name: ListRailMutationLogs :many
 
-SELECT id, merchant_id, rail, rail_merchant_account_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at FROM openrails.rail_mutation_logs
+SELECT id, merchant_id, rail, psp_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at FROM openrails.rail_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
-  AND ($4::uuid IS NULL OR rail_merchant_account_id = $4::uuid)
+  AND ($4::uuid IS NULL OR psp_id = $4::uuid)
   AND ($5::text IS NULL OR phase = $5::text)
 ORDER BY created_at DESC, id DESC
 LIMIT $6
 `
 
 type ListRailMutationLogsParams struct {
-	MerchantID            uuid.UUID
-	Rail                  *string
-	RailIntentID          *uuid.UUID
-	RailMerchantAccountID *uuid.UUID
-	Phase                 *string
-	LimitRows             int64
+	MerchantID   uuid.UUID
+	Rail         *string
+	RailIntentID *uuid.UUID
+	PspID        *uuid.UUID
+	Phase        *string
+	LimitRows    int64
 }
 
 // Operator read surface (#735: replaced the ClickHouse mirror; this table is
@@ -115,7 +115,7 @@ func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutation
 		arg.MerchantID,
 		arg.Rail,
 		arg.RailIntentID,
-		arg.RailMerchantAccountID,
+		arg.PspID,
 		arg.Phase,
 		arg.LimitRows,
 	)
@@ -130,7 +130,7 @@ func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutation
 			&i.ID,
 			&i.MerchantID,
 			&i.Rail,
-			&i.RailMerchantAccountID,
+			&i.PspID,
 			&i.RailIntentID,
 			&i.IntentType,
 			&i.IdempotencyKey,

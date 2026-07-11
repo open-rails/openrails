@@ -12,7 +12,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, customer_id, rail_merchant_account_id,
+    card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
@@ -25,7 +25,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
-    sqlc.narg(rail_merchant_account_id),
+    sqlc.narg(psp_id),
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind)
 );
 
@@ -35,7 +35,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, customer_id, rail_merchant_account_id,
+    card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
@@ -48,7 +48,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
-    sqlc.narg(rail_merchant_account_id),
+    sqlc.narg(psp_id),
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind)
 )
 ON CONFLICT DO NOTHING;

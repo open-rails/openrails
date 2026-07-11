@@ -55,7 +55,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		remoteCustomer       bool
 		chargeSaved          bool
 		openRailsDunning     bool
-		railMerchantAccounts bool
+		psps                 bool
 		merchantKeyCount     int
 		autoBilledNilPM      bool
 		autoBilledWithMethod bool
@@ -85,7 +85,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		if d.OpenRailsDrivenDunning != c.openRailsDunning {
 			t.Errorf("%s: OpenRailsDrivenDunning = %v", c.rail, d.OpenRailsDrivenDunning)
 		}
-		if d.HasRailMerchantAccounts != c.railMerchantAccounts {
+		if d.HasRailMerchantAccounts != c.psps {
 			t.Errorf("%s: HasRailMerchantAccounts = %v", c.rail, d.HasRailMerchantAccounts)
 		}
 		if got := len(MerchantCredentialKeyNames(c.rail)); got != c.merchantKeyCount {

@@ -120,19 +120,19 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 			VALUES ($1, $2, $3, 'usd', $4, $5, $6) ON CONFLICT DO NOTHING`,
 			p.id, p.product, p.amount, p.merchant, p.hours, p.renew)
 	}
-	exec(ctx, t, pool, `INSERT INTO openrails.rail_merchant_accounts (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
 		acctRA1, mA)
 
 	// --- subscriptions (insert order matters only for readability) -------------
 	type subRow struct {
-		id                 uuid.UUID
-		customer           uuid.UUID
-		price              uuid.UUID
-		status             string
-		started            time.Time
-		ended, cancelled   *time.Time
-		cancelType         *string
-		periodEnd          *time.Time
+		id               uuid.UUID
+		customer         uuid.UUID
+		price            uuid.UUID
+		status           string
+		started          time.Time
+		ended, cancelled *time.Time
+		cancelType       *string
+		periodEnd        *time.Time
 	}
 	tp := func(tt time.Time) *time.Time { return &tt }
 	sp := func(s string) *string { return &s }
@@ -162,7 +162,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	sale0, sale1, sale2, sale3 := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	fail1, fail2, refund1, cb1, saleB := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	payCols := `INSERT INTO openrails.payments
-		(id, merchant_id, customer_id, price_id, subscription_id, refunded_payment_id, rail, rail_merchant_account_id,
+		(id, merchant_id, customer_id, price_id, subscription_id, refunded_payment_id, rail, psp_id,
 		 transaction_id, amount, list_amount, currency, status, attempt_kind, failure_code, failure_reason, reversal_kind,
 		 card_brand, discount_code, purchased_at, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'usd',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
@@ -238,7 +238,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 			`DELETE FROM openrails.payments WHERE merchant_id = ANY($1)`,
 			`DELETE FROM openrails.subscription_status_transitions WHERE merchant_id = ANY($1)`,
 			`DELETE FROM openrails.subscriptions WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = ANY($1)`,
+			`DELETE FROM openrails.psps WHERE merchant_id = ANY($1)`,
 			`DELETE FROM openrails.prices WHERE merchant_id = ANY($1)`,
 			`DELETE FROM openrails.products WHERE merchant_id = ANY($1)`,
 			`DELETE FROM openrails.customers WHERE merchant_id = ANY($1)`,

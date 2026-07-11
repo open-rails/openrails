@@ -459,7 +459,7 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 	if sub.RetryAttempts != nil {
 		retryAttempts = *sub.RetryAttempts
 	}
-	cfg := price.GetRailConfig(models.RailSolana)
+	cfg := price.PSPLinkForRail(models.RailSolana)
 	if cfg == nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana rail config", price.ID)
 	}

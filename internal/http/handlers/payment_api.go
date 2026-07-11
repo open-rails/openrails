@@ -186,9 +186,9 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		priceType = "recurring"
 	}
 	var providers []string
-	if len(p.Rails) > 0 {
-		providers = make([]string, 0, len(p.Rails))
-		for name := range p.Rails {
+	if len(p.PSPLinks) > 0 {
+		providers = make([]string, 0, len(p.PSPLinks))
+		for name := range p.PSPLinks {
 			providers = append(providers, name)
 		}
 		sort.Strings(providers)

@@ -24,7 +24,7 @@ import (
 // credentials reach the charge path the way production arms them — a
 // rail_merchant_accounts row plus a scoped secret in the merchant-secrets
 // store, resolved back through the production resolvers — never a raw env
-// value injected into a boot-plane RailMerchantAccountSet.
+// value injected into a boot-plane PSPSet.
 
 // merchantsServiceForTest builds the production merchants.Service over the
 // shared test DB with the production DB-backed secret store (real
@@ -42,15 +42,15 @@ func merchantsServiceForTest(t *testing.T, dbi *db.DB) *merchants.Service {
 // seedRailMerchantAccountSecrets arms one rail for the shared test merchant
 // exactly the way the merchant manifest does (bootstrap
 // reconcileManifestRailMerchantAccount): each secret is Put under its canonical
-// scoped name (merchants.RailMerchantAccountSecretName) and the
-// operator-declared account row is upserted via gen.UpsertRailMerchantAccount
+// scoped name (merchants.PSPSecretName) and the
+// operator-declared account row is upserted via gen.UpsertPSP
 // in a merchant-scoped connection. Cleanup removes both.
 func seedRailMerchantAccountSecrets(t *testing.T, dbi *db.DB, svc *merchants.Service, rail, accountID string, secrets map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	env := config.ExpectedProviderEnvironment(true)
 	for key, value := range secrets {
-		name, err := merchants.RailMerchantAccountSecretName(rail, env, accountID, key)
+		name, err := merchants.PSPSecretName(rail, env, accountID, key)
 		require.NoError(t, err)
 		_, err = svc.Secrets().Put(ctx, dbtest.TestMerchantID, name, value)
 		require.NoError(t, err)
@@ -60,7 +60,7 @@ func seedRailMerchantAccountSecrets(t *testing.T, dbi *db.DB, svc *merchants.Ser
 	}
 	mctx := merchant.WithID(ctx, dbtest.TestMerchantID)
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		_, err := dbi.Gen(ctx).UpsertRailMerchantAccount(ctx, gen.UpsertRailMerchantAccountParams{
+		_, err := dbi.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			MerchantID:  dbtest.TestMerchantID.UUID(),
 			Rail:        rail,
 			Environment: &env,
@@ -70,7 +70,7 @@ func seedRailMerchantAccountSecrets(t *testing.T, dbi *db.DB, svc *merchants.Ser
 	}))
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
-			`DELETE FROM openrails.rail_merchant_accounts WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4`,
+			`DELETE FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4`,
 			dbtest.TestMerchantID.UUID(), rail, env, accountID)
 	})
 }
@@ -82,7 +82,7 @@ func seedRailMerchantAccountSecrets(t *testing.T, dbi *db.DB, svc *merchants.Ser
 //   - Stripe: merchants.Service.LoadStripeCredentials (active account scope ->
 //     scoped secret name -> store Get; the webhook/pull-plane resolver), and the
 //     RequireStripeSecretKey gate every StripeService call site goes through;
-//   - NMI: ActiveRailMerchantAccountSecretName + Secrets().Get (checkout's
+//   - NMI: ActivePSPSecretName + Secrets().Get (checkout's
 //     merchant_rail_secrets.go seam).
 func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	_, dbi, _, _, _, ctx := moneyInEnvWithDB(t)
@@ -111,7 +111,7 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	nmiKey := "store-arming-security-key-" + sfx
 	nmiAccount := "arming-" + sfx
 	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccount, map[string]string{"security_key": nmiKey})
-	name, found, err := msvc.ActiveRailMerchantAccountSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
+	name, found, err := msvc.ActivePSPSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
 	require.NoError(t, err)
 	require.True(t, found, "seeded NMI rail account must resolve to a scoped secret name")
 	sec, err := msvc.Secrets().Get(ctx, dbtest.TestMerchantID, name)
