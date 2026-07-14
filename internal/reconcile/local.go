@@ -98,7 +98,7 @@ type LocalPaymentMethod struct {
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
-// the catalog provider_links (rails jsonb) map remote plan ids onto
+// the catalog psp_links jsonb maps remote plan ids onto
 // local prices.
 type LocalPrice struct {
 	ID               uuid.UUID
@@ -302,7 +302,7 @@ func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 
 // SolanaPlanSourceFromDB lists OUR plan PDAs for the #714 enumeration: the
 // union of locally-known subscription rows and the catalog's
-// rails["solana"].plan_pda provider links (so a fresh DB can still enumerate
+// psp_links["solana"].plan_pda provider links (so a fresh DB can still enumerate
 // from catalog alone).
 func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	return func(ctx context.Context) ([]string, error) {

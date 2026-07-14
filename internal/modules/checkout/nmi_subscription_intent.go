@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -199,6 +200,20 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		}
 		var vaultErr *nmi.CustomerVaultError
 		if errors.As(err, &vaultErr) {
+			// #796: record the declined enrollment charge attempt (verbatim code).
+			if h.Checkout != nil && h.Checkout.PurchaseService != nil {
+				recordDeclinedAttempt(ctx, h.Checkout.PurchaseService.PaymentService, DeclinedAttempt{
+					UserID:                 p.UserID,
+					PriceID:                p.PriceID,
+					Rail:                   strings.ToLower(p.Provider),
+					SyntheticTransactionID: "nmi_sub_declined:" + intent.ID.String(),
+					AmountMicros:           p.AmountMicros,
+					Currency:               p.Currency,
+					FailureCode:            nmidirect.FailureCode(vaultErr),
+					AttemptKind:            payments.AttemptInitial,
+					TokenType:              charge.TokenTypeProviderVault,
+				})
+			}
 			return intents.TerminalWithEvidence(vaultErr.Error(), map[string]any{
 				"declined":        true,
 				"response_code":   vaultErr.ResponseCode,

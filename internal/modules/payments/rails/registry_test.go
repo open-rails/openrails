@@ -12,7 +12,7 @@ import (
 // descriptor's required fields are filled. The unkeyed literals already force
 // every FIELD at compile time; this forces every RAIL.
 func TestRegistryCompleteness(t *testing.T) {
-	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe, models.RailPayPal}
+	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe, models.RailVaultedCard, models.RailPayPal}
 	if len(descriptors) != len(enum) {
 		t.Fatalf("registry has %d descriptors, enum has %d rails", len(descriptors), len(enum))
 	}
@@ -66,6 +66,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
 		{models.RailStripe, true, true, false, true, 3, false, false, false, CancelModeReversible},
 		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
+		{models.RailVaultedCard, false, true, true, true, 1, false, false, false, CancelModeDestructive}, // #795: BT tenant, one custodial secret (api_key)
 		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer

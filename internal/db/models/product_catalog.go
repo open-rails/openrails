@@ -219,7 +219,7 @@ const (
 	RailKeyStripePriceID                = "price_id"
 	RailKeyStripeProductID              = "product_id"
 	// RailKeyRail is the rail (gateway) an entry's provider objects live on.
-	// prices.rails keys on the merchant's ACCOUNT key (e.g. "mobius") so
+	// prices.psp_links keys on the merchant's PSP key (e.g. "mobius") so
 	// several accounts can share one rail; every entry records its rail here.
 	RailKeyRail = "rail"
 )

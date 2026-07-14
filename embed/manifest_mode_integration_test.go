@@ -191,7 +191,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	// Operator-mounted secret files: filename = env-var name (#723 precedence
 	// yaml < files < env).
 	secretsDir := t.TempDir()
-	secretFile := filepath.Join(secretsDir, fmt.Sprintf("BILLING_MERCHANTS_%s_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY", strings.ToUpper(slug)))
+	secretFile := filepath.Join(secretsDir, fmt.Sprintf("BILLING_MERCHANTS_%s_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY", strings.ToUpper(slug)))
 	require.NoError(t, os.WriteFile(secretFile, []byte(keyV1+"\n"), 0o600))
 	t.Setenv("VAULT_SECRETS_PATH", secretsDir)
 

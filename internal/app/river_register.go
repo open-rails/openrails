@@ -329,6 +329,9 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		if r.CheckoutService.NMISaleService != nil {
 			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
 		}
+		if r.CheckoutService.VaultedCardService != nil {
+			registry.Register(checkout.NewVaultedCardSaleIntentHandler(r.CheckoutService.VaultedCardService))
+		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
 	}
 	// #674 tail: durable user-initiated vault deletes (an unwired VaultService

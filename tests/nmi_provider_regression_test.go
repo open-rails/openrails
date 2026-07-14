@@ -160,11 +160,12 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 		price.PSPLinks = map[string]map[string]string{}
 	}
 	price.PSPLinks[provider] = map[string]string{
+		models.RailKeyRail:   string(models.RailNMI),
 		models.RailKeyPlanID: provider + "-plan",
 	}
 	railsJSON, err := json.Marshal(price.PSPLinks)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE openrails.prices SET rails = $1 WHERE id = $2", railsJSON, price.ID)
+		"UPDATE openrails.prices SET psp_links = $1 WHERE id = $2", railsJSON, price.ID)
 	require.NoError(t, err)
 }

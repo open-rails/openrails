@@ -116,6 +116,7 @@ func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
 		FailureCode:       p.FailureCode,
 		FailureReason:     p.FailureReason,
 		ReversalKind:      p.ReversalKind,
+		TokenType:         p.TokenType,
 		DiscountCode:      p.DiscountCode,
 		DiscountReason:    p.DiscountReason,
 		PurchasedAt:       p.PurchasedAt,
@@ -264,6 +265,15 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 
 		StoredCredentialRecurringRef:   p.StoredCredentialRecurringRef,
 		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
+
+		VaultProvider:      p.VaultProvider,
+		VaultFingerprint:   p.VaultFingerprint,
+		NetworkTokenID:     p.NetworkTokenID,
+		NetworkTokenStatus: p.NetworkTokenStatus,
+		NetworkTokenPAR:    p.NetworkTokenPar,
+		ChargeVia:          p.ChargeVia,
+		ParkReason:         p.ParkReason,
+		ParkedAt:           p.ParkedAt,
 	}
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payment_methods.metadata"); err != nil {
 		return nil, err

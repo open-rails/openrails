@@ -45,7 +45,9 @@ const (
 	IndicatorUsed       = "used"
 )
 
-func (sc *StoredCredential) validate() error {
+// Validate rejects malformed CIT/MIT field combinations. nil is valid (no
+// stored-credential data). Exported for sibling rails composing the same form.
+func (sc *StoredCredential) Validate() error {
 	if sc == nil {
 		return nil
 	}
@@ -58,9 +60,11 @@ func (sc *StoredCredential) validate() error {
 	return nil
 }
 
-// applyToForm stamps the credential-on-file fields onto a classic Direct Post
-// form. nil = caller sends no stored-credential data (legacy shape).
-func (sc *StoredCredential) applyToForm(values url.Values) {
+// ApplyToForm stamps the credential-on-file fields onto a classic Direct Post
+// form. nil = caller sends no stored-credential data (legacy shape). Exported
+// for the vaulted_card rail (#795), which composes the same classic sale form
+// for BT-proxy delivery.
+func (sc *StoredCredential) ApplyToForm(values url.Values) {
 	if sc == nil {
 		return
 	}

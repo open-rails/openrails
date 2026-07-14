@@ -220,7 +220,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 
 	// Propagate mutable Product changes to Stripe (display name + description + active).
 	// The Stripe product ID is not stored on the OpenRails product row itself —
-	// it lives on associated prices' rails.stripe.product_id. Look up one
+	// it lives on associated prices' psp_links.stripe.product_id. Look up one
 	// such price to find it; if no prices have a Stripe link yet, there is
 	// nothing to propagate (no Stripe Product exists for this OpenRails product).
 	if !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
@@ -285,7 +285,7 @@ func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID 
 }
 
 // lookupStripeProductID returns the Stripe Product ID associated with the
-// given OpenRails product by scanning its prices for rails.stripe.product_id.
+// given OpenRails product by scanning its prices for psp_links.stripe.product_id.
 // Returns "" if no associated price has a Stripe Product link.
 func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID) string {
 	if s.rt.PriceService == nil {

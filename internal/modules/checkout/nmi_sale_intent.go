@@ -180,6 +180,20 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		}
 		var vaultErr *nmi.CustomerVaultError
 		if errors.As(err, &vaultErr) {
+			// #796: a parsed checkout decline is a charge attempt — record the
+			// failed payments row (verbatim code) or approval_rate silently
+			// inflates. Idempotent per intent.
+			recordDeclinedAttempt(ctx, h.Sale.PurchaseService.PaymentService, DeclinedAttempt{
+				UserID:                 p.UserID,
+				PriceID:                p.PriceID,
+				Rail:                   strings.ToLower(p.Provider),
+				SyntheticTransactionID: "nmi_sale_declined:" + intent.ID.String(),
+				AmountMicros:           p.AmountMicros,
+				Currency:               p.Currency,
+				FailureCode:            nmidirect.FailureCode(vaultErr),
+				AttemptKind:            payments.AttemptInitial,
+				TokenType:              charge.TokenTypeProviderVault,
+			})
 			return intents.TerminalWithEvidence(vaultErr.Error(), map[string]any{
 				"declined":        true,
 				"response_code":   vaultErr.ResponseCode,
@@ -240,6 +254,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 		Currency:      p.Currency,
 		Metadata:      metadata,
 		AttemptKind:   payments.AttemptInitial,
+		TokenType:     charge.TokenTypeProviderVault,
 	})
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the

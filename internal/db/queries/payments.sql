@@ -13,7 +13,7 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
@@ -26,7 +26,8 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
     sqlc.narg(psp_id),
-    sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind)
+    sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
+    sqlc.narg(token_type)
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -36,7 +37,7 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
@@ -49,7 +50,8 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
     sqlc.narg(psp_id),
-    sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind)
+    sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
+    sqlc.narg(token_type)
 )
 ON CONFLICT DO NOTHING;
 

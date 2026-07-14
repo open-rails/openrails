@@ -248,7 +248,9 @@ func TestNMISaleIntent_WriteThroughHappyPathAndReplay(t *testing.T) {
 	require.Equal(t, 1, fx.paymentCount(t))
 }
 
-// A parsed decline is terminal — clean, no verification, no payment row.
+// A parsed decline is terminal — clean, no verification, no COMPLETED payment
+// row; the attempt lands as a durable FAILED payments row (#796: verbatim
+// code + token_type) so approval_rate's denominator sees it.
 func TestNMISaleIntent_DeclineIsTerminal(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	fx.gateway.saleMode.Store("decline")
@@ -258,6 +260,17 @@ func TestNMISaleIntent_DeclineIsTerminal(t *testing.T) {
 	require.Equal(t, 0, fx.paymentCount(t))
 	require.NotNil(t, intent.ResultEvidence)
 	require.Contains(t, string(intent.ResultEvidence), `"declined": true`)
+
+	// #796: the decline is a charge attempt — durable failed row, verbatim code.
+	var failureCode, failureReason, tokenType, attemptKind string
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
+		`SELECT COALESCE(failure_code,''), COALESCE(failure_reason,''), COALESCE(token_type,''), COALESCE(attempt_kind,'')
+		 FROM openrails.payments WHERE status='failed' AND transaction_id=$1`,
+		"nmi_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType, &attemptKind))
+	require.Equal(t, "transaction_was_declined_by_processor", failureCode) // NMI 200, verbatim localization id
+	require.Equal(t, payments.FailureCardDeclined, failureReason)
+	require.Equal(t, "provider_vault", tokenType)
+	require.Equal(t, payments.AttemptInitial, attemptKind)
 }
 
 // Ambiguous timeout (5xx after send — the charge LANDED): the intent parks as

@@ -24,6 +24,9 @@ type RegisterPurchaseRequest struct {
 	// AttemptKind stamps payments.attempt_kind (initial|renewal, #733);
 	// empty = unknown (manual/imported rows).
 	AttemptKind string
+	// TokenType stamps payments.token_type (charge.TokenType* consts, #796);
+	// empty = unknown (non-card rails, imported rows).
+	TokenType string
 }
 
 type RegisterPurchaseResponse struct {

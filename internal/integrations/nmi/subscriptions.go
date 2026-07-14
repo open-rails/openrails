@@ -106,7 +106,7 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	if data.CustomerVaultID == "" && data.PaymentToken == "" {
 		return nil, errors.New("either customer vault or payment token is required")
 	}
-	if err := data.StoredCredential.validate(); err != nil {
+	if err := data.StoredCredential.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -151,9 +151,9 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	if trimmed := strings.TrimSpace(data.StartDate); trimmed != "" {
 		values.Set("start_date", trimmed)
 	}
-	// billing_method=recurring is already stamped above; applyToForm re-setting
+	// billing_method=recurring is already stamped above; ApplyToForm re-setting
 	// it for a recurring-agreement StoredCredential is idempotent.
-	data.StoredCredential.applyToForm(values)
+	data.StoredCredential.ApplyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {
@@ -282,7 +282,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 		err := errors.New("vault ID, billing ID, and subscription ID are required")
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 	}
-	if err := params.StoredCredential.validate(); err != nil {
+	if err := params.StoredCredential.Validate(); err != nil {
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 	}
 
@@ -301,7 +301,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 	if trimmed := strings.TrimSpace(params.PONumber); trimmed != "" {
 		values.Set("ponumber", trimmed)
 	}
-	params.StoredCredential.applyToForm(values)
+	params.StoredCredential.ApplyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {

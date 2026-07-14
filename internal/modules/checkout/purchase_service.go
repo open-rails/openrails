@@ -475,6 +475,10 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		k := req.AttemptKind
 		payment.AttemptKind = &k
 	}
+	if req.TokenType != "" {
+		tt := req.TokenType
+		payment.TokenType = &tt
+	}
 
 	created, err := s.PaymentService.CreateIfNotExists(ctx, payment)
 	if err != nil {

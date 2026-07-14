@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -233,7 +235,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		// #684/#671: RemoteTransaction amounts are provider-wire CENTS; the
 		// payments ledger is MICROS. Convert at this boundary, never store raw.
 		amountMicros := moneyutil.CentsToMicros(t.AmountCents)
-		n, err := q.CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams{
+		params := gen.CreatePaymentIfNotExistsParams{
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,
 			PriceID:        sub.PriceID,
@@ -246,7 +248,21 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
-		})
+		}
+		// #796: backfilled declines carry the rail's code VERBATIM so
+		// approval_rate's failure_reason dimension sees them (attempt_kind
+		// stays NULL — the mirror cannot distinguish initial vs renewal).
+		if !t.Success {
+			if code := strings.TrimSpace(t.DeclineCode); code != "" {
+				reason := payments.NormalizeFailureReason(string(sub.Rail), code)
+				params.FailureCode = &code
+				params.FailureReason = &reason
+			}
+		}
+		if tt := payments.DefaultTokenTypeForRail(string(sub.Rail)); tt != "" {
+			params.TokenType = &tt
+		}
+		n, err := q.CreatePaymentIfNotExists(ctx, params)
 		if err != nil {
 			return inserted, fmt.Errorf("backfill payment %s: %w", t.TransactionID, err)
 		}

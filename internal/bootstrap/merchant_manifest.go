@@ -957,6 +957,13 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
 		}
 	}
+	// #795: strict vaulted_card settings validation at push time (gateway_account
+	// required; nt_charges hard-errors on NMI gateways).
+	if out.rail == string(models.RailVaultedCard) {
+		if err := config.ValidateVaultedCardAccountSettings(account.Settings); err != nil {
+			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		}
+	}
 	secrets, err := newManifestSecretValues(out.rail, account.Secrets)
 	if err != nil {
 		return out, err

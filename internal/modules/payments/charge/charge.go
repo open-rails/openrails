@@ -142,12 +142,31 @@ type Request struct {
 	Context  Context
 }
 
+// TokenType is the credential form the rail presented to the network for one
+// charge (#796): the approval_rate dimension that makes the network-token
+// uplift measurable. Stamped by the rail at charge time; "" = unknown.
+const (
+	// TokenTypeProviderVault: the provider's own vault charged its stored
+	// credential (NMI customer vault).
+	TokenTypeProviderVault = "provider_vault"
+	// TokenTypePANViaVault: a neutral-vault FPAN detokenized through a proxy
+	// (vaulted_card pan_proxy).
+	TokenTypePANViaVault = "pan_via_vault"
+	// TokenTypeNetworkToken: a network token (DPAN) was presented.
+	TokenTypeNetworkToken = "network_token"
+)
+
 // Result is the normalized outcome of an executed charge. A (Result, nil)
 // return means the gateway answered: either an approval or a parsed hard
 // decline. Transport failures and transient gateway errors return an error
 // (callers classify ambiguity rail-side, e.g. nmi.IsTransportAmbiguous).
 type Result struct {
 	TransactionID string
+
+	// TokenType is the credential form presented (TokenType* consts, #796).
+	// Set on approvals AND parsed declines; "" only when the rail predates
+	// the instrumentation.
+	TokenType string
 
 	// CapturedRef is the rail-scoped stored-credential replay reference this
 	// charge established for the request's agreement type — set on first use

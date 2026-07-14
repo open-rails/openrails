@@ -13,7 +13,12 @@ const (
 	RailCCBill Rail = "ccbill" // CCBill gateway (self-contained)
 	RailSolana Rail = "solana" // Solana crypto payments (self-contained)
 	RailStripe Rail = "stripe" // Stripe gateway (subscriptions + one-time)
-	RailPayPal Rail = "paypal" // PayPal gateway (self-contained)
+	// RailVaultedCard (#795): neutral card vault (Basis Theory) detokenizing
+	// through a proxy into an NMI gateway account. account_id = the BT tenant
+	// id (operator-declared); the destination NMI account is referenced from
+	// the account's settings (gateway_account).
+	RailVaultedCard Rail = "vaulted_card"
+	RailPayPal      Rail = "paypal" // PayPal gateway (self-contained)
 )
 
 // Channel is an off-rail mechanism for RECORDING a payment that never flowed

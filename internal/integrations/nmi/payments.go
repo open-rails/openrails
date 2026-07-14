@@ -80,7 +80,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	if len(params.OrderID) > 50 {
 		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
 	}
-	if err := params.StoredCredential.validate(); err != nil {
+	if err := params.StoredCredential.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -134,7 +134,7 @@ func (c *NMIClient) runClassicSale(params SaleParams, currency, orderDesc, billi
 	if params.OrderID != "" {
 		values.Set("orderid", params.OrderID)
 	}
-	params.StoredCredential.applyToForm(values)
+	params.StoredCredential.ApplyToForm(values)
 
 	response, err := c.sendDirectRequest(values)
 	if err != nil {

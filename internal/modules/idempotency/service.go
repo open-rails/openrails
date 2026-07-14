@@ -233,7 +233,7 @@ func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, 
 	now := time.Now()
 	if entry, ok := s.memStore[key]; ok {
 		if now.Before(entry.expiresAt) {
-			return entry.record, true, nil
+			return cloneIdempotencyRecord(entry.record), true, nil
 		}
 		delete(s.memStore, key)
 	}
@@ -247,7 +247,7 @@ func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, 
 		expiresAt: now.Add(s.ttl),
 	}
 
-	return record, false, nil
+	return cloneIdempotencyRecord(record), false, nil
 }
 
 func (s *IdempotencyService) Complete(ctx context.Context, operation, key string, result json.RawMessage) error {
@@ -348,7 +348,7 @@ func (s *IdempotencyService) getMemory(key string) *IdempotencyRecord {
 
 	if entry, ok := s.memStore[key]; ok {
 		if time.Now().Before(entry.expiresAt) {
-			return entry.record
+			return cloneIdempotencyRecord(entry.record)
 		}
 	}
 	return nil
@@ -374,9 +374,18 @@ func (s *IdempotencyService) setMemoryWithTTL(key string, record *IdempotencyRec
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.memStore[key] = &memEntry{
-		record:    record,
+		record:    cloneIdempotencyRecord(record),
 		expiresAt: time.Now().Add(ttl),
 	}
+}
+
+func cloneIdempotencyRecord(record *IdempotencyRecord) *IdempotencyRecord {
+	if record == nil {
+		return nil
+	}
+	clone := *record
+	clone.Result = append(json.RawMessage(nil), record.Result...)
+	return &clone
 }
 
 func (s *IdempotencyService) buildKey(operation, key string) string {

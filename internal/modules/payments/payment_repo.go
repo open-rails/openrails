@@ -92,6 +92,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureCode:              p.FailureCode,
 		FailureReason:            p.FailureReason,
 		ReversalKind:             p.ReversalKind,
+		TokenType:                p.TokenType,
 	}, nil
 }
 

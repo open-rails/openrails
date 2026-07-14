@@ -329,6 +329,7 @@ func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
 		}
 		if !success {
 			txn.DeclineReason = strings.TrimSpace(a.ResponseText)
+			txn.DeclineCode = strings.TrimSpace(a.ResponseCode)
 		}
 		out = append(out, txn)
 	}

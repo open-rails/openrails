@@ -47,6 +47,18 @@ type PaymentMethod struct {
 	StoredCredentialRecurringRef   string `json:"-"`
 	StoredCredentialUnscheduledRef string `json:"-"`
 
+	// Neutral-vault instrument fields (#795, rail='vaulted_card'). ChargeVia
+	// routes pan_proxy|network_token; ParkReason non-empty = instrument parked
+	// (vault-side problem; cancellation-last-resort, never a terminal cancel).
+	VaultProvider      string     `json:"-"` // 'basis_theory' on vaulted_card rows; '' elsewhere
+	VaultFingerprint   string     `json:"-"`
+	NetworkTokenID     string     `json:"-"`
+	NetworkTokenStatus string     `json:"-"`
+	NetworkTokenPAR    string     `json:"-"`
+	ChargeVia          string     `json:"-"`
+	ParkReason         string     `json:"-"`
+	ParkedAt           *time.Time `json:"-"`
+
 	// Payment method metadata
 	LastFour   *string        `json:"last_four"`   // Last 4 digits of card
 	CardType   *string        `json:"card_type"`   // "Visa", "MasterCard", etc.

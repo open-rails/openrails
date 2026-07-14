@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
-    display_name text,
+    key text,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -448,13 +448,13 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, threshold, gotThreshold)
 	require.Equal(t, floor, gotFloor)
 
-	// the manifest `name` persisted as the provider account display_name.
-	var liveDisplayName string
+	// The manifest PSP map key persists as the provider account key.
+	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT display_name FROM openrails.psps
+		SELECT key FROM openrails.psps
 		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND environment = 'live'
-	`, merchantID).Scan(&liveDisplayName))
-	require.Equal(t, "mobius", liveDisplayName)
+	`, merchantID).Scan(&liveKey))
+	require.Equal(t, "mobius", liveKey)
 
 	merchantSvc, err := merchants.NewService(cp.Pool(), nil, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
 	require.NoError(t, err)

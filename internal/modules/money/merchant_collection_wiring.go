@@ -12,9 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -47,6 +49,8 @@ type CollectionEndpoints struct {
 	// Classic NMI endpoints (#727 manual-rebill leg: Direct Post + Query API).
 	NMIDirectPostURL string
 	NMIQueryURL      string
+	// BTBaseURL points store-armed Basis Theory clients at a fake server (#795).
+	BTBaseURL string
 }
 
 // CollectionPlane is the runtime-facing per-merchant credential resolver
@@ -102,7 +106,8 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	}
 	rail := normalizeRail(method.Rail)
 	isStripe := rail == string(models.RailStripe)
-	if !isStripe && !rails.IsNMI(models.Rail(rail)) {
+	isVaultedCard := rail == string(models.RailVaultedCard)
+	if !isStripe && !isVaultedCard && !rails.IsNMI(models.Rail(rail)) {
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
 	mid := merchant.ID(method.MerchantID)
@@ -114,9 +119,12 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		return nil, false, nil // no declared account → nothing armable for this rail
 	}
 	var adapter CollectionAdapter
-	if isStripe {
+	switch {
+	case isStripe:
 		adapter, err = b.stripeAdapter(ctx, svc, mid, scope)
-	} else {
+	case isVaultedCard:
+		adapter, err = b.vaultedCardAdapter(ctx, svc, mid, scope)
+	default:
 		adapter, err = b.nmiAdapter(ctx, svc, mid, scope)
 	}
 	if err != nil {
@@ -196,6 +204,41 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
 	}
 	return NewStripeCollectionAdapter(b.DB, service), nil
+}
+
+// vaultedCardAdapter arms the #795 BT-proxy collection adapter: the private
+// app key from the vaulted_card account's secrets, destination creds from the
+// LINKED NMI gateway account (settings.gateway_account — one source of truth).
+func (b *MerchantCollectionAdapterBuilder) vaultedCardAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+	apiKey, err := b.requireSecret(ctx, svc, mid, scope, "api_key")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("vaulted_card account %s: %w", scope.AccountID, err)
+	}
+	gwScope, ok, err := svc.PSPScopeByAccountID(ctx, mid, string(models.RailNMI), settings.GatewayAccount)
+	if err != nil {
+		return nil, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("vaulted_card account %s: gateway account %q is not declared on rail nmi", scope.AccountID, settings.GatewayAccount)
+	}
+	gatewayKey, err := b.requireSecret(ctx, svc, mid, gwScope, "security_key")
+	if err != nil {
+		return nil, err
+	}
+	bt, err := basistheory.New(basistheory.Config{
+		APIKey:   apiKey,
+		BaseURL:  b.Endpoints.BTBaseURL,
+		ReadOnly: b.Config != nil && b.Config.IsProviderReadOnly(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build store-armed BT client: %w", err)
+	}
+	gw := vaultedcard.GatewayConfig{SecurityKey: gatewayKey, DirectPostURL: b.Endpoints.NMIDirectPostURL}
+	return NewVaultedCardCollectionAdapter(vaultedcard.New(bt, gw)), nil
 }
 
 func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {

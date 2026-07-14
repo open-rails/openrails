@@ -87,6 +87,7 @@ func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg.Register(StripeWebhookHandler{})
 	reg.Register(NMIWebhookHandler{})
 	reg.Register(CCBillWebhookHandler{})
+	reg.Register(BasisTheoryWebhookHandler{})
 	return reg
 }
 

@@ -189,6 +189,19 @@ var descriptors = []Descriptor{
 		[]CredentialKey{{"private_key", false}}, // operator-only signer
 	},
 	{
+		models.RailVaultedCard,
+		"Credit Card", // DisplayName
+		true,          // HasRailMerchantAccounts (account_id = BT tenant id, operator-declared)
+		false,         // HasRemoteCustomer (BT has no customer scope)
+		true,          // SupportsChargeSavedMethod (invoice/top-up MITs through the proxy)
+		true,          // OpenRailsDrivenDunning (no provider-side recurring engine; the engine drives every rebill)
+		false,         // RemoteDeleteOnTerminalCancel (no provider-side schedule to tear down)
+		autoBilledNever,
+		cancelDestructive,                  // no remote schedule; safe default until a resume path is built
+		"",                                 // CancelPortalURL
+		[]CredentialKey{{"api_key", true}}, // BT PRIVATE application key — the only custodial secret (#795)
+	},
+	{
 		models.RailPayPal,
 		"PayPal", // DisplayName
 		false,    // HasRailMerchantAccounts (no integration; display-only vestige)

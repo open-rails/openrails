@@ -233,10 +233,10 @@ type PSPScope struct {
 	Rail        string
 	Environment string
 	AccountID   string
-	// DisplayName is the manifest account KEY ("mobius") — the
+	// Key is the manifest account key ("mobius") — the
 	// payment-provider vocabulary catalog links and checkout use.
-	DisplayName string
-	Settings    map[string]any
+	Key      string
+	Settings map[string]any
 }
 
 // PSPScopeResolver resolves the selected provider account without
@@ -246,7 +246,7 @@ type PSPScopeResolver interface {
 }
 
 // PSPKeyResolver resolves a declared account by its manifest
-// account key (display_name) — the payment-provider name checkout requests
+// account key — the payment-provider name checkout requests
 // and catalog provider_links use.
 type PSPKeyResolver interface {
 	PSPScopeByKey(ctx context.Context, merchantID merchant.ID, key, environment string) (PSPScope, bool, error)

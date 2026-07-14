@@ -639,10 +639,11 @@ type PSPConfig struct {
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
 	// the typed block — there is no flat fallback.
-	NMI    *NMIRailConfig
-	CCBill *CCBillRailConfig
-	Stripe *StripeRailConfig
-	Solana *SolanaRailConfig
+	NMI         *NMIRailConfig
+	CCBill      *CCBillRailConfig
+	Stripe      *StripeRailConfig
+	Solana      *SolanaRailConfig
+	VaultedCard *VaultedCardRailConfig
 }
 
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
@@ -684,6 +685,29 @@ type SolanaRailConfig struct {
 	// Network is DERIVED from test_mode at startup (devnet under test_mode,
 	// mainnet otherwise) — not configurable (#349).
 	Network string
+}
+
+// VaultedCardRailConfig (#795) is the RESOLVED runtime credential shape for
+// the vaulted_card rail: the BT private application key plus the destination
+// NMI gateway credentials resolved from the account's settings.gateway_account
+// reference at resolution time. AccountID on the parent config = BT tenant id.
+type VaultedCardRailConfig struct {
+	// APIKey is the BT PRIVATE application key — the only custodial secret.
+	APIKey string
+	// Gateway destination (the linked NMI account): its security key transits
+	// the BT proxy; the PAN never touches OpenRails.
+	GatewayAccountID     string
+	GatewaySecurityKey   string
+	GatewayDirectPostURL string // "" = the NMI client default
+	// NetworkTokens arms NT provisioning on instrument creation (never
+	// load-bearing; charge routing stays pan_proxy on NMI gateways).
+	NetworkTokens bool
+	// PublicAPIKey is checkout-page config (not a secret).
+	PublicAPIKey string
+	// WebhookKeyURL overrides the BT CDN webhook public-key URL (tests only).
+	WebhookKeyURL string
+	// APIBaseURL overrides the BT API base URL (tests only; "" = production).
+	APIBaseURL string
 }
 
 // PSPSet is an in-memory set of payment-provider credential entries. It
@@ -757,6 +781,9 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	if p.Solana != nil {
 		blockCount++
 	}
+	if p.VaultedCard != nil {
+		blockCount++
+	}
 	if blockCount == 0 {
 		return nil
 	}
@@ -779,6 +806,10 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	case models.RailSolana:
 		if p.Solana == nil {
 			return fmt.Errorf("rail '%s' type solana must use solana block", name)
+		}
+	case models.RailVaultedCard:
+		if p.VaultedCard == nil {
+			return fmt.Errorf("rail '%s' type vaulted_card must use vaulted_card block", name)
 		}
 	default:
 		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
@@ -804,6 +835,11 @@ func (p *PSPConfig) IsStripe(name string) bool {
 // IsSolana returns true if this rail config is for Solana.
 func (p *PSPConfig) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
+}
+
+// IsVaultedCard returns true if this rail config is for the vaulted_card rail.
+func (p *PSPConfig) IsVaultedCard(name string) bool {
+	return p.EffectiveRail(name) == models.RailVaultedCard
 }
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
@@ -1414,6 +1450,10 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 			if err := validateSolanaRail(name, proc, isDev); err != nil {
 				return err
 			}
+		case models.RailVaultedCard:
+			if err := validateVaultedCardRail(name, proc, isDev); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
 		}
@@ -1509,6 +1549,27 @@ func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
 		return fmt.Errorf("rail '%s' (solana): rpc_provider public cannot use rpc_api_key", name)
 	}
 
+	return nil
+}
+
+// validateVaultedCardRail validates a vaulted_card-type rail (#795).
+func validateVaultedCardRail(name string, proc *PSPConfig, isDev bool) error {
+	vc := proc.VaultedCard
+	if vc == nil {
+		return fmt.Errorf("rail '%s' (vaulted_card): vaulted_card block is required", name)
+	}
+	if strings.TrimSpace(proc.AccountID) == "" {
+		return fmt.Errorf("rail '%s' (vaulted_card): account_id (the BT tenant id) is required", name)
+	}
+	if isDev {
+		return nil
+	}
+	if strings.TrimSpace(vc.APIKey) == "" {
+		return fmt.Errorf("rail '%s' (vaulted_card): api_key (BT private application key) is required", name)
+	}
+	if strings.TrimSpace(vc.GatewaySecurityKey) == "" {
+		return fmt.Errorf("rail '%s' (vaulted_card): gateway security key is required (resolved from the linked NMI account)", name)
+	}
 	return nil
 }
 
