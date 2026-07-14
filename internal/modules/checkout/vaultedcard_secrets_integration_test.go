@@ -18,7 +18,7 @@ import (
 )
 
 // #795 spec C12: the vaulted_card rail arms end-to-end from real
-// rail_merchant_accounts rows + the merchant secret store, in BOTH secret
+// psps rows + the merchant secret store, in BOTH secret
 // modes (MODE 2 DB-backed store; MODE 1 in-memory manifest plane): the private
 // api_key + the LINKED NMI gateway account's security key resolve into one
 // VaultedCardRailConfig through the real merchants.Service + railresolve seam.
@@ -34,19 +34,19 @@ func TestVaultedCardRailResolvesFromStoreBothModes(t *testing.T) {
 
 	// Layer B rows (identical in both modes — mode 1 converges the same rows).
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'vaulted_card', 'test', $2, false, '{"source":"test_795","settings":{"gateway_account":"579145-c12","network_tokens":true,"public_api_key":"key_pub_c12"}}'::jsonb)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
 	`, dbtest.TestMerchantID.String(), tenantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.rail_merchant_accounts (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'nmi', 'test', $2, false, '{"source":"test_795"}'::jsonb)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
 	`, dbtest.TestMerchantID.String(), gatewayID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_merchant_accounts WHERE account_id IN ($1, $2)", tenantID, gatewayID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.psps WHERE account_id IN ($1, $2)", tenantID, gatewayID)
 	})
 
 	dbp := db.WrapPool(pool, "")

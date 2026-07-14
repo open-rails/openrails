@@ -144,7 +144,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 				log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
 			} else if found {
 				target.Scope = &scope
-				if key := strings.ToLower(strings.TrimSpace(scope.DisplayName)); key != "" {
+				if key := strings.ToLower(strings.TrimSpace(scope.Key)); key != "" {
 					target.PSP = key
 				}
 			}

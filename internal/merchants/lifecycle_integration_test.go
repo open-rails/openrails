@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
-    display_name text,
+	key text,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT current_timestamp NOT NULL,
