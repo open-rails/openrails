@@ -160,6 +160,7 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 		price.PSPLinks = map[string]map[string]string{}
 	}
 	price.PSPLinks[provider] = map[string]string{
+		models.RailKeyRail:   string(models.RailNMI),
 		models.RailKeyPlanID: provider + "-plan",
 	}
 	railsJSON, err := json.Marshal(price.PSPLinks)
