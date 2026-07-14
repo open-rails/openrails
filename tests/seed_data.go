@@ -416,10 +416,15 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 // a distinct explicit key; a blank Key still auto-derives via the DB trigger.
 func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
 	suite.t.Helper()
+	// These shared fixtures key links directly by rail. The PSP hard-cut also
+	// requires every entry to record that rail explicitly.
+	for rail, link := range price.PSPLinks {
+		link[models.RailKeyRail] = rail
+	}
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, archived, amount, currency, access_duration_hours, auto_renew,
-			rails, key, created_at, updated_at, merchant_id
+			psp_links, key, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11, $12)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, price.Archived, price.Amount, price.Currency,

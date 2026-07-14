@@ -298,7 +298,7 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 	// are translated at push time, so no price-attached metered shape exists.
 	rows, err := database.Qx(ctx).Query(ctx, `
 SELECT p.product_id, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
-       p.trial_unit_amount, p.trial_duration_hours, COALESCE(p.rails, '{}'::jsonb),
+       p.trial_unit_amount, p.trial_duration_hours, COALESCE(p.psp_links, '{}'::jsonb),
        p.archived
 FROM openrails.prices p
 WHERE p.merchant_id = $1

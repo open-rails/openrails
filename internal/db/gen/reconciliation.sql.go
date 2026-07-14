@@ -1905,7 +1905,7 @@ type ReconcileListPricesWithPSPLinksRow struct {
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
-// materializer maps a remote plan id onto the local price whose rails
+// materializer maps a remote plan id onto the local price whose psp_links
 // jsonb carries that id under the provider's key. Archived prices stay
 // (grandfathered subscriptions bill them).
 func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context) ([]ReconcileListPricesWithPSPLinksRow, error) {

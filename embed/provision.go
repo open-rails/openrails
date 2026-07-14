@@ -157,7 +157,7 @@ func ParseMerchantConfig(raw []byte) (MerchantConfig, error) {
 	if yaml.Unmarshal(raw, &probe) == nil {
 		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
 			if _, ok := probe[old]; ok {
-				return MerchantConfig{}, fmt.Errorf("openrails embed: parse merchant config: %s was renamed to accounts", old)
+				return MerchantConfig{}, fmt.Errorf("openrails embed: parse merchant config: %s was renamed to psps", old)
 			}
 		}
 	}
