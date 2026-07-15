@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -78,30 +79,9 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	existing, err := store.LoadAll(r.Request.Context(), payer)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "spend delegation lookup failed")
+	if err := replaceCustomerSpendDelegations(r.Request.Context(), store, payer, next); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "spend delegation replace failed")
 		return
-	}
-
-	wanted := make(map[string]admission.InvokerSpendLimit, len(next))
-	for _, row := range next {
-		wanted[spendDelegationKey(row.Scope, row.ScopeKey)] = row
-	}
-	for _, row := range existing {
-		if _, keep := wanted[spendDelegationKey(row.Scope, row.ScopeKey)]; keep {
-			continue
-		}
-		if err := store.Delete(r.Request.Context(), payer, row.Scope, row.ScopeKey); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "spend delegation replace failed")
-			return
-		}
-	}
-	for _, row := range next {
-		if err := store.Upsert(r.Request.Context(), payer, row); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "spend delegation replace failed")
-			return
-		}
 	}
 
 	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(next)})
@@ -134,6 +114,98 @@ func PutCustomerSpendDelegation(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(customerSpendDelegationFromRow(next[0]))
+}
+
+// ServicePutCustomerSpendDelegations is the merchant-machine counterpart of
+// PutCustomerSpendDelegations. Route authentication pins the merchant; the
+// path names a payable customer within that merchant.
+func ServicePutCustomerSpendDelegations(r *httprequest.Request) {
+	var doc customerSpendDelegationsDocument
+	if !r.BindJSON(&doc) {
+		return
+	}
+	if strings.TrimSpace(doc.CustomerID) != "" {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id is not allowed in the body; it is taken from the path scope")
+		return
+	}
+	next, err := validateCustomerSpendDelegations(doc.Delegations)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	store, payer, ok := serviceCustomerSpendDelegationStore(r)
+	if !ok {
+		return
+	}
+	if err := replaceCustomerSpendDelegations(r.Request.Context(), store, payer, next); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "spend delegation replace failed")
+		return
+	}
+	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(next)})
+}
+
+// ServicePutCustomerSpendDelegation atomically reasserts one payer grant for a
+// merchant-authenticated machine caller without touching sibling grants.
+func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
+	var delegation customerSpendDelegation
+	if !r.BindJSON(&delegation) {
+		return
+	}
+	next, err := validateCustomerSpendDelegations([]customerSpendDelegation{delegation})
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	store, payer, ok := serviceCustomerSpendDelegationStore(r)
+	if !ok {
+		return
+	}
+	if err := store.Upsert(r.Request.Context(), payer, next[0]); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "spend delegation upsert failed")
+		return
+	}
+	r.SuccessJSON(customerSpendDelegationFromRow(next[0]))
+}
+
+func serviceCustomerSpendDelegationStore(r *httprequest.Request) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {
+	payer, err := parseServiceCustomerID(r.Param("customer_id"))
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+		return nil, identity.CustomerID(uuid.Nil), false
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return nil, identity.CustomerID(uuid.Nil), false
+	}
+	if r.State == nil || r.State.DB == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return nil, identity.CustomerID(uuid.Nil), false
+	}
+	return admission.NewInvokerSpendLimitStore(r.State.DB), *payer, true
+}
+
+func replaceCustomerSpendDelegations(ctx context.Context, store *admission.InvokerSpendLimitStore, payer identity.CustomerID, next []admission.InvokerSpendLimit) error {
+	existing, err := store.LoadAll(ctx, payer)
+	if err != nil {
+		return err
+	}
+	wanted := make(map[string]admission.InvokerSpendLimit, len(next))
+	for _, row := range next {
+		wanted[spendDelegationKey(row.Scope, row.ScopeKey)] = row
+	}
+	for _, row := range existing {
+		if _, keep := wanted[spendDelegationKey(row.Scope, row.ScopeKey)]; keep {
+			continue
+		}
+		if err := store.Delete(ctx, payer, row.Scope, row.ScopeKey); err != nil {
+			return err
+		}
+	}
+	for _, row := range next {
+		if err := store.Upsert(ctx, payer, row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {

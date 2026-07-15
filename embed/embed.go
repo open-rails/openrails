@@ -137,9 +137,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 // call. Parity with a standalone deployment is structural (one implementation),
 // enforced by conformance_integration_test.go.
 //
-// Customer spend-delegation writes are PERMANENTLY served by the transcribed
-// localClient — see unifiedClient and the localClient doc for the authz
-// reasoning. The returned Client also always implements
+// Customer spend-delegation writes use localClient's direct service path; the
+// remote client uses equivalent merchant-machine routes. The returned Client
+// also always implements
 // SingleAdmitter (embedded-only single Admit, no wire counterpart) — reach it
 // via a type assertion.
 //
@@ -175,26 +175,23 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 
 // unifiedClient is the embedded SDK client (#685): the embedded
 // openrails.Client (the remote implementation over the in-process transport)
-// serves every merchant-authority method; *localClient keeps the PERMANENT
-// customer-treasury spend-delegation transcriptions (see the localClient doc)
-// plus the embedded-only single-Admit extra, which has no /v1/merchant wire
-// counterpart.
+// serves merchant-authority methods; *localClient keeps direct service
+// implementations for spend-delegation sync plus the embedded-only single-Admit
+// extra, which has no /v1/merchant wire counterpart.
 type unifiedClient struct {
 	openrails.Client
 	*localClient
 }
 
-// SetCustomerSpendDelegations stays transcribed PERMANENTLY: its HTTP surface
-// is the delegated customer-treasury family (/v1/customers/*), whose gate
-// requires a credential that IS the customer — a mapping the merchant host
-// principal cannot honestly satisfy (see the localClient doc). Explicit
-// forward resolves the embedding conflict.
+// SetCustomerSpendDelegations uses the direct embedded service path. The remote
+// client uses the equivalent merchant-machine HTTP route. Explicit forwarding
+// resolves the embedding conflict.
 func (c *unifiedClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	return c.localClient.SetCustomerSpendDelegations(ctx, customerID, delegations)
 }
 
-// SetCustomerSpendDelegation stays transcribed for the same customer-treasury
-// authority boundary as the explicit full-document replacement above.
+// SetCustomerSpendDelegation preserves singular-upsert semantics in both
+// embedded and standalone modes.
 func (c *unifiedClient) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation openrails.SpendDelegationInput) error {
 	return c.localClient.SetCustomerSpendDelegation(ctx, customerID, delegation)
 }

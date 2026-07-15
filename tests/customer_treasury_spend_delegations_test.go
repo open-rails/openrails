@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -23,6 +24,62 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
+
+func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	payerID := suite.ensureCustomer(ctx, uuid.NewString())
+	payer := identity.CustomerID(payerID)
+	_, err := suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	})
+
+	mux := http.NewServeMux()
+	resolver := stubServiceCredentialResolver{
+		serviceJWT: true,
+		permissions: []string{
+			controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+	}
+	httproutes.RegisterServiceRoutes(
+		httprouter.NewMux(mux, "/v1/merchant", suite.App.Runtime),
+		suite.App.Runtime,
+		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: resolver})},
+	)
+	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	client := openrails.NewRemote(srv.URL, openrails.WithTokenProvider(func(context.Context) (string, error) {
+		return "eyJ.service.jwt", nil
+	}))
+
+	first := openrails.SpendDelegationInput{
+		Scope: "invoker", ScopeKey: "document-bound-invoker",
+		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000, Currency: "USD"}},
+	}
+	second := openrails.SpendDelegationInput{
+		Scope: "role", ScopeKey: uuid.NewString(),
+		Windows: []openrails.SpendLimitWindow{{Key: "week", WindowSeconds: 604800, Limit: 9000, Currency: "USD"}},
+	}
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), second))
+	first.Windows[0].Limit = 321
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
+
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	stored, err := svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 2, "singular machine upsert must preserve sibling grants")
+
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{second}))
+	stored, err = svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 1, "full replacement must remove omitted grants")
+	require.Equal(t, "role", stored[0].Scope)
+}
 
 func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	suite := setupTestSuite(t)

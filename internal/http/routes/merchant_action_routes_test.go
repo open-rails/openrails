@@ -46,6 +46,7 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 		}),
 	}
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterServiceRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
 	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), nil, opts)
 	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, opts)
 
@@ -95,6 +96,18 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			name:   "off channel payment",
 			method: http.MethodPost,
 			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payments/off-channel",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "replace customer spend delegations",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/spend-delegations",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "upsert customer spend delegation",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/spend-delegations:upsert",
 			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
 		},
 		{
