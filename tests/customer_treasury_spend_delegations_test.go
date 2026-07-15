@@ -74,6 +74,29 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	require.Len(t, decodeDelegations(t, resp.body), 3)
 
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations:upsert", map[string]any{
+		"scope":     "invoker",
+		"scope_key": invokerKey,
+		"windows": []map[string]any{
+			{"key": "day", "window_seconds": 86400, "limit": 321, "currency": "USD"},
+		},
+	})
+	require.Equal(t, http.StatusOK, resp.status, resp.body)
+
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	payer := identity.CustomerID(dbtest.TestMerchantID.UUID())
+	stored, err := svc.InvokerSpendLimits(dbtest.WithTestMerchant(context.Background()), payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 3, "single upsert must preserve unrelated role and invoker-tier rows")
+	limits := map[string]int64{}
+	for _, row := range stored {
+		limits[row.Scope+"\x00"+row.ScopeKey] = row.Windows[0].Limit
+	}
+	require.EqualValues(t, 321, limits["invoker\x00"+invokerKey])
+	require.EqualValues(t, 9000, limits["role\x00"+roleKey])
+	require.EqualValues(t, 15000, limits["invoker_tier\x00"+trustLevelKey])
+
 	secondDoc := map[string]any{"delegations": []map[string]any{
 		{
 			"scope":     "role",
@@ -86,10 +109,7 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", secondDoc)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 
-	svc, err := billingservice.New(suite.App.Runtime)
-	require.NoError(t, err)
-	payer := identity.CustomerID(dbtest.TestMerchantID.UUID())
-	stored, err := svc.InvokerSpendLimits(dbtest.WithTestMerchant(context.Background()), payer)
+	stored, err = svc.InvokerSpendLimits(dbtest.WithTestMerchant(context.Background()), payer)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	require.Equal(t, "role", stored[0].Scope)

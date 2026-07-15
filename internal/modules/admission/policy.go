@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/budgets"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -232,6 +233,44 @@ type InvokerSpendLimit struct {
 	Scope    string
 	ScopeKey string
 	Windows  []models.BudgetWindowPolicy
+}
+
+// ValidateInvokerSpendLimit validates and canonicalizes one payer-owned
+// delegated-spend policy before either transport writes it.
+func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
+	p.Scope = budgets.NormalizeScope(p.Scope)
+	switch p.Scope {
+	case budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel:
+	default:
+		return InvokerSpendLimit{}, fmt.Errorf("scope must be %q, %q, or %q", budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel)
+	}
+	p.ScopeKey = strings.TrimSpace(p.ScopeKey)
+	if p.ScopeKey == "" {
+		return InvokerSpendLimit{}, fmt.Errorf("scope_key required")
+	}
+	if len(p.Windows) == 0 {
+		return InvokerSpendLimit{}, fmt.Errorf("windows required")
+	}
+	for i := range p.Windows {
+		window := &p.Windows[i]
+		window.Key = strings.TrimSpace(window.Key)
+		if window.Key == "" {
+			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].key required", i)
+		}
+		if window.WindowSeconds <= 0 {
+			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].window_seconds must be positive", i)
+		}
+		if window.Limit < 0 {
+			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].limit must be non-negative", i)
+		}
+		window.Currency = money.NormalizeCurrency(window.Currency)
+		if window.Currency != "" {
+			if err := money.ValidateCurrency(window.Currency); err != nil {
+				return InvokerSpendLimit{}, fmt.Errorf("windows[%d].currency invalid: %w", i, err)
+			}
+		}
+	}
+	return p, nil
 }
 
 func invokerSpendLimitFromGen(r gen.OpenrailsInvokerSpendLimit) (InvokerSpendLimit, error) {

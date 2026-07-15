@@ -433,6 +433,15 @@ func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID str
 	return c.do(ctx, http.MethodPut, path, map[string]any{"delegations": delegations}, nil)
 }
 
+// SetCustomerSpendDelegation atomically upserts one customer delegation.
+func (c *remote) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error {
+	if strings.TrimSpace(customerID) == "" {
+		return invalidErr("customer_id required")
+	}
+	path := "/v1/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations:upsert"
+	return c.do(ctx, http.MethodPut, path, delegation, nil)
+}
+
 // ListActiveEntitlements implements Client (handler
 // ServiceGetExternalSubjectEntitlements, entitlements.go).
 func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {

@@ -215,7 +215,7 @@ explicit `customer:*` grants:
 | `customer:payment-methods:update` | Manage a shared customer's payment methods and Stripe portal |
 | `customer:checkout:create` | Pre-pay / load credits onto a shared customer balance |
 | `customer:spend-delegations:read` | Read a shared customer's spend-delegation policy |
-| `customer:spend-delegations:update` | Replace a shared customer's spend-delegation policy |
+| `customer:spend-delegations:update` | Replace or atomically upsert a shared customer's spend-delegation policy |
 
 **3c. Call the self-service API from the browser.** Have your frontend fetch the delegated
 token from your exchange endpoint (cache it, re-fetch on expiry — a ~30-line helper makes

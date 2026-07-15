@@ -124,6 +124,10 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 		h(httphandlers.PutCustomerSpendDelegations),
 		putSpendDelegations...,
 	)
+	group.Handle(http.MethodPut, "/:customer_id/spend-delegations:upsert",
+		h(httphandlers.PutCustomerSpendDelegation),
+		putSpendDelegations...,
+	)
 
 	// Read the payer's money state. `status` is intentionally NOT mounted (it
 	// reports consumer concepts the customer does not own).

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // Regression: the transcribed SetCustomerSpendDelegations bypasses the
@@ -35,12 +36,36 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	client := rt.Client()
-	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{{
+	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+		{
+			Scope:    "invoker",
+			ScopeKey: "test-invoker",
+			Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
+		},
+		{
+			Scope:  "role",
+			RoleID: "test-role",
+			Windows: []openrails.SpendLimitWindow{{
+				Key: "month", WindowSeconds: 2592000, Limit: 9_000_000, Currency: "USD",
+			}},
+		},
+	})
+	require.NoError(t, err, "embedded SetCustomerSpendDelegations must pin the bound merchant itself")
+
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, customerID.String(), openrails.SpendDelegationInput{
 		Scope:    "invoker",
 		ScopeKey: "test-invoker",
-		Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
-	}})
-	require.NoError(t, err, "embedded SetCustomerSpendDelegations must pin the bound merchant itself")
+		Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 123, Currency: "USD"}},
+	}))
+	stored, err := rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	require.NoError(t, err)
+	require.Len(t, stored, 2, "single embedded upsert must preserve unrelated rows")
+	limits := map[string]int64{}
+	for _, row := range stored {
+		limits[row.Scope+"\x00"+row.ScopeKey] = row.Windows[0].Limit
+	}
+	require.EqualValues(t, 123, limits["invoker\x00test-invoker"])
+	require.EqualValues(t, 9_000_000, limits["role\x00test-role"])
 
 	// Replace-with-empty exercises the delete lane through the same ctx path.
 	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), nil))

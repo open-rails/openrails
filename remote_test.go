@@ -77,6 +77,38 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}
 }
 
+func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/v1/customers/customer-1/spend-delegations:upsert" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+		return "test-token", nil
+	}))
+	err := client.SetCustomerSpendDelegation(context.Background(), " customer-1 ", SpendDelegationInput{
+		Scope: "invoker", ScopeKey: "issuer:subject:digest:entitlement",
+		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
+	})
+	if err != nil {
+		t.Fatalf("SetCustomerSpendDelegation: %v", err)
+	}
+	if got["scope"] != "invoker" || got["scope_key"] != "issuer:subject:digest:entitlement" {
+		t.Fatalf("unexpected body: %#v", got)
+	}
+}
+
 // TestRemoteValidationErrorParity asserts that client-side pre-flight argument
 // checks return typed *StatusError values whose errors.Is chain includes
 // ErrInvalid — matching the embedded transport's behavior (#338).
@@ -109,6 +141,12 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 			name: "SetCustomerSpendDelegations empty customer_id",
 			fn: func() error {
 				return client.SetCustomerSpendDelegations(ctx, "", nil)
+			},
+		},
+		{
+			name: "SetCustomerSpendDelegation empty customer_id",
+			fn: func() error {
+				return client.SetCustomerSpendDelegation(ctx, "", SpendDelegationInput{})
 			},
 		},
 		{

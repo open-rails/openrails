@@ -217,6 +217,8 @@ func TestCustomerTreasurySpendDelegationsMountedAndGated(t *testing.T) {
 
 	w = doSelf(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy update")
+	w = doSelf(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations:upsert", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy single-row update")
 }
 
 func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
@@ -244,4 +246,13 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 	w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", "delegated.jwt.token", body)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "customer_id")
+
+	for _, body := range []string{
+		`{"scope":"invoker","role_id":"role-1","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`,
+		`{"scope":"invoker","scope_key":"invoker-1","windows":[]}`,
+		`{"scope":"invoker","scope_key":"invoker-1","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"BTC"}]}`,
+	} {
+		w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations:upsert", "delegated.jwt.token", body)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	}
 }
