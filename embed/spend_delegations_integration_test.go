@@ -69,6 +69,25 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.EqualValues(t, 123, limits["invoker\x00test-invoker"])
 	require.EqualValues(t, 9_000_000, limits["role\x00test-role"])
 
+	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+		{
+			Scope: " role ", RoleID: " test-role ",
+			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
+		},
+		{
+			Scope: "role", ScopeKey: "test-role",
+			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 2}},
+		},
+	})
+	require.ErrorIs(t, err, openrails.ErrInvalid)
+	var embeddedStatus *openrails.StatusError
+	require.ErrorAs(t, err, &embeddedStatus)
+	require.Equal(t, 400, embeddedStatus.Status)
+	require.Contains(t, err.Error(), "duplicate delegation for role")
+	stored, err = rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	require.NoError(t, err)
+	require.Len(t, stored, 2, "rejected embedded duplicate document must not mutate policy")
+
 	// Replace-with-empty exercises the delete lane through the same ctx path.
 	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), nil))
 }

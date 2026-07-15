@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,9 +11,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -244,18 +242,14 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 	}
 	next := make([]billingservice.InvokerSpendLimitInput, 0, len(delegations))
 	for _, d := range delegations {
-		in, err := spendDelegationInput(d)
-		if err != nil {
-			return err
-		}
-		next = append(next, in)
+		next = append(next, spendDelegationInput(d))
 	}
 	mctx, err := c.merchantCtx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := c.svc.ReplaceInvokerSpendLimits(mctx, payer, next); err != nil {
-		return wrapInternalErr("set customer spend delegations failed", err)
+		return spendDelegationWriteError("set customer spend delegations failed", err)
 	}
 	return nil
 }
@@ -267,50 +261,33 @@ func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID
 	if err != nil {
 		return err
 	}
-	in, err := spendDelegationInput(delegation)
-	if err != nil {
-		return err
-	}
+	in := spendDelegationInput(delegation)
 	mctx, err := c.merchantCtx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := c.svc.SetInvokerSpendLimits(mctx, payer, in); err != nil {
-		return wrapInternalErr("set customer spend delegation failed", err)
+		return spendDelegationWriteError("set customer spend delegation failed", err)
 	}
 	return nil
 }
 
-func spendDelegationInput(d openrails.SpendDelegationInput) (billingservice.InvokerSpendLimitInput, error) {
-	scope := budgets.NormalizeScope(d.Scope)
-	scopeKey := strings.TrimSpace(d.ScopeKey)
-	roleID := strings.TrimSpace(d.RoleID)
-	if roleID != "" && scope != budgets.ScopeRole {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr(fmt.Sprintf("role_id is only allowed for scope %q", budgets.ScopeRole))
+func spendDelegationInput(d openrails.SpendDelegationInput) billingservice.InvokerSpendLimitInput {
+	out := billingservice.InvokerSpendLimitInput{
+		Scope: d.Scope, ScopeKey: d.ScopeKey, RoleID: d.RoleID,
+		Windows: make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows)),
 	}
-	if scopeKey != "" && roleID != "" && scopeKey != roleID {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr("role_id must match scope_key")
-	}
-	if scopeKey == "" {
-		scopeKey = roleID
-	}
-	windows := make([]models.BudgetWindowPolicy, 0, len(d.Windows))
 	for _, w := range d.Windows {
-		windows = append(windows, models.BudgetWindowPolicy{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
-		})
-	}
-	normalized, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
-		Scope: scope, ScopeKey: scopeKey, Windows: windows,
-	})
-	if err != nil {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr(err.Error())
-	}
-	out := billingservice.InvokerSpendLimitInput{Scope: normalized.Scope, ScopeKey: normalized.ScopeKey}
-	for _, w := range normalized.Windows {
 		out.Windows = append(out.Windows, billingservice.SpendLimitWindowInput{
 			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
 		})
 	}
-	return out, nil
+	return out
+}
+
+func spendDelegationWriteError(message string, err error) error {
+	if errors.Is(err, billingservice.ErrInvalidInvokerSpendLimit) {
+		return invalidErr(err.Error())
+	}
+	return wrapInternalErr(message, err)
 }

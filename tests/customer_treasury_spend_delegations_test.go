@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -79,6 +82,148 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 1, "full replacement must remove omitted grants")
 	require.Equal(t, "role", stored[0].Scope)
+
+	err = client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{
+		{
+			Scope: " role ", RoleID: " " + second.ScopeKey + " ", Windows: second.Windows,
+		},
+		second,
+	})
+	require.ErrorIs(t, err, openrails.ErrInvalid)
+	var remoteStatus *openrails.StatusError
+	require.ErrorAs(t, err, &remoteStatus)
+	require.Equal(t, http.StatusBadRequest, remoteStatus.Status)
+	require.Contains(t, err.Error(), "duplicate delegation for role")
+	stored, err = svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 1, "rejected remote duplicate document must not mutate policy")
+}
+
+func TestReplaceInvokerSpendLimitsRollsBackOnWriteFailure(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	payerID := suite.ensureCustomer(ctx, uuid.NewString())
+	payer := identity.CustomerID(payerID)
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	})
+
+	original := billingservice.InvokerSpendLimitInput{
+		Scope: "invoker", ScopeKey: "rollback-original",
+		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 111}},
+	}
+	require.NoError(t, svc.SetInvokerSpendLimits(ctx, payer, original))
+
+	failingKey := "rollback-failure-" + uuid.NewString()
+	suffix := strings.Split(uuid.NewString(), "-")[0]
+	functionName := "fail_invoker_spend_" + suffix
+	triggerName := "fail_invoker_spend_" + suffix
+	_, err = suite.Pool.Exec(ctx, fmt.Sprintf(`
+CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'injected invoker spend-limit write failure';
+END
+$$;
+CREATE TRIGGER %s
+BEFORE INSERT OR UPDATE ON openrails.invoker_spend_limits
+FOR EACH ROW WHEN (NEW.scope_key = '%s')
+EXECUTE FUNCTION openrails.%s()`, functionName, triggerName, failingKey, functionName))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(context.Background(), fmt.Sprintf(
+			"DROP TRIGGER IF EXISTS %s ON openrails.invoker_spend_limits; DROP FUNCTION IF EXISTS openrails.%s()",
+			triggerName, functionName,
+		))
+	})
+
+	err = svc.ReplaceInvokerSpendLimits(ctx, payer, []billingservice.InvokerSpendLimitInput{{
+		Scope: "invoker", ScopeKey: failingKey,
+		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 999}},
+	}})
+	require.ErrorContains(t, err, "injected invoker spend-limit write failure")
+
+	stored, err := svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Equal(t, []billingservice.InvokerSpendLimitInput{original}, stored,
+		"failed replacement must roll back deletes and upserts")
+}
+
+func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	payerID := suite.ensureCustomer(ctx, uuid.NewString())
+	payer := identity.CustomerID(payerID)
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	})
+
+	blocker, err := suite.Pool.Acquire(ctx)
+	require.NoError(t, err)
+	tx, err := blocker.Begin(ctx)
+	require.NoError(t, err)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			_ = tx.Rollback(context.Background())
+			blocker.Release()
+		}
+	})
+	lockKey := dbtest.TestMerchantID.String() + ":" + payerID.String()
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey)
+	require.NoError(t, err)
+
+	replacement := billingservice.InvokerSpendLimitInput{
+		Scope: "role", ScopeKey: uuid.NewString(),
+		Windows: []billingservice.SpendLimitWindowInput{{Key: "week", WindowSeconds: 604800, Limit: 700}},
+	}
+	singular := billingservice.InvokerSpendLimitInput{
+		Scope: "invoker", ScopeKey: "serialized-upsert",
+		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 300}},
+	}
+	replaceDone := make(chan error, 1)
+	go func() {
+		replaceDone <- svc.ReplaceInvokerSpendLimits(ctx, payer, []billingservice.InvokerSpendLimitInput{replacement})
+	}()
+
+	waiters := func(want int) bool {
+		var got int
+		err := suite.Pool.QueryRow(ctx, `
+SELECT count(*)
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND wait_event_type = 'Lock'
+  AND query LIKE '%pg_advisory_xact_lock(hashtextextended%'`).Scan(&got)
+		return err == nil && got >= want
+	}
+	require.Eventually(t, func() bool { return waiters(1) }, 5*time.Second, 20*time.Millisecond,
+		"replacement must wait on the payer-scoped write lock")
+
+	upsertDone := make(chan error, 1)
+	go func() {
+		upsertDone <- svc.SetInvokerSpendLimits(ctx, payer, singular)
+	}()
+	require.Eventually(t, func() bool { return waiters(2) }, 5*time.Second, 20*time.Millisecond,
+		"singular upsert must queue behind replacement on the same lock")
+
+	require.NoError(t, tx.Commit(ctx))
+	blocker.Release()
+	released = true
+	require.NoError(t, <-replaceDone)
+	require.NoError(t, <-upsertDone)
+
+	stored, err := svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 2, "queued replace then upsert must commit in that serial order")
+	limits := map[string]int64{}
+	for _, row := range stored {
+		limits[row.Scope+"\x00"+row.ScopeKey] = row.Windows[0].Limit
+	}
+	require.EqualValues(t, 700, limits["role\x00"+replacement.ScopeKey])
+	require.EqualValues(t, 300, limits["invoker\x00"+singular.ScopeKey])
 }
 
 func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
