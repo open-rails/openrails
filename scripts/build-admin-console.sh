@@ -31,6 +31,6 @@ if [[ ! -w "$src" ]]; then
 fi
 
 cd "$build_dir"
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --ignore-scripts
 pnpm run build -- --outDir "$out" --emptyOutDir
 echo "admin console built: $out"

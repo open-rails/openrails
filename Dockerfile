@@ -5,7 +5,7 @@ FROM node:22-alpine AS console
 WORKDIR /web/admin
 RUN npm install -g --ignore-scripts pnpm@11.0.0
 COPY web/admin/package.json web/admin/pnpm-lock.yaml web/admin/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY web/admin/ ./
 RUN pnpm run build -- --outDir /out --emptyOutDir
 
