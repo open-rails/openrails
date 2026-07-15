@@ -32,5 +32,5 @@ fi
 
 cd "$build_dir"
 pnpm install --frozen-lockfile --ignore-scripts
-pnpm run build -- --outDir "$out" --emptyOutDir
+pnpm run build --outDir "$out" --emptyOutDir
 echo "admin console built: $out"

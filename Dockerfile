@@ -7,7 +7,7 @@ RUN npm install -g --ignore-scripts pnpm@11.0.0
 COPY web/admin/package.json web/admin/pnpm-lock.yaml web/admin/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY web/admin/ ./
-RUN pnpm run build -- --outDir /out --emptyOutDir
+RUN pnpm run build --outDir /out --emptyOutDir
 
 
 # Stage 2: build
