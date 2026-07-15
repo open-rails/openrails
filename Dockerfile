@@ -3,10 +3,11 @@
 FROM node:22-alpine AS console
 
 WORKDIR /web/admin
-COPY web/admin/package.json web/admin/package-lock.json ./
-RUN npm ci
+RUN npm install -g --ignore-scripts pnpm@11.0.0
+COPY web/admin/package.json web/admin/pnpm-lock.yaml web/admin/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/admin/ ./
-RUN npm run build -- --outDir /out --emptyOutDir
+RUN pnpm run build -- --outDir /out --emptyOutDir
 
 
 # Stage 2: build

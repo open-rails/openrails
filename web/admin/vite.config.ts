@@ -19,7 +19,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    // Local dev against a running openrails: `npm run dev` proxies API + auth.
+    // Local dev against a running openrails: `pnpm run dev` proxies API + auth.
     proxy: {
       "/v1": "http://localhost:3053",
       "/auth": "http://localhost:3053",
