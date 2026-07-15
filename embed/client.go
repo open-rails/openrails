@@ -10,6 +10,9 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -26,11 +29,12 @@ type SingleAdmitter interface {
 }
 
 // localClient is the PERMANENT remainder of the pre-#685 handler-transcribing
-// adapter. Every openrails.Client interface method except one runs through the
+// adapter. Every openrails.Client interface method except customer delegation
+// writes runs through the
 // unified remote implementation over the in-process transport (see
 // unifiedClient in embed.go); what stays here is:
 //
-//   - SetCustomerSpendDelegations — PERMANENTLY transcribed (#685 tail
+//   - SetCustomerSpendDelegation(s) — PERMANENTLY transcribed (#685 tail
 //     decision). Its wire surface is the delegated customer-treasury family
 //     (/v1/customers/*), whose gate semantics are "the credential IS the
 //     customer": CustomerScopeRequired matches :customer_id against the
@@ -131,15 +135,6 @@ func requireCurrency(raw string) (string, error) {
 		return currency, nil
 	}
 	return money.NormalizeCurrency(currency), nil
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 // wrapInternalErr wraps a 500 StatusError, appending the underlying cause: these
@@ -268,17 +263,11 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 	}
 	next := make([]billingservice.InvokerSpendLimitInput, 0, len(delegations))
 	for _, d := range delegations {
-		windows := make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows))
-		for _, w := range d.Windows {
-			windows = append(windows, billingservice.SpendLimitWindowInput{
-				Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
-			})
+		in, err := spendDelegationInput(d)
+		if err != nil {
+			return err
 		}
-		next = append(next, billingservice.InvokerSpendLimitInput{
-			Scope:    d.Scope,
-			ScopeKey: firstNonEmpty(d.ScopeKey, d.RoleID),
-			Windows:  windows,
-		})
+		next = append(next, in)
 	}
 	mctx, err := c.merchantCtx(ctx)
 	if err != nil {
@@ -288,4 +277,59 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 		return wrapInternalErr("set customer spend delegations failed", err)
 	}
 	return nil
+}
+
+// SetCustomerSpendDelegation uses the service/store single-row upsert path;
+// unlike SetCustomerSpendDelegations it never loads or deletes sibling rows.
+func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation openrails.SpendDelegationInput) error {
+	payer, err := parseCustomer(customerID, "invalid customer_id")
+	if err != nil {
+		return err
+	}
+	in, err := spendDelegationInput(delegation)
+	if err != nil {
+		return err
+	}
+	mctx, err := c.merchantCtx(ctx)
+	if err != nil {
+		return err
+	}
+	if err := c.svc.SetInvokerSpendLimits(mctx, payer, in); err != nil {
+		return wrapInternalErr("set customer spend delegation failed", err)
+	}
+	return nil
+}
+
+func spendDelegationInput(d openrails.SpendDelegationInput) (billingservice.InvokerSpendLimitInput, error) {
+	scope := budgets.NormalizeScope(d.Scope)
+	scopeKey := strings.TrimSpace(d.ScopeKey)
+	roleID := strings.TrimSpace(d.RoleID)
+	if roleID != "" && scope != budgets.ScopeRole {
+		return billingservice.InvokerSpendLimitInput{}, invalidErr(fmt.Sprintf("role_id is only allowed for scope %q", budgets.ScopeRole))
+	}
+	if scopeKey != "" && roleID != "" && scopeKey != roleID {
+		return billingservice.InvokerSpendLimitInput{}, invalidErr("role_id must match scope_key")
+	}
+	if scopeKey == "" {
+		scopeKey = roleID
+	}
+	windows := make([]models.BudgetWindowPolicy, 0, len(d.Windows))
+	for _, w := range d.Windows {
+		windows = append(windows, models.BudgetWindowPolicy{
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
+		})
+	}
+	normalized, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
+		Scope: scope, ScopeKey: scopeKey, Windows: windows,
+	})
+	if err != nil {
+		return billingservice.InvokerSpendLimitInput{}, invalidErr(err.Error())
+	}
+	out := billingservice.InvokerSpendLimitInput{Scope: normalized.Scope, ScopeKey: normalized.ScopeKey}
+	for _, w := range normalized.Windows {
+		out.Windows = append(out.Windows, billingservice.SpendLimitWindowInput{
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
+		})
+	}
+	return out, nil
 }

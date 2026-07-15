@@ -107,6 +107,35 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(next)})
 }
 
+// PutCustomerSpendDelegation atomically upserts one addressed delegation and
+// leaves every unrelated payer-owned delegation untouched.
+func PutCustomerSpendDelegation(r *httprequest.Request) {
+	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	if !ok {
+		return
+	}
+
+	var delegation customerSpendDelegation
+	if !r.BindJSON(&delegation) {
+		return
+	}
+	next, err := validateCustomerSpendDelegations([]customerSpendDelegation{delegation})
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	store, payer, ok := customerTreasuryStore(r, resolved)
+	if !ok {
+		return
+	}
+	if err := store.Upsert(r.Request.Context(), payer, next[0]); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "spend delegation upsert failed")
+		return
+	}
+	r.SuccessJSON(customerSpendDelegationFromRow(next[0]))
+}
+
 func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {
 	v, ok := r.Get(middleware.DelegatedContextKey)
 	if !ok {
@@ -149,40 +178,30 @@ func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]admission
 			return nil, fmt.Errorf("delegations[%d].customer_id is not allowed", i)
 		}
 		scope := budgets.NormalizeScope(row.Scope)
-		if scope != budgets.ScopeInvoker && scope != budgets.ScopeRole && scope != budgets.ScopeInvokerTrustLevel {
-			return nil, fmt.Errorf("delegations[%d].scope must be %q, %q, or %q", i, budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel)
-		}
 		scopeKey := strings.TrimSpace(row.ScopeKey)
-		if scopeKey == "" {
-			scopeKey = strings.TrimSpace(row.RoleID)
+		roleID := strings.TrimSpace(row.RoleID)
+		if roleID != "" && scope != budgets.ScopeRole {
+			return nil, fmt.Errorf("delegations[%d].role_id is only allowed for scope %q", i, budgets.ScopeRole)
+		}
+		if scopeKey != "" && roleID != "" && scopeKey != roleID {
+			return nil, fmt.Errorf("delegations[%d].role_id must match scope_key", i)
 		}
 		if scopeKey == "" {
-			return nil, fmt.Errorf("delegations[%d].scope_key required", i)
+			scopeKey = roleID
 		}
-		key := spendDelegationKey(scope, scopeKey)
+		windows := append([]models.BudgetWindowPolicy(nil), row.Windows...)
+		normalized, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
+			Scope: scope, ScopeKey: scopeKey, Windows: windows,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("delegations[%d].%s", i, err)
+		}
+		key := spendDelegationKey(normalized.Scope, normalized.ScopeKey)
 		if _, dup := seen[key]; dup {
 			return nil, fmt.Errorf("duplicate delegation for %s", key)
 		}
 		seen[key] = struct{}{}
-		if len(row.Windows) == 0 {
-			return nil, fmt.Errorf("delegations[%d].windows required", i)
-		}
-		windows := make([]models.BudgetWindowPolicy, 0, len(row.Windows))
-		for j, window := range row.Windows {
-			window.Key = strings.TrimSpace(window.Key)
-			window.Currency = strings.TrimSpace(window.Currency)
-			if window.Key == "" {
-				return nil, fmt.Errorf("delegations[%d].windows[%d].key required", i, j)
-			}
-			if window.WindowSeconds <= 0 {
-				return nil, fmt.Errorf("delegations[%d].windows[%d].window_seconds must be positive", i, j)
-			}
-			if window.Limit < 0 {
-				return nil, fmt.Errorf("delegations[%d].windows[%d].limit must be non-negative", i, j)
-			}
-			windows = append(windows, window)
-		}
-		out = append(out, admission.InvokerSpendLimit{Scope: scope, ScopeKey: scopeKey, Windows: windows})
+		out = append(out, normalized)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return spendDelegationKey(out[i].Scope, out[i].ScopeKey) < spendDelegationKey(out[j].Scope, out[j].ScopeKey)
@@ -193,20 +212,22 @@ func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]admission
 func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []customerSpendDelegation {
 	out := make([]customerSpendDelegation, 0, len(rows))
 	for _, row := range rows {
-		delegation := customerSpendDelegation{
-			Scope:    budgets.NormalizeScope(row.Scope),
-			ScopeKey: row.ScopeKey,
-			Windows:  row.Windows,
-		}
-		if delegation.Scope == budgets.ScopeRole {
-			delegation.RoleID = row.ScopeKey
-		}
-		out = append(out, delegation)
+		out = append(out, customerSpendDelegationFromRow(row))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return spendDelegationKey(out[i].Scope, out[i].ScopeKey) < spendDelegationKey(out[j].Scope, out[j].ScopeKey)
 	})
 	return out
+}
+
+func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
+	delegation := customerSpendDelegation{
+		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: row.Windows,
+	}
+	if delegation.Scope == budgets.ScopeRole {
+		delegation.RoleID = row.ScopeKey
+	}
+	return delegation
 }
 
 func spendDelegationKey(scope, scopeKey string) string {

@@ -167,6 +167,7 @@ POST /v1/webhooks/{provider}/{account_id}
 PUT /v1/customers/{customer_id}/payment-methods/{id}
 PUT /v1/customers/{customer_id}/settings
 PUT /v1/customers/{customer_id}/spend-delegations
+PUT /v1/customers/{customer_id}/spend-delegations:upsert
 PUT /v1/me/payment-methods/{id}
 PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method

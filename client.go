@@ -92,7 +92,12 @@ type UsageReportClient interface {
 type PolicySyncClient interface {
 	GetMerchantSettings(ctx context.Context) (*MerchantSettings, error)
 	SetMerchantSettings(ctx context.Context, settings MerchantSettings) error
+	// SetCustomerSpendDelegations explicitly replaces the customer's complete
+	// delegation document.
 	SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error
+	// SetCustomerSpendDelegation atomically upserts one delegation without
+	// reading or replacing unrelated customer delegations.
+	SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error
 }
 
 // AdminFundingClient is the small non-hot-path funding/reporting surface used

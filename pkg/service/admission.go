@@ -203,10 +203,14 @@ func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.Cust
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, admission.InvokerSpendLimit{
+	row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 		Scope: in.Scope, ScopeKey: in.ScopeKey,
 		Windows: budgetScopeWindowModels(in.Windows),
 	})
+	if err != nil {
+		return err
+	}
+	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, row)
 }
 
 // InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
@@ -248,10 +252,13 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 	}
 	wanted := make(map[string]admission.InvokerSpendLimit, len(next))
 	for _, in := range next {
-		row := admission.InvokerSpendLimit{
+		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 			Scope:    in.Scope,
 			ScopeKey: strings.TrimSpace(in.ScopeKey),
 			Windows:  budgetScopeWindowModels(in.Windows),
+		})
+		if err != nil {
+			return err
 		}
 		wanted[row.Scope+"\x00"+row.ScopeKey] = row
 	}

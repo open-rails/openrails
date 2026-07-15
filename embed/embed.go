@@ -137,9 +137,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 // call. Parity with a standalone deployment is structural (one implementation),
 // enforced by conformance_integration_test.go.
 //
-// One interface method (SetCustomerSpendDelegations) is PERMANENTLY served by
-// the transcribed localClient — see unifiedClient and the localClient doc for
-// the authz reasoning. The returned Client also always implements
+// Customer spend-delegation writes are PERMANENTLY served by the transcribed
+// localClient — see unifiedClient and the localClient doc for the authz
+// reasoning. The returned Client also always implements
 // SingleAdmitter (embedded-only single Admit, no wire counterpart) — reach it
 // via a type assertion.
 //
@@ -175,10 +175,10 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 
 // unifiedClient is the embedded SDK client (#685): the embedded
 // openrails.Client (the remote implementation over the in-process transport)
-// serves 20/21 interface methods; *localClient keeps the PERMANENT
-// transcription (SetCustomerSpendDelegations — customer-treasury auth surface,
-// see the localClient doc) plus the embedded-only single-Admit extra, which has
-// no /v1/merchant wire counterpart.
+// serves every merchant-authority method; *localClient keeps the PERMANENT
+// customer-treasury spend-delegation transcriptions (see the localClient doc)
+// plus the embedded-only single-Admit extra, which has no /v1/merchant wire
+// counterpart.
 type unifiedClient struct {
 	openrails.Client
 	*localClient
@@ -191,6 +191,12 @@ type unifiedClient struct {
 // forward resolves the embedding conflict.
 func (c *unifiedClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	return c.localClient.SetCustomerSpendDelegations(ctx, customerID, delegations)
+}
+
+// SetCustomerSpendDelegation stays transcribed for the same customer-treasury
+// authority boundary as the explicit full-document replacement above.
+func (c *unifiedClient) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation openrails.SpendDelegationInput) error {
+	return c.localClient.SetCustomerSpendDelegation(ctx, customerID, delegation)
 }
 
 // Verify is the authenticated readiness probe (see openrails.Verify), running

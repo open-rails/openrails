@@ -170,6 +170,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	}
 	// Shuffle kills the ListActiveMerchantIDs order bias: no merchant is
 	// systematically last in every window.
+	// #nosec G404 -- this is scheduling fairness, not a security-sensitive random choice.
 	rand.Shuffle(len(merchantIDs), func(i, j int) { merchantIDs[i], merchantIDs[j] = merchantIDs[j], merchantIDs[i] })
 
 	now := w.now()
