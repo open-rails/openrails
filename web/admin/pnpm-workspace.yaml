@@ -3,6 +3,7 @@ packages:
 
 pmOnFail: error
 ignoreScripts: true
+ignorePnpmfile: true
 verifyDepsBeforeRun: error
 enablePrePostScripts: false
 dangerouslyAllowAllBuilds: false
