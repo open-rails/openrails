@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,9 +11,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -28,29 +26,13 @@ type SingleAdmitter interface {
 	Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error)
 }
 
-// localClient is the PERMANENT remainder of the pre-#685 handler-transcribing
-// adapter. Every openrails.Client interface method except customer delegation
-// writes runs through the
-// unified remote implementation over the in-process transport (see
-// unifiedClient in embed.go); what stays here is:
+// localClient is the direct embedded remainder of the pre-#685 adapter. Most
+// openrails.Client methods run through the unified remote implementation over
+// the in-process transport (see unifiedClient in embed.go); what stays here is:
 //
-//   - SetCustomerSpendDelegation(s) — PERMANENTLY transcribed (#685 tail
-//     decision). Its wire surface is the delegated customer-treasury family
-//     (/v1/customers/*), whose gate semantics are "the credential IS the
-//     customer": CustomerScopeRequired matches :customer_id against the
-//     delegated principal's OWN resolved identity and the handler derives the
-//     payer FROM the principal (a body customer_id is rejected). The host
-//     principal is the MERCHANT — one fixed identity — while this method takes
-//     an arbitrary customerID per call; routing it in-process would require
-//     synthesizing a per-request ResolvedDelegated whose identity is copied
-//     from the very path segment the gate exists to check (fabrication, not
-//     auth), with a merchant.ID holding a non-merchant UUID. The wire also
-//     deliberately offers NO merchant-credential route for this operation
-//     (#666 retired the merchant-side service routes; every /v1/customers
-//     route is gated on customer:* perms because the balance may be shared) —
-//     an in-process mapping would mint embedded-only authority with no
-//     standalone equivalent. The transcription states what this really is:
-//     direct engine access by the process owner.
+//   - SetCustomerSpendDelegation(s), implemented directly through pkg/service.
+//     Standalone mode exposes equivalent merchant-authenticated service routes;
+//     `/v1/customers/*` remains the distinct customer-owned browser surface.
 //   - Embedded-only extra with NO wire counterpart: single Admit (the batch
 //     route is the surviving HTTP surface, #666), reachable via type assertion
 //     to SingleAdmitter by hosts that need it. (SetCreditAccountSettings, ListCreditTransactions,
@@ -250,12 +232,9 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 	return out
 }
 
-// SetCustomerSpendDelegations transcribes the customer treasury spend-delegations
-// replace operation for embedded hosts (#567). PERMANENTLY transcribed — see the
-// localClient doc: the /v1/customers/* gate requires a credential that IS the
-// customer, which a host (merchant) principal cannot honestly satisfy for an
-// arbitrary customerID; the wire deliberately has no merchant-credential
-// equivalent for this operation.
+// SetCustomerSpendDelegations applies the spend-delegation replacement directly
+// for embedded hosts. Standalone callers reach the equivalent merchant-machine
+// route; both paths pin the merchant and share the same service/store semantics.
 func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
@@ -263,18 +242,14 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 	}
 	next := make([]billingservice.InvokerSpendLimitInput, 0, len(delegations))
 	for _, d := range delegations {
-		in, err := spendDelegationInput(d)
-		if err != nil {
-			return err
-		}
-		next = append(next, in)
+		next = append(next, spendDelegationInput(d))
 	}
 	mctx, err := c.merchantCtx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := c.svc.ReplaceInvokerSpendLimits(mctx, payer, next); err != nil {
-		return wrapInternalErr("set customer spend delegations failed", err)
+		return spendDelegationWriteError("set customer spend delegations failed", err)
 	}
 	return nil
 }
@@ -286,50 +261,33 @@ func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID
 	if err != nil {
 		return err
 	}
-	in, err := spendDelegationInput(delegation)
-	if err != nil {
-		return err
-	}
+	in := spendDelegationInput(delegation)
 	mctx, err := c.merchantCtx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := c.svc.SetInvokerSpendLimits(mctx, payer, in); err != nil {
-		return wrapInternalErr("set customer spend delegation failed", err)
+		return spendDelegationWriteError("set customer spend delegation failed", err)
 	}
 	return nil
 }
 
-func spendDelegationInput(d openrails.SpendDelegationInput) (billingservice.InvokerSpendLimitInput, error) {
-	scope := budgets.NormalizeScope(d.Scope)
-	scopeKey := strings.TrimSpace(d.ScopeKey)
-	roleID := strings.TrimSpace(d.RoleID)
-	if roleID != "" && scope != budgets.ScopeRole {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr(fmt.Sprintf("role_id is only allowed for scope %q", budgets.ScopeRole))
+func spendDelegationInput(d openrails.SpendDelegationInput) billingservice.InvokerSpendLimitInput {
+	out := billingservice.InvokerSpendLimitInput{
+		Scope: d.Scope, ScopeKey: d.ScopeKey, RoleID: d.RoleID,
+		Windows: make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows)),
 	}
-	if scopeKey != "" && roleID != "" && scopeKey != roleID {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr("role_id must match scope_key")
-	}
-	if scopeKey == "" {
-		scopeKey = roleID
-	}
-	windows := make([]models.BudgetWindowPolicy, 0, len(d.Windows))
 	for _, w := range d.Windows {
-		windows = append(windows, models.BudgetWindowPolicy{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
-		})
-	}
-	normalized, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
-		Scope: scope, ScopeKey: scopeKey, Windows: windows,
-	})
-	if err != nil {
-		return billingservice.InvokerSpendLimitInput{}, invalidErr(err.Error())
-	}
-	out := billingservice.InvokerSpendLimitInput{Scope: normalized.Scope, ScopeKey: normalized.ScopeKey}
-	for _, w := range normalized.Windows {
 		out.Windows = append(out.Windows, billingservice.SpendLimitWindowInput{
 			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
 		})
 	}
-	return out, nil
+	return out
+}
+
+func spendDelegationWriteError(message string, err error) error {
+	if errors.Is(err, billingservice.ErrInvalidInvokerSpendLimit) {
+		return invalidErr(err.Error())
+	}
+	return wrapInternalErr(message, err)
 }

@@ -355,7 +355,7 @@ Credential examples:
 |-------|---------------------|
 | `GET /v1/merchant/customers/{customer_id}/entitlements`, `GET /v1/merchant/users/{user_id}/product-access`, `GET /v1/merchant/invokers/{invoker}/credits`, `GET /v1/merchant/trust-level`, `GET /v1/merchant/credit-limit`, `GET /v1/merchant/credits/balance` | `merchant:customer-settings:read` |
 | `POST /v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` |
-| `PUT /v1/merchant/credit-limit`, `POST /v1/merchant/credits/deposit` | `merchant:customer-settings:update` |
+| `PUT /v1/merchant/credit-limit`, `POST /v1/merchant/credits/deposit`, `PUT /v1/merchant/customers/{customer_id}/spend-delegations`, `PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` |
 | `POST /v1/merchant/admissions`, `POST /v1/merchant/admissions/{id}/capture`, `POST /v1/merchant/admissions/{id}/release`, `POST /v1/merchant/wasted-spend` | `merchant:admissions:create` |
 | `GET /v1/merchant/settings` | `merchant:settings:read` |
 | `PUT /v1/merchant/settings` | `merchant:settings:update` |
@@ -533,6 +533,14 @@ Lists payment history for one customer. Requires `merchant:payments:read`.
 ### POST /v1/merchant/customers/{customer_id}/payments/off-channel
 Records an off-channel/manual purchase and grants product entitlements through
 the normal checkout purchase path. Requires `merchant:customer-settings:update`.
+
+### PUT /v1/merchant/customers/{customer_id}/spend-delegations
+Atomically replaces the customer's complete payer-owned spend-delegation policy.
+Requires `merchant:customer-settings:update`.
+
+### PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert
+Atomically upserts one customer spend delegation without changing sibling grants.
+Requires `merchant:customer-settings:update`.
 
 ### POST /v1/merchant/customers/{customer_id}/entitlements
 Manually grants an entitlement through the grant ledger. Requires

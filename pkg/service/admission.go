@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
@@ -182,7 +185,22 @@ type SpendLimitWindowInput struct {
 type InvokerSpendLimitInput struct {
 	Scope    string                  `json:"scope"`
 	ScopeKey string                  `json:"scope_key,omitempty"`
+	RoleID   string                  `json:"role_id,omitempty"`
 	Windows  []SpendLimitWindowInput `json:"windows"`
+}
+
+// ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
+// errors so HTTP and embedded transports can map the shared service result to
+// the same 400/ErrInvalid contract.
+var ErrInvalidInvokerSpendLimit = errors.New("invalid invoker spend limit")
+
+type invokerSpendLimitValidationError struct{ message string }
+
+func (e *invokerSpendLimitValidationError) Error() string { return e.message }
+func (e *invokerSpendLimitValidationError) Unwrap() error { return ErrInvalidInvokerSpendLimit }
+
+func invalidInvokerSpendLimit(message string) error {
+	return &invokerSpendLimitValidationError{message: message}
 }
 
 func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPolicy {
@@ -191,6 +209,71 @@ func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPo
 		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
 	}
 	return out
+}
+
+func spendLimitWindowInputs(ws []models.BudgetWindowPolicy) []SpendLimitWindowInput {
+	out := make([]SpendLimitWindowInput, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, SpendLimitWindowInput{
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
+		})
+	}
+	return out
+}
+
+func invokerSpendLimitKey(scope, scopeKey string) string {
+	return budgets.NormalizeScope(scope) + "\x00" + strings.TrimSpace(scopeKey)
+}
+
+// ValidateInvokerSpendLimitInputs validates and canonicalizes a complete
+// payer-owned spend-delegation document. Duplicate detection happens after
+// scope, scope_key, and role_id aliases are normalized, so every transport has
+// identical replacement semantics.
+func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpendLimitInput, error) {
+	out := make([]InvokerSpendLimitInput, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for i, item := range in {
+		scope := budgets.NormalizeScope(item.Scope)
+		scopeKey := strings.TrimSpace(item.ScopeKey)
+		roleID := strings.TrimSpace(item.RoleID)
+		if roleID != "" && scope != budgets.ScopeRole {
+			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].role_id is only allowed for scope %q", i, budgets.ScopeRole))
+		}
+		if scopeKey != "" && roleID != "" && scopeKey != roleID {
+			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].role_id must match scope_key", i))
+		}
+		if scopeKey == "" {
+			scopeKey = roleID
+		}
+		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
+			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
+		})
+		if err != nil {
+			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].%s", i, err))
+		}
+		key := invokerSpendLimitKey(row.Scope, row.ScopeKey)
+		if _, duplicate := seen[key]; duplicate {
+			return nil, invalidInvokerSpendLimit(fmt.Sprintf("duplicate delegation for %s", key))
+		}
+		seen[key] = struct{}{}
+		normalized := InvokerSpendLimitInput{
+			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
+		}
+		if row.Scope == budgets.ScopeRole {
+			normalized.RoleID = row.ScopeKey
+		}
+		out = append(out, normalized)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return invokerSpendLimitKey(out[i].Scope, out[i].ScopeKey) < invokerSpendLimitKey(out[j].Scope, out[j].ScopeKey)
+	})
+	return out, nil
+}
+
+func invokerSpendLimitRow(in InvokerSpendLimitInput) admission.InvokerSpendLimit {
+	return admission.InvokerSpendLimit{
+		Scope: in.Scope, ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
+	}
 }
 
 // SetInvokerSpendLimits upserts a SUBJECT-owned budget-scope policy (#473): the
@@ -203,14 +286,11 @@ func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.Cust
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
-		Scope: in.Scope, ScopeKey: in.ScopeKey,
-		Windows: budgetScopeWindowModels(in.Windows),
-	})
+	next, err := ValidateInvokerSpendLimitInputs([]InvokerSpendLimitInput{in})
 	if err != nil {
 		return err
 	}
-	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, row)
+	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, invokerSpendLimitRow(next[0]))
 }
 
 // InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
@@ -245,37 +325,15 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	store := admission.NewInvokerSpendLimitStore(s.rt.DB)
-	existing, err := store.LoadAll(ctx, payer)
+	normalized, err := ValidateInvokerSpendLimitInputs(next)
 	if err != nil {
 		return err
 	}
-	wanted := make(map[string]admission.InvokerSpendLimit, len(next))
-	for _, in := range next {
-		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
-			Scope:    in.Scope,
-			ScopeKey: strings.TrimSpace(in.ScopeKey),
-			Windows:  budgetScopeWindowModels(in.Windows),
-		})
-		if err != nil {
-			return err
-		}
-		wanted[row.Scope+"\x00"+row.ScopeKey] = row
+	rows := make([]admission.InvokerSpendLimit, 0, len(normalized))
+	for _, in := range normalized {
+		rows = append(rows, invokerSpendLimitRow(in))
 	}
-	for _, row := range existing {
-		if _, keep := wanted[row.Scope+"\x00"+row.ScopeKey]; keep {
-			continue
-		}
-		if err := store.Delete(ctx, payer, row.Scope, row.ScopeKey); err != nil {
-			return err
-		}
-	}
-	for _, row := range wanted {
-		if err := store.Upsert(ctx, payer, row); err != nil {
-			return err
-		}
-	}
-	return nil
+	return admission.NewInvokerSpendLimitStore(s.rt.DB).Replace(ctx, payer, rows)
 }
 
 // TrustLevelBudgetWindowInput / PayerSpendLimitInput configure a trust level's

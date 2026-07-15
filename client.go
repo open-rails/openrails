@@ -508,8 +508,9 @@ type SpendLimitWindow struct {
 	Currency      string `json:"currency,omitempty"`
 }
 
-// SpendDelegationInput is one payer-owned delegation in
-// /v1/customers/:customer_id/spend-delegations.
+// SpendDelegationInput is one payer-owned spend delegation. Machine clients use
+// the merchant service surface; customers manage the same policy through their
+// customer-owned treasury surface.
 type SpendDelegationInput struct {
 	Scope    string             `json:"scope"`
 	ScopeKey string             `json:"scope_key,omitempty"`

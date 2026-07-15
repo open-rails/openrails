@@ -83,7 +83,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 		if r.Method != http.MethodPut {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		if r.URL.Path != "/v1/customers/customer-1/spend-delegations:upsert" {
+		if r.URL.Path != "/v1/merchant/customers/customer-1/spend-delegations:upsert" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -105,6 +105,38 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 		t.Fatalf("SetCustomerSpendDelegation: %v", err)
 	}
 	if got["scope"] != "invoker" || got["scope_key"] != "issuer:subject:digest:entitlement" {
+		t.Fatalf("unexpected body: %#v", got)
+	}
+}
+
+func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/v1/merchant/customers/customer-1/spend-delegations" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+		return "test-token", nil
+	}))
+	err := client.SetCustomerSpendDelegations(context.Background(), " customer-1 ", []SpendDelegationInput{{
+		Scope: "invoker", ScopeKey: "invoker-1",
+		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
+	}})
+	if err != nil {
+		t.Fatalf("SetCustomerSpendDelegations: %v", err)
+	}
+	if rows, ok := got["delegations"].([]any); !ok || len(rows) != 1 {
 		t.Fatalf("unexpected body: %#v", got)
 	}
 }

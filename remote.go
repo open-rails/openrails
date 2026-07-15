@@ -423,13 +423,14 @@ func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
-// SetCustomerSpendDelegations implements PolicySyncClient over the customer
-// treasury surface (#567 — mounted on /v1/customers).
+// SetCustomerSpendDelegations implements PolicySyncClient over the
+// machine-authenticated merchant surface. The /v1/customers counterpart is
+// reserved for a customer-owned delegated browser principal.
 func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
 	}
-	path := "/v1/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations"
+	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations"
 	return c.do(ctx, http.MethodPut, path, map[string]any{"delegations": delegations}, nil)
 }
 
@@ -438,7 +439,7 @@ func (c *remote) SetCustomerSpendDelegation(ctx context.Context, customerID stri
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
 	}
-	path := "/v1/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations:upsert"
+	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations:upsert"
 	return c.do(ctx, http.MethodPut, path, delegation, nil)
 }
 

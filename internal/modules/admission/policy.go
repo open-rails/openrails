@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -290,70 +291,116 @@ func (s *InvokerSpendLimitStore) LoadAll(ctx context.Context, payer identity.Cus
 	if terr != nil {
 		return nil, terr
 	}
-	tenantID := tid.UUID()
 	var out []InvokerSpendLimit
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, e := s.db.Gen(ctx).ListInvokerSpendLimits(ctx, gen.ListInvokerSpendLimitsParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(),
-		})
-		if e != nil {
-			return e
-		}
-		for _, r := range rows {
-			p, derr := invokerSpendLimitFromGen(r)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, p)
-		}
-		return nil
+		var err error
+		out, err = s.loadAll(ctx, tid.UUID(), payer)
+		return err
 	})
 	return out, err
 }
 
-// Upsert writes one invoker spend limit (payer-set).
-func (s *InvokerSpendLimitStore) Upsert(ctx context.Context, payer identity.CustomerID, p InvokerSpendLimit) error {
-	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
-	if terr != nil {
-		return terr
+func (s *InvokerSpendLimitStore) loadAll(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID) ([]InvokerSpendLimit, error) {
+	var out []InvokerSpendLimit
+	rows, err := s.db.Gen(ctx).ListInvokerSpendLimits(ctx, gen.ListInvokerSpendLimitsParams{
+		MerchantID: tenantID, CustomerID: payer.UUID(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		p, err := invokerSpendLimitFromGen(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// withPayerWriteTx serializes every spend-delegation write for one
+// merchant+payer and keeps the lock for the full transaction. Replace therefore
+// cannot interleave its read/delete/upsert sequence with a singular upsert.
+func (s *InvokerSpendLimitStore) withPayerWriteTx(ctx context.Context, payer identity.CustomerID, fn func(context.Context, *InvokerSpendLimitStore, uuid.UUID) error) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("admission: invoker spend-limit store not initialized")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
 	}
 	tenantID := tid.UUID()
+	lockKey := tid.String() + ":" + payer.UUID().String()
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return fmt.Errorf("admission: lock invoker spend limits: %w", err)
+		}
+		txdb := s.db.NewWithPgxTx(tx)
+		if _, err := db.EnsureCustomerID(ctx, txdb.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+			return err
+		}
+		return fn(ctx, NewInvokerSpendLimitStore(txdb), tenantID)
+	})
+}
+
+// Upsert writes one invoker spend limit (payer-set) under the same serialized
+// transaction boundary used by Replace.
+func (s *InvokerSpendLimitStore) Upsert(ctx context.Context, payer identity.CustomerID, p InvokerSpendLimit) error {
+	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
+		return txStore.upsert(ctx, tenantID, payer, p)
+	})
+}
+
+func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID, p InvokerSpendLimit) error {
 	now := time.Now().UTC()
 	windowsJSON, err := json.Marshal(p.Windows)
 	if err != nil {
 		return fmt.Errorf("admission: encode invoker spend-limit windows: %w", err)
 	}
-	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		if _, err := db.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
-			return err
-		}
-		return s.db.Gen(ctx).UpsertInvokerSpendLimit(ctx, gen.UpsertInvokerSpendLimitParams{
-			ID:            uuidutil.NewV7(),
-			MerchantID:    tenantID,
-			CustomerID:    payer.UUID(),
-			Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
-			ScopeKey:      p.ScopeKey,
-			Windows:       windowsJSON,
-			PolicyVersion: 1,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		})
+	return s.db.Gen(ctx).UpsertInvokerSpendLimit(ctx, gen.UpsertInvokerSpendLimitParams{
+		ID:            uuidutil.NewV7(),
+		MerchantID:    tenantID,
+		CustomerID:    payer.UUID(),
+		Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
+		ScopeKey:      p.ScopeKey,
+		Windows:       windowsJSON,
+		PolicyVersion: 1,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 }
 
 // Delete removes one invoker spend limit.
 func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) error {
-	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
-	if terr != nil {
-		return terr
-	}
-	tenantID := tid.UUID()
-	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		_, err := s.db.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(),
-			Scope: budgets.NormalizeScope(scope), ScopeKey: scopeKey,
-		})
-		return err
+	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
+		return txStore.delete(ctx, tenantID, payer, scope, scopeKey)
+	})
+}
+
+func (s *InvokerSpendLimitStore) delete(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID, scope, scopeKey string) error {
+	_, err := s.db.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
+		MerchantID: tenantID, CustomerID: payer.UUID(),
+		Scope: budgets.NormalizeScope(scope), ScopeKey: strings.TrimSpace(scopeKey),
+	})
+	return err
+}
+
+// Replace atomically replaces the complete payer-owned policy document. Any
+// failed delete/upsert rolls the transaction back to the prior document.
+func (s *InvokerSpendLimitStore) Replace(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimit) error {
+	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
+		if _, err := txStore.db.Gen(ctx).DeleteAllInvokerSpendLimits(ctx, gen.DeleteAllInvokerSpendLimitsParams{
+			MerchantID: tenantID,
+			CustomerID: payer.UUID(),
+		}); err != nil {
+			return err
+		}
+		for _, row := range next {
+			if err := txStore.upsert(ctx, tenantID, payer, row); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

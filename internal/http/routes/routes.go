@@ -203,6 +203,14 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		h(httphandlers.ServiceGetCustomerEntitlements),
 		readMW...,
 	)
+	customers.Handle(http.MethodPut, "/spend-delegations",
+		h(httphandlers.ServicePutCustomerSpendDelegations),
+		writeMW...,
+	)
+	customers.Handle(http.MethodPut, "/spend-delegations:upsert",
+		h(httphandlers.ServicePutCustomerSpendDelegation),
+		writeMW...,
+	)
 
 	entitlements := group.Group("/entitlements")
 	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
