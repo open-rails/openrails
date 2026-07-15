@@ -12,6 +12,27 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteAllInvokerSpendLimits = `-- name: DeleteAllInvokerSpendLimits :execrows
+DELETE FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2
+`
+
+type DeleteAllInvokerSpendLimitsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// Full-document replacement removes the exact merchant+payer set before
+// inserting the canonical replacement. This also purges legacy non-canonical
+// scope_key values that cannot be addressed safely by normalized key deletes.
+func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAllInvokerSpendLimitsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAllInvokerSpendLimits, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
 DELETE FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2

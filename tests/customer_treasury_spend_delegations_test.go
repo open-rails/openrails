@@ -150,6 +150,63 @@ EXECUTE FUNCTION openrails.%s()`, functionName, triggerName, failingKey, functio
 		"failed replacement must roll back deletes and upserts")
 }
 
+func TestReplaceInvokerSpendLimitsPurgesLegacyPaddedScopeKeys(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	payerID := suite.ensureCustomer(ctx, uuid.NewString())
+	payer := identity.CustomerID(payerID)
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	})
+
+	canonical := billingservice.InvokerSpendLimitInput{
+		Scope: "invoker_tier", ScopeKey: "gold",
+		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 222}},
+	}
+	require.NoError(t, svc.SetInvokerSpendLimits(ctx, payer, canonical))
+	tag, err := suite.Pool.Exec(ctx, `
+UPDATE openrails.invoker_spend_limits
+SET scope_key = 'gold '
+WHERE merchant_id = $1 AND customer_id = $2
+  AND scope = 'invoker_tier' AND scope_key = 'gold'`, dbtest.TestMerchantID.UUID(), payerID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
+
+	loadScopeKeys := func() []string {
+		rows, err := suite.Pool.Query(ctx, `
+SELECT scope_key
+FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2
+ORDER BY scope_key`, dbtest.TestMerchantID.UUID(), payerID)
+		require.NoError(t, err)
+		defer rows.Close()
+		var keys []string
+		for rows.Next() {
+			var key string
+			require.NoError(t, rows.Scan(&key))
+			keys = append(keys, key)
+		}
+		require.NoError(t, rows.Err())
+		return keys
+	}
+
+	require.Equal(t, []string{"gold "}, loadScopeKeys(), "fixture must contain the padded legacy key")
+	require.NoError(t, svc.ReplaceInvokerSpendLimits(ctx, payer, []billingservice.InvokerSpendLimitInput{canonical}))
+	require.Equal(t, []string{"gold"}, loadScopeKeys(), "canonical replacement must leave exactly its requested set")
+
+	tag, err = suite.Pool.Exec(ctx, `
+UPDATE openrails.invoker_spend_limits
+SET scope_key = 'gold '
+WHERE merchant_id = $1 AND customer_id = $2
+  AND scope = 'invoker_tier' AND scope_key = 'gold'`, dbtest.TestMerchantID.UUID(), payerID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
+	require.NoError(t, svc.ReplaceInvokerSpendLimits(ctx, payer, nil))
+	require.Empty(t, loadScopeKeys(), "empty replacement must revoke padded legacy rows")
+}
+
 func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := dbtest.WithTestMerchant(context.Background())

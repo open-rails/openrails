@@ -389,22 +389,11 @@ func (s *InvokerSpendLimitStore) delete(ctx context.Context, tenantID uuid.UUID,
 // failed delete/upsert rolls the transaction back to the prior document.
 func (s *InvokerSpendLimitStore) Replace(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimit) error {
 	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
-		existing, err := txStore.loadAll(ctx, tenantID, payer)
-		if err != nil {
+		if _, err := txStore.db.Gen(ctx).DeleteAllInvokerSpendLimits(ctx, gen.DeleteAllInvokerSpendLimitsParams{
+			MerchantID: tenantID,
+			CustomerID: payer.UUID(),
+		}); err != nil {
 			return err
-		}
-		wanted := make(map[string]struct{}, len(next))
-		for _, row := range next {
-			wanted[budgets.NormalizeScope(row.Scope)+"\x00"+strings.TrimSpace(row.ScopeKey)] = struct{}{}
-		}
-		for _, row := range existing {
-			key := budgets.NormalizeScope(row.Scope) + "\x00" + strings.TrimSpace(row.ScopeKey)
-			if _, keep := wanted[key]; keep {
-				continue
-			}
-			if err := txStore.delete(ctx, tenantID, payer, row.Scope, row.ScopeKey); err != nil {
-				return err
-			}
 		}
 		for _, row := range next {
 			if err := txStore.upsert(ctx, tenantID, payer, row); err != nil {

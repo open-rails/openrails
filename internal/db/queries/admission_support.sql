@@ -50,6 +50,13 @@ DELETE FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
   AND scope = $3 AND scope_key = $4;
 
+-- name: DeleteAllInvokerSpendLimits :execrows
+-- Full-document replacement removes the exact merchant+payer set before
+-- inserting the canonical replacement. This also purges legacy non-canonical
+-- scope_key values that cannot be addressed safely by normalized key deletes.
+DELETE FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2;
+
 -- name: ListInvokerSpendLimits :many
 -- ALL invoker spend limits for a payer (the admit path reads every scope to
 -- compose the verdict).
