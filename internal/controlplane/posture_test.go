@@ -43,3 +43,20 @@ func TestHostedPostureIsCodeOnlyOptIn(t *testing.T) {
 		t.Fatalf("registrationMode(false) = %q, want %q", got, authcore.RegistrationModeOpen)
 	}
 }
+
+func TestPasswordlessPolicyIsCodeOnlyOptIn(t *testing.T) {
+	defaults := newOptions(nil)
+	if defaults.passwordlessLogin || defaults.passwordlessAutoRegistration {
+		t.Fatal("passwordless policy must remain disabled by default")
+	}
+
+	loginOnly := newOptions([]Option{WithPasswordless(false)})
+	if !loginOnly.passwordlessLogin || loginOnly.passwordlessAutoRegistration {
+		t.Fatal("WithPasswordless(false) must enable login without auto-registration")
+	}
+
+	autoRegistration := newOptions([]Option{WithPasswordless(true)})
+	if !autoRegistration.passwordlessLogin || !autoRegistration.passwordlessAutoRegistration {
+		t.Fatal("WithPasswordless(true) must enable login and auto-registration")
+	}
+}

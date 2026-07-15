@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
@@ -172,4 +173,53 @@ func TestTrustedProxies_InvalidCIDRFailsAttach(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid trusted proxy CIDR")
+}
+
+func TestPasswordlessPolicyForwarding(t *testing.T) {
+	ctx := context.Background()
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	t.Run("disabled by default", func(t *testing.T) {
+		cfg := hostedTestConfig(dsn, "https://passwordless-disabled.openrails.test")
+		e := newHostApp(t, cfg)
+		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+			HostedPosture: true,
+			EmailSender:   &captureEmailSender{},
+		}))
+		srv := mountAuthRoutes(t, e)
+
+		status, _ := postJSON(t, srv.URL+"/passwordless/start", `{"identifier":"disabled@example.test"}`)
+		require.Equal(t, http.StatusNotFound, status)
+	})
+
+	t.Run("login and auto-registration enabled", func(t *testing.T) {
+		cfg := hostedTestConfig(dsn, "https://passwordless-enabled.openrails.test")
+		e := newHostApp(t, cfg)
+		sender := &captureEmailSender{}
+		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+			HostedPosture:                true,
+			PasswordlessLogin:            true,
+			PasswordlessAutoRegistration: true,
+			EmailSender:                  sender,
+		}))
+		srv := mountAuthRoutes(t, e)
+		email := "passwordless-" + strings.ToLower(uuid.NewString()[:8]) + "@example.test"
+
+		status, body := postJSON(t, srv.URL+"/passwordless/start",
+			`{"identifier":"`+email+`","mode":"code","return_to":"/portal/example"}`)
+		require.Equal(t, http.StatusAccepted, status, "%v", body)
+		code := sender.code(email)
+		require.NotEmpty(t, code)
+
+		status, body = postJSON(t, srv.URL+"/passwordless/confirm",
+			`{"identifier":"`+email+`","code":"`+code+`"}`)
+		require.Equal(t, http.StatusOK, status, "%v", body)
+		require.NotEmpty(t, body["access_token"])
+		require.Equal(t, "/portal/example", body["return_to"])
+
+		cp := embcp.Get(e.App())
+		user, err := cp.Core().GetUserByEmail(ctx, email)
+		require.NoError(t, err)
+		require.NotEmpty(t, user.ID)
+	})
 }

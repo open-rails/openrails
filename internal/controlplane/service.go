@@ -64,13 +64,15 @@ type ControlPlane struct {
 }
 
 type options struct {
-	hosted             bool
-	email              authcore.EmailSender
-	sms                authcore.SMSSender
-	frontend           authcore.FrontendConfig
-	trustedProxies     []string
-	rateLimitOverrides map[string]ratelimit.Limit
-	redis              *redis.Client
+	hosted                       bool
+	passwordlessLogin            bool
+	passwordlessAutoRegistration bool
+	email                        authcore.EmailSender
+	sms                          authcore.SMSSender
+	frontend                     authcore.FrontendConfig
+	trustedProxies               []string
+	rateLimitOverrides           map[string]ratelimit.Limit
+	redis                        *redis.Client
 }
 
 // Option configures the control plane for embedding hosts.
@@ -82,6 +84,17 @@ type Option func(*options)
 func WithHostedPosture() Option {
 	return func(o *options) {
 		o.hosted = true
+	}
+}
+
+// WithPasswordless enables AuthKit's contact-based passwordless login policy.
+// autoRegistration additionally lets a verified unknown contact create a
+// no-password user during confirmation. Both remain off unless an embedding
+// host explicitly opts in through pkg/embedded/controlplane.AttachOptions.
+func WithPasswordless(autoRegistration bool) Option {
+	return func(o *options) {
+		o.passwordlessLogin = true
+		o.passwordlessAutoRegistration = autoRegistration
 	}
 }
 
@@ -338,8 +351,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// keeps required and must configure an email/SMS sender
 		// (WithEmailSender/WithSMSSender, #738).
 		Registration: authcore.RegistrationConfig{
-			NativeUserMode: registrationMode(lockedRegistration),
-			Verification:   registrationVerification(lockedRegistration),
+			NativeUserMode:               registrationMode(lockedRegistration),
+			Verification:                 registrationVerification(lockedRegistration),
+			PasswordlessLogin:            options.passwordlessLogin,
+			PasswordlessAutoRegistration: options.passwordlessAutoRegistration,
 		},
 	}
 

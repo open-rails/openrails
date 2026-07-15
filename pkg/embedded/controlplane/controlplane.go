@@ -44,9 +44,9 @@ import (
 //     durations/session caps have no AttachOptions knob yet — an open gap,
 //     not yet requested by a host.
 //   - Frontend: FORWARDED (this issue) via AttachOptions.Frontend.
-//   - Registration: NOT a raw forward. OpenRails computes it from
-//     HostedPosture (open+required vs closed+none) — this is product policy
-//     (#738), not a pass-through dial; a host cannot pick a THIRD policy.
+//   - Registration: PARTIALLY forwarded. OpenRails computes native registration
+//     from HostedPosture (open+required vs closed+none), while the independent
+//     passwordless login and auto-registration policies are explicit opt-ins.
 //   - Keys: NOT forwarded. Signing-key resolution is OpenRails' own
 //     responsibility (resolveControlPlaneKeySource: cfg.Auth.* inline
 //     material, else vault keys.json, else dev-ephemeral) — a host has no
@@ -105,6 +105,13 @@ type AttachOptions struct {
 	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
 	// Leave false for private standalone-compatible embedded hosts.
 	HostedPosture bool
+
+	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
+	// confirm routes. PasswordlessAutoRegistration additionally lets a verified
+	// unknown contact create a no-password user during confirmation. Both are
+	// off by default; auto-registration has no effect unless login is enabled.
+	PasswordlessLogin            bool
+	PasswordlessAutoRegistration bool
 
 	// EmailSender / SMSSender are host-owned verification senders threaded into
 	// the AuthKit engine (#738). The types (and the VerificationMessage payload a
@@ -195,6 +202,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	var cpOpts []controlplane.Option
 	if opts.HostedPosture {
 		cpOpts = append(cpOpts, controlplane.WithHostedPosture())
+	}
+	if opts.PasswordlessLogin {
+		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))
 	}
 	if opts.EmailSender != nil {
 		cpOpts = append(cpOpts, controlplane.WithEmailSender(opts.EmailSender))
