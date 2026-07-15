@@ -55,7 +55,9 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.NoError(t, client.SetCustomerSpendDelegation(ctx, customerID.String(), openrails.SpendDelegationInput{
 		Scope:    "invoker",
 		ScopeKey: "test-invoker",
-		Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 123, Currency: "USD"}},
+		// Currency is intentionally omitted: spend limits are also valid for
+		// non-monetary units, and the singular upsert must preserve that contract.
+		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 123}},
 	}))
 	stored, err := rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
 	require.NoError(t, err)
