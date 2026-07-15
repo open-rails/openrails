@@ -131,6 +131,13 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	err := embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{HostedPosture: true})
 	require.Error(t, err, "hosted posture without a sender must refuse to boot")
 	require.Contains(t, err.Error(), "no email or SMS sender")
+	var typedNilSender *captureEmailSender
+	err = embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+		HostedPosture: true,
+		EmailSender:   typedNilSender,
+	})
+	require.Error(t, err, "hosted posture with a typed-nil sender must refuse to boot")
+	require.Contains(t, err.Error(), "no email or SMS sender")
 
 	// With a host-owned sender, hosted posture boots.
 	sender := &captureEmailSender{}

@@ -15,6 +15,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/embedded"
@@ -108,8 +109,9 @@ type AttachOptions struct {
 
 	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
 	// confirm routes. PasswordlessAutoRegistration additionally lets a verified
-	// unknown contact create a no-password user during confirmation. Both are
-	// off by default; auto-registration has no effect unless login is enabled.
+	// unknown contact create a no-password user during confirmation. Both are off
+	// by default. Auto-registration requires login and HostedPosture; login
+	// requires at least one non-nil email or SMS sender.
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
 
@@ -185,6 +187,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if a == nil || cfg == nil {
 		return fmt.Errorf("control plane: app and config are required")
 	}
+	if err := validateAttachOptions(opts); err != nil {
+		return err
+	}
 
 	// The control plane needs a pgx pool over the database holding AuthKit's
 	// profiles.* schema. Reuse an injected pool when provided, else create one.
@@ -206,10 +211,10 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.PasswordlessLogin {
 		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))
 	}
-	if opts.EmailSender != nil {
+	if !isNil(opts.EmailSender) {
 		cpOpts = append(cpOpts, controlplane.WithEmailSender(opts.EmailSender))
 	}
-	if opts.SMSSender != nil {
+	if !isNil(opts.SMSSender) {
 		cpOpts = append(cpOpts, controlplane.WithSMSSender(opts.SMSSender))
 	}
 	if opts.Frontend != (authcore.FrontendConfig{}) {
@@ -245,6 +250,32 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		a.SetControlPlane(cp, nil)
 	}
 	return nil
+}
+
+func validateAttachOptions(opts AttachOptions) error {
+	if opts.PasswordlessAutoRegistration && !opts.PasswordlessLogin {
+		return fmt.Errorf("control plane: passwordless auto-registration requires passwordless login")
+	}
+	if opts.PasswordlessAutoRegistration && !opts.HostedPosture {
+		return fmt.Errorf("control plane: passwordless auto-registration requires hosted posture")
+	}
+	if opts.PasswordlessLogin && isNil(opts.EmailSender) && isNil(opts.SMSSender) {
+		return fmt.Errorf("control plane: passwordless login requires an email or SMS sender")
+	}
+	return nil
+}
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 // BootstrapOptions is the nameable, externally-constructible alias for

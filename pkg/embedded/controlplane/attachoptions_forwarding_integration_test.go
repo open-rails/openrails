@@ -222,4 +222,39 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, user.ID)
 	})
+
+	t.Run("login without auto-registration", func(t *testing.T) {
+		cfg := hostedTestConfig(dsn, "https://passwordless-login-only.openrails.test")
+		e := newHostApp(t, cfg)
+		sender := &captureEmailSender{}
+		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+			HostedPosture:     true,
+			PasswordlessLogin: true,
+			EmailSender:       sender,
+			TrustedProxies:    []string{"127.0.0.1/32", "::1/128"},
+		}))
+		srv := mountAuthRoutes(t, e)
+		email := "passwordless-existing-" + strings.ToLower(uuid.NewString()[:8]) + "@example.test"
+		cp := embcp.Get(e.App())
+		_, err := cp.Core().CreateUser(ctx, email, "pwexisting"+strings.ToLower(uuid.NewString()[:8]))
+		require.NoError(t, err)
+
+		status := postJSONWithHeaders(t, srv.URL+"/passwordless/start",
+			`{"identifier":"`+email+`","mode":"code"}`,
+			map[string]string{"X-Forwarded-For": "203.0.113.10"})
+		require.Equal(t, http.StatusAccepted, status)
+		code := sender.code(email)
+		require.NotEmpty(t, code)
+		status, body := postJSON(t, srv.URL+"/passwordless/confirm",
+			`{"identifier":"`+email+`","code":"`+code+`"}`)
+		require.Equal(t, http.StatusOK, status, "%v", body)
+		require.NotEmpty(t, body["access_token"])
+
+		unknownEmail := "passwordless-unknown-" + strings.ToLower(uuid.NewString()[:8]) + "@example.test"
+		status = postJSONWithHeaders(t, srv.URL+"/passwordless/start",
+			`{"identifier":"`+unknownEmail+`","mode":"code"}`,
+			map[string]string{"X-Forwarded-For": "203.0.113.11"})
+		require.Equal(t, http.StatusAccepted, status)
+		require.Empty(t, sender.code(unknownEmail), "unknown contacts must not auto-register")
+	})
 }
