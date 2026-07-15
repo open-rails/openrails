@@ -1,0 +1,8 @@
+packages:
+  - '.'
+
+pmOnFail: error
+ignoreScripts: true
+verifyDepsBeforeRun: error
+enablePrePostScripts: false
+dangerouslyAllowAllBuilds: false

@@ -6,7 +6,7 @@
 #   consumer:  "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/webassets/dist
 #
 # The Go module cache is read-only, so when the SPA source isn't writable it is
-# copied to a temp dir before `npm ci` (npm must write node_modules).
+# copied to a temp dir before `pnpm install` (pnpm must write node_modules).
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -14,8 +14,8 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-command -v npm >/dev/null 2>&1 || {
-  echo "error: npm is required to build the admin console (Node is a BUILD-time dependency only, #754)" >&2
+command -v pnpm >/dev/null 2>&1 || {
+  echo "error: pnpm is required to build the admin console (Node is a BUILD-time dependency only, #754)" >&2
   exit 1
 }
 
@@ -31,6 +31,6 @@ if [[ ! -w "$src" ]]; then
 fi
 
 cd "$build_dir"
-npm ci
-npm run build -- --outDir "$out" --emptyOutDir
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run build --outDir "$out" --emptyOutDir
 echo "admin console built: $out"

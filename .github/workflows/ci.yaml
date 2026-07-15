@@ -88,18 +88,21 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/admin/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: web/admin/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/admin/pnpm-lock.yaml
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build console (npm ci + tsc + vite)
+      - name: Build console (pnpm install + tsc + vite)
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
       - name: Lint console
-        run: npm run lint
+        run: pnpm run lint
         working-directory: web/admin
       - name: Tagged Go build embeds the dist
         run: go vet -tags console_assets ./...

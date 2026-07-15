@@ -69,7 +69,7 @@ Build the dist from the openrails module cache (no vendoring, no checkout):
 ```
 
 (The script copies `web/admin` out of the read-only module cache to a temp dir
-before `npm ci`.) Then hand the FS to the engine:
+before `pnpm install`.) Then hand the FS to the engine:
 
 ```go
 sub, _ := fs.Sub(consoleassets.FS, "dist")
@@ -103,7 +103,7 @@ permission" toast. Embedded hosts that mount `/v1/merchant/*` for host principal
 
 ## Local UI dev
 
-`cd web/admin && npm run dev` (proxies `/v1`, `/auth`, `/admin/config.json` to
+`cd web/admin && pnpm run dev` (proxies `/v1`, `/auth`, `/admin/config.json` to
 `localhost:3053`). `web/admin/node_modules` is fenced from `go build ./...` by
 the root go.mod `ignore` directive (no nested go.mod — that would prune
 `web/admin` from the module zip hosts build from).
