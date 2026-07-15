@@ -4,6 +4,14 @@ packages:
 pmOnFail: error
 ignoreScripts: true
 ignorePnpmfile: true
+strictDepBuilds: true
 verifyDepsBeforeRun: error
 enablePrePostScripts: false
 dangerouslyAllowAllBuilds: false
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+trustLockfile: false
+blockExoticSubdeps: true
