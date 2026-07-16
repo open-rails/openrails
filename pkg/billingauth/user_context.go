@@ -18,6 +18,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// MerchantSelectorHeader names the explicit merchant context requested by a
+// human user session. The value is an untrusted routing hint: merchant route
+// gates must still verify the user's live permission for the selected merchant
+// and resolve it to an active merchant before authorizing the request.
+const MerchantSelectorHeader = "X-OpenRails-Merchant"
+
 // UserContext is the identity OpenRails billing reads about the caller. It is
 // the contract between the host's auth system and the library: the host
 // populates whichever fields apply to its identity model and OpenRails treats
