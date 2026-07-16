@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     slug             TEXT NOT NULL UNIQUE,
     status           TEXT NOT NULL DEFAULT 'active',
     permission_group_id  TEXT,
+    display_name     TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
@@ -284,6 +286,37 @@ func TestProvision_Idempotent(t *testing.T) {
 
 	_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
 	require.ErrorIs(t, err, ErrPermissionGroupRequired, "control-plane provisioning must not create an ownerless merchant")
+}
+
+func TestSetDisplayName(t *testing.T) {
+	ctx := context.Background()
+	svc := newSvc(t)
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "named", PermissionGroupID: "group-named"})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "  Named Merchant  "))
+	var displayName *string
+	require.NoError(t, svc.pool.QueryRow(ctx,
+		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
+	require.NotNil(t, displayName)
+	require.Equal(t, "Named Merchant", *displayName)
+
+	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "Repaired Name"))
+	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "  "))
+	require.NoError(t, svc.pool.QueryRow(ctx,
+		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
+	require.NotNil(t, displayName)
+	require.Equal(t, "Repaired Name", *displayName)
+
+	require.ErrorIs(t, svc.SetDisplayName(ctx, merchant.ID(uuid.New()), "Missing"), ErrMerchantNotFound)
+	_, err = svc.pool.Exec(ctx,
+		`UPDATE openrails.merchants SET status = 'deleted' WHERE id = $1::uuid`, tn.ID.String())
+	require.NoError(t, err)
+	require.ErrorIs(t, svc.SetDisplayName(ctx, tn.ID, "Deleted"), ErrMerchantNotFound)
+	_, err = svc.pool.Exec(ctx,
+		`UPDATE openrails.merchants SET status = 'active', deleted_at = current_timestamp WHERE id = $1::uuid`, tn.ID.String())
+	require.NoError(t, err)
+	require.ErrorIs(t, svc.SetDisplayName(ctx, tn.ID, "Soft Deleted"), ErrMerchantNotFound)
 }
 
 func TestDelete_RequiresExport(t *testing.T) {
