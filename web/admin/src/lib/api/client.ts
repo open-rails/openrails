@@ -24,6 +24,7 @@ export interface TokenPair {
   access_token: string
   refresh_token?: string
   expires_at?: number // unix ms, derived from expires_in
+  merchant?: string
 }
 
 const TOKEN_KEY = "openrails.admin.tokens"
@@ -48,7 +49,8 @@ export function getBootstrap(): BootstrapConfig {
 }
 
 export function getTokens(): TokenPair | null {
-  const raw = localStorage.getItem(TOKEN_KEY)
+  localStorage.removeItem(TOKEN_KEY)
+  const raw = sessionStorage.getItem(TOKEN_KEY)
   if (!raw) return null
   try {
     return JSON.parse(raw) as TokenPair
@@ -58,8 +60,61 @@ export function getTokens(): TokenPair | null {
 }
 
 export function setTokens(tokens: TokenPair | null) {
-  if (tokens) localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
-  else localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(TOKEN_KEY)
+  if (tokens) sessionStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
+  else sessionStorage.removeItem(TOKEN_KEY)
+}
+
+function sameStoredSession(
+  left: TokenPair | null,
+  right: TokenPair | null
+): boolean {
+  if (!left || !right) return left === right
+  return (
+    left.access_token === right.access_token &&
+    left.refresh_token === right.refresh_token &&
+    left.merchant === right.merchant
+  )
+}
+
+function tokenSessionID(tokens: TokenPair | null): string | undefined {
+  const payload = tokens?.access_token.split(".")[1]
+  if (!payload) return undefined
+  try {
+    const base64 = payload.replaceAll("-", "+").replaceAll("_", "/")
+    const decoded = JSON.parse(
+      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))
+    ) as { sid?: unknown }
+    return typeof decoded.sid === "string" ? decoded.sid : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function sameTokenSession(
+  left: TokenPair | null,
+  right: TokenPair | null
+): boolean {
+  if (!left || !right) return left === right
+  if (left.merchant !== right.merchant) return false
+  if (left.access_token === right.access_token) return true
+  const leftID = tokenSessionID(left)
+  return !!leftID && leftID === tokenSessionID(right)
+}
+
+export function setTokensIfCurrent(
+  tokens: TokenPair,
+  expected: TokenPair | null
+): boolean {
+  if (!sameStoredSession(expected, getTokens())) return false
+  setTokens(tokens)
+  return true
+}
+
+export function clearTokensIfCurrent(expected: TokenPair): boolean {
+  if (!sameStoredSession(expected, getTokens())) return false
+  setTokens(null)
+  return true
 }
 
 // Stripe-shaped error envelope (pkg/api).
@@ -106,9 +161,8 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, body, `request failed (${res.status})`)
 }
 
-async function refreshTokens(): Promise<boolean> {
-  const tokens = getTokens()
-  if (!tokens?.refresh_token) return false
+async function refreshTokens(tokens: TokenPair): Promise<TokenPair | null> {
+  if (!tokens.refresh_token) return null
   const { auth_base_url } = getBootstrap()
   const res = await fetch(`${auth_base_url}/token`, {
     method: "POST",
@@ -118,19 +172,24 @@ async function refreshTokens(): Promise<boolean> {
       refresh_token: tokens.refresh_token,
     }),
   })
-  if (!res.ok) return false
+  if (!res.ok) return null
   const body = (await res.json()) as {
     access_token?: string
     refresh_token?: string
     expires_in?: number
   }
-  if (!body.access_token) return false
-  setTokens({
+  if (!body.access_token) return null
+  if (!sameStoredSession(tokens, getTokens())) return null
+  const refreshed = {
     access_token: body.access_token,
     refresh_token: body.refresh_token ?? tokens.refresh_token,
-    expires_at: body.expires_in ? Date.now() + body.expires_in * 1000 : undefined,
-  })
-  return true
+    expires_at: body.expires_in
+      ? Date.now() + body.expires_in * 1000
+      : undefined,
+    merchant: tokens.merchant,
+  }
+  setTokens(refreshed)
+  return refreshed
 }
 
 export interface RequestOptions {
@@ -138,6 +197,11 @@ export interface RequestOptions {
   body?: unknown
   headers?: Record<string, string>
   query?: Record<string, string | number | boolean | undefined>
+}
+
+interface FetchResult {
+  response: Response
+  tokens: TokenPair | null
 }
 
 function buildURL(base: string, path: string, query?: RequestOptions["query"]) {
@@ -153,29 +217,47 @@ function buildURL(base: string, path: string, query?: RequestOptions["query"]) {
   return url
 }
 
-async function doFetch(url: string, opts: RequestOptions, retry: boolean): Promise<Response> {
+async function doFetch(
+  url: string,
+  opts: RequestOptions,
+  retry: boolean,
+  selectMerchant: boolean,
+  tokens: TokenPair | null = getTokens()
+): Promise<FetchResult> {
   const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
-  const tokens = getTokens()
   if (tokens) headers["Authorization"] = `Bearer ${tokens.access_token}`
+  if (selectMerchant && tokens?.merchant)
+    headers["X-OpenRails-Merchant"] = tokens.merchant
   const res = await fetch(url, {
     method: opts.method ?? "GET",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   })
   if (res.status === 401 && retry && tokens?.refresh_token) {
-    if (await refreshTokens()) return doFetch(url, opts, false)
+    const refreshed = await refreshTokens(tokens)
+    if (refreshed) return doFetch(url, opts, false, selectMerchant, refreshed)
   }
-  return res
+  return { response: res, tokens }
 }
 
 // api calls the merchant API (api_base_url-relative path, e.g. "/merchant/payments").
-export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+export async function api<T>(
+  path: string,
+  opts: RequestOptions = {}
+): Promise<T> {
   const { api_base_url } = getBootstrap()
-  const res = await doFetch(buildURL(api_base_url, path, opts.query), opts, true)
+  const { response: res, tokens } = await doFetch(
+    buildURL(api_base_url, path, opts.query),
+    opts,
+    true,
+    true
+  )
   if (res.status === 401) {
-    setTokens(null)
-    onUnauthorized?.()
+    if (sameStoredSession(tokens, getTokens())) {
+      setTokens(null)
+      onUnauthorized?.()
+    }
     throw await parseError(res)
   }
   if (!res.ok) throw await parseError(res)
@@ -184,11 +266,31 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
 }
 
 // authApi calls the AuthKit authhttp surface (auth_base_url-relative path).
-export async function authApi<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+export async function authApi<T>(
+  path: string,
+  opts: RequestOptions = {}
+): Promise<T> {
   const { auth_base_url } = getBootstrap()
-  const res = await doFetch(buildURL(auth_base_url, path, opts.query), opts, true)
+  const { response: res } = await doFetch(
+    buildURL(auth_base_url, path, opts.query),
+    opts,
+    true,
+    false
+  )
   if (!res.ok) throw await parseError(res)
   return (await res.json()) as T
+}
+
+export async function logoutSession(tokens: TokenPair): Promise<void> {
+  const { auth_base_url } = getBootstrap()
+  const { response } = await doFetch(
+    buildURL(auth_base_url, "/logout"),
+    { method: "DELETE" },
+    false,
+    false,
+    tokens
+  )
+  if (!response.ok) throw await parseError(response)
 }
 
 // Standard list envelope used by most /v1/merchant list endpoints.
