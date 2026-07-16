@@ -452,15 +452,20 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "authorization unavailable"}
 	}
 	if strings.TrimSpace(uc.Merchant) == "" {
-		resolver, ok := g.AdminPermissionChecker.(merchantUserResolver)
-		if !ok {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+		if req != nil {
+			uc.Merchant = strings.TrimSpace(req.Header.Get(billingauth.MerchantSelectorHeader))
 		}
-		ref, rerr := resolver.MerchantForUser(ctx, uc.UserID)
-		if rerr != nil || strings.TrimSpace(ref) == "" {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+		if uc.Merchant == "" {
+			resolver, ok := g.AdminPermissionChecker.(merchantUserResolver)
+			if !ok {
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
+			}
+			ref, rerr := resolver.MerchantForUser(ctx, uc.UserID)
+			if rerr != nil || strings.TrimSpace(ref) == "" {
+				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+			}
+			uc.Merchant = ref
 		}
-		uc.Merchant = ref
 	}
 	allowed, err := g.AdminPermissionChecker.HasAdminPermission(ctx, uc.Merchant, uc.UserID, perm)
 	if err != nil {
@@ -469,13 +474,13 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if !allowed {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 	}
+	membershipMID, rerr := g.resolveMerchantForGroup(ctx, uc.Merchant)
+	if rerr != nil {
+		return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
+	}
 	mid, ok := merchant.FromContext(ctx)
 	if !ok {
-		var rerr error
-		mid, rerr = g.resolveMerchantForGroup(ctx, uc.Merchant)
-		if rerr != nil {
-			return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
-		}
+		mid = membershipMID
 	}
 	// #766: uc.Merchant was resolved from the USER'S group membership, but mid
 	// may instead be the Host-pinned merchant (merchant.WithHostMerchant, set by
@@ -488,13 +493,12 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	// right signal because it is a no-op unless a Host resolver actually ran, so
 	// single-merchant self-hosters are unaffected.
 	if hostMID, ok := merchant.HostMerchant(ctx); ok {
-		membershipMID, rerr := g.resolveMerchantForGroup(ctx, uc.Merchant)
-		if rerr != nil {
-			return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
-		}
 		if hostMID != membershipMID {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
 		}
+	}
+	if mid != membershipMID {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
 	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
 }
