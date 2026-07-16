@@ -185,6 +185,27 @@ func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error)
 	return s.merchantBySlug(ctx, normalizeSlug(slug))
 }
 
+// SetDisplayName sets the human-readable name for an active merchant. An empty
+// name is a no-op so repair calls cannot clear an existing value by omission.
+func (s *Service) SetDisplayName(ctx context.Context, id merchant.ID, displayName string) error {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE openrails.merchants
+		   SET display_name = $2, updated_at = current_timestamp
+		 WHERE id = $1::uuid AND status = 'active' AND deleted_at IS NULL
+	`, id.String(), displayName)
+	if err != nil {
+		return fmt.Errorf("merchants: set display name: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMerchantNotFound
+	}
+	return nil
+}
+
 // SearchMerchants returns active merchant directory rows whose slug matches the
 // (case-insensitive) query substring. It is the cross-merchant search backing
 // the platform-superadmin API (issue #226); the CALLER is responsible for

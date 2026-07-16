@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
@@ -183,11 +184,27 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	var rowID, rowGroupID string
+	var rowDisplayName *string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT id::text, permission_group_id FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`,
-		slug).Scan(&rowID, &rowGroupID))
+		`SELECT id::text, permission_group_id, display_name FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`,
+		slug).Scan(&rowID, &rowGroupID, &rowDisplayName))
 	require.Equal(t, res1.MerchantID.String(), rowID)
 	require.Equal(t, res1.GroupID, rowGroupID)
+	require.Nil(t, rowDisplayName)
+
+	require.NoError(t, embcp.SetMerchantDisplayName(ctx, e.App(), res1.MerchantID, "  SaaS Merchant  "))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
+	require.NotNil(t, rowDisplayName)
+	require.Equal(t, "SaaS Merchant", *rowDisplayName)
+	require.NoError(t, embcp.SetMerchantDisplayName(ctx, e.App(), res1.MerchantID, "Repaired Merchant"))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
+	require.NotNil(t, rowDisplayName)
+	require.Equal(t, "Repaired Merchant", *rowDisplayName)
+	require.ErrorIs(t,
+		embcp.SetMerchantDisplayName(ctx, e.App(), merchant.ID(uuid.New()), "Missing"),
+		embcp.ErrMerchantNotFound)
 
 	// The owner holds the merchant owner role (= merchant:*), never platform authority.
 	canRead, err := cp.Core().Can(ctx, user.ID, authcore.SubjectKindUser, "merchant", slug, permissions.MerchantSettingsRead)
