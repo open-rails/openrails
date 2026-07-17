@@ -18,6 +18,8 @@ package tests
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +45,7 @@ type fakeStripeAPI struct {
 	mu               sync.Mutex
 	checkoutForms    []url.Values
 	checkoutVersions []string
+	checkoutKeys     []string
 	customerCreates  int
 
 	webhookEndpointLists   int
@@ -70,6 +73,7 @@ func newFakeStripeAPI(t *testing.T) *fakeStripeAPI {
 		f.mu.Lock()
 		f.checkoutForms = append(f.checkoutForms, r.PostForm)
 		f.checkoutVersions = append(f.checkoutVersions, r.Header.Get(stripeapi.VersionHeader))
+		f.checkoutKeys = append(f.checkoutKeys, r.Header.Get(stripeapi.IdempotencyKeyHeader))
 		f.mu.Unlock()
 		writeJSON(w, map[string]any{
 			"id":     "cs_test_e2e_1",
@@ -119,6 +123,19 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func clearCheckoutIdempotency(t *testing.T, suite *TestContainerSuite, clientKey string) {
+	t.Helper()
+	sum := sha256.Sum256([]byte(clientKey))
+	keys, err := suite.RedisClient.Keys(
+		context.Background(),
+		"idemp:*:"+hex.EncodeToString(sum[:]),
+	).Result()
+	require.NoError(t, err)
+	if len(keys) > 0 {
+		require.NoError(t, suite.RedisClient.Del(context.Background(), keys...).Err())
+	}
+}
+
 // hostRewriteTransport sends every request to target regardless of the
 // original host (api.stripe.com), preserving method/path/query/body/headers.
 type hostRewriteTransport struct{ target string }
@@ -150,6 +167,8 @@ func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripe
 		},
 	}
 	suite.InsertProduct(ctx, product)
+	trialAmount := int64(0)
+	trialHours := 24
 	price := &models.Price{
 		ID:                  uuid.New(),
 		ProductID:           product.ID,
@@ -157,6 +176,8 @@ func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripe
 		Currency:            "usd",
 		AutoRenew:           true,
 		AccessDurationHours: intPtr(720),
+		TrialUnitAmount:     &trialAmount,
+		TrialDurationHours:  &trialHours,
 		PSPLinks: map[string]map[string]string{
 			string(models.RailStripe): {
 				models.RailKeyRail:          string(models.RailStripe),
@@ -195,6 +216,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/v1/checkout", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "stripe-checkout-e2e")
 
 	suite.Server.Handler().ServeHTTP(w, req)
 
@@ -226,9 +248,13 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	// Wire pinning: exactly one checkout-session create, with the fields the
 	// activation leg depends on (metadata linkage back to OUR session/user).
 	fake.mu.Lock()
-	defer fake.mu.Unlock()
-	require.Len(t, fake.checkoutForms, 1, "exactly one Stripe checkout session create")
-	form := fake.checkoutForms[0]
+	checkoutForms := append([]url.Values(nil), fake.checkoutForms...)
+	checkoutVersions := append([]string(nil), fake.checkoutVersions...)
+	checkoutKeys := append([]string(nil), fake.checkoutKeys...)
+	customerCreates := fake.customerCreates
+	fake.mu.Unlock()
+	require.Len(t, checkoutForms, 1, "exactly one Stripe checkout session create")
+	form := checkoutForms[0]
 	assert.Equal(t, "subscription", form.Get("mode"))
 	assert.Equal(t, "price_e2e_stripe", form.Get("line_items[0][price]"))
 	assert.Equal(t, "1", form.Get("line_items[0][quantity]"))
@@ -241,11 +267,61 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	assert.Equal(t, userID, form.Get("subscription_data[metadata][user_id]"))
 	// One durable Stripe customer per user (#212): resolved BEFORE the session,
 	// and the session is created against it (not customer_email).
-	assert.Equal(t, 1, fake.customerCreates, "customer created once via search-miss → create")
+	assert.Equal(t, 1, customerCreates, "customer created once via search-miss → create")
 	assert.Equal(t, "cus_e2e_test", form.Get("customer"))
 	assert.Empty(t, form.Get("customer_email"), "customer and customer_email are mutually exclusive")
 	// Choke-point proof: the API version pin rode through the fake transport.
-	assert.Equal(t, stripeapi.APIVersion, fake.checkoutVersions[0])
+	assert.Equal(t, stripeapi.APIVersion, checkoutVersions[0])
+	assert.NotEmpty(t, checkoutKeys[0], "checkout create must carry a Stripe idempotency key")
+
+	// Drop both Redis replay layers to simulate retry after their cache windows.
+	// The durable session id/fingerprint must recover the original local row and
+	// redirect without issuing a second provider request.
+	clearCheckoutIdempotency(t, suite, "stripe-checkout-e2e")
+	second := httptest.NewRecorder()
+	secondReq, _ := http.NewRequest("POST", "/v1/checkout", bytes.NewReader(jsonBody))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.Header.Set("Authorization", "Bearer "+token)
+	secondReq.Header.Set("Idempotency-Key", "stripe-checkout-e2e")
+	suite.Server.Handler().ServeHTTP(second, secondReq)
+	require.Equal(t, http.StatusOK, second.Code, "durable replay body: %s", second.Body.String())
+	var secondResp map[string]any
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondResp))
+	assert.Equal(t, resp["id"], secondResp["id"], "durable replay must reuse the checkout session")
+	fake.mu.Lock()
+	checkoutCreateCount := len(fake.checkoutForms)
+	fake.mu.Unlock()
+	require.Equal(t, 1, checkoutCreateCount, "durable replay must not create another Stripe checkout session")
+
+	// Simulate a process dying after Stripe accepted the request but before the
+	// local row persisted the redirect. The next cache-miss retry must reuse both
+	// the local session id and Stripe key, so every provider parameter is stable.
+	_, err = suite.Pool.Exec(context.Background(), `
+		UPDATE openrails.checkout_sessions
+		   SET status = 'created', rail_state = rail_state - 'redirect_url'
+		 WHERE id = $1
+	`, sessionID)
+	require.NoError(t, err)
+	clearCheckoutIdempotency(t, suite, "stripe-checkout-e2e")
+	third := httptest.NewRecorder()
+	thirdReq, _ := http.NewRequest("POST", "/v1/checkout", bytes.NewReader(jsonBody))
+	thirdReq.Header.Set("Content-Type", "application/json")
+	thirdReq.Header.Set("Authorization", "Bearer "+token)
+	thirdReq.Header.Set("Idempotency-Key", "stripe-checkout-e2e")
+	suite.Server.Handler().ServeHTTP(third, thirdReq)
+	require.Equal(t, http.StatusOK, third.Code, "crash replay body: %s", third.Body.String())
+	var thirdResp map[string]any
+	require.NoError(t, json.Unmarshal(third.Body.Bytes(), &thirdResp))
+	assert.Equal(t, resp["id"], thirdResp["id"], "crash replay must reuse the checkout session")
+	fake.mu.Lock()
+	checkoutForms = append([]url.Values(nil), fake.checkoutForms...)
+	checkoutKeys = append([]string(nil), fake.checkoutKeys...)
+	fake.mu.Unlock()
+	require.Len(t, checkoutForms, 2, "crash replay must retry the same Stripe operation once")
+	assert.Equal(t, checkoutKeys[0], checkoutKeys[1], "crash replay must reuse the Stripe idempotency key")
+	assert.Equal(t, checkoutForms[0].Get("metadata[checkout_session_id]"), checkoutForms[1].Get("metadata[checkout_session_id]"))
+	assert.NotEmpty(t, checkoutForms[0].Get("subscription_data[trial_end]"))
+	assert.Equal(t, checkoutForms[0].Get("subscription_data[trial_end]"), checkoutForms[1].Get("subscription_data[trial_end]"))
 
 	// The user's rail-customer mapping was recorded at checkout time (#212).
 	var mapped string

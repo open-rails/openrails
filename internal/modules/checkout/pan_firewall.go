@@ -27,10 +27,14 @@ func RejectPANShapedFields(req *CheckoutRequest) error {
 		"state":              req.State,
 		"zip":                req.Zip,
 		"country":            req.Country,
+		"last_four":          req.LastFour,
 		"expiry_date":        req.ExpiryDate,
 		"card_type":          req.CardType,
 	}
 	for key, value := range req.Metadata {
+		if looksLikePAN(key) {
+			return fmt.Errorf("metadata key contains a card-number-shaped value: raw PANs must never reach OpenRails (SAQ A) — collect cards via the vault's browser SDK")
+		}
 		fields["metadata."+key] = value
 	}
 	for name, value := range fields {

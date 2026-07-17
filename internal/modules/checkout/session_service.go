@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/mail"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -38,9 +40,11 @@ import (
 )
 
 const (
-	checkoutSessionIdempotencyOp = "checkout_session_create"
-	defaultCheckoutSessionTTL    = 15 * time.Minute
-	redirectCheckoutSessionTTL   = 24 * time.Hour
+	checkoutSessionIdempotencyOp  = "checkout_session_create"
+	checkoutSessionFingerprintKey = "_openrails_request_fingerprint"
+	checkoutSessionPendingLease   = 30 * time.Second
+	defaultCheckoutSessionTTL     = 15 * time.Minute
+	redirectCheckoutSessionTTL    = 24 * time.Hour
 )
 
 // Idempotency types are the idempotency module's own (#666 — the copy that
@@ -63,6 +67,7 @@ type checkoutSessionIdempotencyResult struct {
 
 type sessionIdempotencyStore interface {
 	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
+	TryTakeoverPending(ctx context.Context, operation, key string, olderThan time.Duration) (bool, error)
 	Fail(ctx context.Context, operation, key string, operationErr error) error
 	Complete(ctx context.Context, operation, key string, result json.RawMessage) error
 }
@@ -292,6 +297,9 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	if err := s.requireProviderWrites(); err != nil {
 		return nil, err
 	}
+	if looksLikePAN(req.IdempotencyKey) {
+		return nil, fmt.Errorf("%w: idempotency key contains invalid card input", ErrCheckoutSessionValidation)
+	}
 
 	fingerprint := checkoutSessionRequestFingerprint(req)
 	req.IdempotencyKey = scopeIdempotencyKey(user.ID, req.IdempotencyKey)
@@ -311,7 +319,22 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				}
 				return cached, nil
 			case IdempotencyStatusPending:
-				return nil, ErrCheckoutSessionPending
+				if s.now().Sub(rec.CreatedAt) < checkoutSessionPendingLease {
+					return nil, ErrCheckoutSessionPending
+				}
+				taken, err := s.idempotencyService.TryTakeoverPending(
+					ctx,
+					checkoutSessionIdempotencyOp,
+					req.IdempotencyKey,
+					checkoutSessionPendingLease,
+				)
+				if err != nil {
+					return nil, fmt.Errorf("take over stale checkout session request: %w", err)
+				}
+				if !taken {
+					return nil, ErrCheckoutSessionPending
+				}
+				claimed = true
 			case IdempotencyStatusFailed:
 				return nil, fmt.Errorf("%w: previous request failed: %s", ErrCheckoutSessionConflict, rec.Error)
 			}
@@ -322,7 +345,10 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	resp, err := s.createSessionWithValidation(ctx, req, user)
 	if err != nil {
 		if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
-			_ = s.idempotencyService.Fail(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
+			isDeterministic := errors.Is(err, ErrCheckoutSessionValidation) || errors.Is(err, ErrCheckoutSessionConflict)
+			if isDeterministic {
+				_ = s.idempotencyService.Fail(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
+			}
 		}
 		return nil, err
 	}
@@ -370,6 +396,9 @@ func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, fingerprint
 }
 
 func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	if err := rejectCheckoutSessionPAN(req); err != nil {
+		return nil, err
+	}
 	// Solana subscription-lifecycle modes (cancel / tier-change) are owner-gated
 	// actions on an EXISTING subscription, not a price purchase — route them to
 	// their dedicated builder before the price-first validation below.
@@ -402,6 +431,9 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
+	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutSessionValidation)
+	}
 	mode, err := s.resolveMode(req.Mode, rail, price)
 	if err != nil {
 		return nil, err
@@ -428,8 +460,19 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if rail == "ccbill" || rail == "stripe" {
 		ttl = redirectCheckoutSessionTTL
 	}
+	sessionID := uuidutil.NewV7()
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	requestFingerprint := ""
+	if idempotencyKey != "" {
+		sessionID = idempotentCheckoutSessionID(price.MerchantID, idempotencyKey)
+		requestFingerprint = checkoutSessionRequestFingerprint(req)
+	}
+	railState := map[string]any{}
+	if requestFingerprint != "" {
+		railState[checkoutSessionFingerprintKey] = requestFingerprint
+	}
 	session := &models.CheckoutSession{
-		ID:         uuidutil.NewV7(),
+		ID:         sessionID,
 		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
 		PriceID:    price.ID,
 		Mode:       mode,
@@ -440,7 +483,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ExpiresAt:  timePtr(now.Add(ttl)),
 		Metadata:   normalizeMetadata(req.Metadata),
 		RailFields: s.buildRailFields(rail, &req.Payment),
-		RailState:  map[string]any{},
+		RailState:  railState,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		PspID:      pspID,
@@ -449,11 +492,24 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ExpiryDate: &req.Payment.ExpiryDate,
 	}
 
-	if strings.TrimSpace(req.IdempotencyKey) != "" {
+	if idempotencyKey != "" {
 		session.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
+		existing, err := s.repo.GetByID(ctx, session.ID)
+		if err == nil {
+			return s.resumeIdempotentSession(ctx, existing, session, &req.Payment, req.SuccessURL, req.CancelURL, user)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("failed to resolve idempotent checkout session: %w", err)
+		}
 	}
 
 	if err := s.repo.Create(ctx, session); err != nil {
+		if idempotencyKey != "" {
+			existing, getErr := s.repo.GetByID(ctx, session.ID)
+			if getErr == nil {
+				return s.resumeIdempotentSession(ctx, existing, session, &req.Payment, req.SuccessURL, req.CancelURL, user)
+			}
+		}
 		return nil, fmt.Errorf("failed to create checkout session: %w", err)
 	}
 
@@ -468,6 +524,60 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	return s.sessionToResponse(session), nil
+}
+
+func idempotentCheckoutSessionID(merchantID uuid.UUID, key string) uuid.UUID {
+	name := "openrails:checkout-session:" + merchantID.String() + ":" + strings.TrimSpace(key)
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(name))
+}
+
+func (s *CheckoutSessionService) resumeIdempotentSession(
+	ctx context.Context,
+	existing, requested *models.CheckoutSession,
+	payment *CheckoutSessionPaymentRequest,
+	successURL, cancelURL string,
+	user *UserIdentity,
+) (*CheckoutSessionResponse, error) {
+	if existing == nil || requested == nil {
+		return nil, fmt.Errorf("%w: idempotent checkout session unavailable", ErrCheckoutSessionConflict)
+	}
+	storedFingerprint, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
+	requestedFingerprint, _ := requested.RailState[checkoutSessionFingerprintKey].(string)
+	parametersMatch := existing.CustomerID == requested.CustomerID &&
+		existing.PriceID == requested.PriceID &&
+		existing.Mode == requested.Mode &&
+		existing.Rail == requested.Rail &&
+		equalOptionalUUID(existing.PspID, requested.PspID) &&
+		storedFingerprint != "" &&
+		storedFingerprint == requestedFingerprint
+	if !parametersMatch {
+		return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+	}
+
+	switch existing.Status {
+	case models.CheckoutSessionStatusRequiresAction, models.CheckoutSessionStatusSucceeded:
+		return s.sessionToResponse(existing), nil
+	case models.CheckoutSessionStatusCreated, models.CheckoutSessionStatusFailed:
+		existing.IdempotencyKey = requested.IdempotencyKey
+		if err := s.initializeSession(ctx, existing, payment, successURL, cancelURL, user); err != nil {
+			_ = s.MarkFailed(ctx, existing.ID, err.Error(), "")
+			return nil, err
+		}
+		existing.UpdatedAt = s.now()
+		if err := s.repo.Update(ctx, existing); err != nil {
+			return nil, fmt.Errorf("failed to update idempotent checkout session: %w", err)
+		}
+		return s.sessionToResponse(existing), nil
+	default:
+		return nil, fmt.Errorf("%w: previous checkout session is %s", ErrCheckoutSessionConflict, existing.Status)
+	}
+}
+
+func equalOptionalUUID(left, right *uuid.UUID) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutSessionResponse, error) {
@@ -606,6 +716,48 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail strin
 	default:
 		return fmt.Errorf("%w: unsupported rail", ErrCheckoutSessionValidation)
 	}
+}
+
+func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
+	if req == nil {
+		return nil
+	}
+	payment := req.Payment
+	if err := RejectPANShapedFields(&CheckoutRequest{
+		PaymentMethodID: payment.PaymentMethodID,
+		PaymentToken:    payment.PaymentToken,
+		Email:           payment.Email,
+		FirstName:       payment.FirstName,
+		LastName:        payment.LastName,
+		Address1:        payment.Address1,
+		City:            payment.City,
+		State:           payment.State,
+		Zip:             payment.Zip,
+		Country:         payment.Country,
+		LastFour:        payment.LastFour,
+		CardType:        payment.CardType,
+		ExpiryDate:      payment.ExpiryDate,
+		Metadata:        req.Metadata,
+	}); err != nil {
+		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)
+	}
+	extraFields := map[string]string{
+		"payment.rail":         payment.Rail,
+		"payment.token_symbol": payment.TokenSymbol,
+		"payment.flow":         payment.Flow,
+		"payment.wallet":       payment.Wallet,
+		"success_url":          req.SuccessURL,
+		"cancel_url":           req.CancelURL,
+		"subscription_id":      req.SubscriptionID,
+		"new_price_id":         req.NewPriceID,
+		"price_id":             req.PriceID,
+		"mode":                 req.Mode,
+		"idempotency_key":      req.IdempotencyKey,
+	}
+	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
+		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)
+	}
+	return nil
 }
 
 // validateNMIInput requires exactly one of payment_token or payment_method_id;
@@ -1363,24 +1515,25 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 	}
 
 	req := &CheckoutRequest{
-		PriceID:         api.FormatPriceID(session.PriceID),
-		PaymentMethodID: payment.PaymentMethodID,
-		PaymentToken:    payment.PaymentToken,
-		Rail:            string(session.Rail),
-		SuccessURL:      successURL,
-		CancelURL:       cancelURL,
-		Metadata:        session.Metadata,
-		Email:           payment.Email,
-		FirstName:       payment.FirstName,
-		LastName:        payment.LastName,
-		Address1:        payment.Address1,
-		City:            payment.City,
-		State:           payment.State,
-		Zip:             payment.Zip,
-		Country:         payment.Country,
-		LastFour:        payment.LastFour,
-		CardType:        payment.CardType,
-		ExpiryDate:      payment.ExpiryDate,
+		PriceID:           api.FormatPriceID(session.PriceID),
+		PaymentMethodID:   payment.PaymentMethodID,
+		PaymentToken:      payment.PaymentToken,
+		Rail:              string(session.Rail),
+		SuccessURL:        successURL,
+		CancelURL:         cancelURL,
+		Metadata:          session.Metadata,
+		CheckoutStartedAt: session.CreatedAt,
+		Email:             payment.Email,
+		FirstName:         payment.FirstName,
+		LastName:          payment.LastName,
+		Address1:          payment.Address1,
+		City:              payment.City,
+		State:             payment.State,
+		Zip:               payment.Zip,
+		Country:           payment.Country,
+		LastFour:          payment.LastFour,
+		CardType:          payment.CardType,
+		ExpiryDate:        payment.ExpiryDate,
 	}
 
 	if session.IdempotencyKey != nil {
@@ -1597,7 +1750,8 @@ func scopeIdempotencyKey(userID, key string) string {
 	if strings.TrimSpace(userID) == "" || trimmedKey == "" {
 		return trimmedKey
 	}
-	return fmt.Sprintf("%s:%s", strings.TrimSpace(userID), trimmedKey)
+	sum := sha256.Sum256([]byte(trimmedKey))
+	return fmt.Sprintf("%s:%s", strings.TrimSpace(userID), hex.EncodeToString(sum[:]))
 }
 
 func (s *CheckoutSessionService) isTerminal(status models.CheckoutSessionStatus) bool {

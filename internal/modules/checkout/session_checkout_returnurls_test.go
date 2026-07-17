@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -46,11 +47,13 @@ func TestInitializeCheckoutSession_ThreadsStripeReturnURLs(t *testing.T) {
 
 	exec := &captureCheckoutExecutor{}
 	svc := &CheckoutSessionService{checkoutService: exec}
+	startedAt := time.Date(2026, time.July, 17, 12, 0, 0, 0, time.UTC)
 
 	session := &models.CheckoutSession{
-		ID:      uuid.New(),
-		PriceID: uuid.New(),
-		Rail:    models.RailStripe,
+		ID:        uuid.New(),
+		PriceID:   uuid.New(),
+		Rail:      models.RailStripe,
+		CreatedAt: startedAt,
 	}
 	payment := &CheckoutSessionPaymentRequest{Rail: string(models.RailStripe)}
 	user := &UserIdentity{ID: uuid.New().String()}
@@ -66,5 +69,8 @@ func TestInitializeCheckoutSession_ThreadsStripeReturnURLs(t *testing.T) {
 	}
 	if exec.captured.CancelURL != wantCancel {
 		t.Errorf("CancelURL not threaded: got %q, want %q", exec.captured.CancelURL, wantCancel)
+	}
+	if !exec.captured.CheckoutStartedAt.Equal(startedAt) {
+		t.Errorf("CheckoutStartedAt not threaded: got %v, want %v", exec.captured.CheckoutStartedAt, startedAt)
 	}
 }
