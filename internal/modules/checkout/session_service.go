@@ -275,12 +275,22 @@ func (s *CheckoutSessionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
+func (s *CheckoutSessionService) requireProviderWrites() error {
+	if s == nil || s.config == nil || s.config.IsProviderReadOnly() {
+		return fmt.Errorf("%w: provider writes are disabled", ErrCheckoutSessionValidation)
+	}
+	return nil
+}
+
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return nil, fmt.Errorf("%w: user is required", ErrCheckoutSessionValidation)
 	}
 	if req == nil {
 		return nil, fmt.Errorf("%w: request is required", ErrCheckoutSessionValidation)
+	}
+	if err := s.requireProviderWrites(); err != nil {
+		return nil, err
 	}
 
 	fingerprint := checkoutSessionRequestFingerprint(req)
@@ -330,15 +340,19 @@ func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string
 		return ""
 	}
 	payload, _ := json.Marshal(struct {
-		PriceID  string
-		Mode     string
-		Payment  CheckoutSessionPaymentRequest
-		Metadata map[string]string
+		PriceID    string
+		Mode       string
+		Payment    CheckoutSessionPaymentRequest
+		Metadata   map[string]string
+		SuccessURL string
+		CancelURL  string
 	}{
-		PriceID:  strings.TrimSpace(req.PriceID),
-		Mode:     strings.TrimSpace(req.Mode),
-		Payment:  req.Payment,
-		Metadata: normalizeMetadata(req.Metadata),
+		PriceID:    strings.TrimSpace(req.PriceID),
+		Mode:       strings.TrimSpace(req.Mode),
+		Payment:    req.Payment,
+		Metadata:   normalizeMetadata(req.Metadata),
+		SuccessURL: strings.TrimSpace(req.SuccessURL),
+		CancelURL:  strings.TrimSpace(req.CancelURL),
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -2214,6 +2228,9 @@ func solanaLifecycleLabel(verb, productName string, state map[string]any) string
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout session and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
 func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*solanamodule.PayTransactionResponse, error) {
+	if err := s.requireProviderWrites(); err != nil {
+		return nil, err
+	}
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}

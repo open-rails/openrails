@@ -119,6 +119,44 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 
 // -------------------------------- Checkout Sessions --------------------------------
 
+// ListCheckoutRailOptions returns the locally ready payment-provider choices
+// for a price. It does not probe remote providers or mutate billing state.
+func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) ([]CheckoutRailOption, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	priceRef = strings.TrimSpace(priceRef)
+	if priceRef == "" {
+		return nil, fmt.Errorf("price reference is required")
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var options []checkout.CheckoutRailOption
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var listErr error
+		options, listErr = checkoutSessions.ListCheckoutRailOptions(scopedCtx, priceRef)
+		return listErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list checkout rail options: %w", err)
+	}
+	result := make([]CheckoutRailOption, 0, len(options))
+	for _, option := range options {
+		result = append(result, CheckoutRailOption{
+			Selector: option.Selector,
+			Rail:     option.Rail,
+			Mode:     option.Mode,
+		})
+	}
+	return result, nil
+}
+
 // CreateCheckoutSession creates a new checkout session.
 func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
 	checkoutSessions, err := s.requireCheckoutSessionService()
@@ -135,6 +173,8 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 		Mode:           req.Mode,
 		Metadata:       req.Metadata,
 		IdempotencyKey: req.IdempotencyKey,
+		SuccessURL:     req.SuccessURL,
+		CancelURL:      req.CancelURL,
 		Payment: checkout.CheckoutSessionPaymentRequest{
 			Rail:            req.Payment.Rail,
 			PaymentMethodID: req.Payment.PaymentMethodID,
@@ -157,7 +197,19 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	resp, err := checkoutSessions.CreateSession(ctx, svcReq, user)
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var createErr error
+		resp, createErr = checkoutSessions.CreateSession(scopedCtx, svcReq, user)
+		return createErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +232,19 @@ func (s *Service) GetCheckoutSession(ctx context.Context, userID string, session
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	resp, err := checkoutSessions.GetSession(ctx, sessionID, user)
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var getErr error
+		resp, getErr = checkoutSessions.GetSession(scopedCtx, sessionID, user)
+		return getErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +275,19 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	resp, err := checkoutSessions.ConfirmSession(ctx, sessionID, svcReq, user)
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var confirmErr error
+		resp, confirmErr = checkoutSessions.ConfirmSession(scopedCtx, sessionID, svcReq, user)
+		return confirmErr
+	})
 	if err != nil {
 		return nil, err
 	}

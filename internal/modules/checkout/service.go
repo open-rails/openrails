@@ -3013,7 +3013,7 @@ func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, er
 	if id, ok := lookup(target.PSP); ok {
 		return id, nil
 	}
-	if target.PSP != target.Rail {
+	if target.Scope == nil && target.PSP != target.Rail {
 		if id, ok := lookup(target.Rail); ok {
 			return id, nil
 		}
