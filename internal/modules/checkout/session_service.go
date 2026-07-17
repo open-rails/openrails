@@ -752,7 +752,6 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 		"new_price_id":         req.NewPriceID,
 		"price_id":             req.PriceID,
 		"mode":                 req.Mode,
-		"idempotency_key":      req.IdempotencyKey,
 	}
 	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
 		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)

@@ -90,3 +90,15 @@ func TestEqualOptionalUUID(t *testing.T) {
 		t.Fatal("different optional UUIDs matched")
 	}
 }
+
+func TestRejectCheckoutSessionPANIgnoresDerivedIdempotencyHash(t *testing.T) {
+	t.Parallel()
+
+	request := &CheckoutSessionCreateRequest{
+		Payment:        CheckoutSessionPaymentRequest{Rail: "nmi", PaymentToken: "safe-token"},
+		IdempotencyKey: scopeIdempotencyKey(uuid.NewString(), "checkout-92"),
+	}
+	if err := rejectCheckoutSessionPAN(request); err != nil {
+		t.Fatalf("derived idempotency hash rejected as pan: %v", err)
+	}
+}
