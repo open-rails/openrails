@@ -110,7 +110,7 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 				target += "?" + r.URL.RawQuery
 			}
 			operation := "http:" + r.Method + " " + target
-			storeKey := mid.String() + ":" + key
+			storeKey := mid.String() + ":" + hashIdempotencyKey(key)
 			fp := fingerprint(r.Method, target, body)
 			ctx := r.Context()
 
@@ -189,6 +189,11 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 			}
 		})
 	}
+}
+
+func hashIdempotencyKey(key string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	return hex.EncodeToString(sum[:])
 }
 
 // fingerprint hashes the request identity. target is path plus query string (#579)

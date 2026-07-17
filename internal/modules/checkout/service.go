@@ -1249,7 +1249,11 @@ func (s *CheckoutService) processStripeSubscription(
 	if stripePaidIntroUnsupported(price) {
 		return nil, errors.New("stripe paid introductory pricing is not supported")
 	}
-	trialEnd := stripeCheckoutTrialEnd(price, coverage, s.now())
+	trialAnchor := req.CheckoutStartedAt
+	if trialAnchor.IsZero() {
+		trialAnchor = s.now()
+	}
+	trialEnd := stripeCheckoutTrialEnd(price, coverage, trialAnchor)
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "subscription",
 		PriceID:           stripePriceID,
@@ -1261,6 +1265,7 @@ func (s *CheckoutService) processStripeSubscription(
 		InternalPriceID:   price.ID.String(),
 		TrialEnd:          trialEnd,
 		CheckoutSessionID: req.CheckoutSessionID,
+		IdempotencyKey:    req.IdempotencyKey,
 	})
 	if err != nil {
 		return nil, err
@@ -1323,6 +1328,7 @@ func (s *CheckoutService) processStripePayment(
 		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
 		CheckoutSessionID: req.CheckoutSessionID,
+		IdempotencyKey:    req.IdempotencyKey,
 	})
 	if err != nil {
 		return nil, err
@@ -1562,6 +1568,7 @@ type stripeCheckoutParams struct {
 	InternalPriceID   string
 	TrialEnd          int64
 	CheckoutSessionID string
+	IdempotencyKey    string
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
@@ -1606,6 +1613,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.Stripe.SecretKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
 	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
@@ -1631,6 +1639,15 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 		return "", errors.New("stripe checkout returned empty URL")
 	}
 	return out.URL, nil
+}
+
+func stripeCheckoutIdempotencyKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return "openrails-checkout-" + hex.EncodeToString(sum[:])
 }
 
 func parseStripeError(body []byte) string {
