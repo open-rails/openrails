@@ -89,6 +89,15 @@ type RecurringInfo struct {
 
 // -------------------------------- Checkout Sessions --------------------------------
 
+// CheckoutRailOption is a locally ready payment-provider choice for a price.
+// Selector is the exact value accepted by CheckoutPayment.Rail; Rail is the
+// canonical gateway and Mode is "one_off" or "subscription".
+type CheckoutRailOption struct {
+	Selector string
+	Rail     string
+	Mode     string
+}
+
 // CreateCheckoutSessionRequest specifies checkout session creation parameters.
 type CreateCheckoutSessionRequest struct {
 	PriceID        string
@@ -96,6 +105,8 @@ type CreateCheckoutSessionRequest struct {
 	Payment        CheckoutPayment
 	Metadata       map[string]string
 	IdempotencyKey string
+	SuccessURL     string // Required for Stripe hosted checkout
+	CancelURL      string // Required for Stripe hosted checkout
 }
 
 // CheckoutPayment specifies payment details for checkout.
