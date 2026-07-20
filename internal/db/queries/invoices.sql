@@ -108,7 +108,8 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
 ORDER BY period_from ASC;
 
 -- name: ListChargeableOpenInvoices :many
-SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due, s.auto_topup_payment_method_id
+SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
+       i.collection_failure_count, i.collection_failed_at, s.auto_topup_payment_method_id
 FROM openrails.invoices i
 JOIN openrails.money_settings s
   ON s.merchant_id = i.merchant_id
@@ -119,8 +120,29 @@ WHERE i.merchant_id = $1
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
   AND s.auto_topup_payment_method_id IS NOT NULL
+  AND (i.due_at IS NULL OR i.due_at <= sqlc.arg(now)::timestamptz)
+  AND (
+      (i.collection_failure_count = 0 AND i.next_collection_attempt_at IS NULL)
+      OR i.next_collection_attempt_at <= sqlc.arg(now)::timestamptz
+  )
   AND (sqlc.arg(min_threshold)::bigint <= 0 OR i.amount_due >= sqlc.arg(min_threshold)::bigint)
 ORDER BY i.due_at NULLS FIRST, i.created_at ASC;
+
+-- name: RecordInvoiceCollectionFailure :execrows
+UPDATE openrails.invoices
+SET collection_failure_count = collection_failure_count + 1,
+    collection_failed_at = COALESCE(collection_failed_at, sqlc.arg(now)::timestamptz),
+    status = CASE WHEN sqlc.arg(terminal)::boolean THEN 'uncollectible' ELSE 'past_due' END,
+    next_collection_attempt_at = sqlc.narg(next_attempt_at)::timestamptz,
+    last_collection_failure_code = sqlc.narg(failure_code),
+    last_collection_failure_message = sqlc.narg(failure_message),
+    uncollectible_at = CASE WHEN sqlc.arg(terminal)::boolean THEN sqlc.arg(now)::timestamptz ELSE NULL END,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = sqlc.arg(invoice_id)
+  AND status IN ('open', 'past_due')
+  AND collection_failure_count = sqlc.arg(expected_failure_count)::integer;
 
 -- name: MarkInvoicesPastDue :execrows
 -- #798: net-N receivables whose due date has passed become past_due. The
@@ -167,6 +189,7 @@ SET amount_paid = amount_paid + sqlc.arg(snapshot)::bigint,
     amount_due = GREATEST(0, amount_due - sqlc.arg(snapshot)::bigint),
     status = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN 'paid' ELSE status END,
     paid_at = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
+    next_collection_attempt_at = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN NULL ELSE next_collection_attempt_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
   AND status IN ('open', 'past_due')
@@ -183,11 +206,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
-    failure_code, failure_message, attempted_at, settled_at, created_at, updated_at
+    failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(ledger_transfer_id),
     sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.narg(rail),
-    sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_message),
+    sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(failure_message),
     sqlc.arg(attempted_at), sqlc.narg(settled_at), sqlc.arg(created_at), sqlc.arg(updated_at)
 );
 

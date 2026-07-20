@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -195,6 +196,8 @@ type invoiceArrearsAccount struct {
 	CustomerID      uuid.UUID
 	Currency        string
 	AmountDue       int64
+	FailureCount    int32
+	FirstFailureAt  *time.Time
 	PaymentMethodID *uuid.UUID
 }
 
@@ -215,7 +218,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 	}
 	tenantID := tid.UUID()
 	invoiceRows, err := s.db.Gen(ctx).ListChargeableOpenInvoices(ctx, gen.ListChargeableOpenInvoicesParams{
-		MerchantID: tenantID, MinThreshold: minThreshold,
+		MerchantID: tenantID, Now: s.now(), MinThreshold: minThreshold,
 	})
 	if err != nil {
 		return 0, err
@@ -228,6 +231,8 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 			CustomerID:      r.CustomerID,
 			Currency:        r.Currency,
 			AmountDue:       r.AmountDue,
+			FailureCount:    r.CollectionFailureCount,
+			FirstFailureAt:  r.CollectionFailedAt,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
 		})
 		if err != nil {
@@ -297,7 +302,8 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	}
 	now := s.now()
 	if res.Declined {
-		if err := s.recordInvoicePaymentAttempt(ctx, r, nil, "failed", optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, now); err != nil {
+		action := invoiceCollectionAction(res.Rail, res.FailureCode, r.FailureCount, r.FirstFailureAt, now)
+		if err := s.recordInvoiceCollectionFailure(ctx, r, optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, action, now); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -385,21 +391,37 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	return charged, nil
 }
 
-func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, rail, railPaymentID, failureCode, failureMessage *string, now time.Time) error {
+func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, r invoiceArrearsAccount, rail, railPaymentID, failureCode, failureMessage *string, action invoiceCollectionFailureAction, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return gen.New(tx).InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+		q := gen.New(tx)
+		updated, err := q.RecordInvoiceCollectionFailure(ctx, gen.RecordInvoiceCollectionFailureParams{
+			MerchantID:           r.MerchantID,
+			CustomerID:           r.CustomerID,
+			InvoiceID:            r.InvoiceID,
+			ExpectedFailureCount: r.FailureCount,
+			Terminal:             action.terminal,
+			NextAttemptAt:        action.nextAttemptAt,
+			FailureCode:          failureCode,
+			FailureMessage:       failureMessage,
+			Now:                  now,
+		})
+		if err != nil || updated == 0 {
+			return err
+		}
+		failureReason := payments.NormalizeFailureReason(derefStr(rail), derefStr(failureCode))
+		return q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:               uuidutil.NewV7(),
 			MerchantID:       r.MerchantID,
 			CustomerID:       r.CustomerID,
 			InvoiceID:        r.InvoiceID,
-			LedgerTransferID: trxID,
 			Currency:         normalizeCurrency(r.Currency),
 			Amount:           r.AmountDue,
-			Status:           status,
+			Status:           "failed",
 			Rail:             rail,
 			RailPaymentID:    railPaymentID,
 			FailureCode:      failureCode,
 			FailureMessage:   failureMessage,
+			FailureReason:    &failureReason,
 			AttemptedAt:      now,
 			CreatedAt:        now,
 			UpdatedAt:        now,
