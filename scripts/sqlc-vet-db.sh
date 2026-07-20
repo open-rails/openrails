@@ -36,7 +36,7 @@ done
 # fails the whole build at 0007 with "schema profiles does not exist".
 psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f internal/db/schema/profiles_shim.sql 1>&2
 for f in $(ls migrations/postgres/*.up.sql | sort -V); do
-    psql "$VET_URL" -v ON_ERROR_STOP=1 -q -f "$f" 1>&2
+    psql "$VET_URL" -v ON_ERROR_STOP=1 -q -1 -f "$f" 1>&2
 done
 
 printf '%s\n' "$VET_URL"

@@ -189,6 +189,122 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 	require.Zero(t, outstanding)
 }
 
+func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *testing.T) {
+	svc, pool, payer, _, ctx := moneyInEnv(t)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+	})
+
+	created, err := svc.EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+		CollectionMethod: money.CollectionChargeAutomatically,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+
+	require.NoError(t, svc.SetCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+		NetTermsDays:     30,
+		CollectionMethod: money.CollectionSendInvoice,
+		Memo:             "operator terms",
+	}))
+
+	created, err = svc.EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+		CollectionMethod: money.CollectionChargeAutomatically,
+	})
+	require.NoError(t, err)
+	require.False(t, created)
+
+	got, err := svc.GetCustomerInvoiceProfile(ctx, payer)
+	require.NoError(t, err)
+	require.Equal(t, 30, got.NetTermsDays)
+	require.Equal(t, money.CollectionSendInvoice, got.CollectionMethod)
+	require.Equal(t, "operator terms", got.Memo)
+
+	_, err = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := svc.EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+			CollectionMethod: money.CollectionChargeAutomatically,
+		})
+		errs <- err
+	}()
+	go func() {
+		<-start
+		errs <- svc.SetCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+			NetTermsDays:     45,
+			CollectionMethod: money.CollectionSendInvoice,
+			Memo:             "concurrent operator terms",
+		})
+	}()
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	got, err = svc.GetCustomerInvoiceProfile(ctx, payer)
+	require.NoError(t, err)
+	require.Equal(t, 45, got.NetTermsDays)
+	require.Equal(t, money.CollectionSendInvoice, got.CollectionMethod)
+	require.Equal(t, "concurrent operator terms", got.Memo)
+
+	_, err = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+	require.NoError(t, err)
+	type ensureResult struct {
+		created bool
+		err     error
+	}
+	results := make(chan ensureResult, 2)
+	start = make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			created, err := svc.EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+				CollectionMethod: money.CollectionChargeAutomatically,
+			})
+			results <- ensureResult{created: created, err: err}
+		}()
+	}
+	close(start)
+	createdCount := 0
+	for range 2 {
+		result := <-results
+		require.NoError(t, result.err)
+		if result.created {
+			createdCount++
+		}
+	}
+	require.Equal(t, 1, createdCount)
+}
+
+func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *testing.T) {
+	svc, pool, _, _, ctx := moneyInEnv(t)
+	foreignMerchantID := uuid.New()
+	foreignPayer := identity.CustomerIDFromString(uuid.NewString())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", foreignPayer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", foreignMerchantID)
+	})
+
+	_, err := pool.Exec(ctx,
+		"INSERT INTO openrails.merchants (id, slug) VALUES ($1, $2)",
+		foreignMerchantID, "foreign-profile-"+uuid.NewString()[:8],
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		"INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)",
+		foreignPayer.UUID(), foreignMerchantID, foreignPayer.UUID().String(),
+	)
+	require.NoError(t, err)
+
+	profile := money.CustomerInvoiceProfile{CollectionMethod: money.CollectionChargeAutomatically}
+	created, err := svc.EnsureCustomerInvoiceProfile(ctx, foreignPayer, profile)
+	require.ErrorContains(t, err, "payer belongs to another merchant")
+	require.False(t, created)
+	require.ErrorContains(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), "payer belongs to another merchant")
+}
+
 // TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals pins the #798
 // fix: finalizing a window that ENDED in the past (the previous-month close)
 // must rate + ATTACH that window's usage — accruals are stamped with their

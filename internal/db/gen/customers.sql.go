@@ -76,6 +76,24 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
+const lockCustomerForMerchant = `-- name: LockCustomerForMerchant :one
+SELECT id FROM openrails.customers
+WHERE id = $1 AND merchant_id = $2
+FOR UPDATE
+`
+
+type LockCustomerForMerchantParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) LockCustomerForMerchant(ctx context.Context, arg LockCustomerForMerchantParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCustomerForMerchant, arg.ID, arg.MerchantID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lookupCustomerIDsBySubjects = `-- name: LookupCustomerIDsBySubjects :many
 SELECT id, subject FROM openrails.customers
 WHERE merchant_id = $1
