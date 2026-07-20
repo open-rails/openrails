@@ -122,7 +122,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 		return err
 	}
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		_, e := s.db.Pool().Exec(ctx, `
+		_, e := s.db.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit)
 VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''))
 ON CONFLICT (merchant_id, key) DO UPDATE
