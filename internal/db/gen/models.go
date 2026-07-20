@@ -773,6 +773,17 @@ type OpenrailsPaymentMethod struct {
 	ParkedAt *time.Time
 }
 
+// Durable host-consumption queue for real successful payments; consumers ack after idempotent processing.
+type OpenrailsPaymentSettlementEvent struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	PaymentID   uuid.UUID
+	Amount      int64
+	Currency    string
+	SettledAt   time.Time
+	DeliveredAt *time.Time
+}
+
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
 	ID        uuid.UUID
