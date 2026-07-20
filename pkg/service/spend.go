@@ -16,6 +16,9 @@ var (
 	ErrInvoiceNotRetryable             = money.ErrInvoiceNotRetryable
 	ErrCollectionPaymentMethodRequired = money.ErrCollectionPaymentMethodRequired
 	ErrCollectionPaymentMethodInvalid  = money.ErrCollectionPaymentMethodInvalid
+	ErrInvoiceRetryInProgress          = money.ErrInvoiceRetryInProgress
+	ErrInvoiceRetryOutcomeUnknown      = money.ErrInvoiceRetryOutcomeUnknown
+	ErrInvoiceRetryIdempotencyConflict = money.ErrInvoiceRetryIdempotencyConflict
 )
 
 // CreditAccountSnapshot is the balance + policy view of an payer's credit
@@ -191,6 +194,18 @@ type InvoicePaymentAttemptDTO struct {
 	FailureReason   *string    `json:"failure_reason,omitempty"`
 	AttemptedAt     time.Time  `json:"attempted_at"`
 	SettledAt       *time.Time `json:"settled_at,omitempty"`
+}
+
+type InvoiceCollectionRetryRequest struct {
+	InvoiceID       uuid.UUID `json:"invoice_id"`
+	IdempotencyKey  string    `json:"-"`
+	PaymentMethodID uuid.UUID `json:"payment_method_id"`
+}
+
+type InvoiceCollectionRetryResult struct {
+	Invoice  InvoiceDTO               `json:"invoice"`
+	Attempt  InvoicePaymentAttemptDTO `json:"attempt"`
+	Replayed bool                     `json:"replayed"`
 }
 
 // InvoiceContactDTO is one billing contact on an invoice document (#798).
@@ -392,6 +407,38 @@ func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.Cus
 		}
 		dto := invoiceToDTO(invoice)
 		out = &dto
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RetryInvoiceCollectionIdempotent retries collection with a durable client
+// key and an explicitly bound payer-owned saved method.
+func (s *Service) RetryInvoiceCollectionIdempotent(ctx context.Context, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.MoneyCharger == nil {
+		return nil, fmt.Errorf("invoice collection charger not configured")
+	}
+	var out *InvoiceCollectionRetryResult
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		result, err := s.moneyService().RetryInvoiceCollectionIdempotent(ctx, rt.MoneyCharger, payer, money.InvoiceCollectionRetryRequest{
+			InvoiceID: request.InvoiceID, IdempotencyKey: request.IdempotencyKey, PaymentMethodID: request.PaymentMethodID,
+		})
+		if err != nil {
+			return err
+		}
+		out = &InvoiceCollectionRetryResult{
+			Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Replayed: result.Replayed,
+		}
 		return nil
 	})
 	if err != nil {

@@ -5,9 +5,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
+
+func TestInvoiceRetryIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	invoiceID := uuid.New()
+	key := invoiceRetryIdempotencyKey(invoiceID, "client-key")
+	if len(key) > 50 {
+		t.Fatalf("provider key length = %d, want at most 50", len(key))
+	}
+	if key != invoiceRetryIdempotencyKey(invoiceID, "client-key") {
+		t.Fatal("provider key is not deterministic")
+	}
+	if key == invoiceRetryIdempotencyKey(uuid.New(), "client-key") {
+		t.Fatal("provider key does not include invoice scope")
+	}
+	methodID := uuid.New()
+	if attemptKey := invoiceRetryAttemptKey(key, methodID); attemptKey != key+":"+methodID.String() {
+		t.Fatalf("attempt key = %q, want immutable method binding", attemptKey)
+	}
+}
 
 func TestInvoiceCollectionRetryable(t *testing.T) {
 	t.Parallel()

@@ -421,6 +421,104 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 	return i, err
 }
 
+const getInvoicePaymentAttemptByClientKey = `-- name: GetInvoicePaymentAttemptByClientKey :one
+SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND idempotency_key LIKE $4 || ':%'
+LIMIT 1
+`
+
+type GetInvoicePaymentAttemptByClientKeyParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+	ClientKey  *string
+}
+
+func (q *Queries) GetInvoicePaymentAttemptByClientKey(ctx context.Context, arg GetInvoicePaymentAttemptByClientKeyParams) (OpenrailsInvoicePayment, error) {
+	row := q.db.QueryRow(ctx, getInvoicePaymentAttemptByClientKey,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.ClientKey,
+	)
+	var i OpenrailsInvoicePayment
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.InvoiceID,
+		&i.LedgerTransferID,
+		&i.Currency,
+		&i.Amount,
+		&i.Status,
+		&i.Rail,
+		&i.RailPaymentID,
+		&i.FailureCode,
+		&i.FailureMessage,
+		&i.AttemptedAt,
+		&i.SettledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.FailureReason,
+		&i.PaymentMethodID,
+		&i.IdempotencyKey,
+	)
+	return i, err
+}
+
+const getInvoicePaymentAttemptByKey = `-- name: GetInvoicePaymentAttemptByKey :one
+SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND idempotency_key = $4
+LIMIT 1
+`
+
+type GetInvoicePaymentAttemptByKeyParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	InvoiceID      uuid.UUID
+	IdempotencyKey *string
+}
+
+func (q *Queries) GetInvoicePaymentAttemptByKey(ctx context.Context, arg GetInvoicePaymentAttemptByKeyParams) (OpenrailsInvoicePayment, error) {
+	row := q.db.QueryRow(ctx, getInvoicePaymentAttemptByKey,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.IdempotencyKey,
+	)
+	var i OpenrailsInvoicePayment
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.InvoiceID,
+		&i.LedgerTransferID,
+		&i.Currency,
+		&i.Amount,
+		&i.Status,
+		&i.Rail,
+		&i.RailPaymentID,
+		&i.FailureCode,
+		&i.FailureMessage,
+		&i.AttemptedAt,
+		&i.SettledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.FailureReason,
+		&i.PaymentMethodID,
+		&i.IdempotencyKey,
+	)
+	return i, err
+}
+
 const insertInvoice = `-- name: InsertInvoice :exec
 INSERT INTO openrails.invoices (
     id, merchant_id, customer_id, currency,
