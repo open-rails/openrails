@@ -231,6 +231,22 @@ INSERT INTO openrails.invoice_payments (
     sqlc.narg(payment_method_id), sqlc.narg(idempotency_key)
 );
 
+-- name: GetInvoicePaymentAttemptByKey :one
+SELECT * FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND idempotency_key = sqlc.arg(idempotency_key)
+LIMIT 1;
+
+-- name: GetInvoicePaymentAttemptByClientKey :one
+SELECT * FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND idempotency_key LIKE sqlc.arg(client_key) || ':%'
+LIMIT 1;
+
 -- name: DeleteClaimedInvoicePaymentAttempt :execrows
 DELETE FROM openrails.invoice_payments
 WHERE merchant_id = $1

@@ -74,6 +74,56 @@ func TestInvoiceRecovery_SelectsSeparateMethodAndSettles(t *testing.T) {
 	require.Equal(t, "failed", attempts[1].Status)
 }
 
+func TestInvoiceRecovery_IdempotentRetryBindsMethodAndReplays(t *testing.T) {
+	svc, pool, payer, currency, ctx := moneyInEnv(t)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+	})
+	defaultMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
+	boundMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
+	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
+		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &defaultMethod,
+	})
+	require.NoError(t, err)
+	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "recovery-idempotent", 5_000_000)
+	require.NoError(t, err)
+	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
+	require.NoError(t, err)
+	_, err = svc.ChargeOutstanding(ctx, &fakeCharger{declineAll: true}, 0)
+	require.NoError(t, err)
+
+	request := money.InvoiceCollectionRetryRequest{
+		InvoiceID: invoice.ID, IdempotencyKey: "client-retry-key", PaymentMethodID: boundMethod,
+	}
+	charger := &fakeCharger{}
+	result, err := svc.RetryInvoiceCollectionIdempotent(ctx, charger, payer, request)
+	require.NoError(t, err)
+	require.False(t, result.Replayed)
+	require.Equal(t, "paid", result.Invoice.Status)
+	require.Equal(t, "settled", result.Attempt.Status)
+	require.Equal(t, boundMethod, *result.Attempt.PaymentMethodID)
+	require.Len(t, charger.charges, 1)
+	require.Equal(t, boundMethod, charger.charges[0].PaymentMethodID)
+
+	replayCharger := &fakeCharger{}
+	replayed, err := svc.RetryInvoiceCollectionIdempotent(ctx, replayCharger, payer, request)
+	require.NoError(t, err)
+	require.True(t, replayed.Replayed)
+	require.Equal(t, result.Attempt.ID, replayed.Attempt.ID)
+	require.Empty(t, replayCharger.charges)
+
+	request.PaymentMethodID = defaultMethod
+	_, err = svc.RetryInvoiceCollectionIdempotent(ctx, replayCharger, payer, request)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryIdempotencyConflict)
+
+	_, err = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", boundMethod)
+	require.NoError(t, err)
+	_, err = svc.RetryInvoiceCollectionIdempotent(ctx, replayCharger, payer, request)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryIdempotencyConflict)
+}
+
 func TestInvoiceRecovery_AmbiguousOutcomeBlocksFurtherRetries(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
@@ -93,9 +143,12 @@ func TestInvoiceRecovery_AmbiguousOutcomeBlocksFurtherRetries(t *testing.T) {
 	_, err = svc.ChargeOutstanding(ctx, &fakeCharger{declineAll: true}, 0)
 	require.NoError(t, err)
 
+	request := money.InvoiceCollectionRetryRequest{
+		InvoiceID: invoice.ID, IdempotencyKey: "ambiguous-retry-key", PaymentMethodID: method,
+	}
 	ambiguous := &fakeCharger{ambiguous: true}
-	_, err = svc.RetryInvoiceCollection(ctx, ambiguous, payer, invoice.ID)
-	require.Error(t, err)
+	_, err = svc.RetryInvoiceCollectionIdempotent(ctx, ambiguous, payer, request)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryOutcomeUnknown)
 	require.Len(t, ambiguous.charges, 1)
 
 	blocked, err := svc.GetInvoiceByID(ctx, payer, invoice.ID)
@@ -113,8 +166,11 @@ func TestInvoiceRecovery_AmbiguousOutcomeBlocksFurtherRetries(t *testing.T) {
 	require.Nil(t, attempts[0].FailureReason)
 
 	second := &fakeCharger{}
-	_, err = svc.RetryInvoiceCollection(ctx, second, payer, invoice.ID)
-	require.ErrorIs(t, err, money.ErrInvoiceNotRetryable)
+	_, err = svc.RetryInvoiceCollectionIdempotent(ctx, second, payer, request)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryOutcomeUnknown)
+	request.IdempotencyKey = "different-key"
+	_, err = svc.RetryInvoiceCollectionIdempotent(ctx, second, payer, request)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryOutcomeUnknown)
 	require.Empty(t, second.charges)
 }
 

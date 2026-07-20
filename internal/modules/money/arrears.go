@@ -304,9 +304,9 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		defer cancel()
 		if isCollectionOutcomeAmbiguous(err) {
 			if recordErr := s.markInvoiceCollectionOutcomeUnknown(cleanupCtx, claim, s.now()); recordErr != nil {
-				return false, errors.Join(err, recordErr)
+				return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err, recordErr)
 			}
-			return false, err
+			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
 		}
 		if releaseErr := s.releaseInvoiceCollectionClaim(cleanupCtx, claim, s.now()); releaseErr != nil {
 			return false, errors.Join(err, releaseErr)
@@ -322,9 +322,9 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 			markCtx, markCancel := collectionCleanupContext(ctx)
 			defer markCancel()
 			if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
-				return false, errors.Join(err, markErr)
+				return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err, markErr)
 			}
-			return false, err
+			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
 		}
 		return false, nil
 	}
@@ -416,9 +416,9 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		markCtx, markCancel := collectionCleanupContext(ctx)
 		defer markCancel()
 		if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
-			return false, errors.Join(err, markErr)
+			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err, markErr)
 		}
-		return false, err
+		return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
 	}
 	return charged, nil
 }
