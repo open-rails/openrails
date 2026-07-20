@@ -59,6 +59,30 @@ func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.
 	})
 }
 
+// EnsureCustomerInvoiceProfile inserts a payer's invoicing profile when none
+// is stored. Existing operator configuration is left unchanged. The returned
+// boolean is true only when this call committed a new profile.
+func (s *Service) EnsureCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p InvoiceProfileDTO) (bool, error) {
+	if s == nil || s.rt == nil {
+		return false, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return false, fmt.Errorf("payer required")
+	}
+	contacts := make([]models.InvoiceContact, 0, len(p.BillingContacts))
+	for _, c := range p.BillingContacts {
+		contacts = append(contacts, models.InvoiceContact{Name: c.Name, Email: c.Email})
+	}
+	return s.moneyService().EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
+		NetTermsDays:     p.NetTermsDays,
+		CollectionMethod: p.CollectionMethod,
+		PONumber:         p.PONumber,
+		Tax:              p.Tax,
+		BillingContacts:  contacts,
+		Memo:             p.Memo,
+	})
+}
+
 // GetCustomerInvoiceProfile returns a payer's invoicing profile (nil = none).
 func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*InvoiceProfileDTO, error) {
 	if s == nil || s.rt == nil {

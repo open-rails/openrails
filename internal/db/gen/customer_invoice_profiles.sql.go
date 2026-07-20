@@ -41,6 +41,49 @@ func (q *Queries) GetCustomerInvoiceProfile(ctx context.Context, arg GetCustomer
 	return i, err
 }
 
+const insertCustomerInvoiceProfileIfAbsent = `-- name: InsertCustomerInvoiceProfileIfAbsent :execrows
+INSERT INTO openrails.customer_invoice_profiles (
+    merchant_id, customer_id, net_terms_days, collection_method,
+    po_number, tax, billing_contacts, memo, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, COALESCE($6, '{}'::jsonb),
+    COALESCE($7, '[]'::jsonb), $8,
+    $9::timestamptz, $9::timestamptz
+)
+ON CONFLICT (merchant_id, customer_id) DO NOTHING
+`
+
+type InsertCustomerInvoiceProfileIfAbsentParams struct {
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	NetTermsDays     int32
+	CollectionMethod string
+	PoNumber         *string
+	Tax              []byte
+	BillingContacts  []byte
+	Memo             *string
+	Now              time.Time
+}
+
+func (q *Queries) InsertCustomerInvoiceProfileIfAbsent(ctx context.Context, arg InsertCustomerInvoiceProfileIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertCustomerInvoiceProfileIfAbsent,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.NetTermsDays,
+		arg.CollectionMethod,
+		arg.PoNumber,
+		arg.Tax,
+		arg.BillingContacts,
+		arg.Memo,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertCustomerInvoiceProfile = `-- name: UpsertCustomerInvoiceProfile :exec
 
 INSERT INTO openrails.customer_invoice_profiles (

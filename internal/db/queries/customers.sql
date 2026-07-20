@@ -18,6 +18,11 @@ INSERT INTO openrails.customers (id, merchant_id, subject)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.arg(subject))
 ON CONFLICT DO NOTHING;
 
+-- name: LockCustomerForMerchant :one
+SELECT id FROM openrails.customers
+WHERE id = sqlc.arg(id) AND merchant_id = sqlc.arg(merchant_id)
+FOR UPDATE;
+
 -- name: LookupCustomerIDsBySubjects :many
 -- Resolve merchant-local stable host subjects to customer ids. Issuer is audit
 -- metadata only and never participates in identity.
