@@ -17,6 +17,8 @@ type PaymentSettlement struct {
 	ID         uuid.UUID
 	MerchantID merchant.ID
 	PaymentID  uuid.UUID
+	Amount     int64
+	Currency   string
 	SettledAt  time.Time
 }
 
@@ -26,7 +28,7 @@ func (c *ControlPlane) ListPendingPaymentSettlements(ctx context.Context, limit 
 		limit = 100
 	}
 	rows, err := c.pool.Query(ctx, `
-		SELECT id, merchant_id, payment_id, settled_at
+		SELECT id, merchant_id, payment_id, amount, currency, settled_at
 		  FROM openrails.payment_settlement_events
 		 WHERE delivered_at IS NULL
 		 ORDER BY id
@@ -41,7 +43,7 @@ func (c *ControlPlane) ListPendingPaymentSettlements(ctx context.Context, limit 
 	for rows.Next() {
 		var settlement PaymentSettlement
 		var merchantID uuid.UUID
-		if err := rows.Scan(&settlement.ID, &merchantID, &settlement.PaymentID, &settlement.SettledAt); err != nil {
+		if err := rows.Scan(&settlement.ID, &merchantID, &settlement.PaymentID, &settlement.Amount, &settlement.Currency, &settlement.SettledAt); err != nil {
 			return nil, fmt.Errorf("control plane: scan payment settlement: %w", err)
 		}
 		settlement.MerchantID = merchant.ID(merchantID)
