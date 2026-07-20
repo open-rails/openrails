@@ -121,11 +121,10 @@ func TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt(t *testing.T) 
 	require.Len(t, decl.charges, 1)
 	require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0", decl.charges[0].IdempotencyKey)
 
-	// Next run: the recorded failure advances the durable attempt count -> new key.
+	// Explicit retry: the recorded failure advances the durable attempt count -> new key.
 	ok := &fakeCharger{}
-	n, err = svc.ChargeOutstanding(ctx, ok, 0)
+	_, err = svc.RetryInvoiceCollection(ctx, ok, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, n)
 	require.Len(t, ok.charges, 1)
 	require.Equal(t, "invoice:"+inv.ID.String()+":attempt:1", ok.charges[0].IdempotencyKey)
 

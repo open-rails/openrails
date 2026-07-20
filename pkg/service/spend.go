@@ -12,6 +12,12 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
+var (
+	ErrInvoiceNotRetryable             = money.ErrInvoiceNotRetryable
+	ErrCollectionPaymentMethodRequired = money.ErrCollectionPaymentMethodRequired
+	ErrCollectionPaymentMethodInvalid  = money.ErrCollectionPaymentMethodInvalid
+)
+
 // CreditAccountSnapshot is the balance + policy view of an payer's credit
 // account, served by the authorize/balance route (issue #235).
 type CreditAccountSnapshot struct {
@@ -135,36 +141,56 @@ type InvoiceLineItemDTO struct {
 // #303), served by the customer-facing GET /v1/me/invoices[/:id] routes. It is
 // a public projection of models.Invoice so callers don't import internal types.
 type InvoiceDTO struct {
-	ID                uuid.UUID            `json:"id"`
-	Currency          string               `json:"currency"`
-	InvoiceNumber     *string              `json:"invoice_number,omitempty"`
-	PeriodFrom        time.Time            `json:"period_from"`
-	PeriodTo          time.Time            `json:"period_to"`
-	UsageTotal        int64                `json:"usage_total"`
-	DepositsTotal     int64                `json:"deposits_total"`
-	OwedAccrued       int64                `json:"owed_accrued"`
-	OwedPaid          int64                `json:"owed_paid"`
-	ClosingBalance    int64                `json:"closing_balance"`
-	SubtotalAmount    int64                `json:"subtotal_amount"`
-	TotalAmount       int64                `json:"total_amount"`
-	AmountPaid        int64                `json:"amount_paid"`
-	AmountDue         int64                `json:"amount_due"`
-	LineItems         []InvoiceLineItemDTO `json:"line_items"`
-	MoneyMovements    map[string]int64     `json:"money_movements,omitempty"`
-	PONumber          *string              `json:"po_number,omitempty"`
-	Tax               map[string]any       `json:"tax,omitempty"`
-	BillingContacts   []InvoiceContactDTO  `json:"billing_contacts,omitempty"`
-	Memo              *string              `json:"memo,omitempty"`
-	Status            string               `json:"status"`
-	CollectionMethod  string               `json:"collection_method"`
-	IssuedAt          *time.Time           `json:"issued_at,omitempty"`
-	DueAt             *time.Time           `json:"due_at,omitempty"`
-	PaidAt            *time.Time           `json:"paid_at,omitempty"`
-	VoidedAt          *time.Time           `json:"voided_at,omitempty"`
-	UncollectibleAt   *time.Time           `json:"uncollectible_at,omitempty"`
-	FinalizedAt       *time.Time           `json:"finalized_at,omitempty"`
-	ExternalInvoiceID *string              `json:"external_invoice_id,omitempty"`
-	CreatedAt         time.Time            `json:"created_at"`
+	ID                        uuid.UUID            `json:"id"`
+	Currency                  string               `json:"currency"`
+	InvoiceNumber             *string              `json:"invoice_number,omitempty"`
+	PeriodFrom                time.Time            `json:"period_from"`
+	PeriodTo                  time.Time            `json:"period_to"`
+	UsageTotal                int64                `json:"usage_total"`
+	DepositsTotal             int64                `json:"deposits_total"`
+	OwedAccrued               int64                `json:"owed_accrued"`
+	OwedPaid                  int64                `json:"owed_paid"`
+	ClosingBalance            int64                `json:"closing_balance"`
+	SubtotalAmount            int64                `json:"subtotal_amount"`
+	TotalAmount               int64                `json:"total_amount"`
+	AmountPaid                int64                `json:"amount_paid"`
+	AmountDue                 int64                `json:"amount_due"`
+	LineItems                 []InvoiceLineItemDTO `json:"line_items"`
+	MoneyMovements            map[string]int64     `json:"money_movements,omitempty"`
+	PONumber                  *string              `json:"po_number,omitempty"`
+	Tax                       map[string]any       `json:"tax,omitempty"`
+	BillingContacts           []InvoiceContactDTO  `json:"billing_contacts,omitempty"`
+	Memo                      *string              `json:"memo,omitempty"`
+	Status                    string               `json:"status"`
+	CollectionMethod          string               `json:"collection_method"`
+	IssuedAt                  *time.Time           `json:"issued_at,omitempty"`
+	DueAt                     *time.Time           `json:"due_at,omitempty"`
+	PaidAt                    *time.Time           `json:"paid_at,omitempty"`
+	VoidedAt                  *time.Time           `json:"voided_at,omitempty"`
+	UncollectibleAt           *time.Time           `json:"uncollectible_at,omitempty"`
+	FinalizedAt               *time.Time           `json:"finalized_at,omitempty"`
+	ExternalInvoiceID         *string              `json:"external_invoice_id,omitempty"`
+	CollectionFailureCount    int32                `json:"collection_failure_count"`
+	CollectionFailedAt        *time.Time           `json:"collection_failed_at,omitempty"`
+	NextCollectionAttemptAt   *time.Time           `json:"next_collection_attempt_at,omitempty"`
+	LastCollectionFailureCode *string              `json:"last_collection_failure_code,omitempty"`
+	CreatedAt                 time.Time            `json:"created_at"`
+}
+
+// InvoicePaymentAttemptDTO is one automatic collection attempt for an invoice.
+type InvoicePaymentAttemptDTO struct {
+	ID              uuid.UUID  `json:"id"`
+	InvoiceID       uuid.UUID  `json:"invoice_id"`
+	Currency        string     `json:"currency"`
+	Amount          int64      `json:"amount"`
+	Status          string     `json:"status"`
+	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
+	Rail            *string    `json:"rail,omitempty"`
+	RailPaymentID   *string    `json:"rail_payment_id,omitempty"`
+	FailureCode     *string    `json:"failure_code,omitempty"`
+	FailureReason   *string    `json:"failure_reason,omitempty"`
+	AttemptedAt     time.Time  `json:"attempted_at"`
+	SettledAt       *time.Time `json:"settled_at,omitempty"`
 }
 
 // InvoiceContactDTO is one billing contact on an invoice document (#798).
@@ -196,36 +222,57 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 		})
 	}
 	return InvoiceDTO{
-		ID:                inv.ID,
-		Currency:          inv.Currency,
-		InvoiceNumber:     inv.InvoiceNumber,
-		PeriodFrom:        inv.PeriodFrom,
-		PeriodTo:          inv.PeriodTo,
-		UsageTotal:        inv.UsageTotal,
-		DepositsTotal:     inv.DepositsTotal,
-		OwedAccrued:       inv.OwedAccrued,
-		OwedPaid:          inv.OwedPaid,
-		ClosingBalance:    inv.ClosingBalance,
-		SubtotalAmount:    inv.SubtotalAmount,
-		TotalAmount:       inv.TotalAmount,
-		AmountPaid:        inv.AmountPaid,
-		AmountDue:         inv.AmountDue,
-		LineItems:         items,
-		MoneyMovements:    inv.MoneyMovements,
-		PONumber:          inv.PONumber,
-		Tax:               inv.Tax,
-		BillingContacts:   contactsToDTO(inv.BillingContacts),
-		Memo:              inv.Memo,
-		Status:            inv.Status,
-		CollectionMethod:  inv.CollectionMethod,
-		IssuedAt:          inv.IssuedAt,
-		DueAt:             inv.DueAt,
-		PaidAt:            inv.PaidAt,
-		VoidedAt:          inv.VoidedAt,
-		UncollectibleAt:   inv.UncollectibleAt,
-		FinalizedAt:       inv.FinalizedAt,
-		ExternalInvoiceID: inv.ExternalInvoiceID,
-		CreatedAt:         inv.CreatedAt,
+		ID:                        inv.ID,
+		Currency:                  inv.Currency,
+		InvoiceNumber:             inv.InvoiceNumber,
+		PeriodFrom:                inv.PeriodFrom,
+		PeriodTo:                  inv.PeriodTo,
+		UsageTotal:                inv.UsageTotal,
+		DepositsTotal:             inv.DepositsTotal,
+		OwedAccrued:               inv.OwedAccrued,
+		OwedPaid:                  inv.OwedPaid,
+		ClosingBalance:            inv.ClosingBalance,
+		SubtotalAmount:            inv.SubtotalAmount,
+		TotalAmount:               inv.TotalAmount,
+		AmountPaid:                inv.AmountPaid,
+		AmountDue:                 inv.AmountDue,
+		LineItems:                 items,
+		MoneyMovements:            inv.MoneyMovements,
+		PONumber:                  inv.PONumber,
+		Tax:                       inv.Tax,
+		BillingContacts:           contactsToDTO(inv.BillingContacts),
+		Memo:                      inv.Memo,
+		Status:                    inv.Status,
+		CollectionMethod:          inv.CollectionMethod,
+		IssuedAt:                  inv.IssuedAt,
+		DueAt:                     inv.DueAt,
+		PaidAt:                    inv.PaidAt,
+		VoidedAt:                  inv.VoidedAt,
+		UncollectibleAt:           inv.UncollectibleAt,
+		FinalizedAt:               inv.FinalizedAt,
+		ExternalInvoiceID:         inv.ExternalInvoiceID,
+		CollectionFailureCount:    inv.CollectionFailureCount,
+		CollectionFailedAt:        inv.CollectionFailedAt,
+		NextCollectionAttemptAt:   inv.NextCollectionAttemptAt,
+		LastCollectionFailureCode: inv.LastCollectionFailureCode,
+		CreatedAt:                 inv.CreatedAt,
+	}
+}
+
+func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePaymentAttemptDTO {
+	return InvoicePaymentAttemptDTO{
+		ID:              attempt.ID,
+		InvoiceID:       attempt.InvoiceID,
+		Currency:        attempt.Currency,
+		Amount:          attempt.Amount,
+		Status:          attempt.Status,
+		PaymentMethodID: attempt.PaymentMethodID,
+		Rail:            attempt.Rail,
+		RailPaymentID:   attempt.RailPaymentID,
+		FailureCode:     attempt.FailureCode,
+		FailureReason:   attempt.FailureReason,
+		AttemptedAt:     attempt.AttemptedAt,
+		SettledAt:       attempt.SettledAt,
 	}
 }
 
@@ -272,6 +319,78 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id 
 			return err
 		}
 		dto := invoiceToDTO(inv)
+		out = &dto
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListInvoicePaymentAttempts returns one payer-owned invoice's collection
+// history, newest attempt first, plus the total count for pagination.
+func (s *Service) ListInvoicePaymentAttempts(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, limit, offset int) ([]InvoicePaymentAttemptDTO, int, error) {
+	if s == nil || s.rt == nil {
+		return nil, 0, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, 0, fmt.Errorf("payer required")
+	}
+	var out []InvoicePaymentAttemptDTO
+	var total int
+	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		attempts, count, err := s.moneyService().ListInvoicePaymentAttempts(ctx, payer, invoiceID, limit, offset)
+		if err != nil {
+			return err
+		}
+		total = count
+		out = make([]InvoicePaymentAttemptDTO, 0, len(attempts))
+		for _, attempt := range attempts {
+			out = append(out, invoicePaymentAttemptToDTO(attempt))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// SetInvoiceCollectionPaymentMethod selects the payer-owned saved method used
+// for automatic invoice collection in one billing currency.
+func (s *Service) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer identity.CustomerID, currency string, paymentMethodID uuid.UUID) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return s.moneyService().SetInvoiceCollectionPaymentMethod(ctx, payer, currency, paymentMethodID)
+	})
+}
+
+// RetryInvoiceCollection reopens a failed automatic-collection invoice and
+// immediately retries it through the configured runtime collection plane.
+func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID) (*InvoiceDTO, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.MoneyCharger == nil {
+		return nil, fmt.Errorf("invoice collection charger not configured")
+	}
+	var out *InvoiceDTO
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		invoice, err := s.moneyService().RetryInvoiceCollection(ctx, rt.MoneyCharger, payer, invoiceID)
+		if err != nil {
+			return err
+		}
+		dto := invoiceToDTO(invoice)
 		out = &dto
 		return nil
 	})

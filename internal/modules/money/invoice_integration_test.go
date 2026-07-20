@@ -142,7 +142,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	require.NotNil(t, paid.PaidAt)
 }
 
-func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T) {
+func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
@@ -171,11 +171,11 @@ func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1)
 
-	stillOpen, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "open", stillOpen.Status)
-	require.Equal(t, int64(500), stillOpen.AmountDue)
-	require.Equal(t, int64(0), stillOpen.AmountPaid)
+	require.Equal(t, "past_due", pastDue.Status)
+	require.Equal(t, int64(500), pastDue.AmountDue)
+	require.Equal(t, int64(0), pastDue.AmountPaid)
 	var failedAttempts int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)

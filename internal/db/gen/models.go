@@ -430,8 +430,13 @@ type OpenrailsInvoice struct {
 	// #798 tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.
 	Tax []byte
 	// #798 billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.
-	BillingContacts []byte
-	Memo            *string
+	BillingContacts              []byte
+	Memo                         *string
+	CollectionFailureCount       int32
+	CollectionFailedAt           *time.Time
+	NextCollectionAttemptAt      *time.Time
+	LastCollectionFailureCode    *string
+	LastCollectionFailureMessage *string
 }
 
 // Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
@@ -470,7 +475,10 @@ type OpenrailsInvoicePayment struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	// PSP used for this invoice payment attempt or settled provider payment.
-	PspID *uuid.UUID
+	PspID           *uuid.UUID
+	FailureReason   *string
+	PaymentMethodID *uuid.UUID
+	IdempotencyKey  *string
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -648,7 +656,8 @@ type OpenrailsMoneySetting struct {
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
-	CreditLimitAmount int64
+	CreditLimitAmount         int64
+	CollectionPaymentMethodID *uuid.UUID
 }
 
 // Queue for user notifications related to billing and subscriptions

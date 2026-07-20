@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -195,7 +195,16 @@ type invoiceArrearsAccount struct {
 	CustomerID      uuid.UUID
 	Currency        string
 	AmountDue       int64
+	FailureCount    int32
+	FirstFailureAt  *time.Time
 	PaymentMethodID *uuid.UUID
+}
+
+type invoiceCollectionClaim struct {
+	account        invoiceArrearsAccount
+	previous       *models.Invoice
+	attemptID      uuid.UUID
+	idempotencyKey string
 }
 
 // ChargeOutstanding collects open/past-due invoice receivables by charging the
@@ -214,26 +223,29 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		return 0, err
 	}
 	tenantID := tid.UUID()
+	if err := s.expireStaleInvoiceCollectionRetryClaims(ctx, tenantID, s.now()); err != nil {
+		return 0, err
+	}
 	invoiceRows, err := s.db.Gen(ctx).ListChargeableOpenInvoices(ctx, gen.ListChargeableOpenInvoicesParams{
-		MerchantID: tenantID, MinThreshold: minThreshold,
+		MerchantID: tenantID, Now: s.now(), MinThreshold: minThreshold,
 	})
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, r := range invoiceRows {
-		ok, err := s.chargeOneOpenInvoice(ctx, charger, invoiceArrearsAccount{
-			InvoiceID:       r.ID,
-			MerchantID:      r.MerchantID,
-			CustomerID:      r.CustomerID,
-			Currency:        r.Currency,
-			AmountDue:       r.AmountDue,
-			PaymentMethodID: r.AutoTopupPaymentMethodID,
-		})
+		claim, ok, err := s.claimInvoiceCollection(ctx, identity.CustomerID(r.CustomerID), r.ID, minThreshold, false, s.now())
 		if err != nil {
 			return count, err
 		}
-		if ok {
+		if !ok {
+			continue
+		}
+		charged, err := s.chargeClaimedInvoice(ctx, charger, claim)
+		if err != nil {
+			return count, err
+		}
+		if charged {
 			count++
 		}
 	}
@@ -256,7 +268,11 @@ func (s *MoneyService) arrearsExposureTx(ctx context.Context, q *gen.Queries, me
 	return openDue + pendingDue, nil
 }
 
-func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger, r invoiceArrearsAccount) (bool, error) {
+func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger, claim *invoiceCollectionClaim) (bool, error) {
+	if claim == nil {
+		return false, fmt.Errorf("invoice collection claim required")
+	}
+	r := claim.account
 	payer := identity.CustomerID(r.CustomerID)
 	snapshot := r.AmountDue
 	if snapshot <= 0 || r.PaymentMethodID == nil {
@@ -265,21 +281,12 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
 		return false, nil
 	}
-	// #674 hardening: key by invoice + durable attempt identity (count of recorded
-	// invoice_payments rows), NOT the mutable amount_due snapshot. A crash between
-	// provider success and the recording tx leaves the count unchanged, so a retry
-	// replays the SAME provider idempotency key instead of re-charging under a
-	// fresh one.
-	var attempts int64
-	if err := s.db.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.invoice_payments WHERE merchant_id = $1 AND invoice_id = $2`,
-		r.MerchantID, r.InvoiceID).Scan(&attempts); err != nil {
-		return false, err
-	}
-	key := fmt.Sprintf("invoice:%s:attempt:%d", r.InvoiceID, attempts)
+	key := claim.idempotencyKey
 	chargeMinor, err := NativeToRailMinor(r.Currency, snapshot)
 	if err != nil {
-		return false, err
+		cleanupCtx, cancel := collectionCleanupContext(ctx)
+		defer cancel()
+		return false, errors.Join(err, s.releaseInvoiceCollectionClaim(cleanupCtx, claim, s.now()))
 	}
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		MerchantID:      r.MerchantID,
@@ -293,18 +300,37 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		Description:     fmt.Sprintf("invoice %s", r.InvoiceID.String()),
 	})
 	if err != nil {
+		cleanupCtx, cancel := collectionCleanupContext(ctx)
+		defer cancel()
+		if isCollectionOutcomeAmbiguous(err) {
+			if recordErr := s.markInvoiceCollectionOutcomeUnknown(cleanupCtx, claim, s.now()); recordErr != nil {
+				return false, errors.Join(err, recordErr)
+			}
+			return false, err
+		}
+		if releaseErr := s.releaseInvoiceCollectionClaim(cleanupCtx, claim, s.now()); releaseErr != nil {
+			return false, errors.Join(err, releaseErr)
+		}
 		return false, err
 	}
 	now := s.now()
+	cleanupCtx, cancel := collectionCleanupContext(ctx)
+	defer cancel()
 	if res.Declined {
-		if err := s.recordInvoicePaymentAttempt(ctx, r, nil, "failed", optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, now); err != nil {
+		action := invoiceCollectionAction(res.Rail, res.FailureCode, r.FailureCount, r.FirstFailureAt, now)
+		if err := s.recordInvoiceCollectionFailure(cleanupCtx, claim, optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, action, now); err != nil {
+			markCtx, markCancel := collectionCleanupContext(ctx)
+			defer markCancel()
+			if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
+				return false, errors.Join(err, markErr)
+			}
 			return false, err
 		}
 		return false, nil
 	}
 
 	charged := false
-	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(cleanupCtx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		n, uerr := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, InvoiceID: r.InvoiceID,
@@ -318,6 +344,16 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		// unless this key was already recorded, record the settled payment below —
 		// unapplied to amount_due — and alert for repair.
 		applied := n > 0
+		if !applied {
+			if _, err := q.MarkInvoiceCollectionOutcomeUnknown(ctx, gen.MarkInvoiceCollectionOutcomeUnknownParams{
+				MerchantID: r.MerchantID,
+				CustomerID: r.CustomerID,
+				InvoiceID:  r.InvoiceID,
+				Now:        now,
+			}); err != nil {
+				return err
+			}
+		}
 		if applied {
 			if externalInvoiceID := optionalString(res.ExternalInvoiceID); externalInvoiceID != nil {
 				if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{
@@ -337,39 +373,36 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		// Settle the arrears liability via the external charge. An existing
 		// owed-payment transfer at this attempt key means a previous/concurrent run
 		// already recorded this exact charge — done.
-		_, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+		storedTrx, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: cur,
 			TransferType: "owed_payment", Source: "invoice_charge", SourceID: sid,
 		})
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		storedTrx, err := ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
-		if err != nil {
-			return err
+		if errors.Is(err, pgx.ErrNoRows) {
+			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
+			if err != nil {
+				return err
+			}
 		}
 		rail := optionalRail(res.Rail)
 		railPaymentID := optionalString(res.TransactionID)
-		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:               uuidutil.NewV7(),
+		updated, err := q.SettleClaimedInvoicePaymentAttempt(ctx, gen.SettleClaimedInvoicePaymentAttemptParams{
 			MerchantID:       r.MerchantID,
 			CustomerID:       r.CustomerID,
 			InvoiceID:        r.InvoiceID,
+			AttemptID:        claim.attemptID,
 			LedgerTransferID: &storedTrx.ID,
-			Currency:         normalizeCurrency(r.Currency),
-			Amount:           snapshot,
-			Status:           "settled",
 			Rail:             rail,
 			RailPaymentID:    railPaymentID,
-			AttemptedAt:      now,
-			SettledAt:        &now,
-			CreatedAt:        now,
-			UpdatedAt:        now,
-		}); err != nil {
+			Now:              now,
+		})
+		if err != nil {
 			return err
+		}
+		if updated != 1 {
+			return fmt.Errorf("settle claimed invoice payment attempt: claim lost")
 		}
 		charged = true
 		if !applied {
@@ -380,31 +413,70 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 		return nil
 	})
 	if err != nil {
+		markCtx, markCancel := collectionCleanupContext(ctx)
+		defer markCancel()
+		if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
+			return false, errors.Join(err, markErr)
+		}
 		return false, err
 	}
 	return charged, nil
 }
 
-func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, rail, railPaymentID, failureCode, failureMessage *string, now time.Time) error {
-	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return gen.New(tx).InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:               uuidutil.NewV7(),
-			MerchantID:       r.MerchantID,
-			CustomerID:       r.CustomerID,
-			InvoiceID:        r.InvoiceID,
-			LedgerTransferID: trxID,
-			Currency:         normalizeCurrency(r.Currency),
-			Amount:           r.AmountDue,
-			Status:           status,
-			Rail:             rail,
-			RailPaymentID:    railPaymentID,
-			FailureCode:      failureCode,
-			FailureMessage:   failureMessage,
-			AttemptedAt:      now,
-			CreatedAt:        now,
-			UpdatedAt:        now,
+func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim *invoiceCollectionClaim, rail, railPaymentID, failureCode, failureMessage *string, action invoiceCollectionFailureAction, now time.Time) error {
+	r := claim.account
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		failureReason := payments.NormalizeFailureReason(derefStr(rail), derefStr(failureCode))
+		attemptUpdated, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
+			MerchantID:     r.MerchantID,
+			CustomerID:     r.CustomerID,
+			InvoiceID:      r.InvoiceID,
+			AttemptID:      claim.attemptID,
+			Rail:           rail,
+			RailPaymentID:  railPaymentID,
+			FailureCode:    failureCode,
+			FailureReason:  &failureReason,
+			FailureMessage: failureMessage,
+			Now:            now,
 		})
+		if err != nil {
+			return err
+		}
+		if attemptUpdated != 1 {
+			return fmt.Errorf("fail claimed invoice payment attempt: claim lost")
+		}
+		updated, err := q.RecordInvoiceCollectionFailure(ctx, gen.RecordInvoiceCollectionFailureParams{
+			MerchantID:           r.MerchantID,
+			CustomerID:           r.CustomerID,
+			InvoiceID:            r.InvoiceID,
+			ExpectedFailureCount: r.FailureCount,
+			Terminal:             action.terminal,
+			NextAttemptAt:        action.nextAttemptAt,
+			FailureCode:          failureCode,
+			FailureMessage:       failureMessage,
+			Now:                  now,
+		})
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return fmt.Errorf("record invoice collection failure: invoice claim lost")
+		}
+		return nil
 	})
+}
+
+func (s *MoneyService) expireStaleInvoiceCollectionRetryClaims(ctx context.Context, merchantID uuid.UUID, now time.Time) error {
+	_, err := s.db.Gen(ctx).ExpireStaleInvoiceCollectionClaims(ctx, gen.ExpireStaleInvoiceCollectionClaimsParams{
+		MerchantID:  merchantID,
+		Now:         now,
+		StaleBefore: now.Add(-15 * time.Minute),
+	})
+	if err != nil {
+		return fmt.Errorf("expire stale invoice collection claims: %w", err)
+	}
+	return nil
 }
 
 func optionalRail(rail string) *string {

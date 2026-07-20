@@ -18,6 +18,9 @@ SET amount_paid = amount_paid + $3::bigint,
     amount_due = GREATEST(0, amount_due - $3::bigint),
     status = CASE WHEN amount_due - $3::bigint <= 0 THEN 'paid' ELSE status END,
     paid_at = CASE WHEN amount_due - $3::bigint <= 0 THEN $4::timestamptz ELSE paid_at END,
+    next_collection_attempt_at = CASE WHEN amount_due - $3::bigint <= 0 THEN NULL ELSE next_collection_attempt_at END,
+    last_collection_failure_code = CASE WHEN amount_due - $3::bigint <= 0 THEN NULL ELSE last_collection_failure_code END,
+    last_collection_failure_message = CASE WHEN amount_due - $3::bigint <= 0 THEN NULL ELSE last_collection_failure_message END,
     updated_at = $4::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $5
   AND status IN ('open', 'past_due')
@@ -86,6 +89,31 @@ func (q *Queries) AttachPendingInvoiceItemsToInvoice(ctx context.Context, arg At
 	return result.RowsAffected(), nil
 }
 
+const countInvoicePaymentAttemptsByPayer = `-- name: CountInvoicePaymentAttemptsByPayer :one
+SELECT count(*)
+FROM openrails.invoice_payments p
+JOIN openrails.invoices i
+  ON i.merchant_id = p.merchant_id
+ AND i.customer_id = p.customer_id
+ AND i.id = p.invoice_id
+WHERE p.merchant_id = $1
+  AND p.customer_id = $2
+  AND p.invoice_id = $3
+`
+
+type CountInvoicePaymentAttemptsByPayerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+}
+
+func (q *Queries) CountInvoicePaymentAttemptsByPayer(ctx context.Context, arg CountInvoicePaymentAttemptsByPayerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvoicePaymentAttemptsByPayer, arg.MerchantID, arg.CustomerID, arg.InvoiceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countInvoicesByPayer = `-- name: CountInvoicesByPayer :one
 SELECT count(*) FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
@@ -103,9 +131,111 @@ func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByP
 	return count, err
 }
 
+const deleteClaimedInvoicePaymentAttempt = `-- name: DeleteClaimedInvoicePaymentAttempt :execrows
+DELETE FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND id = $4
+  AND status = 'attempted'
+`
+
+type DeleteClaimedInvoicePaymentAttemptParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+	AttemptID  uuid.UUID
+}
+
+func (q *Queries) DeleteClaimedInvoicePaymentAttempt(ctx context.Context, arg DeleteClaimedInvoicePaymentAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteClaimedInvoicePaymentAttempt,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.AttemptID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireStaleInvoiceCollectionClaims = `-- name: ExpireStaleInvoiceCollectionClaims :execrows
+UPDATE openrails.invoices
+SET last_collection_failure_code = 'collection_outcome_unknown',
+    last_collection_failure_message = NULL,
+    next_collection_attempt_at = NULL,
+    updated_at = $2::timestamptz
+WHERE merchant_id = $1
+  AND last_collection_failure_code = 'collection_attempt_in_progress'
+  AND updated_at <= $3::timestamptz
+`
+
+type ExpireStaleInvoiceCollectionClaimsParams struct {
+	MerchantID  uuid.UUID
+	Now         time.Time
+	StaleBefore time.Time
+}
+
+func (q *Queries) ExpireStaleInvoiceCollectionClaims(ctx context.Context, arg ExpireStaleInvoiceCollectionClaimsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireStaleInvoiceCollectionClaims, arg.MerchantID, arg.Now, arg.StaleBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const failClaimedInvoicePaymentAttempt = `-- name: FailClaimedInvoicePaymentAttempt :execrows
+UPDATE openrails.invoice_payments
+SET status = 'failed',
+    rail = $4,
+    rail_payment_id = $5,
+    failure_code = $6,
+    failure_reason = $7,
+    failure_message = $8,
+    updated_at = $9::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND id = $10
+  AND status = 'attempted'
+`
+
+type FailClaimedInvoicePaymentAttemptParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	InvoiceID      uuid.UUID
+	Rail           *string
+	RailPaymentID  *string
+	FailureCode    *string
+	FailureReason  *string
+	FailureMessage *string
+	Now            time.Time
+	AttemptID      uuid.UUID
+}
+
+func (q *Queries) FailClaimedInvoicePaymentAttempt(ctx context.Context, arg FailClaimedInvoicePaymentAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failClaimedInvoicePaymentAttempt,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.Rail,
+		arg.RailPaymentID,
+		arg.FailureCode,
+		arg.FailureReason,
+		arg.FailureMessage,
+		arg.Now,
+		arg.AttemptID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
 
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
   AND period_from = $3 AND period_to = $4 AND currency = $5
 LIMIT 1
@@ -165,12 +295,17 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 		&i.Tax,
 		&i.BillingContacts,
 		&i.Memo,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.LastCollectionFailureCode,
+		&i.LastCollectionFailureMessage,
 	)
 	return i, err
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 `
@@ -218,12 +353,17 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 		&i.Tax,
 		&i.BillingContacts,
 		&i.Memo,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.LastCollectionFailureCode,
+		&i.LastCollectionFailureMessage,
 	)
 	return i, err
 }
 
 const getInvoiceForPayerForUpdate = `-- name: GetInvoiceForPayerForUpdate :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE
@@ -272,6 +412,11 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 		&i.Tax,
 		&i.BillingContacts,
 		&i.Memo,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.LastCollectionFailureCode,
+		&i.LastCollectionFailureMessage,
 	)
 	return i, err
 }
@@ -381,12 +526,14 @@ const insertInvoicePayment = `-- name: InsertInvoicePayment :exec
 INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
-    failure_code, failure_message, attempted_at, settled_at, created_at, updated_at
+    failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
+    payment_method_id, idempotency_key
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
-    $10, $11, $12,
-    $13, $14, $15, $16
+    $10, $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19
 )
 `
 
@@ -402,11 +549,14 @@ type InsertInvoicePaymentParams struct {
 	Rail             *string
 	RailPaymentID    *string
 	FailureCode      *string
+	FailureReason    *string
 	FailureMessage   *string
 	AttemptedAt      time.Time
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	PaymentMethodID  *uuid.UUID
+	IdempotencyKey   *string
 }
 
 func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePaymentParams) error {
@@ -422,11 +572,14 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.Rail,
 		arg.RailPaymentID,
 		arg.FailureCode,
+		arg.FailureReason,
 		arg.FailureMessage,
 		arg.AttemptedAt,
 		arg.SettledAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.PaymentMethodID,
+		arg.IdempotencyKey,
 	)
 	return err
 }
@@ -480,7 +633,9 @@ func (q *Queries) InsertPendingInvoiceItem(ctx context.Context, arg InsertPendin
 }
 
 const listChargeableOpenInvoices = `-- name: ListChargeableOpenInvoices :many
-SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due, s.auto_topup_payment_method_id
+SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
+       i.collection_failure_count, i.collection_failed_at,
+       COALESCE(s.collection_payment_method_id, s.auto_topup_payment_method_id)::uuid AS collection_payment_method_id
 FROM openrails.invoices i
 JOIN openrails.money_settings s
   ON s.merchant_id = i.merchant_id
@@ -490,27 +645,37 @@ WHERE i.merchant_id = $1
   AND i.status IN ('open', 'past_due')
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
-  AND s.auto_topup_payment_method_id IS NOT NULL
-  AND ($2::bigint <= 0 OR i.amount_due >= $2::bigint)
+  AND COALESCE(s.collection_payment_method_id, s.auto_topup_payment_method_id) IS NOT NULL
+  AND i.last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+  AND i.last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown'
+  AND (i.due_at IS NULL OR i.due_at <= $2::timestamptz)
+  AND (
+      (i.collection_failure_count = 0 AND i.next_collection_attempt_at IS NULL)
+      OR i.next_collection_attempt_at <= $2::timestamptz
+  )
+  AND ($3::bigint <= 0 OR i.amount_due >= $3::bigint)
 ORDER BY i.due_at NULLS FIRST, i.created_at ASC
 `
 
 type ListChargeableOpenInvoicesParams struct {
 	MerchantID   uuid.UUID
+	Now          time.Time
 	MinThreshold int64
 }
 
 type ListChargeableOpenInvoicesRow struct {
-	ID                       uuid.UUID
-	MerchantID               uuid.UUID
-	CustomerID               uuid.UUID
-	Currency                 string
-	AmountDue                int64
-	AutoTopupPaymentMethodID *uuid.UUID
+	ID                        uuid.UUID
+	MerchantID                uuid.UUID
+	CustomerID                uuid.UUID
+	Currency                  string
+	AmountDue                 int64
+	CollectionFailureCount    int32
+	CollectionFailedAt        *time.Time
+	CollectionPaymentMethodID uuid.UUID
 }
 
 func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListChargeableOpenInvoicesParams) ([]ListChargeableOpenInvoicesRow, error) {
-	rows, err := q.db.Query(ctx, listChargeableOpenInvoices, arg.MerchantID, arg.MinThreshold)
+	rows, err := q.db.Query(ctx, listChargeableOpenInvoices, arg.MerchantID, arg.Now, arg.MinThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +689,78 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 			&i.CustomerID,
 			&i.Currency,
 			&i.AmountDue,
-			&i.AutoTopupPaymentMethodID,
+			&i.CollectionFailureCount,
+			&i.CollectionFailedAt,
+			&i.CollectionPaymentMethodID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInvoicePaymentAttemptsByPayer = `-- name: ListInvoicePaymentAttemptsByPayer :many
+SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
+FROM openrails.invoice_payments p
+JOIN openrails.invoices i
+  ON i.merchant_id = p.merchant_id
+ AND i.customer_id = p.customer_id
+ AND i.id = p.invoice_id
+WHERE p.merchant_id = $1
+  AND p.customer_id = $2
+  AND p.invoice_id = $3
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT $4 OFFSET $5
+`
+
+type ListInvoicePaymentAttemptsByPayerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+	Limit      int64
+	Offset     int64
+}
+
+func (q *Queries) ListInvoicePaymentAttemptsByPayer(ctx context.Context, arg ListInvoicePaymentAttemptsByPayerParams) ([]OpenrailsInvoicePayment, error) {
+	rows, err := q.db.Query(ctx, listInvoicePaymentAttemptsByPayer,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsInvoicePayment
+	for rows.Next() {
+		var i OpenrailsInvoicePayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.InvoiceID,
+			&i.LedgerTransferID,
+			&i.Currency,
+			&i.Amount,
+			&i.Status,
+			&i.Rail,
+			&i.RailPaymentID,
+			&i.FailureCode,
+			&i.FailureMessage,
+			&i.AttemptedAt,
+			&i.SettledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.FailureReason,
+			&i.PaymentMethodID,
+			&i.IdempotencyKey,
 		); err != nil {
 			return nil, err
 		}
@@ -601,7 +837,7 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 }
 
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo FROM openrails.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY period_from DESC
 LIMIT $3::int OFFSET $4::int
@@ -662,6 +898,11 @@ func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPay
 			&i.Tax,
 			&i.BillingContacts,
 			&i.Memo,
+			&i.CollectionFailureCount,
+			&i.CollectionFailedAt,
+			&i.NextCollectionAttemptAt,
+			&i.LastCollectionFailureCode,
+			&i.LastCollectionFailureMessage,
 		); err != nil {
 			return nil, err
 		}
@@ -722,6 +963,41 @@ func (q *Queries) ListPendingInvoiceItemsByPayer(ctx context.Context, arg ListPe
 	return items, nil
 }
 
+const markInvoiceCollectionOutcomeUnknown = `-- name: MarkInvoiceCollectionOutcomeUnknown :execrows
+UPDATE openrails.invoices
+SET status = 'past_due',
+    next_collection_attempt_at = NULL,
+    last_collection_failure_code = 'collection_outcome_unknown',
+    last_collection_failure_message = NULL,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $4
+  AND status = 'past_due'
+  AND amount_due > 0
+  AND last_collection_failure_code = 'collection_attempt_in_progress'
+`
+
+type MarkInvoiceCollectionOutcomeUnknownParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+	InvoiceID  uuid.UUID
+}
+
+func (q *Queries) MarkInvoiceCollectionOutcomeUnknown(ctx context.Context, arg MarkInvoiceCollectionOutcomeUnknownParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInvoiceCollectionOutcomeUnknown,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markInvoiceUncollectibleForPayer = `-- name: MarkInvoiceUncollectibleForPayer :one
 UPDATE openrails.invoices
 SET status = 'uncollectible',
@@ -729,7 +1005,8 @@ SET status = 'uncollectible',
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('open', 'past_due')
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message
 `
 
 type MarkInvoiceUncollectibleForPayerParams struct {
@@ -781,6 +1058,11 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 		&i.Tax,
 		&i.BillingContacts,
 		&i.Memo,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.LastCollectionFailureCode,
+		&i.LastCollectionFailureMessage,
 	)
 	return i, err
 }
@@ -812,6 +1094,135 @@ func (q *Queries) MarkInvoicesPastDue(ctx context.Context, arg MarkInvoicesPastD
 	return result.RowsAffected(), nil
 }
 
+const recordInvoiceCollectionFailure = `-- name: RecordInvoiceCollectionFailure :execrows
+UPDATE openrails.invoices
+SET collection_failure_count = collection_failure_count + 1,
+    collection_failed_at = COALESCE(collection_failed_at, $3::timestamptz),
+    status = CASE WHEN $4::boolean THEN 'uncollectible' ELSE 'past_due' END,
+    next_collection_attempt_at = $5::timestamptz,
+    last_collection_failure_code = $6,
+    last_collection_failure_message = $7,
+    uncollectible_at = CASE WHEN $4::boolean THEN $3::timestamptz ELSE NULL END,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $8
+  AND status IN ('open', 'past_due')
+  AND collection_failure_count = $9::integer
+`
+
+type RecordInvoiceCollectionFailureParams struct {
+	MerchantID           uuid.UUID
+	CustomerID           uuid.UUID
+	Now                  time.Time
+	Terminal             bool
+	NextAttemptAt        *time.Time
+	FailureCode          *string
+	FailureMessage       *string
+	InvoiceID            uuid.UUID
+	ExpectedFailureCount int32
+}
+
+func (q *Queries) RecordInvoiceCollectionFailure(ctx context.Context, arg RecordInvoiceCollectionFailureParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordInvoiceCollectionFailure,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.Terminal,
+		arg.NextAttemptAt,
+		arg.FailureCode,
+		arg.FailureMessage,
+		arg.InvoiceID,
+		arg.ExpectedFailureCount,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseInvoiceCollectionRetry = `-- name: ReleaseInvoiceCollectionRetry :execrows
+UPDATE openrails.invoices
+SET status = $3::text,
+    next_collection_attempt_at = $4::timestamptz,
+    last_collection_failure_code = $5::text,
+    last_collection_failure_message = $6::text,
+    uncollectible_at = $7::timestamptz,
+    updated_at = $8::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $9
+  AND status = 'past_due'
+  AND last_collection_failure_code IN ('collection_attempt_in_progress', 'collection_outcome_unknown')
+`
+
+type ReleaseInvoiceCollectionRetryParams struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	Status          string
+	NextAttemptAt   *time.Time
+	FailureCode     *string
+	FailureMessage  *string
+	UncollectibleAt *time.Time
+	Now             time.Time
+	InvoiceID       uuid.UUID
+}
+
+func (q *Queries) ReleaseInvoiceCollectionRetry(ctx context.Context, arg ReleaseInvoiceCollectionRetryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseInvoiceCollectionRetry,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Status,
+		arg.NextAttemptAt,
+		arg.FailureCode,
+		arg.FailureMessage,
+		arg.UncollectibleAt,
+		arg.Now,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setInvoiceCollectionClaim = `-- name: SetInvoiceCollectionClaim :execrows
+UPDATE openrails.invoices
+SET status = 'past_due',
+    next_collection_attempt_at = NULL,
+    last_collection_failure_code = 'collection_attempt_in_progress',
+    last_collection_failure_message = NULL,
+    uncollectible_at = NULL,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $4
+  AND status IN ('open', 'past_due', 'uncollectible')
+  AND amount_due > 0
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown'
+`
+
+type SetInvoiceCollectionClaimParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+	InvoiceID  uuid.UUID
+}
+
+func (q *Queries) SetInvoiceCollectionClaim(ctx context.Context, arg SetInvoiceCollectionClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setInvoiceCollectionClaim,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setInvoiceExternalID = `-- name: SetInvoiceExternalID :execrows
 UPDATE openrails.invoices
 SET external_invoice_id = $3,
@@ -835,6 +1246,49 @@ func (q *Queries) SetInvoiceExternalID(ctx context.Context, arg SetInvoiceExtern
 		arg.ExternalInvoiceID,
 		arg.Now,
 		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const settleClaimedInvoicePaymentAttempt = `-- name: SettleClaimedInvoicePaymentAttempt :execrows
+UPDATE openrails.invoice_payments
+SET status = 'settled',
+    ledger_transfer_id = $4,
+    rail = $5,
+    rail_payment_id = $6,
+    settled_at = $7::timestamptz,
+    updated_at = $7::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND id = $8
+  AND status = 'attempted'
+`
+
+type SettleClaimedInvoicePaymentAttemptParams struct {
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	InvoiceID        uuid.UUID
+	LedgerTransferID *uuid.UUID
+	Rail             *string
+	RailPaymentID    *string
+	Now              time.Time
+	AttemptID        uuid.UUID
+}
+
+func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg SettleClaimedInvoicePaymentAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, settleClaimedInvoicePaymentAttempt,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceID,
+		arg.LedgerTransferID,
+		arg.Rail,
+		arg.RailPaymentID,
+		arg.Now,
+		arg.AttemptID,
 	)
 	if err != nil {
 		return 0, err
@@ -977,7 +1431,8 @@ SET status = 'voided',
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('draft', 'open', 'past_due')
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message
 `
 
 type VoidInvoiceForPayerParams struct {
@@ -1029,6 +1484,11 @@ func (q *Queries) VoidInvoiceForPayer(ctx context.Context, arg VoidInvoiceForPay
 		&i.Tax,
 		&i.BillingContacts,
 		&i.Memo,
+		&i.CollectionFailureCount,
+		&i.CollectionFailedAt,
+		&i.NextCollectionAttemptAt,
+		&i.LastCollectionFailureCode,
+		&i.LastCollectionFailureMessage,
 	)
 	return i, err
 }

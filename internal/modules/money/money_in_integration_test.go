@@ -869,10 +869,10 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 
-	stillOpen, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "open", stillOpen.Status)
-	require.Equal(t, int64(50_000), stillOpen.AmountDue)
+	require.Equal(t, "past_due", pastDue.Status)
+	require.Equal(t, int64(50_000), pastDue.AmountDue)
 
 	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -976,10 +976,10 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	require.Equal(t, 0, n)
 	require.Len(t, adapter.charges, 1)
 
-	stillOpen, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "open", stillOpen.Status)
-	require.Equal(t, int64(500), stillOpen.AmountDue)
+	require.Equal(t, "past_due", pastDue.Status)
+	require.Equal(t, int64(500), pastDue.AmountDue)
 
 	var rail, railPaymentID, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `

@@ -55,6 +55,7 @@ type MoneyAccount struct {
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
 	AutoTopupAmount          *int64     `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
+	CollectionPaymentMethod  *uuid.UUID `json:"collection_payment_method_id,omitempty"`
 	DefaultCreditExpiryHours *int       `json:"default_credit_expiry_hours,omitempty"`
 
 	// CreditLimitAmount is the admin-set arrears credit line (#489): under
