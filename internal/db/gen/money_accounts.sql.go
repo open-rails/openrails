@@ -92,7 +92,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -123,6 +123,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.TierSource,
 		&i.Currency,
 		&i.CreditLimitAmount,
+		&i.CollectionPaymentMethodID,
 	)
 	return i, err
 }
@@ -265,7 +266,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -296,8 +297,40 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.TierSource,
 		&i.Currency,
 		&i.CreditLimitAmount,
+		&i.CollectionPaymentMethodID,
 	)
 	return i, err
+}
+
+const setMoneyAccountCollectionPaymentMethod = `-- name: SetMoneyAccountCollectionPaymentMethod :execrows
+UPDATE openrails.money_settings
+SET collection_payment_method_id = $3,
+    updated_at = $4
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = $5
+`
+
+type SetMoneyAccountCollectionPaymentMethodParams struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	PaymentMethodID *uuid.UUID
+	Now             time.Time
+	Currency        string
+}
+
+func (q *Queries) SetMoneyAccountCollectionPaymentMethod(ctx context.Context, arg SetMoneyAccountCollectionPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMoneyAccountCollectionPaymentMethod,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PaymentMethodID,
+		arg.Now,
+		arg.Currency,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec

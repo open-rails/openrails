@@ -475,8 +475,10 @@ type OpenrailsInvoicePayment struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	// PSP used for this invoice payment attempt or settled provider payment.
-	PspID         *uuid.UUID
-	FailureReason *string
+	PspID           *uuid.UUID
+	FailureReason   *string
+	PaymentMethodID *uuid.UUID
+	IdempotencyKey  *string
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -654,7 +656,8 @@ type OpenrailsMoneySetting struct {
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
-	CreditLimitAmount int64
+	CreditLimitAmount         int64
+	CollectionPaymentMethodID *uuid.UUID
 }
 
 // Queue for user notifications related to billing and subscriptions

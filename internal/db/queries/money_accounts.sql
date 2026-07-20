@@ -76,6 +76,14 @@ UPDATE openrails.money_settings
 SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
+-- name: SetMoneyAccountCollectionPaymentMethod :execrows
+UPDATE openrails.money_settings
+SET collection_payment_method_id = sqlc.arg(payment_method_id),
+    updated_at = sqlc.arg(now)
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = sqlc.arg(currency);
+
 -- name: StampMoneyAccountAlertAt :exec
 UPDATE openrails.money_settings
 SET last_alert_at = sqlc.arg(now), updated_at = sqlc.arg(now)
