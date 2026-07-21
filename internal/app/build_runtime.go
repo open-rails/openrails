@@ -772,7 +772,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 
 	// #813: plan migrations — cross-product bulk retirement over the #773
 	// reprice engine; Stripe is the one observed rail with a server-side push.
-	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs})
+	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, paymentMethodService)
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)

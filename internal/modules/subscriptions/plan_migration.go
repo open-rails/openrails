@@ -121,6 +121,12 @@ type RailCounts struct {
 	Skipped        int `json:"skipped"`
 }
 
+// PaymentMethodLookup resolves a subscription's payment method — the
+// engine-driven-rail detector (#297 stored-credential recurring anchor).
+type PaymentMethodLookup interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error)
+}
+
 // StripePusher is the observed-rail push seam (satisfied by
 // *StripeService). Extracted as an interface so migration tests can run
 // against a fake without a live Stripe.
@@ -133,12 +139,13 @@ type StripePusher interface {
 // PlanMigrationService drives #813 bulk plan migrations over the #773
 // reprice engine.
 type PlanMigrationService struct {
-	reprice *RepriceService
-	stripe  StripePusher
+	reprice        *RepriceService
+	stripe         StripePusher
+	paymentMethods PaymentMethodLookup
 }
 
-func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher) *PlanMigrationService {
-	return &PlanMigrationService{reprice: reprice, stripe: stripe}
+func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, paymentMethods PaymentMethodLookup) *PlanMigrationService {
+	return &PlanMigrationService{reprice: reprice, stripe: stripe, paymentMethods: paymentMethods}
 }
 
 // migrationCapability classifies one subscription's rail for forced
@@ -151,21 +158,28 @@ const (
 	capabilityUserAction                              // rail cannot be mutated server-side
 )
 
-func classifyMigrationCapability(sub *models.Subscription) migrationCapability {
+func (s *PlanMigrationService) classifyMigrationCapability(ctx context.Context, sub *models.Subscription) migrationCapability {
 	switch {
 	case sub.Rail == models.RailStripe:
 		return capabilityAutoStripe
 	case sub.Rail == models.RailCCBill, sub.Rail == models.RailSolana:
 		return capabilityUserAction
-	case strings.TrimSpace(sub.RailSubscriptionID) == "":
-		// No gateway-side recurring object: OpenRails' own engine initiates
-		// the charges (#297 stored-credential MIT), so the renewal-boundary
-		// pickup is the whole mechanism.
-		return capabilityAutoInternal
 	default:
-		// A native gateway recurring plan OpenRails only observes (e.g. NMI
-		// recurring): the gateway would keep charging the old plan.
-		return capabilityUserAction
+		// Non-stripe card rails split by who INITIATES the recurring charge:
+		// a payment method carrying the #297 stored-credential recurring
+		// anchor means OpenRails' own engine charges (RenewalCharger) — the
+		// renewal-boundary pickup is then the whole mechanism. Anything else
+		// is a gateway-native recurring plan OpenRails only observes; the
+		// gateway would keep charging the old plan, so it cannot be
+		// auto-migrated server-side.
+		if s.paymentMethods == nil || sub.PaymentMethodID == nil {
+			return capabilityUserAction
+		}
+		pm, err := s.paymentMethods.GetByID(ctx, *sub.PaymentMethodID)
+		if err != nil || pm == nil || strings.TrimSpace(pm.StoredCredentialRecurringRef) == "" {
+			return capabilityUserAction
+		}
+		return capabilityAutoInternal
 	}
 }
 
@@ -227,7 +241,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			out.Disposition = "skipped"
 			out.Reason = "already on target price"
 			rail(sub).Skipped++
-		case classifyMigrationCapability(sub) == capabilityUserAction:
+		case s.classifyMigrationCapability(ctx, sub) == capabilityUserAction:
 			out.Disposition = "blocked"
 			out.Reason = migrationBlockedRailUserAction
 			rail(sub).RequiresAction++
@@ -378,7 +392,7 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 				}
 				continue
 			}
-			if req.Immediate && classifyMigrationCapability(sub) == capabilityAutoInternal {
+			if req.Immediate && s.classifyMigrationCapability(ctx, sub) == capabilityAutoInternal {
 				o.Disposition = "applied_immediately"
 			}
 			s.reprice.emitPlanChangeNotification(ctx, sub, source, target, targetProduct, req.EffectiveAt)
@@ -411,7 +425,7 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 
 // executeScheduled performs the per-rail action for one scheduled row.
 func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMigrationRequest, sub *models.Subscription, source, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
-	switch classifyMigrationCapability(sub) {
+	switch s.classifyMigrationCapability(ctx, sub) {
 	case capabilityAutoStripe:
 		return s.pushStripe(ctx, req, sub, source, target, row)
 	case capabilityAutoInternal:
