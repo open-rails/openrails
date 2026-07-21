@@ -722,6 +722,15 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// called BEFORE the price edit that creates the new version (so never
 	// mutates, unlike the bulk call above).
 	rr.Handle(http.MethodGet, "/catalog/reprice-all-prior-versions/preview", h(httphandlers.PreviewRepriceAllPriorVersions), subRead...)
+	// #813 plan migrations: operator-driven cross-product bulk retirement
+	// (plan-A -> plan-B) over the reprice engine. preview registered before
+	// "/:id" so it is never captured as an id.
+	pm := rr.Group("/plan-migrations")
+	pm.Handle(http.MethodPost, "", h(httphandlers.CreatePlanMigration), subWrite...)
+	pm.Handle(http.MethodPost, "/preview", h(httphandlers.PreviewPlanMigration), subRead...)
+	pm.Handle(http.MethodGet, "/:id", h(httphandlers.GetPlanMigration), subRead...)
+	pm.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.CancelPlanMigration), subWrite...)
+
 	reprices := rr.Group("/reprices")
 	reprices.Handle(http.MethodGet, "", h(httphandlers.ListSubscriptionReprices), subRead...)
 	// #777: list a price key's bulk reprice batches (pending-migration display

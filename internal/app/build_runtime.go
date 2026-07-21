@@ -311,6 +311,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PublicSubscriptionService: serviceInstances.PublicSubscriptionService,
 		AdminSubscriptionService:  serviceInstances.AdminSubscriptionService,
 		RepriceService:            serviceInstances.RepriceService,
+		PlanMigrationService:      serviceInstances.PlanMigrationService,
 
 		EmailService:                 emailService,
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
@@ -577,6 +578,9 @@ type servicesInstances struct {
 	// RepriceService is the #773 reprice primitive (move subscribers to a
 	// different price at their next renewal).
 	RepriceService *subscriptions.RepriceService
+	// PlanMigrationService (#813) is the operator-driven cross-product bulk
+	// migration over the reprice engine.
+	PlanMigrationService *subscriptions.PlanMigrationService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
@@ -766,6 +770,10 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railConfigs}
 
+	// #813: plan migrations — cross-product bulk retirement over the #773
+	// reprice engine; Stripe is the one observed rail with a server-side push.
+	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs})
+
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
 	webhookDispatcher := &webhooks.WebhookDispatcher{
@@ -859,6 +867,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PublicSubscriptionService:    publicSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
 		RepriceService:               repriceService,
+		PlanMigrationService:         planMigrationService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		IdempotencyService:           idempotencyService,
