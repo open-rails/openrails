@@ -13,6 +13,27 @@ const (
 	RepriceStatusScheduled RepriceStatus = "scheduled"
 	RepriceStatusApplied   RepriceStatus = "applied"
 	RepriceStatusCanceled  RepriceStatus = "canceled"
+	// RepriceStatusBlocked (#813): a plan-migration cohort member the engine
+	// could not auto-schedule (rail requires user action / missing rail
+	// config / rail push failure). Terminal at insert; BlockedReason says why.
+	RepriceStatusBlocked RepriceStatus = "blocked"
+)
+
+// RepriceKind (#813) distinguishes #773's same-product price move from a
+// cross-product plan migration, which also moves the subscription's product
+// and cuts entitlement/credit snapshots over at the same boundary.
+type RepriceKind string
+
+const (
+	RepriceKindReprice    RepriceKind = "reprice"
+	RepriceKindPlanChange RepriceKind = "plan_change"
+)
+
+// Plan-migration fallback policies (#813) for rails that cannot be
+// auto-migrated server-side (ccbill/solana).
+const (
+	MigrationFallbackKeepGrandfathered = "keep_grandfathered"
+	MigrationFallbackCancelAtPeriodEnd = "cancel_at_period_end"
 )
 
 // SubscriptionReprice (#773) is one subscription's scheduled/applied/canceled
@@ -37,6 +58,10 @@ type SubscriptionReprice struct {
 	// merchant's configured notice window and was scheduled anyway via the
 	// request's explicit acknowledge_short_notice override.
 	AcknowledgedShortNotice bool `json:"acknowledged_short_notice"`
+	// Kind (#813): 'reprice' or 'plan_change' (cross-product cutover).
+	Kind RepriceKind `json:"kind"`
+	// BlockedReason (#813): set only when Status=blocked.
+	BlockedReason string `json:"blocked_reason,omitempty"`
 }
 
 // IsDue reports whether this scheduled reprice should be applied at the
@@ -59,4 +84,9 @@ type RepriceBatch struct {
 	SubscriptionsScheduled int       `json:"subscriptions_scheduled"`
 	SubscriptionsSkipped   int       `json:"subscriptions_skipped"`
 	CreatedAt              time.Time `json:"created_at"`
+	// #813 plan-migration header fields; zero-valued on #773 reprice batches.
+	Kind                 RepriceKind `json:"kind"`
+	SourcePriceID        *uuid.UUID  `json:"source_price_id,omitempty"`
+	FallbackPolicy       string      `json:"fallback_policy,omitempty"`
+	SubscriptionsBlocked int         `json:"subscriptions_blocked"`
 }

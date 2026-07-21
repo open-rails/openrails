@@ -10,6 +10,19 @@ INSERT INTO openrails.reprice_batches (
 )
 RETURNING *;
 
+-- #813: header row for one plan-migration operation (kind=plan_change).
+-- name: CreatePlanMigrationBatch :one
+INSERT INTO openrails.reprice_batches (
+    merchant_id, to_price_id, effective_at, kind, source_price_id, fallback_policy,
+    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, subscriptions_blocked
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz,
+    'plan_change', sqlc.arg(source_price_id)::uuid, sqlc.arg(fallback_policy)::text,
+    sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_scheduled)::int,
+    sqlc.arg(subscriptions_skipped)::int, sqlc.arg(subscriptions_blocked)::int
+)
+RETURNING *;
+
 -- name: GetRepriceBatchByID :one
 SELECT * FROM openrails.reprice_batches WHERE id = $1;
 
