@@ -42,6 +42,10 @@ func TestUpsertPaymentProviderConfig(t *testing.T) {
 	require.Equal(t, "test", provider.Environment)
 	require.Equal(t, "acct_"+suffix, provider.AccountID)
 	require.True(t, provider.Credentials["webhook_signing_secret"].Configured)
+	loaded, err := embcp.GetPaymentProviderConfig(ctx, e.App(), provisioned.MerchantID, "stripe", "test")
+	require.NoError(t, err)
+	require.Equal(t, provider.ID, loaded.ID)
+	require.Equal(t, provider.AccountID, loaded.AccountID)
 
 	encoded, err := json.Marshal(provider)
 	require.NoError(t, err)
