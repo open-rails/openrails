@@ -47,6 +47,9 @@ func (c *RedisCache) Clear(ctx context.Context) error {
 	return c.client.FlushAll(ctx).Err()
 }
 
+// Close is a no-op: the redis client is injected (NewRedisCache borrows it),
+// so its owner — Runtime for self-dialed clients, the host for injected ones —
+// closes it. Closing here poisoned host-shared clients (cozy-art ca#198).
 func (c *RedisCache) Close() error {
-	return c.client.Close()
+	return nil
 }

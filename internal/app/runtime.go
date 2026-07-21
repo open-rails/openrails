@@ -51,7 +51,10 @@ import (
 type Runtime struct {
 	DB          *db.DB
 	RedisClient *redis.Client
-	Config      *config.Config
+	// redisOwned marks a self-dialed client; injected clients are borrowed and
+	// must never be closed here (the host owns their lifecycle).
+	redisOwned bool
+	Config     *config.Config
 
 	// configuredMerchant scopes this engine instance to one merchant — set by
 	// embedded hosts that run one engine per merchant (zero in standalone,
@@ -310,7 +313,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.HTTPIdempotency != nil {
 		r.HTTPIdempotency.Close()
 	}
-	if r.RedisClient != nil {
+	if r.RedisClient != nil && r.redisOwned {
 		if err := r.RedisClient.Close(); err != nil {
 			// Make shutdown idempotent: Close can be called multiple times across layers.
 			if !errors.Is(err, redis.ErrClosed) {
