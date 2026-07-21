@@ -59,6 +59,16 @@ func (r *RepriceRepo) GetBatchByID(ctx context.Context, id uuid.UUID) (*models.R
 // (#781) records whether this row's effective_at was inside the merchant's
 // configured notice window and was scheduled anyway via an explicit override.
 func (r *RepriceRepo) CreateSubscriptionReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID, acknowledgedShortNotice bool) (*models.SubscriptionReprice, error) {
+	return r.createReprice(ctx, subscriptionID, fromPriceID, toPriceID, effectiveAt, batchID, acknowledgedShortNotice, models.RepriceKindReprice)
+}
+
+// CreatePlanChangeReprice (#813) schedules one subscription's cross-product
+// plan migration row (kind=plan_change).
+func (r *RepriceRepo) CreatePlanChangeReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID, acknowledgedShortNotice bool) (*models.SubscriptionReprice, error) {
+	return r.createReprice(ctx, subscriptionID, fromPriceID, toPriceID, effectiveAt, batchID, acknowledgedShortNotice, models.RepriceKindPlanChange)
+}
+
+func (r *RepriceRepo) createReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID, acknowledgedShortNotice bool, kind models.RepriceKind) (*models.SubscriptionReprice, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -71,11 +81,88 @@ func (r *RepriceRepo) CreateSubscriptionReprice(ctx context.Context, subscriptio
 		EffectiveAt:             effectiveAt,
 		RepriceBatchID:          batchID,
 		AcknowledgedShortNotice: acknowledgedShortNotice,
+		Kind:                    string(kind),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return models.SubscriptionRepriceFromGen(row), nil
+}
+
+// CreateBlockedReprice (#813) records a plan-migration cohort member the
+// engine could NOT auto-schedule — the per-subscription ledger row that keeps
+// batch totals complete. Terminal at insert.
+func (r *RepriceRepo) CreateBlockedReprice(ctx context.Context, subscriptionID, fromPriceID, toPriceID uuid.UUID, effectiveAt time.Time, batchID *uuid.UUID, kind models.RepriceKind, reason string) (*models.SubscriptionReprice, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).CreateBlockedSubscriptionReprice(ctx, gen.CreateBlockedSubscriptionRepriceParams{
+		MerchantID:     tid.UUID(),
+		SubscriptionID: subscriptionID,
+		FromPriceID:    fromPriceID,
+		ToPriceID:      toPriceID,
+		EffectiveAt:    effectiveAt,
+		RepriceBatchID: batchID,
+		Kind:           string(kind),
+		BlockedReason:  reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepriceFromGen(row), nil
+}
+
+// BlockScheduledReprice (#813) transitions a scheduled row to blocked (rail
+// push failed after creation). Idempotent via the status predicate.
+func (r *RepriceRepo) BlockScheduledReprice(ctx context.Context, id uuid.UUID, reason string) error {
+	_, err := r.db.Gen(ctx).BlockSubscriptionReprice(ctx, gen.BlockSubscriptionRepriceParams{ID: id, BlockedReason: reason})
+	return err
+}
+
+// CreatePlanMigrationBatch (#813) records a plan-migration operation's header.
+func (r *RepriceRepo) CreatePlanMigrationBatch(ctx context.Context, sourcePriceID, toPriceID uuid.UUID, effectiveAt time.Time, fallbackPolicy string, matched, scheduled, skipped, blocked int) (*models.RepriceBatch, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matched32, _ := safecast.Convert[int32](matched)
+	scheduled32, _ := safecast.Convert[int32](scheduled)
+	skipped32, _ := safecast.Convert[int32](skipped)
+	blocked32, _ := safecast.Convert[int32](blocked)
+	row, err := r.db.Gen(ctx).CreatePlanMigrationBatch(ctx, gen.CreatePlanMigrationBatchParams{
+		MerchantID:             tid.UUID(),
+		ToPriceID:              toPriceID,
+		EffectiveAt:            effectiveAt,
+		SourcePriceID:          sourcePriceID,
+		FallbackPolicy:         fallbackPolicy,
+		SubscriptionsMatched:   matched32,
+		SubscriptionsScheduled: scheduled32,
+		SubscriptionsSkipped:   skipped32,
+		SubscriptionsBlocked:   blocked32,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.RepriceBatchFromGen(row), nil
+}
+
+// ListMigratableSubscriptionsByPriceID (#813) returns the plan-migration
+// cohort: every subscription still billing (or being dunned) on the price.
+func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListMigratableSubscriptionsByPriceID(ctx, priceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.Subscription, 0, len(rows))
+	for _, row := range rows {
+		sub, err := models.SubscriptionFromGen(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sub)
+	}
+	return out, nil
 }
 
 func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {

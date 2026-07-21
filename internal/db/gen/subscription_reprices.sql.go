@@ -52,6 +52,28 @@ func (q *Queries) ApplySubscriptionReprice(ctx context.Context, id uuid.UUID) (i
 	return result.RowsAffected(), nil
 }
 
+const blockSubscriptionReprice = `-- name: BlockSubscriptionReprice :execrows
+UPDATE openrails.subscription_reprices SET
+    status = 'blocked',
+    blocked_reason = $1::text
+WHERE id = $2 AND status = 'scheduled'
+`
+
+type BlockSubscriptionRepriceParams struct {
+	BlockedReason string
+	ID            uuid.UUID
+}
+
+// #813: a scheduled row whose rail push failed after creation — terminal,
+// with the reason preserved for the batch ledger.
+func (q *Queries) BlockSubscriptionReprice(ctx context.Context, arg BlockSubscriptionRepriceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, blockSubscriptionReprice, arg.BlockedReason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelSubscriptionReprice = `-- name: CancelSubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',

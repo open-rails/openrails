@@ -66,3 +66,11 @@ UPDATE openrails.subscription_reprices SET
 WHERE subscription_id = sqlc.arg(subscription_id)::uuid
   AND to_price_id = sqlc.arg(to_price_id)::uuid
   AND status = 'scheduled';
+
+-- #813: a scheduled row whose rail push failed after creation — terminal,
+-- with the reason preserved for the batch ledger.
+-- name: BlockSubscriptionReprice :execrows
+UPDATE openrails.subscription_reprices SET
+    status = 'blocked',
+    blocked_reason = sqlc.arg(blocked_reason)::text
+WHERE id = sqlc.arg(id) AND status = 'scheduled';
