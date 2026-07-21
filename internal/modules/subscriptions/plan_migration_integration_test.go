@@ -536,3 +536,36 @@ func TestPlanMigration_CancelBatch(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, models.RepriceStatusCanceled, rows[0].Status)
 }
+
+// TestPlanMigration_StripeFarFutureEffectiveBlocksHonestly: pushing a Stripe
+// schedule for an effective date beyond the current period would flip a whole
+// period EARLY — the row must block instead, and a re-run inside the final
+// pre-effective period must succeed.
+func TestPlanMigration_StripeFarFutureEffectiveBlocksHonestly(t *testing.T) {
+	f := newPlanMigrationFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	subID, _ := f.createSubscriptionOnRail(t, ctx, f.stripeSourcePriceID, "stripe", false)
+
+	// Period ends +30d; effective +45d — beyond it.
+	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{
+		SourcePriceID: f.stripeSourcePriceID, TargetPriceID: f.stripeTargetPriceID,
+		EffectiveAt: f.clock.Now().Add(45 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Blocked)
+	require.Contains(t, res.Outcomes[0].Reason, "stripe_deferred_push_required")
+	require.Empty(t, f.stripe.schedules, "no early flip may be pushed")
+
+	// Simulate the sub renewing into its final pre-effective period
+	// (period now ends +60d > effective +45d): re-run succeeds.
+	_, err = f.pool.Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at = $1 WHERE id = $2`,
+		f.clock.Now().Add(60*24*time.Hour), subID)
+	require.NoError(t, err)
+	res2, err := f.pm.Migrate(ctx, PlanMigrationRequest{
+		SourcePriceID: f.stripeSourcePriceID, TargetPriceID: f.stripeTargetPriceID,
+		EffectiveAt: f.clock.Now().Add(45 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res2.Scheduled)
+	require.Len(t, f.stripe.schedules, 1)
+}

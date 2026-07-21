@@ -470,6 +470,14 @@ func (s *PlanMigrationService) pushStripe(ctx context.Context, req *PlanMigratio
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return fmt.Errorf("subscription missing current period end")
 	}
+	// A Stripe subscription schedule flips at the CURRENT period end. If
+	// effective_at lies beyond it, pushing now would flip a whole period
+	// EARLY — a money defect. Refuse honestly; the row lands blocked and an
+	// idempotent re-run inside the final pre-effective period succeeds.
+	// (Automated deferred push is the filed follow-up on #813.)
+	if req.EffectiveAt.After(*sub.CurrentPeriodEndsAt) {
+		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
+	}
 	periodStart := sub.StartedAt
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		periodStart = *sub.CurrentPeriodStartsAt
