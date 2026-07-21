@@ -177,6 +177,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		return nil, err
 	}
 
+	redisOwned := false
 	if overrides != nil && overrides.Redis != nil {
 		redisClient = overrides.Redis
 	} else {
@@ -184,6 +185,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to create redis client: %w", err)
 		}
+		redisOwned = redisClient != nil
 	}
 
 	// Webhook-dedup posture (#678). Embedded hosts are identified by the injected
@@ -280,6 +282,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	runtime := &Runtime{
 		DB:          database,
 		RedisClient: redisClient,
+		redisOwned:  redisOwned,
 		Config:      cfg,
 		Clock:       clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
