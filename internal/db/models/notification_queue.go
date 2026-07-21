@@ -36,6 +36,11 @@ const (
 	// recurring amount change (the disclosure hook #297 Phase A's MIT
 	// compliance rides on).
 	NotificationSubscriptionRepriceScheduled NotificationEventType = "subscription_reprice_scheduled"
+
+	// #813: scheduling a plan MIGRATION fires this at SCHEDULE time — distinct
+	// from reprice_scheduled because the disclosure content differs: the plan
+	// (what the customer receives) is changing, not just the amount.
+	NotificationSubscriptionPlanChangeScheduled NotificationEventType = "subscription_plan_change_scheduled"
 )
 
 // NotificationQueue stores in-app notification attempts
