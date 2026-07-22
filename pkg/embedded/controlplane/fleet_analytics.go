@@ -24,11 +24,14 @@ type FleetCurrencyRevenue struct {
 	SettledAmount int64  `json:"settled_amount_micros"`
 }
 
-// FleetRailHealth is one rail's completed/failed split across the fleet window.
+// FleetRailHealth is one rail's completed/failed/chargeback split across the
+// fleet window. Chargebacks counts #733 reversal mirror rows recorded in the
+// window — the dispute signal VAMP-style monitoring watches.
 type FleetRailHealth struct {
-	Rail      string `json:"rail"`
-	Succeeded int64  `json:"succeeded"`
-	Failed    int64  `json:"failed"`
+	Rail        string `json:"rail"`
+	Succeeded   int64  `json:"succeeded"`
+	Failed      int64  `json:"failed"`
+	Chargebacks int64  `json:"chargebacks"`
 }
 
 // FleetMRR is one currency's monthly-normalized recurring run-rate, in MICROS.
@@ -81,7 +84,7 @@ func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, window
 		out.Revenue = append(out.Revenue, FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
 	}
 	for _, r := range snapshot.Rails {
-		out.Rails = append(out.Rails, FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed})
+		out.Rails = append(out.Rails, FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
 	}
 	for _, r := range snapshot.MRR {
 		out.MRR = append(out.MRR, FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
