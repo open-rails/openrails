@@ -96,9 +96,17 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if !found {
 		return fmt.Errorf("nmi push: subscription %s not found at nmi", railID)
 	}
-	planPayments := 0 // NMI's "until cancelled"
+	// plan_payments is the TOTAL payment count (0 = until cancelled; see
+	// AddRecurringPlan) and update_subscription always sends it. Absent/empty
+	// reads as NMI's own 0 default; a NON-empty value we cannot parse must
+	// block rather than silently rewrite a finite schedule to bill-forever.
+	planPayments := 0
 	if remote.Plan != nil {
-		if n, perr := strconv.Atoi(strings.TrimSpace(remote.Plan.PlanPayments)); perr == nil {
+		if raw := strings.TrimSpace(remote.Plan.PlanPayments); raw != "" {
+			n, perr := strconv.Atoi(raw)
+			if perr != nil || n < 0 {
+				return fmt.Errorf("nmi push: %s carries unparseable plan_payments %q — refusing to guess the schedule", railID, raw)
+			}
 			planPayments = n
 		}
 	}

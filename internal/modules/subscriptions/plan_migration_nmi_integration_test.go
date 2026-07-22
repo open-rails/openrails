@@ -230,6 +230,23 @@ func TestPlanMigration_NMINativePushFailureDegradesToBlocked(t *testing.T) {
 	require.Equal(t, f.targetPriceID, priceID)
 }
 
+// TestPlanMigration_NMINativeGarbagePlanPaymentsBlocks: a NON-empty remote
+// plan_payments we cannot parse must block the push — silently defaulting to
+// 0 would rewrite a finite-payments schedule to bill-forever.
+func TestPlanMigration_NMINativeGarbagePlanPaymentsBlocks(t *testing.T) {
+	f, gateway, subID, _ := nmiNativeFixture(t, "10.00", "not-a-number")
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Blocked)
+	require.Contains(t, res.Outcomes[0].Reason, "unparseable plan_payments")
+	require.Equal(t, int64(0), gateway.updateCalls.Load(), "no update may be attempted on an unreadable schedule")
+	require.Equal(t, "10.00", gateway.amount.Load().(string))
+	priceID, _ := f.subscriptionRow(t, ctx, subID)
+	require.Equal(t, f.lowPriceID, priceID)
+}
+
 // TestPlanMigration_NMINativeVerifyMismatchBlocks: an update the gateway
 // accepts but never applies (ambiguous) must fail the read-back verify and
 // land blocked — never an internal cutover NMI does not bill.
