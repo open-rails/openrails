@@ -82,10 +82,12 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		            WHERE p.merchant_id = m.id AND p.replaced_at IS NULL)),
 		       count(*) FILTER (WHERE EXISTS (
 		           SELECT 1 FROM openrails.payments pay
-		            WHERE pay.merchant_id = m.id AND pay.status = 'completed')),
+		            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+		              AND pay.reversal_kind IS NULL)),
 		       count(*) FILTER (WHERE EXISTS (
 		           SELECT 1 FROM openrails.payments pay
 		            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+		              AND pay.reversal_kind IS NULL
 		              AND pay.purchased_at >= $2))
 		  FROM openrails.merchants m
 		 WHERE m.deleted_at IS NULL AND m.status = 'active'
@@ -97,10 +99,12 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		return nil, fmt.Errorf("fleet analytics: merchant funnel: %w", err)
 	}
 
+	// Sale rows only: refund/chargeback mirror rows share status='completed'
+	// (with negative amounts + reversal_kind set) and must not count as sales.
 	revenueRows, err := c.pool.Query(ctx, `
 		SELECT currency, count(*), COALESCE(sum(amount), 0)
 		  FROM openrails.payments
-		 WHERE status = 'completed' AND purchased_at >= $2
+		 WHERE status = 'completed' AND reversal_kind IS NULL AND purchased_at >= $2
 		   AND ($1::uuid IS NULL OR merchant_id <> $1)
 		 GROUP BY currency ORDER BY currency
 	`, excludeArg, since)
@@ -121,8 +125,8 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 
 	railRows, err := c.pool.Query(ctx, `
 		SELECT rail,
-		       count(*) FILTER (WHERE status = 'completed'),
-		       count(*) FILTER (WHERE status = 'failed')
+		       count(*) FILTER (WHERE status = 'completed' AND reversal_kind IS NULL),
+		       count(*) FILTER (WHERE status = 'failed' AND reversal_kind IS NULL)
 		  FROM openrails.payments
 		 WHERE purchased_at >= $2 AND status IN ('completed', 'failed')
 		   AND ($1::uuid IS NULL OR merchant_id <> $1)
