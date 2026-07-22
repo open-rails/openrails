@@ -179,6 +179,49 @@ func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, 
 	return out, nil
 }
 
+// ListRedrivableBlockedPlanChanges (#816) is the re-driver's CROSS-MERCHANT
+// enumeration (base pool, same posture as the River workers' other sweeps):
+// plan_change rows blocked by a rail push failure — the deferred-window
+// refusals and the push-verified-then-crash window. Classification blocks
+// stay terminal and are excluded by the reason prefix.
+func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batchSize int) ([]*models.SubscriptionReprice, error) {
+	batch32, _ := safecast.Convert[int32](batchSize)
+	rows, err := r.db.GenGlobal().ListRedrivableBlockedPlanChangeReprices(ctx, batch32)
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepricesFromGen(rows), nil
+}
+
+// Unblock (#816) transitions a blocked row back to scheduled for a re-drive —
+// the exact inverse of BlockScheduledReprice, status-predicated. Returns
+// ErrRepriceNotScheduled when the row is no longer blocked (a concurrent
+// transition won); a unique violation on
+// uq_subscription_reprices_one_scheduled (the subscription acquired another
+// scheduled row meanwhile) surfaces as the driver error for the caller to
+// treat as a skip.
+func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
+	rows, err := r.db.Gen(ctx).UnblockSubscriptionReprice(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return ErrRepriceNotScheduled
+	}
+	return nil
+}
+
+// CountBatchRows (#816) recomputes a plan-migration batch header's
+// scheduled/blocked counts from its actual rows — the re-sync source of
+// truth after re-drives move rows between the classes.
+func (r *RepriceRepo) CountBatchRows(ctx context.Context, batchID uuid.UUID) (scheduled, blocked int, err error) {
+	row, err := r.db.Gen(ctx).CountPlanMigrationBatchRows(ctx, batchID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(row.Scheduled), int(row.Blocked), nil
+}
+
 func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
 	row, err := r.db.Gen(ctx).GetSubscriptionRepriceByID(ctx, id)
 	if err != nil {

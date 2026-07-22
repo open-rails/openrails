@@ -513,6 +513,15 @@ func centRepresentable(amountMicros int64) bool {
 	return err == nil
 }
 
+// deferredPushRequired is THE early-flip predicate (#813 stripe, #815 NMI,
+// #816 re-driver — one definition, never forked): an effective date beyond
+// the subscription's CURRENT period means a rail push now would flip at least
+// one whole rebill early (a money defect). The push must wait until the
+// subscription enters its final pre-effective period.
+func deferredPushRequired(effectiveAt time.Time, sub *models.Subscription) bool {
+	return sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() && effectiveAt.After(*sub.CurrentPeriodEndsAt)
+}
+
 // pushNMI (#815) migrates a gateway-native NMI recurring subscription:
 // re-point the remote record's plan_amount at the target (schedule and
 // plan_payments untouched, read-back verified inside the pusher), then apply
@@ -531,12 +540,10 @@ func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRe
 		return fmt.Errorf("subscription missing current period end")
 	}
 	// Early-flip guard, STRICTER than stripe's: NMI has no future-dated
-	// schedule object — the push IS the next-rebill flip. An effective date
-	// beyond the current period would flip at least one whole rebill EARLY (a
-	// money defect). Refuse honestly; the row lands blocked and an idempotent
-	// re-run inside the final pre-effective period succeeds. (Automated
-	// deferred push is the filed follow-up on #813.)
-	if req.EffectiveAt.After(*sub.CurrentPeriodEndsAt) {
+	// schedule object — the push IS the next-rebill flip. Refuse honestly; the
+	// row lands blocked and the #816 re-driver (or a manual re-run) succeeds
+	// once the subscription enters its final pre-effective period.
+	if deferredPushRequired(req.EffectiveAt, sub) {
 		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
 	if err := s.nmi.PushPlanAmount(ctx, sub, target.Amount); err != nil {
@@ -579,10 +586,10 @@ func (s *PlanMigrationService) pushStripe(ctx context.Context, req *PlanMigratio
 	}
 	// A Stripe subscription schedule flips at the CURRENT period end. If
 	// effective_at lies beyond it, pushing now would flip a whole period
-	// EARLY — a money defect. Refuse honestly; the row lands blocked and an
-	// idempotent re-run inside the final pre-effective period succeeds.
-	// (Automated deferred push is the filed follow-up on #813.)
-	if req.EffectiveAt.After(*sub.CurrentPeriodEndsAt) {
+	// EARLY — a money defect. Refuse honestly; the row lands blocked and the
+	// #816 re-driver (or a manual re-run) succeeds once the subscription
+	// enters its final pre-effective period.
+	if deferredPushRequired(req.EffectiveAt, sub) {
 		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
 	periodStart := sub.StartedAt
