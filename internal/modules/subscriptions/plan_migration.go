@@ -21,14 +21,23 @@ package subscriptions
 //                        item update with proration_behavior=none); converge
 //                        applies the internal cutover from provider truth.
 //   - engine-driven      AUTO — no rail push needed; the #773 renewal-boundary
-//     (no rail sub id):  pickup (ResolveEffectivePrice / RenewMembership)
+//     (#297 anchored):   pickup (ResolveEffectivePrice / RenewMembership)
 //                        applies it when OpenRails initiates the charge.
-//   - ccbill, solana,    REQUIRES USER ACTION — the rail cannot be mutated
-//     native gateway     server-side (redirect flows / on-chain co-sign /
-//     recurring:         gateway-owned plans). Rows land status=blocked with
-//                        the reason; the operator's fallback_policy records
-//                        intent (keep_grandfathered | cancel_at_period_end —
-//                        the latter is NOT automated in v1, it is surfaced).
+//   - gateway-native     AUTO (#815) — classic Direct Post update_subscription
+//     NMI recurring:     re-points the remote plan_amount (schedule untouched,
+//                        plan_payments preserved, read-back verified). NMI has
+//                        no future-dated schedules, so the push IS the
+//                        next-rebill flip: it happens only inside the change-
+//                        boundary period, and the internal cutover accompanies
+//                        it (provider truth flips at push). Requires matching
+//                        billing intervals — an interval change cannot be
+//                        expressed as an amount update and blocks honestly.
+//   - ccbill, solana:    REQUIRES USER ACTION — the rail cannot be mutated
+//                        server-side (redirect flows / on-chain co-sign).
+//                        Rows land status=blocked with the reason; the
+//                        operator's fallback_policy records intent
+//                        (keep_grandfathered | cancel_at_period_end — the
+//                        latter is NOT automated in v1, it is surfaced).
 
 import (
 	"context"
@@ -42,6 +51,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -51,6 +61,12 @@ const (
 	migrationBlockedRailUserAction   = "rail_requires_user_action"
 	migrationBlockedMissingRailPrice = "target_price_missing_rail_config"
 	migrationBlockedRailPushFailed   = "rail_push_failed"
+	// #815: an NMI amount update cannot change the billing interval; a target
+	// on a different cycle cannot be expressed rail-side.
+	migrationBlockedNMIIntervalMismatch = "nmi_interval_mismatch"
+	// #815: NMI bills whole cents; a micro-dollar amount that is not
+	// cent-representable cannot be pushed.
+	migrationBlockedNMISubCentAmount = "nmi_amount_not_cent_representable"
 )
 
 var (
@@ -141,11 +157,12 @@ type StripePusher interface {
 type PlanMigrationService struct {
 	reprice        *RepriceService
 	stripe         StripePusher
+	nmi            NMIPusher
 	paymentMethods PaymentMethodLookup
 }
 
-func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, paymentMethods PaymentMethodLookup) *PlanMigrationService {
-	return &PlanMigrationService{reprice: reprice, stripe: stripe, paymentMethods: paymentMethods}
+func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, nmi NMIPusher, paymentMethods PaymentMethodLookup) *PlanMigrationService {
+	return &PlanMigrationService{reprice: reprice, stripe: stripe, nmi: nmi, paymentMethods: paymentMethods}
 }
 
 // migrationCapability classifies one subscription's rail for forced
@@ -155,6 +172,7 @@ type migrationCapability int
 const (
 	capabilityAutoInternal migrationCapability = iota // engine-driven: reprice row alone suffices
 	capabilityAutoStripe                              // push to Stripe, converge applies
+	capabilityAutoNMI                                 // #815: push plan_amount to NMI, cutover accompanies the push
 	capabilityUserAction                              // rail cannot be mutated server-side
 )
 
@@ -168,19 +186,32 @@ func (s *PlanMigrationService) classifyMigrationCapability(ctx context.Context, 
 		// Non-stripe card rails split by who INITIATES the recurring charge:
 		// a payment method carrying the #297 stored-credential recurring
 		// anchor means OpenRails' own engine charges (RenewalCharger) — the
-		// renewal-boundary pickup is then the whole mechanism. Anything else
-		// is a gateway-native recurring plan OpenRails only observes; the
-		// gateway would keep charging the old plan, so it cannot be
-		// auto-migrated server-side.
-		if s.paymentMethods == nil || sub.PaymentMethodID == nil {
-			return capabilityUserAction
+		// renewal-boundary pickup is then the whole mechanism.
+		if s.paymentMethods != nil && sub.PaymentMethodID != nil {
+			pm, err := s.paymentMethods.GetByID(ctx, *sub.PaymentMethodID)
+			if err == nil && pm != nil && strings.TrimSpace(pm.StoredCredentialRecurringRef) != "" {
+				return capabilityAutoInternal
+			}
 		}
-		pm, err := s.paymentMethods.GetByID(ctx, *sub.PaymentMethodID)
-		if err != nil || pm == nil || strings.TrimSpace(pm.StoredCredentialRecurringRef) == "" {
-			return capabilityUserAction
+		// #815: a gateway-native NMI recurring record CAN be mutated
+		// server-side (classic update_subscription). CanPush is the
+		// resolver-driven NMI-family detector, so custom-named NMI provider
+		// accounts classify without code changes. Everything else stays a
+		// record OpenRails only observes — the gateway would keep charging
+		// the old plan.
+		if s.nmi != nil && s.nmi.CanPush(ctx, sub) {
+			return capabilityAutoNMI
 		}
-		return capabilityAutoInternal
+		return capabilityUserAction
 	}
+}
+
+// nmiCyclesCompatible: an NMI amount update never touches the remote
+// schedule, so a plan change is expressible only when the target bills on
+// the SAME cycle the cohort already bills on.
+func nmiCyclesCompatible(source, target *models.Price) bool {
+	src, tgt := source.RecurringCycleDays(), target.RecurringCycleDays()
+	return src != nil && tgt != nil && *src == *tgt
 }
 
 func normalizeFallback(policy string) (string, error) {
@@ -236,6 +267,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 	}
 	for _, sub := range cohort {
 		out := PlanMigrationOutcome{SubscriptionID: sub.ID, Rail: string(sub.Rail)}
+		capability := s.classifyMigrationCapability(ctx, sub)
 		switch {
 		case sub.PriceID == target.ID:
 			out.Disposition = "skipped"
@@ -252,9 +284,19 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			out.Disposition = "skipped"
 			out.Reason = "self-scheduled downgrade pending"
 			rail(sub).Skipped++
-		case s.classifyMigrationCapability(ctx, sub) == capabilityUserAction:
+		case capability == capabilityUserAction:
 			out.Disposition = "blocked"
 			out.Reason = migrationBlockedRailUserAction
+			rail(sub).RequiresAction++
+		case capability == capabilityAutoNMI && !nmiCyclesCompatible(source, target):
+			// #815: the rail-side flip is an amount-only update; a target on a
+			// different billing cycle cannot be expressed at NMI.
+			out.Disposition = "blocked"
+			out.Reason = migrationBlockedNMIIntervalMismatch
+			rail(sub).RequiresAction++
+		case capability == capabilityAutoNMI && !centRepresentable(target.Amount):
+			out.Disposition = "blocked"
+			out.Reason = migrationBlockedNMISubCentAmount
 			rail(sub).RequiresAction++
 		default:
 			if err := s.reprice.scheduledConflict(ctx, sub.ID); err != nil {
@@ -403,7 +445,14 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 				}
 				continue
 			}
-			if req.Immediate && s.classifyMigrationCapability(ctx, sub) == capabilityAutoInternal {
+			switch s.classifyMigrationCapability(ctx, sub) {
+			case capabilityAutoInternal:
+				if req.Immediate {
+					o.Disposition = "applied_immediately"
+				}
+			case capabilityAutoNMI:
+				// #815: the NMI push carries the internal cutover with it
+				// (provider truth flips at push) — the row is already applied.
 				o.Disposition = "applied_immediately"
 			}
 			s.reprice.emitPlanChangeNotification(ctx, sub, source, target, targetProduct, req.EffectiveAt)
@@ -445,6 +494,8 @@ func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMi
 	switch s.classifyMigrationCapability(ctx, sub) {
 	case capabilityAutoStripe:
 		return s.pushStripe(ctx, req, sub, source, target, row)
+	case capabilityAutoNMI:
+		return s.pushNMI(ctx, req, sub, target, targetProduct, row)
 	case capabilityAutoInternal:
 		if req.Immediate {
 			return s.applyImmediately(ctx, sub, target, targetProduct, row)
@@ -453,6 +504,45 @@ func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMi
 	default:
 		return fmt.Errorf("unexpected capability for scheduled row")
 	}
+}
+
+// centRepresentable reports whether a micro-dollar amount lands on a whole
+// cent — NMI's amount granularity.
+func centRepresentable(amountMicros int64) bool {
+	_, err := moneyutil.MicrosToCentsExact(amountMicros)
+	return err == nil
+}
+
+// pushNMI (#815) migrates a gateway-native NMI recurring subscription:
+// re-point the remote record's plan_amount at the target (schedule and
+// plan_payments untouched, read-back verified inside the pusher), then apply
+// the internal cutover — provider truth has already flipped, so the row goes
+// applied in the same operation. Billing flips at the NEXT rebill (NMI
+// charges the record's amount on its unchanged schedule); nothing is charged
+// here and the rebill date never moves.
+func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRequest, sub *models.Subscription, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
+	if s.nmi == nil {
+		return fmt.Errorf("nmi pusher not configured")
+	}
+	if strings.TrimSpace(sub.RailSubscriptionID) == "" {
+		return fmt.Errorf("subscription missing nmi reference")
+	}
+	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
+		return fmt.Errorf("subscription missing current period end")
+	}
+	// Early-flip guard, STRICTER than stripe's: NMI has no future-dated
+	// schedule object — the push IS the next-rebill flip. An effective date
+	// beyond the current period would flip at least one whole rebill EARLY (a
+	// money defect). Refuse honestly; the row lands blocked and an idempotent
+	// re-run inside the final pre-effective period succeeds. (Automated
+	// deferred push is the filed follow-up on #813.)
+	if req.EffectiveAt.After(*sub.CurrentPeriodEndsAt) {
+		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
+	}
+	if err := s.nmi.PushPlanAmount(ctx, sub, target.Amount); err != nil {
+		return err
+	}
+	return s.applyImmediately(ctx, sub, target, targetProduct, row)
 }
 
 // pushStripe pushes the plan change to Stripe. Boundary mode schedules the
