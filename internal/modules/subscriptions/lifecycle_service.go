@@ -607,6 +607,14 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		// Idempotent: a scheduled row that already applied is gone, so a second
 		// RenewMembership call for the same renewal (e.g. a caller that also
 		// pre-resolves price before charging) just sees no due reprice here.
+		var price *models.Price
+		var oldProduct, newProduct *models.Product
+		oldEntitlementsSpec := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
+		// planChangeApplied (#813): a due kind=plan_change reprice moved the
+		// subscription across products at this boundary — the downgrade
+		// entitlement-diff pass below must run for it too.
+		planChangeApplied := false
+
 		repriceRepo := NewRepriceRepo(db)
 		if scheduledReprice, repriceErr := repriceRepo.GetScheduledForSubscription(ctx, subscription.ID); repriceErr == nil {
 			if scheduledReprice.IsDue(s.now()) {
@@ -617,10 +625,28 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
 					"reprice_id":      scheduledReprice.ID,
+					"kind":            scheduledReprice.Kind,
 					"old_price_id":    subscription.PriceID,
 					"new_price_id":    repricedTo.ID,
 				}).Info("Applying scheduled reprice on renewal")
-				// Same product by #773's constraint — no product/entitlements swap.
+				if repricedTo.ProductID != subscription.ProductID {
+					// #813 plan_change: cross-product cutover — move the
+					// product ref and cut entitlement/credit snapshots over at
+					// the same boundary the price moves.
+					oldProduct, err = productService.GetByID(ctx, subscription.ProductID)
+					if err != nil {
+						return fmt.Errorf("failed to get current product for plan change: %w", err)
+					}
+					newProduct, err = productService.GetByID(ctx, repricedTo.ProductID)
+					if err != nil {
+						return fmt.Errorf("failed to get target product for plan change: %w", err)
+					}
+					subscription.ProductID = repricedTo.ProductID
+					subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
+					subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(newProduct.CreditsSpec)
+					planChangeApplied = true
+				}
+				// #773 same-product reprice: price re-pin only.
 				subscription.PriceID = repricedTo.ID
 				if err := repriceRepo.Apply(ctx, scheduledReprice.ID); err != nil && !errors.Is(err, ErrRepriceNotScheduled) {
 					return fmt.Errorf("failed to mark reprice applied: %w", err)
@@ -631,10 +657,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		// Check for scheduled downgrade
-		var price *models.Price
-		var oldProduct, newProduct *models.Product
 		applyingDowngrade := subscription.ScheduledPriceID != nil
-		oldEntitlementsSpec := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
 
 		if applyingDowngrade {
 			// Get old product for entitlement comparison
@@ -892,8 +915,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		}
 
-		// Handle entitlements for downgrade
-		if applyingDowngrade && oldProduct != nil && newProduct != nil {
+		// Handle entitlements for downgrade (and #813 cross-product plan
+		// changes — same diff: revoke what the old product had and the new
+		// one doesn't).
+		if (applyingDowngrade || planChangeApplied) && oldProduct != nil && newProduct != nil {
 			// Determine which entitlements to revoke (in old but not in new)
 			oldEnts := make(map[string]bool)
 			if len(oldEntitlementsSpec) == 0 {

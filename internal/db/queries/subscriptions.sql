@@ -261,3 +261,13 @@ WHERE sub.customer_id = $1
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY sub.created_at DESC
 LIMIT 1;
+
+-- #813: the plan-migration cohort — every subscription still billing (or
+-- still being dunned) on the retired price. past_due is INCLUDED: a sub whose
+-- dunning recovers would otherwise renew on the old plan and silently escape
+-- the migration.
+-- name: ListMigratableSubscriptionsByPriceID :many
+SELECT * FROM openrails.subscriptions sub
+WHERE sub.price_id = sqlc.arg(price_id)::uuid
+  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
+ORDER BY sub.created_at;

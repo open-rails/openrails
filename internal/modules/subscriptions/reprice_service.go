@@ -49,6 +49,12 @@ func NewRepriceService(d *db.DB, repo *RepriceRepo, prices *catalog.PriceService
 	}
 }
 
+// products loads a product through a catalog service bound to the same DB
+// handle (#813: cross-product cutover needs the target product's specs).
+func (s *RepriceService) products(ctx context.Context, id uuid.UUID) (*models.Product, error) {
+	return catalog.NewProductService(s.db).GetByID(ctx, id)
+}
+
 func (s *RepriceService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -387,6 +393,18 @@ func (s *RepriceService) ResolveEffectivePrice(ctx context.Context, subscription
 	toPrice, err := s.prices.GetByID(ctx, scheduled.ToPriceID)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve effective price: load target price: %w", err)
+	}
+	if toPrice.ProductID != sub.ProductID {
+		// #813 plan_change: cross-product cutover — move the product ref and
+		// cut entitlement/credit snapshots over with the price. The renewal
+		// grant that follows re-derives windows from the new snapshots.
+		newProduct, err := s.products(ctx, toPrice.ProductID)
+		if err != nil {
+			return nil, false, fmt.Errorf("resolve effective price: load target product: %w", err)
+		}
+		sub.ProductID = toPrice.ProductID
+		sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
+		sub.CreditsSpecSnapshot = models.CloneCreditsSpec(newProduct.CreditsSpec)
 	}
 	sub.PriceID = toPrice.ID
 	if err := s.subscriptions.Update(ctx, sub); err != nil {

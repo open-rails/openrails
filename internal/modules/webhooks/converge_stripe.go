@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -370,6 +371,17 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 					sub.PriceID = price.ID
 					sub.ProductID = price.ProductID
 					sub.ScheduledPriceID = nil
+					// #813: if a scheduled reprice/plan-change row targeted
+					// exactly this price, the provider flip IS its
+					// application — mark it applied in the same tx so batch
+					// progress reflects provider truth. Idempotent by
+					// predicate; 0 rows on organic price moves.
+					if _, aerr := db.NewWithPgxTx(tx).Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, gen.ApplyScheduledRepriceForSubscriptionPriceParams{
+						SubscriptionID: sub.ID,
+						ToPriceID:      price.ID,
+					}); aerr != nil {
+						return fmt.Errorf("stripe converge: mark scheduled reprice applied: %w", aerr)
+					}
 					if s.ProductService != nil {
 						if product, perr2 := s.ProductService.GetByID(ctx, price.ProductID); perr2 == nil {
 							sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)

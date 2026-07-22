@@ -74,6 +74,7 @@ GET /v1/merchant/payment-providers
 GET /v1/merchant/payment-providers/{provider}
 GET /v1/merchant/payments
 GET /v1/merchant/payments/{id}
+GET /v1/merchant/plan-migrations/{id}
 GET /v1/merchant/repair-alerts
 GET /v1/merchant/reprices
 GET /v1/merchant/reprices/batches
@@ -148,6 +149,9 @@ POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
 POST /v1/merchant/payments/{id}/refunds
+POST /v1/merchant/plan-migrations
+POST /v1/merchant/plan-migrations/preview
+POST /v1/merchant/plan-migrations/{id}/cancel
 POST /v1/merchant/reprices/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/reprice

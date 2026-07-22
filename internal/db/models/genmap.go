@@ -405,6 +405,8 @@ func SubscriptionRepriceFromGen(r gen.OpenrailsSubscriptionReprice) *Subscriptio
 		AppliedAt:               r.AppliedAt,
 		CanceledAt:              r.CanceledAt,
 		AcknowledgedShortNotice: r.AcknowledgedShortNotice,
+		Kind:                    RepriceKind(r.Kind),
+		BlockedReason:           r.BlockedReason,
 	}
 }
 
@@ -430,5 +432,9 @@ func RepriceBatchFromGen(r gen.OpenrailsRepriceBatch) *RepriceBatch {
 		SubscriptionsScheduled: int(r.SubscriptionsScheduled),
 		SubscriptionsSkipped:   int(r.SubscriptionsSkipped),
 		CreatedAt:              r.CreatedAt,
+		Kind:                   RepriceKind(r.Kind),
+		SourcePriceID:          r.SourcePriceID,
+		FallbackPolicy:         r.FallbackPolicy,
+		SubscriptionsBlocked:   int(r.SubscriptionsBlocked),
 	}
 }

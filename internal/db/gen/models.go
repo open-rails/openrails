@@ -1066,6 +1066,12 @@ type OpenrailsRepriceBatch struct {
 	SubscriptionsScheduled int32
 	SubscriptionsSkipped   int32
 	CreatedAt              time.Time
+	Kind                   string
+	// #813: the retired plan's price for a plan_change batch (the cohort selector); NULL for #773 price-key batches.
+	SourcePriceID *uuid.UUID
+	// #813: operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
+	FallbackPolicy       string
+	SubscriptionsBlocked int32
 }
 
 type OpenrailsSolanaSubscription struct {
@@ -1140,6 +1146,10 @@ type OpenrailsSubscriptionReprice struct {
 	CanceledAt     *time.Time
 	// #781: true when this INCREASE reprice's effective_at was inside the merchant's configured notice window and was scheduled anyway via the explicit acknowledge_short_notice override on the request — the audit record for the support/emergency bypass path.
 	AcknowledgedShortNotice bool
+	// #813: 'reprice' = #773 same-product price move; 'plan_change' = cross-product migration — the renewal-boundary pickup also moves product_id and cuts entitlement/credit snapshots over.
+	Kind string
+	// #813: why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.
+	BlockedReason string
 }
 
 // #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.

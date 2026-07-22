@@ -12,6 +12,63 @@ import (
 	"github.com/google/uuid"
 )
 
+const createPlanMigrationBatch = `-- name: CreatePlanMigrationBatch :one
+INSERT INTO openrails.reprice_batches (
+    merchant_id, to_price_id, effective_at, kind, source_price_id, fallback_policy,
+    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, subscriptions_blocked
+) VALUES (
+    $1::uuid, $2::uuid, $3::timestamptz,
+    'plan_change', $4::uuid, $5::text,
+    $6::int, $7::int,
+    $8::int, $9::int
+)
+RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked
+`
+
+type CreatePlanMigrationBatchParams struct {
+	MerchantID             uuid.UUID
+	ToPriceID              uuid.UUID
+	EffectiveAt            time.Time
+	SourcePriceID          uuid.UUID
+	FallbackPolicy         string
+	SubscriptionsMatched   int32
+	SubscriptionsScheduled int32
+	SubscriptionsSkipped   int32
+	SubscriptionsBlocked   int32
+}
+
+// #813: header row for one plan-migration operation (kind=plan_change).
+func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMigrationBatchParams) (OpenrailsRepriceBatch, error) {
+	row := q.db.QueryRow(ctx, createPlanMigrationBatch,
+		arg.MerchantID,
+		arg.ToPriceID,
+		arg.EffectiveAt,
+		arg.SourcePriceID,
+		arg.FallbackPolicy,
+		arg.SubscriptionsMatched,
+		arg.SubscriptionsScheduled,
+		arg.SubscriptionsSkipped,
+		arg.SubscriptionsBlocked,
+	)
+	var i OpenrailsRepriceBatch
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.PriceKey,
+		&i.ToPriceID,
+		&i.EffectiveAt,
+		&i.SubscriptionsMatched,
+		&i.SubscriptionsScheduled,
+		&i.SubscriptionsSkipped,
+		&i.CreatedAt,
+		&i.Kind,
+		&i.SourcePriceID,
+		&i.FallbackPolicy,
+		&i.SubscriptionsBlocked,
+	)
+	return i, err
+}
+
 const createRepriceBatch = `-- name: CreateRepriceBatch :one
 
 INSERT INTO openrails.reprice_batches (
@@ -21,7 +78,7 @@ INSERT INTO openrails.reprice_batches (
     $1::uuid, $2::text, $3::uuid, $4::timestamptz,
     $5::int, $6::int, $7::int
 )
-RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at
+RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked
 `
 
 type CreateRepriceBatchParams struct {
@@ -56,12 +113,16 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 		&i.SubscriptionsScheduled,
 		&i.SubscriptionsSkipped,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.SourcePriceID,
+		&i.FallbackPolicy,
+		&i.SubscriptionsBlocked,
 	)
 	return i, err
 }
 
 const getRepriceBatchByID = `-- name: GetRepriceBatchByID :one
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at FROM openrails.reprice_batches WHERE id = $1
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches WHERE id = $1
 `
 
 func (q *Queries) GetRepriceBatchByID(ctx context.Context, id uuid.UUID) (OpenrailsRepriceBatch, error) {
@@ -77,12 +138,16 @@ func (q *Queries) GetRepriceBatchByID(ctx context.Context, id uuid.UUID) (Openra
 		&i.SubscriptionsScheduled,
 		&i.SubscriptionsSkipped,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.SourcePriceID,
+		&i.FallbackPolicy,
+		&i.SubscriptionsBlocked,
 	)
 	return i, err
 }
 
 const listRepriceBatches = `-- name: ListRepriceBatches :many
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at FROM openrails.reprice_batches
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches
 ORDER BY created_at DESC
 LIMIT $2::int OFFSET $1::int
 `
@@ -111,6 +176,10 @@ func (q *Queries) ListRepriceBatches(ctx context.Context, arg ListRepriceBatches
 			&i.SubscriptionsScheduled,
 			&i.SubscriptionsSkipped,
 			&i.CreatedAt,
+			&i.Kind,
+			&i.SourcePriceID,
+			&i.FallbackPolicy,
+			&i.SubscriptionsBlocked,
 		); err != nil {
 			return nil, err
 		}
@@ -123,7 +192,7 @@ func (q *Queries) ListRepriceBatches(ctx context.Context, arg ListRepriceBatches
 }
 
 const listRepriceBatchesByPriceKey = `-- name: ListRepriceBatchesByPriceKey :many
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at FROM openrails.reprice_batches
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches
 WHERE price_key = $1::text
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $2::int
@@ -157,6 +226,10 @@ func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepr
 			&i.SubscriptionsScheduled,
 			&i.SubscriptionsSkipped,
 			&i.CreatedAt,
+			&i.Kind,
+			&i.SourcePriceID,
+			&i.FallbackPolicy,
+			&i.SubscriptionsBlocked,
 		); err != nil {
 			return nil, err
 		}
@@ -166,4 +239,27 @@ func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepr
 		return nil, err
 	}
 	return items, nil
+}
+
+const updatePlanMigrationBatchCounts = `-- name: UpdatePlanMigrationBatchCounts :execrows
+UPDATE openrails.reprice_batches SET
+    subscriptions_scheduled = $1::int,
+    subscriptions_blocked = $2::int
+WHERE id = $3
+`
+
+type UpdatePlanMigrationBatchCountsParams struct {
+	SubscriptionsScheduled int32
+	SubscriptionsBlocked   int32
+	ID                     uuid.UUID
+}
+
+// #813: re-sync a plan-migration batch header after rail pushes degrade
+// scheduled rows to blocked — the header must always agree with its rows.
+func (q *Queries) UpdatePlanMigrationBatchCounts(ctx context.Context, arg UpdatePlanMigrationBatchCountsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePlanMigrationBatchCounts, arg.SubscriptionsScheduled, arg.SubscriptionsBlocked, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

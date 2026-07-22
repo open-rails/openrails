@@ -1045,6 +1045,68 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 	return items, nil
 }
 
+const listMigratableSubscriptionsByPriceID = `-- name: ListMigratableSubscriptionsByPriceID :many
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+WHERE sub.price_id = $1::uuid
+  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
+ORDER BY sub.created_at
+`
+
+// #813: the plan-migration cohort — every subscription still billing (or
+// still being dunned) on the retired price. past_due is INCLUDED: a sub whose
+// dunning recovers would otherwise renew on the old plan and silently escape
+// the migration.
+func (q *Queries) ListMigratableSubscriptionsByPriceID(ctx context.Context, priceID uuid.UUID) ([]OpenrailsSubscription, error) {
+	rows, err := q.db.Query(ctx, listMigratableSubscriptionsByPriceID, priceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsSubscription
+	for rows.Next() {
+		var i OpenrailsSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.RailSubscriptionID,
+			&i.UserEmail,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.ScheduledPriceID,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CancelledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubscriptionsByCustomerPaged = `-- name: ListSubscriptionsByCustomerPaged :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
