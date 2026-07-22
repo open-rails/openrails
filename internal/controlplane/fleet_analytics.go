@@ -34,10 +34,13 @@ type FleetCurrencyRevenue struct {
 }
 
 // FleetRailHealth is one rail's window outcome split across the fleet.
+// Chargebacks counts reversal_kind='chargeback' mirror rows recorded in the
+// window (#733) — the dispute signal VAMP-style monitoring watches.
 type FleetRailHealth struct {
-	Rail      string
-	Succeeded int64
-	Failed    int64
+	Rail        string
+	Succeeded   int64
+	Failed      int64
+	Chargebacks int64
 }
 
 // FleetMRR is the monthly-normalized recurring run-rate in one currency, in
@@ -126,7 +129,8 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 	railRows, err := c.pool.Query(ctx, `
 		SELECT rail,
 		       count(*) FILTER (WHERE status = 'completed' AND reversal_kind IS NULL),
-		       count(*) FILTER (WHERE status = 'failed' AND reversal_kind IS NULL)
+		       count(*) FILTER (WHERE status = 'failed' AND reversal_kind IS NULL),
+		       count(*) FILTER (WHERE reversal_kind = 'chargeback')
 		  FROM openrails.payments
 		 WHERE purchased_at >= $2 AND status IN ('completed', 'failed')
 		   AND ($1::uuid IS NULL OR merchant_id <> $1)
@@ -138,7 +142,7 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 	defer railRows.Close()
 	for railRows.Next() {
 		var r FleetRailHealth
-		if err := railRows.Scan(&r.Rail, &r.Succeeded, &r.Failed); err != nil {
+		if err := railRows.Scan(&r.Rail, &r.Succeeded, &r.Failed, &r.Chargebacks); err != nil {
 			return nil, fmt.Errorf("fleet analytics: scan rail health: %w", err)
 		}
 		out.Rails = append(out.Rails, r)
