@@ -175,6 +175,77 @@ func TestListPaymentMethods(t *testing.T) {
 	})
 }
 
+func TestListPaymentMethodsForSubscription(t *testing.T) {
+	suite, token, userID := setupTestSuiteWithAuth(t)
+	priceID := suite.SeedProducts()[0].Prices[0].ID
+	matching := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
+		UserID:   userID,
+		Rail:     models.RailNMI,
+		LastFour: "4242",
+		CardType: "Visa",
+	})
+	suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
+		UserID:   userID,
+		Rail:     models.RailCCBill,
+		LastFour: "1111",
+		CardType: "Visa",
+	})
+	subscription := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:          userID,
+		PriceID:         priceID,
+		Status:          models.StatusActive,
+		Rail:            models.RailNMI,
+		PaymentMethodID: &matching.ID,
+	})
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		http.MethodGet,
+		"/v1/me/payment-methods?subscription_id="+api.FormatSubscriptionID(subscription.ID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.Server.Handler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response struct {
+		Data  []map[string]any `json:"data"`
+		Total int64            `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, int64(1), response.Total)
+	require.Len(t, response.Data, 1)
+	require.Equal(t, api.FormatPaymentMethodID(matching.ID), response.Data[0]["id"])
+	subscriptions, ok := response.Data[0]["subscriptions"].([]any)
+	require.True(t, ok)
+	require.Len(t, subscriptions, 1)
+	require.Equal(t, subscription.ID.String(), subscriptions[0].(map[string]any)["id"])
+	for _, privateField := range []string{
+		"psp_id",
+		"provider_account_id",
+		"account_id",
+		"rail_customer_ref",
+		"rail_method_ref",
+		"secret",
+	} {
+		require.NotContains(t, response.Data[0], privateField)
+	}
+
+	otherUserID := uuid.NewString()
+	otherSubscription := suite.CreateTestSubscription(otherUserID, priceID, models.StatusActive)
+	w = httptest.NewRecorder()
+	req, err = http.NewRequest(
+		http.MethodGet,
+		"/v1/me/payment-methods?subscription_id="+api.FormatSubscriptionID(otherSubscription.ID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.Server.Handler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
 // TestCreatePaymentMethod tests creating payment methods
 func TestCreatePaymentMethod(t *testing.T) {
 	suite, mock := SetupSuiteWithMockNMI(t)

@@ -44,6 +44,24 @@ WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountCompatiblePaymentMethodsByCustomer :one
+SELECT count(*) FROM openrails.payment_methods pm
+WHERE pm.customer_id = sqlc.arg(customer_id)
+  AND lower(btrim(pm.rail)) = sqlc.arg(rail)
+  AND (sqlc.narg(psp_id)::uuid IS NULL
+       OR pm.psp_id IS NULL
+       OR pm.psp_id = sqlc.narg(psp_id)::uuid);
+
+-- name: ListCompatiblePaymentMethodsByCustomerPaged :many
+SELECT * FROM openrails.payment_methods pm
+WHERE pm.customer_id = sqlc.arg(customer_id)
+  AND lower(btrim(pm.rail)) = sqlc.arg(rail)
+  AND (sqlc.narg(psp_id)::uuid IS NULL
+       OR pm.psp_id IS NULL
+       OR pm.psp_id = sqlc.narg(psp_id)::uuid)
+ORDER BY pm.created_at DESC
+LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
+
 -- name: GetPaymentMethodByRailMethodRef :one
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.rail = $1 AND pm.rail_method_ref = $2

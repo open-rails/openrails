@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/stretchr/testify/require"
@@ -175,6 +177,57 @@ func TestPaymentMethodToAPIIncludesStoredBillingMetadata(t *testing.T) {
 	require.Equal(t, "100-0001", *got.BillingDetails.Address.PostalCode)
 	require.Equal(t, "1 Chiyoda", *got.BillingDetails.Address.Line1)
 	require.Equal(t, "Ada Lovelace", got.Metadata["name_on_card"])
+}
+
+func TestPaymentMethodToAPIPrivacyContract(t *testing.T) {
+	t.Parallel()
+
+	pspID := uuid.New()
+	response := paymentMethodToAPI(&models.PaymentMethod{
+		ID:                             uuid.New(),
+		Rail:                           models.RailNMI,
+		PspID:                          &pspID,
+		RailCustomerRef:                "private-customer-ref",
+		RailMethodRef:                  "private-method-ref",
+		InitialTransactionID:           "private-transaction-ref",
+		StoredCredentialRecurringRef:   "private-recurring-ref",
+		StoredCredentialUnscheduledRef: "private-unscheduled-ref",
+		VaultProvider:                  "private-vault-provider",
+		VaultFingerprint:               "private-vault-fingerprint",
+		NetworkTokenID:                 "private-network-token",
+		NetworkTokenPAR:                "private-network-par",
+		CreatedAt:                      time.Now().UTC(),
+	}, nil)
+
+	payload, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(payload, &got))
+	for _, privateField := range []string{
+		"psp_id",
+		"provider_account_id",
+		"account_id",
+		"rail_customer_ref",
+		"rail_method_ref",
+		"secret",
+	} {
+		require.NotContains(t, got, privateField)
+	}
+	for _, privateValue := range []string{
+		pspID.String(),
+		"private-customer-ref",
+		"private-method-ref",
+		"private-transaction-ref",
+		"private-recurring-ref",
+		"private-unscheduled-ref",
+		"private-vault-provider",
+		"private-vault-fingerprint",
+		"private-network-token",
+		"private-network-par",
+	} {
+		require.False(t, strings.Contains(string(payload), privateValue))
+	}
 }
 
 func TestCreateVaultRequestDoesNotStoreRawProviderPayload(t *testing.T) {

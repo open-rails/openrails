@@ -96,6 +96,28 @@ func (q *Queries) CaptureStoredCredentialRefByRailInstrument(ctx context.Context
 	return result.RowsAffected(), nil
 }
 
+const countCompatiblePaymentMethodsByCustomer = `-- name: CountCompatiblePaymentMethodsByCustomer :one
+SELECT count(*) FROM openrails.payment_methods pm
+WHERE pm.customer_id = $1
+  AND lower(btrim(pm.rail)) = $2
+  AND ($3::uuid IS NULL
+       OR pm.psp_id IS NULL
+       OR pm.psp_id = $3::uuid)
+`
+
+type CountCompatiblePaymentMethodsByCustomerParams struct {
+	CustomerID uuid.UUID
+	Rail       string
+	PspID      *uuid.UUID
+}
+
+func (q *Queries) CountCompatiblePaymentMethodsByCustomer(ctx context.Context, arg CountCompatiblePaymentMethodsByCustomerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCompatiblePaymentMethodsByCustomer, arg.CustomerID, arg.Rail, arg.PspID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPaymentMethodForUser = `-- name: CountPaymentMethodForUser :one
 SELECT count(*) FROM openrails.payment_methods pm
 WHERE pm.id = $1 AND pm.customer_id = $2
@@ -430,6 +452,77 @@ func (q *Queries) GetPaymentMethodByVaultFingerprint(ctx context.Context, arg Ge
 		&i.ParkedAt,
 	)
 	return i, err
+}
+
+const listCompatiblePaymentMethodsByCustomerPaged = `-- name: ListCompatiblePaymentMethodsByCustomerPaged :many
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, vault_provider, vault_fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at FROM openrails.payment_methods pm
+WHERE pm.customer_id = $1
+  AND lower(btrim(pm.rail)) = $2
+  AND ($3::uuid IS NULL
+       OR pm.psp_id IS NULL
+       OR pm.psp_id = $3::uuid)
+ORDER BY pm.created_at DESC
+LIMIT NULLIF($5::int, 0) OFFSET $4::int
+`
+
+type ListCompatiblePaymentMethodsByCustomerPagedParams struct {
+	CustomerID uuid.UUID
+	Rail       string
+	PspID      *uuid.UUID
+	PageOffset int32
+	PageLimit  int32
+}
+
+func (q *Queries) ListCompatiblePaymentMethodsByCustomerPaged(ctx context.Context, arg ListCompatiblePaymentMethodsByCustomerPagedParams) ([]OpenrailsPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listCompatiblePaymentMethodsByCustomerPaged,
+		arg.CustomerID,
+		arg.Rail,
+		arg.PspID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPaymentMethod
+	for rows.Next() {
+		var i OpenrailsPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.Rail,
+			&i.InitialTransactionID,
+			&i.LastFour,
+			&i.CardType,
+			&i.ExpiryDate,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.RailCustomerRef,
+			&i.RailMethodRef,
+			&i.RebillDriver,
+			&i.StoredCredentialRecurringRef,
+			&i.StoredCredentialUnscheduledRef,
+			&i.VaultProvider,
+			&i.VaultFingerprint,
+			&i.NetworkTokenID,
+			&i.NetworkTokenStatus,
+			&i.NetworkTokenPar,
+			&i.ChargeVia,
+			&i.ParkReason,
+			&i.ParkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many

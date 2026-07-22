@@ -73,6 +73,28 @@ func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, 
 	return items, total, nil
 }
 
+func (s *PaymentMethodService) ListCompatibleByUserID(ctx context.Context, userID string, rail models.Rail, pspID *uuid.UUID, limit, offset int) ([]*models.PaymentMethod, int64, error) {
+	if userID == "" {
+		return nil, 0, errors.New("user ID is required")
+	}
+	rail = models.Rail(strings.ToLower(strings.TrimSpace(string(rail))))
+	if rail == "" {
+		return nil, 0, errors.New("rail is required")
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	items, total, err := s.repo.ListCompatibleByUserID(ctx, userID, rail, pspID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 // GetByRailMethodRef finds a payment method by its instrument-scope rail handle
 // (e.g. a Stripe pm_ token) for the given rail.
 func (s *PaymentMethodService) GetByRailMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error) {

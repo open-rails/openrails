@@ -131,6 +131,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		CurrentPeriodStartsAt *time.Time                `json:"current_period_starts_at,omitempty"`
 		CurrentPeriodEndsAt   *time.Time                `json:"current_period_ends_at,omitempty"`
 		Rail                  models.Rail               `json:"rail,omitempty"`
+		PaymentMethodID       string                    `json:"payment_method_id,omitempty"`
 		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
 		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
 		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
@@ -175,6 +176,9 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 			CreatedAt:             r.Subscription.CreatedAt,
 			UpdatedAt:             r.Subscription.UpdatedAt,
 			Access:                r.Access,
+		}
+		if r.Subscription.PaymentMethodID != nil {
+			out.PaymentMethodID = api.FormatPaymentMethodID(*r.Subscription.PaymentMethodID)
 		}
 		if r.Price != nil {
 			price := priceToAPIObject(r.Price)

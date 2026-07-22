@@ -41,27 +41,27 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		pspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID:                    m.ID,
-		MerchantID:            tid.UUID(),
-		CustomerID:            m.CustomerID,
-		Rail:                  string(m.Rail),
-		PspID:                 pspID,
-		RailCustomerRef:       m.RailCustomerRef,
-		RailMethodRef:         m.RailMethodRef,
-		RebillDriver:          m.RebillDriver, // "" -> DB default 'provider'
-		InitialTransactionID:  m.InitialTransactionID,
-		LastFour:              m.LastFour,
-		CardType:              m.CardType,
-		ExpiryDate:            m.ExpiryDate,
-		Metadata:              meta,
-		CreatedAt:             m.CreatedAt,
-		UpdatedAt:             m.UpdatedAt,
-		VaultProvider:         m.VaultProvider,
-		VaultFingerprint:      m.VaultFingerprint,
-		NetworkTokenID:        m.NetworkTokenID,
-		NetworkTokenStatus:    m.NetworkTokenStatus,
-		NetworkTokenPar:       m.NetworkTokenPAR,
-		ChargeVia:             m.ChargeVia, // "" -> DB default 'pan_proxy'
+		ID:                   m.ID,
+		MerchantID:           tid.UUID(),
+		CustomerID:           m.CustomerID,
+		Rail:                 string(m.Rail),
+		PspID:                pspID,
+		RailCustomerRef:      m.RailCustomerRef,
+		RailMethodRef:        m.RailMethodRef,
+		RebillDriver:         m.RebillDriver, // "" -> DB default 'provider'
+		InitialTransactionID: m.InitialTransactionID,
+		LastFour:             m.LastFour,
+		CardType:             m.CardType,
+		ExpiryDate:           m.ExpiryDate,
+		Metadata:             meta,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
+		VaultProvider:        m.VaultProvider,
+		VaultFingerprint:     m.VaultFingerprint,
+		NetworkTokenID:       m.NetworkTokenID,
+		NetworkTokenStatus:   m.NetworkTokenStatus,
+		NetworkTokenPar:      m.NetworkTokenPAR,
+		ChargeVia:            m.ChargeVia, // "" -> DB default 'pan_proxy'
 	})
 	if err != nil {
 		return err
@@ -184,6 +184,48 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListPaymentMethodsByCustomerPaged(ctx, gen.ListPaymentMethodsByCustomerPagedParams{
 		CustomerID: tsid,
+		PageLimit:  limit32,
+		PageOffset: offset32,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	methods, err := models.PaymentMethodsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachPaymentMethodSubscriptions(ctx, methods); err != nil {
+		return nil, 0, err
+	}
+	return methods, total, nil
+}
+
+func (r *PaymentMethodRepo) ListCompatibleByUserID(ctx context.Context, userID string, rail models.Rail, pspID *uuid.UUID, limit, offset int) ([]*models.PaymentMethod, int64, error) {
+	tsid, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	q := r.db.Gen(ctx)
+	total, err := q.CountCompatiblePaymentMethodsByCustomer(ctx, gen.CountCompatiblePaymentMethodsByCustomerParams{
+		CustomerID: tsid,
+		Rail:       string(rail),
+		PspID:      pspID,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	limit32, err := safecast.Convert[int32](limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("convert payment method page limit: %w", err)
+	}
+	offset32, err := safecast.Convert[int32](offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("convert payment method page offset: %w", err)
+	}
+	rows, err := q.ListCompatiblePaymentMethodsByCustomerPaged(ctx, gen.ListCompatiblePaymentMethodsByCustomerPagedParams{
+		CustomerID: tsid,
+		Rail:       string(rail),
+		PspID:      pspID,
 		PageLimit:  limit32,
 		PageOffset: offset32,
 	})

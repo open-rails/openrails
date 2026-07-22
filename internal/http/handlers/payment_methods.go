@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
@@ -23,9 +24,10 @@ import (
 )
 
 type listPaymentMethodsQuery struct {
-	Limit           int  `form:"limit"`
-	Offset          int  `form:"offset"`
-	IncludeInactive bool `form:"include_inactive"`
+	Limit           int    `form:"limit"`
+	Offset          int    `form:"offset"`
+	IncludeInactive bool   `form:"include_inactive"`
+	SubscriptionID  string `form:"subscription_id"`
 }
 
 type paymentMethodURI struct {
@@ -447,7 +449,47 @@ func ListPaymentMethods(r *httprequest.Request) {
 		return
 	}
 
-	methods, totalItems, err := r.State.PaymentMethodService.ListByUserID(r.Request.Context(), user.ID, req.Limit, req.Offset)
+	var methods []*models.PaymentMethod
+	var totalItems int64
+	var err error
+	if subscriptionID := strings.TrimSpace(req.SubscriptionID); subscriptionID != "" {
+		parsedSubscriptionID, parseErr := api.ParseSubscriptionID(subscriptionID)
+		if parseErr != nil {
+			r.ErrorJSON(http.StatusBadRequest, "Invalid subscription_id format")
+			return
+		}
+		subscription, getErr := r.State.SubscriptionService.GetByID(
+			r.Request.Context(),
+			parsedSubscriptionID,
+		)
+		if getErr != nil {
+			if db.IsNotFound(getErr) {
+				r.ErrorJSON(http.StatusNotFound, "Subscription not found")
+				return
+			}
+			log.WithError(getErr).WithFields(log.Fields{
+				"subscription_id": parsedSubscriptionID,
+				"user_id":         user.ID,
+			}).Error("Failed to retrieve subscription for payment method filtering")
+			r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve subscription")
+			return
+		}
+		if subscription.CustomerID.String() != user.ID {
+			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
+			return
+		}
+
+		methods, totalItems, err = r.State.PaymentMethodService.ListCompatibleByUserID(
+			r.Request.Context(),
+			user.ID,
+			subscription.Rail,
+			subscription.PspID,
+			req.Limit,
+			req.Offset,
+		)
+	} else {
+		methods, totalItems, err = r.State.PaymentMethodService.ListByUserID(r.Request.Context(), user.ID, req.Limit, req.Offset)
+	}
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": user.ID, "limit": req.Limit, "offset": req.Offset}).Error("Failed to retrieve payment methods")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve payment methods")
