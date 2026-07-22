@@ -14,6 +14,7 @@ package subscriptions
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,9 +80,33 @@ func (f pmLookupFunc) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 	return f(ctx, id)
 }
 
+// fakeNMIPusher (#815) records gateway-native NMI pushes at the seam level
+// (the real Direct Post wire shape is covered by the fake-gateway suite in
+// plan_migration_nmi_integration_test.go).
+type fakeNMIPusher struct {
+	canPush bool
+	pushErr error
+	pushes  []map[string]any
+}
+
+func (f *fakeNMIPusher) CanPush(_ context.Context, sub *models.Subscription) bool {
+	return f != nil && f.canPush && strings.TrimSpace(sub.RailSubscriptionID) != ""
+}
+
+func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, amountMicros int64) error {
+	if f.pushErr != nil {
+		return f.pushErr
+	}
+	f.pushes = append(f.pushes, map[string]any{
+		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID, "amount_micros": amountMicros,
+	})
+	return nil
+}
+
 type planMigrationFixture struct {
 	*repriceFixture
 	stripe *fakeStripePusher
+	nmi    *fakeNMIPusher
 	pm     *PlanMigrationService
 
 	targetProductID uuid.UUID
@@ -128,16 +153,18 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 		`{"stripe": {"rail": "stripe", "price_id": "price_tgt_`+suffix+`"}}`)
 
 	stripe := &fakeStripePusher{}
+	nmiPusher := &fakeNMIPusher{canPush: true}
 	// Payment-method lookup: any PM id resolves to an engine-anchored
 	// instrument (per-test overrides construct their own service).
 	pmLookup := pmLookupFunc(func(_ context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
 		return &models.PaymentMethod{ID: id, StoredCredentialRecurringRef: "anchor-" + id.String()}, nil
 	})
-	svc := NewPlanMigrationService(base.repriceSvc, stripe, pmLookup)
+	svc := NewPlanMigrationService(base.repriceSvc, stripe, nmiPusher, pmLookup)
 
 	f := &planMigrationFixture{
 		repriceFixture:      base,
 		stripe:              stripe,
+		nmi:                 nmiPusher,
 		pm:                  svc,
 		targetProductID:     targetProductID,
 		targetPriceID:       targetPriceID,
@@ -374,22 +401,24 @@ func TestPlanMigration_StripePushFailureDegradesToBlocked(t *testing.T) {
 	require.EqualValues(t, 1, batch.SubscriptionsBlocked)
 }
 
-// TestPlanMigration_CapabilityClassification: ccbill/solana and gateway-
-// native recurring (no stored-credential anchor) land blocked
-// rail_requires_user_action; the preview reports per-rail counts.
+// TestPlanMigration_CapabilityClassification: ccbill/solana land blocked
+// rail_requires_user_action; gateway-native NMI recurring (no stored-
+// credential anchor) is AUTO since #815 (server-side update_subscription);
+// the preview reports per-rail counts.
 func TestPlanMigration_CapabilityClassification(t *testing.T) {
 	f := newPlanMigrationFixture(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "ccbill", false)
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "solana", false)
-	// NMI WITHOUT a payment method (gateway-native recurring): blocked too.
+	// NMI WITHOUT a payment method (gateway-native recurring): AUTO via the
+	// #815 pusher.
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", false)
-	// Engine-anchored NMI: auto.
+	// Engine-anchored NMI: auto via the renewal-boundary pickup.
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
 
 	// Real PM lookup for this test: resolve from the DB so the anchored/
 	// unanchored split is driven by actual rows.
-	svc := NewPlanMigrationService(f.repriceSvc, f.stripe, pmLookupFunc(func(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
+	svc := NewPlanMigrationService(f.repriceSvc, f.stripe, f.nmi, pmLookupFunc(func(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
 		var anchor string
 		if err := f.pool.QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM openrails.payment_methods WHERE id = $1`, id).Scan(&anchor); err != nil {
 			return nil, err
@@ -400,13 +429,13 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 	preview, err := svc.Preview(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
 	require.Equal(t, 4, preview.Matched)
-	require.Equal(t, 1, preview.Scheduled)
-	require.Equal(t, 3, preview.Blocked)
+	require.Equal(t, 2, preview.Scheduled)
+	require.Equal(t, 2, preview.Blocked)
 	require.Nil(t, preview.BatchID, "preview must not create a batch")
 	require.Equal(t, 1, preview.ByRail["ccbill"].RequiresAction)
 	require.Equal(t, 1, preview.ByRail["solana"].RequiresAction)
-	require.Equal(t, 1, preview.ByRail["nmi"].RequiresAction)
-	require.Equal(t, 1, preview.ByRail["nmi"].Auto)
+	require.Equal(t, 2, preview.ByRail["nmi"].Auto, "anchored AND gateway-native NMI are both auto since #815")
+	require.Empty(t, f.nmi.pushes, "preview must not push")
 
 	// Preview wrote nothing.
 	var batches, reprices int
@@ -415,10 +444,14 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 	require.Zero(t, batches)
 	require.Zero(t, reprices)
 
-	// Migrate records the blocked ledger rows.
+	// Migrate records the blocked ledger rows and pushes the gateway-native
+	// NMI sub (preview counts == execute classification).
 	res, err := svc.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
-	require.Equal(t, 3, res.Blocked)
+	require.Equal(t, 2, res.Blocked)
+	require.Equal(t, preview.Scheduled, res.Scheduled, "preview counts must match execute classification")
+	require.Len(t, f.nmi.pushes, 1, "exactly the gateway-native NMI sub is pushed")
+	require.EqualValues(t, 9000000, f.nmi.pushes[0]["amount_micros"])
 	rows, err := f.repriceRepo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: res.BatchID}, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 4)
@@ -429,7 +462,7 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 			require.Equal(t, "rail_requires_user_action", row.BlockedReason)
 		}
 	}
-	require.Equal(t, 3, blocked)
+	require.Equal(t, 2, blocked)
 }
 
 // TestPlanMigration_NoticeWindowGate (#781 reuse): an INCREASE migration
