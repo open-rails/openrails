@@ -157,10 +157,10 @@ func CancelPlanMigration(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "plan migration service unavailable")
 		return
 	}
-	canceled, err := r.State.PlanMigrationService.CancelBatch(r.Request.Context(), id)
+	res, err := r.State.PlanMigrationService.CancelBatch(r.Request.Context(), id)
 	if err != nil {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, map[string]any{"canceled": canceled})
+	r.JSON(http.StatusOK, res)
 }

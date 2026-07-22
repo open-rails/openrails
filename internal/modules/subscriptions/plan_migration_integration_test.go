@@ -366,6 +366,12 @@ func TestPlanMigration_StripePushFailureDegradesToBlocked(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, models.RepriceStatusBlocked, rows[0].Status)
 	require.Contains(t, rows[0].BlockedReason, "stripe 500")
+
+	// The persisted batch header must agree with its rows after degradation.
+	batch, _, err := f.pm.GetBatch(ctx, *res.BatchID, 10, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, batch.SubscriptionsScheduled)
+	require.EqualValues(t, 1, batch.SubscriptionsBlocked)
 }
 
 // TestPlanMigration_CapabilityClassification: ccbill/solana and gateway-
@@ -522,9 +528,11 @@ func TestPlanMigration_CancelBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Scheduled)
 
-	canceled, err := f.pm.CancelBatch(ctx, *res.BatchID)
+	cres, err := f.pm.CancelBatch(ctx, *res.BatchID)
 	require.NoError(t, err)
-	require.Equal(t, 1, canceled)
+	require.Equal(t, 1, cres.Canceled)
+	require.Empty(t, cres.RailReleaseRequired, "engine-rail cancel is complete on both sides")
+	require.Empty(t, cres.Warning)
 
 	f.clock.Advance(48 * time.Hour)
 	amount := f.renewalAmount(t, ctx, models.RailNMI, railSubID)
@@ -535,6 +543,50 @@ func TestPlanMigration_CancelBatch(t *testing.T) {
 	require.Equal(t, models.RepriceKindPlanChange, batch.Kind)
 	require.Len(t, rows, 1)
 	require.Equal(t, models.RepriceStatusCanceled, rows[0].Status)
+}
+
+// TestPlanMigration_CancelAfterStripePushWarnsLoudly: cancelling a batch
+// whose Stripe boundary push already planted a provider-side schedule must
+// surface the divergence — Stripe will still flip at period end unless the
+// schedule is released out of band.
+func TestPlanMigration_CancelAfterStripePushWarnsLoudly(t *testing.T) {
+	f := newPlanMigrationFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	subID, _ := f.createSubscriptionOnRail(t, ctx, f.stripeSourcePriceID, "stripe", false)
+
+	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.stripeSourcePriceID, TargetPriceID: f.stripeTargetPriceID})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Scheduled)
+	require.Len(t, f.stripe.schedules, 1)
+
+	cres, err := f.pm.CancelBatch(ctx, *res.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, 1, cres.Canceled)
+	require.Equal(t, []uuid.UUID{subID}, cres.RailReleaseRequired)
+	require.Contains(t, cres.Warning, "WILL flip the price at period end")
+}
+
+// TestPlanMigration_SkipsSelfScheduledDowngrade: a subscription with a
+// pending self-serve TierChange downgrade (ScheduledPriceID set) is already
+// leaving the source price — stacking a plan-change row on the same renewal
+// boundary would double-schedule; it must be skipped with a reason.
+func TestPlanMigration_SkipsSelfScheduledDowngrade(t *testing.T) {
+	f := newPlanMigrationFixture(t)
+	ctx := dbtest.WithTestMerchant(context.Background())
+	subID, _ := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
+
+	sub, err := f.subSvc.GetByID(ctx, subID)
+	require.NoError(t, err)
+	sub.ScheduledPriceID = &f.stripeTargetPriceID
+	require.NoError(t, err)
+	require.NoError(t, f.subSvc.Update(ctx, sub))
+
+	res, err := f.pm.Preview(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Matched)
+	require.Zero(t, res.Scheduled)
+	require.Equal(t, 1, res.Skipped)
+	require.Equal(t, "self-scheduled downgrade pending", res.Outcomes[0].Reason)
 }
 
 // TestPlanMigration_StripeFarFutureEffectiveBlocksHonestly: pushing a Stripe

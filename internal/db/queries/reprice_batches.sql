@@ -39,3 +39,11 @@ SELECT * FROM openrails.reprice_batches
 WHERE price_key = sqlc.arg(price_key)::text
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- #813: re-sync a plan-migration batch header after rail pushes degrade
+-- scheduled rows to blocked — the header must always agree with its rows.
+-- name: UpdatePlanMigrationBatchCounts :execrows
+UPDATE openrails.reprice_batches SET
+    subscriptions_scheduled = sqlc.arg(subscriptions_scheduled)::int,
+    subscriptions_blocked = sqlc.arg(subscriptions_blocked)::int
+WHERE id = sqlc.arg(id);

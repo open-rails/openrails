@@ -147,6 +147,20 @@ func (r *RepriceRepo) CreatePlanMigrationBatch(ctx context.Context, sourcePriceI
 	return models.RepriceBatchFromGen(row), nil
 }
 
+// UpdatePlanMigrationBatchCounts (#813) re-syncs a batch header's
+// scheduled/blocked counts after rail pushes degrade rows — the header must
+// always agree with its per-subscription rows.
+func (r *RepriceRepo) UpdatePlanMigrationBatchCounts(ctx context.Context, id uuid.UUID, scheduled, blocked int) error {
+	scheduled32, _ := safecast.Convert[int32](scheduled)
+	blocked32, _ := safecast.Convert[int32](blocked)
+	_, err := r.db.Gen(ctx).UpdatePlanMigrationBatchCounts(ctx, gen.UpdatePlanMigrationBatchCountsParams{
+		ID:                     id,
+		SubscriptionsScheduled: scheduled32,
+		SubscriptionsBlocked:   blocked32,
+	})
+	return err
+}
+
 // ListMigratableSubscriptionsByPriceID (#813) returns the plan-migration
 // cohort: every subscription still billing (or being dunned) on the price.
 func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Subscription, error) {

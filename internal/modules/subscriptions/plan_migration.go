@@ -241,6 +241,17 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			out.Disposition = "skipped"
 			out.Reason = "already on target price"
 			rail(sub).Skipped++
+		case sub.ScheduledPriceID != nil:
+			// A self-scheduled TierChange downgrade is already moving this
+			// subscription off the source price at its boundary. Scheduling a
+			// plan-change row on top would stack two changes at the same
+			// renewal (the downgrade applies second and wins, leaving a
+			// misleading applied-to-target ledger row; on stripe the second
+			// schedule push just fails). Skip; a re-run after the downgrade
+			// lands catches any sub that is somehow still on the source price.
+			out.Disposition = "skipped"
+			out.Reason = "self-scheduled downgrade pending"
+			rail(sub).Skipped++
 		case s.classifyMigrationCapability(ctx, sub) == capabilityUserAction:
 			out.Disposition = "blocked"
 			out.Reason = migrationBlockedRailUserAction
@@ -399,6 +410,12 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 		}
 	}
 
+	// Rail pushes may have degraded scheduled rows to blocked — re-sync the
+	// batch header so it always agrees with its per-subscription rows.
+	if uerr := s.reprice.repo.UpdatePlanMigrationBatchCounts(ctx, batch.ID, res.Scheduled, res.Blocked); uerr != nil {
+		return nil, fmt.Errorf("plan migration: sync batch counts: %w", uerr)
+	}
+
 	// Archive the source price: the retired plan stops selling the moment the
 	// migration is committed (grandfathering of anything left behind — the
 	// blocked rows — is the archived-price billing path that already exists).
@@ -516,18 +533,31 @@ func (s *PlanMigrationService) GetBatch(ctx context.Context, batchID uuid.UUID, 
 	return batch, rows, nil
 }
 
+// PlanMigrationCancelResult reports a batch cancel — including the rows whose
+// rail-side change the cancel could NOT undo.
+type PlanMigrationCancelResult struct {
+	Canceled int `json:"canceled"`
+	// RailReleaseRequired lists subscriptions whose Stripe boundary push
+	// already created a provider-side subscription schedule: the internal row
+	// is canceled, but STRIPE WILL STILL FLIP THE PRICE at period end (and
+	// converge will follow provider truth) unless the schedule is released
+	// out of band. Empty means the cancel is complete on both sides.
+	RailReleaseRequired []uuid.UUID `json:"rail_release_required,omitempty"`
+	Warning             string      `json:"warning,omitempty"`
+}
+
 // CancelBatch cancels every still-scheduled row in the batch (rows already
 // applied or blocked are untouched). It does NOT un-archive the source price.
-// NOTE (honest limitation): a Stripe boundary push that already created a
-// subscription schedule is not rolled back here — converge keeps provider
-// truth authoritative; cancel before pushes land, or release the Stripe
-// schedule out of band.
-func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUID) (int, error) {
+// A Stripe boundary push that already created a subscription schedule is not
+// rolled back here — those subscriptions are returned in RailReleaseRequired
+// with a loud warning so the operator releases the schedules out of band
+// (automated release is the filed follow-up on #813).
+func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUID) (*PlanMigrationCancelResult, error) {
 	rows, err := s.reprice.repo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: &batchID}, 10000, 0)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	canceled := 0
+	res := &PlanMigrationCancelResult{}
 	for _, row := range rows {
 		if row.Status != models.RepriceStatusScheduled {
 			continue
@@ -536,11 +566,22 @@ func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUI
 			if errors.Is(err, ErrRepriceNotScheduled) || errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}
-			return canceled, err
+			return res, err
 		}
-		canceled++
+		res.Canceled++
+		// A scheduled (not yet applied) plan_change row on the stripe rail
+		// means the boundary push already planted a provider-side schedule
+		// that this cancel does not release.
+		if row.Kind == models.RepriceKindPlanChange {
+			if sub, serr := s.reprice.subscriptions.GetByID(ctx, row.SubscriptionID); serr == nil && sub != nil && sub.Rail == models.RailStripe {
+				res.RailReleaseRequired = append(res.RailReleaseRequired, row.SubscriptionID)
+			}
+		}
 	}
-	return canceled, nil
+	if len(res.RailReleaseRequired) > 0 {
+		res.Warning = fmt.Sprintf("%d stripe subscription(s) still carry a provider-side schedule that WILL flip the price at period end unless released in the Stripe dashboard/API (subscription_schedules release)", len(res.RailReleaseRequired))
+	}
+	return res, nil
 }
 
 // emitPlanChangeNotification fires the #813 plan-change disclosure at

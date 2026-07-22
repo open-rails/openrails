@@ -58,12 +58,13 @@ func (s *Service) GetPlanMigration(ctx context.Context, batchID uuid.UUID, limit
 	return pm.GetBatch(ctx, batchID, limit, offset)
 }
 
-// CancelPlanMigration cancels every still-scheduled row in the batch,
-// returning the number canceled.
-func (s *Service) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (int, error) {
+// CancelPlanMigration cancels every still-scheduled row in the batch. The
+// result carries RailReleaseRequired + Warning when Stripe-side schedules
+// survive the cancel and must be released out of band.
+func (s *Service) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*subscriptions.PlanMigrationCancelResult, error) {
 	pm, err := s.planMigrations()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	return pm.CancelBatch(ctx, batchID)
 }
