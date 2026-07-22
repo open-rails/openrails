@@ -74,3 +74,38 @@ UPDATE openrails.subscription_reprices SET
     status = 'blocked',
     blocked_reason = sqlc.arg(blocked_reason)::text
 WHERE id = sqlc.arg(id) AND status = 'scheduled';
+
+-- #816: the re-driver's cross-merchant enumeration. Only push-failure blocks
+-- are re-drivable (the prefix covers the deferred-window refusals and the NMI
+-- push-verified-then-crash window); classification blocks
+-- (rail_requires_user_action, interval/cent mismatches, missing rail config
+-- at classify time) never carried a push attempt and stay terminal.
+-- name: ListRedrivableBlockedPlanChangeReprices :many
+SELECT * FROM openrails.subscription_reprices
+WHERE kind = 'plan_change'
+  AND status = 'blocked'
+  AND blocked_reason LIKE 'rail_push_failed:%'
+ORDER BY created_at
+LIMIT sqlc.arg(batch_size)::int;
+
+-- #816: the re-driver's un-block — the exact inverse of
+-- BlockSubscriptionReprice, status-predicated so a concurrent transition wins
+-- cleanly. uq_subscription_reprices_one_scheduled makes this fail (unique
+-- violation) if the subscription acquired another scheduled row meanwhile —
+-- callers treat that as a skip.
+-- name: UnblockSubscriptionReprice :execrows
+UPDATE openrails.subscription_reprices SET
+    status = 'scheduled',
+    blocked_reason = ''
+WHERE id = sqlc.arg(id) AND status = 'blocked';
+
+-- #816: batch-header re-sync source of truth. Rows exist only for
+-- scheduled/blocked cohort members (skips are header-only), and the header's
+-- "scheduled" has always counted every auto-migratable row regardless of how
+-- far it progressed — so non-blocked = scheduled|applied|canceled.
+-- name: CountPlanMigrationBatchRows :one
+SELECT
+    count(*) FILTER (WHERE status = 'blocked')  AS blocked,
+    count(*) FILTER (WHERE status <> 'blocked') AS scheduled
+FROM openrails.subscription_reprices
+WHERE reprice_batch_id = sqlc.arg(batch_id)::uuid;
