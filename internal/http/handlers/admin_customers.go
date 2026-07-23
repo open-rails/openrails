@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // adminCustomerSummary is one row of the merchant customer list/search (#740).
@@ -51,8 +52,17 @@ func ListAdminCustomers(r *httprequest.Request) {
 		offset = n
 	}
 
+	// Explicit merchant predicate (defense-in-depth, #227): RLS also pins the
+	// merchant on enforcing roles, but a BYPASSRLS connection (development's
+	// owner role) must never list another merchant's customers.
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")
+		return
+	}
 	queries := r.State.DB.Gen(ctx)
 	rows, err := queries.SearchCustomers(ctx, gen.SearchCustomersParams{
+		MerchantID: tid.UUID(),
 		Q:          q,
 		PageLimit:  int64(limit),
 		PageOffset: int64(offset),
@@ -61,7 +71,10 @@ func ListAdminCustomers(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to search customers")
 		return
 	}
-	total, err := queries.CountSearchCustomers(ctx, q)
+	total, err := queries.CountSearchCustomers(ctx, gen.CountSearchCustomersParams{
+		MerchantID: tid.UUID(),
+		Q:          q,
+	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count customers")
 		return
