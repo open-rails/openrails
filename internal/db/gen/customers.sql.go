@@ -14,17 +14,24 @@ import (
 
 const countSearchCustomers = `-- name: CountSearchCustomers :one
 SELECT count(*) FROM openrails.customers c
-WHERE $1::text = ''
-   OR c.subject ILIKE $1 || '%'
-   OR c.id::text ILIKE $1 || '%'
+WHERE c.merchant_id = $1
+  AND ($2::text = ''
+   OR c.subject ILIKE $2 || '%'
+   OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
-          AND se.user_email ILIKE '%' || $1 || '%')
+          AND se.merchant_id = c.merchant_id
+          AND se.user_email ILIKE '%' || $2 || '%'))
 `
 
-func (q *Queries) CountSearchCustomers(ctx context.Context, q_ string) (int64, error) {
-	row := q.db.QueryRow(ctx, countSearchCustomers, q_)
+type CountSearchCustomersParams struct {
+	MerchantID uuid.UUID
+	Q          string
+}
+
+func (q *Queries) CountSearchCustomers(ctx context.Context, arg CountSearchCustomersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSearchCustomers, arg.MerchantID, arg.Q)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -135,21 +142,25 @@ func (q *Queries) LookupCustomerIDsBySubjects(ctx context.Context, arg LookupCus
 const searchCustomers = `-- name: SearchCustomers :many
 SELECT c.id, c.subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
-     WHERE s.customer_id = c.id AND s.user_email IS NOT NULL
+     WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
+       AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
 FROM openrails.customers c
-WHERE $1::text = ''
-   OR c.subject ILIKE $1 || '%'
-   OR c.id::text ILIKE $1 || '%'
+WHERE c.merchant_id = $1
+  AND ($2::text = ''
+   OR c.subject ILIKE $2 || '%'
+   OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
-          AND se.user_email ILIKE '%' || $1 || '%')
+          AND se.merchant_id = c.merchant_id
+          AND se.user_email ILIKE '%' || $2 || '%'))
 ORDER BY c.last_seen_at DESC
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type SearchCustomersParams struct {
+	MerchantID uuid.UUID
 	Q          string
 	PageOffset int64
 	PageLimit  int64
@@ -163,12 +174,20 @@ type SearchCustomersRow struct {
 	Email      *string
 }
 
-// Merchant-scoped customer list/search (#740). RLS pins the merchant (run on
-// a merchant conn). q matches subject (external ref) prefix, id prefix, or a
-// subscription email substring; empty q lists newest-touched first. email is
-// the latest subscription email on file (customers carry none themselves).
+// Merchant-scoped customer list/search (#740). merchant_id is an EXPLICIT
+// predicate (defense-in-depth doctrine, #227): RLS still pins the merchant on
+// enforcing roles, but a BYPASSRLS role (development's owner connection) must
+// never see another merchant's customers. q matches subject (external ref)
+// prefix, id prefix, or a subscription email substring; empty q lists
+// newest-touched first. email is the latest subscription email on file
+// (customers carry none themselves).
 func (q *Queries) SearchCustomers(ctx context.Context, arg SearchCustomersParams) ([]SearchCustomersRow, error) {
-	rows, err := q.db.Query(ctx, searchCustomers, arg.Q, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, searchCustomers,
+		arg.MerchantID,
+		arg.Q,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
