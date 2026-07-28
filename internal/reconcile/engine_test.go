@@ -670,12 +670,16 @@ func TestDiffTaxonomy(t *testing.T) {
 		snap := &RemoteSnapshot{
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
+			// #842: only a roster that PROVES it covered everything makes
+			// absence actionable.
+			Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
 			Subscriptions: []RemoteSubscription{
 				{RailSubscriptionID: "alive-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*alive.CurrentPeriodEndsAt)},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		// Below the breaker threshold (2 local live), so absence is honored.
+		// 1 of 2 remote-live clears the ratio breaker, 1 cancellation clears the
+		// per-pass cap.
 		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 
@@ -1069,6 +1073,7 @@ func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Subscriptions: []RemoteSubscription{
 			{RailSubscriptionID: "nmi-0", Status: SubscriptionStatusActive},
 		},
@@ -1083,17 +1088,32 @@ func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 	assert.Zero(t, writer.totalCalls())
 }
 
-func TestCircuitBreakerAllowsSmallRosters(t *testing.T) {
+// #837: the breaker used to be DISABLED below ten local live subscriptions —
+// this exact fixture asserted that five subscribers could all be cancelled off
+// an empty roster. Small books need MORE protection, not an exemption, so the
+// floor is gone and a nine-subscriber merchant is protected too.
+func TestSmallMerchantsAreProtectedFromEmptyRosters(t *testing.T) {
 	ctx := context.Background()
-	local := &fakeLocal{}
-	for i := 0; i < 5; i++ { // below MinLocal: absence is honored
-		local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
+	for _, book := range []int{1, 5, 9} {
+		local := &fakeLocal{}
+		for i := 0; i < book; i++ {
+			local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
+		}
+		// An exhaustive-but-empty roster: the shape a misdeclared account_id or
+		// a rotated credential produces.
+		snap := &RemoteSnapshot{
+			Provider:     ProviderNMI,
+			Capabilities: Capabilities{Subscriptions: true},
+			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
+		}
+		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		require.Error(t, err, "book of %d: an empty roster must not sail through", book)
+		assert.Contains(t, err.Error(), "circuit breaker")
+		assert.True(t, res.Summary.Providers["nmi"].Aborted)
+		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead), "book of %d", book)
+		assert.Zero(t, writer.calls["cancel"], "book of %d", book)
 	}
-	snap := &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Subscriptions: true}}
-	eng, _, _ := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
-	require.NoError(t, err)
-	assert.Len(t, findByType(res.Findings, FindingLocalActiveRemoteDead), 5)
 }
 
 func TestIdentityStableAcrossRuns(t *testing.T) {

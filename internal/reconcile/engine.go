@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -53,9 +54,14 @@ type Engine struct {
 	// Circuit breaker for absence-based PS-2 detection (design decision 6):
 	// when the provider reports implausibly few live subscriptions vs local
 	// state, ABORT the provider's run instead of generating mass PS-2.
-	// Defaults: MinLocal 10, Ratio 0.10.
+	// Defaults: MinLocal 1 (#837 — no small-merchant blind spot), Ratio 0.10.
 	CircuitBreakerMinLocal int
 	CircuitBreakerRatio    float64
+
+	// CancelBudget (#837) caps how many subscriptions ONE pass may cancel for
+	// this merchant. Over the cap, the pass applies NOTHING, raises a
+	// requires_review finding and halts. Zero value = the defaults.
+	CancelBudget CancelBudget
 }
 
 // RunParams bounds one reconcile run.
@@ -186,18 +192,8 @@ func (e *Engine) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (e *Engine) breakerMinLocal() int {
-	if e.CircuitBreakerMinLocal > 0 {
-		return e.CircuitBreakerMinLocal
-	}
-	return 10
-}
-
-func (e *Engine) breakerRatio() float64 {
-	if e.CircuitBreakerRatio > 0 {
-		return e.CircuitBreakerRatio
-	}
-	return 0.10
+func (e *Engine) rosterBreaker() RosterBreaker {
+	return RosterBreaker{MinLocal: e.CircuitBreakerMinLocal, Ratio: e.CircuitBreakerRatio}
 }
 
 // providerTraits captures per-provider diff semantics that the capability
@@ -346,25 +342,27 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	rep.LocalSubscriptions = len(local.Subscriptions)
 
+	localLive := 0
+	for i := range local.Subscriptions {
+		s := &local.Subscriptions[i]
+		if s.IsLive() && s.RailSubscriptionID != "" {
+			localLive++
+		}
+	}
+
 	// Circuit breaker (design decision 6): on absence-based providers, refuse
 	// to treat absence as truth when the remote live set is implausibly small
 	// relative to local live state — a truncated/failed report would otherwise
-	// cancel the whole local roster as mass PS-2.
+	// cancel the whole local roster as mass PS-2. #837: the old `localLive >= 10`
+	// floor DISABLED the breaker for exactly the merchants least able to absorb
+	// the mistake; it is gone. The breaker only has a job where the roster claims
+	// to be an absence proof (#842) — a non-exhaustive roster proves nothing and
+	// produces no absence findings to guard.
 	traits := traitsFor(provider)
-	if traits.absenceMeansCancelled && snap.Capabilities.Subscriptions {
-		localLive := 0
-		for i := range local.Subscriptions {
-			s := &local.Subscriptions[i]
-			if s.IsLive() && s.RailSubscriptionID != "" {
-				localLive++
-			}
-		}
-		remoteLive := len(snap.Subscriptions)
-		if localLive >= e.breakerMinLocal() && float64(remoteLive) < float64(localLive)*e.breakerRatio() {
+	if traits.absenceMeansCancelled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
+		if tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive); tripped {
 			rep.Aborted = true
-			return rep, nil, nil, nil, fmt.Errorf(
-				"circuit breaker: %s reports only %d live subscriptions against %d locally-live linked subscriptions (< %.0f%%); refusing to treat absence as cancellation — the report is more likely truncated/broken than %d users all cancelled. No findings were generated; investigate the provider report before re-running",
-				provider, remoteLive, localLive, e.breakerRatio()*100, localLive)
+			return rep, nil, nil, nil, errors.New(reason)
 		}
 	}
 
@@ -383,6 +381,17 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
 		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)
+	}
+
+	// #837 cancellation cap. Counted BEFORE anything is applied, over the
+	// decider transitions this pass would perform — the LOCAL cancel + revoke,
+	// which no other guard in the system sees. Over the cap the pass applies
+	// NOTHING (findings are still persisted: they are the evidence an operator
+	// needs) and halts the merchant.
+	plannedCancels := countPlannedCancellations(findings)
+	capExceeded, capReason := e.CancelBudget.Exceeded(plannedCancels, localLive)
+	if capExceeded {
+		findings = append(findings, cancellationCapFinding(provider, plannedCancels, localLive, len(snap.Subscriptions), capReason))
 	}
 
 	// Persist findings (stable identity: upsert by (tenant, provider, type,
@@ -421,6 +430,16 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		if f.Apply != nil && rec.Status == FindingStatusReconcileRequired && params.Mutations.allows(f) {
 			applyByID[rec.ID] = f
 		}
+	}
+
+	if capExceeded {
+		rep.Aborted = true
+		rep.ApplySkipped += len(applyByID)
+		log.WithContext(ctx).WithFields(log.Fields{
+			"provider": provider, "planned_cancellations": plannedCancels,
+			"local_live": localLive, "remote_live": len(snap.Subscriptions),
+		}).Error("reconcile: cancellation cap exceeded; applied nothing and halted this merchant's pass")
+		return rep, records, planned, appliedChanges, errors.New(capReason)
 	}
 
 	// Enforce: apply the idempotent local writes (one-shot fetch+diff+apply,

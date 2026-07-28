@@ -438,9 +438,14 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 
 	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
 	// lists live subscriptions, so a locally-live linked subscription that is
-	// absent is dead at the rail). Guarded upstream by the circuit
-	// breaker.
-	if traits.absenceMeansCancelled {
+	// absent is dead at the rail). Guarded upstream by the circuit breaker and
+	// the cancellation cap.
+	//
+	// #842: absence is only proof when the roster PROVES it covered everything.
+	// This used to force SubscriptionsExhaustive=true regardless of what the
+	// fetcher declared, so an empty or silently-truncated pull cancelled the
+	// merchant's whole book. The snapshot's own coverage decides now.
+	if traits.absenceMeansCancelled && snap.Coverage.SubscriptionsExhaustive {
 		for _, s := range idx.byPSID {
 			if !s.IsLive() {
 				continue
@@ -462,7 +467,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
 				// absenceMeansCancelled: the provider's live-only roster IS
 				// exhaustive for this subject — coverage-absence proof (#665).
-				Apply: decideApply(s, snap, true, now),
+				Apply: decideApply(s, snap, now),
 			}
 			if intent := deletionIntent(s); intent != nil {
 				f.IntentEvidence = intent
@@ -671,15 +676,12 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 // the decider consumes. forceExhaustive stamps SubscriptionsExhaustive for
 // providers whose live-only roster is exhaustive by construction
 // (traits.absenceMeansCancelled) even when a fixture omitted the coverage flag.
-func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string, forceExhaustive bool) *RemoteSnapshot {
+func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot {
 	out := &RemoteSnapshot{
 		Provider:     snap.Provider,
 		FetchedAt:    snap.FetchedAt,
 		Capabilities: snap.Capabilities,
 		Coverage:     snap.Coverage,
-	}
-	if forceExhaustive {
-		out.Coverage.SubscriptionsExhaustive = true
 	}
 	for i := range snap.Subscriptions {
 		if snap.Subscriptions[i].RailSubscriptionID == psid {
@@ -698,7 +700,7 @@ func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string, forceExhaustive 
 // its per-subscription snapshot slice and wraps it as the finding's apply
 // action (#665: the pull engine invokes the decider; no applier writes domain
 // state). Nil when the decider has no evidence-justified move.
-func decideApply(s *LocalSubscription, snap *RemoteSnapshot, forceExhaustive bool, now time.Time) *ApplyAction {
+func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time) *ApplyAction {
 	state := SubscriptionState{
 		Status:             s.Status,
 		Rail:               s.Rail,
@@ -707,7 +709,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, forceExhaustive boo
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
-	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID, forceExhaustive)}, now, 0)
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID)}, now, 0)
 	if d.Kind == TransitionNone {
 		return nil
 	}
@@ -740,7 +742,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "rail reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
-			Apply:             decideApply(s, snap, false, now),
+			Apply:             decideApply(s, snap, now),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -787,7 +789,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: fmt.Sprintf("rail status %q vs local %q; enforce applies the evidence-gated transition", r.Status, s.Status),
-			Apply:             decideApply(s, snap, false, now),
+			Apply:             decideApply(s, snap, now),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -811,7 +813,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
 					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", drift.Hours()),
-					Apply:             decideApply(s, snap, false, now),
+					Apply:             decideApply(s, snap, now),
 				}}
 			}
 		}

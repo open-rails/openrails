@@ -45,6 +45,11 @@ const (
 	// by migration 058). Always requires_review — the fix (cancel+refund at
 	// the rail) is remote and human.
 	FindingDuplicateSubscriptions FindingType = "pull.subscription.duplicate"
+	// FindingCancellationCapped (#837): one pass planned more cancellations
+	// than the merchant's per-pass budget allows, so NONE were applied and the
+	// pass halted. Always requires_review — a book-sized cancellation is a
+	// human decision, never an automatic one.
+	FindingCancellationCapped FindingType = "pull.cancellation.capped"
 )
 
 // #665 single-writer-per-invariant: the legacy PS-9 entitlement check
