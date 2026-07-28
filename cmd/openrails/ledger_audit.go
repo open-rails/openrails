@@ -29,9 +29,10 @@ func newLedgerAuditCmd() *cobra.Command {
 		format       string
 	)
 	cmd := &cobra.Command{
-		Use:   "ledger-audit",
-		Short: "Verify double-entry ledger integrity (#833): per-(merchant,currency) conservation and account counters vs the transfer log (read-only)",
-		Args:  cobra.NoArgs,
+		Use:          "ledger-audit",
+		SilenceUsage: true,
+		Short:        "Verify double-entry ledger integrity (#833): per-(merchant,currency) conservation and account counters vs the transfer log (read-only)",
+		Args:         cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runLedgerAudit(c, merchantSlug, format)
 		},
