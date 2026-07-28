@@ -64,14 +64,20 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 }
 
 // GenGlobal returns a sqlc query catalog bound to the BASE pool, deliberately
-// IGNORING any merchant-pinned connection in the context. It is for the rare
-// cross-merchant reads (the #732 destructive-rate ceiling counts across all
-// actors + merchants) that must span the whole deployment — a merchant-pinned
-// connection's RLS GUC would scope them to a single merchant. Cross-tenant
-// visibility follows the SAME posture as the River workers' base-pool sweeps
-// (ExpireOverdueRailIntents, ListStuckRailIntents): RLS enforcement, if the
-// connected role enforces it, applies equally to both. Returns an erroring
-// catalog when this DB has no pool (a tx-scoped wrapper).
+// IGNORING any merchant-pinned connection in the context — a merchant-pinned
+// connection's RLS GUC would scope a deployment-wide query to one merchant.
+//
+// WARNING (#824): this does NOT grant cross-merchant visibility. There is one
+// pool and one role; dropping the GUC does not escape RLS, it FAILS it. Under
+// the production openrails_app role a base-pool read of any policy-bearing
+// table (which is every table except merchants, probe_verdicts, worker_health
+// and destructive_action_switch) matches `merchant_id = NULL` and returns ZERO
+// ROWS AND NO ERROR. Every current caller — the #732 destructive-rate ceiling,
+// the alert/digest armed-merchant scans, the #816 re-driver, the intent sweeps —
+// is therefore inert in production; the #824 sweep tracks them. A genuinely
+// cross-merchant read needs a SECURITY DEFINER directory function (migration
+// 0016) or a per-merchant walk under MerchantTx (merchants.ProbeLiveRailPSPs).
+// Returns an erroring catalog when this DB has no pool (a tx-scoped wrapper).
 func (d *DB) GenGlobal() *gen.Queries {
 	if d == nil || d.pool == nil {
 		return gen.New(errDBTX{fmt.Errorf("db: GenGlobal requires a pool-backed DB")})

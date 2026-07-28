@@ -889,7 +889,9 @@ WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
 `
 
 // #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
-// low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
+// low-severity findings digest, mirroring ListArmedAlertMerchants's posture —
+// including its #824 defect: reconciliation_findings FORCEs RLS and the base
+// pool carries no app.merchant_id, so this selects nothing in production.
 func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedFindingsDigestMerchants)
 	if err != nil {

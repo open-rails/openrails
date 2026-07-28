@@ -61,6 +61,11 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 		excludeArg = exclude.UUID()
 	}
 
+	// #824 SWEEP: the aggregates below read RLS-bearing tables (payments,
+	// subscriptions) on the base pool with no app.merchant_id, so under the
+	// production openrails_app role every series is empty — see the same note on
+	// FleetAnalytics.
+	//
 	// Canonical week list from Postgres so bucket alignment can never drift
 	// from the aggregates' date_trunc semantics.
 	weekRows, err := c.pool.Query(ctx, `

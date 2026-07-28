@@ -77,6 +77,12 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		excludeArg = exclude.UUID()
 	}
 
+	// #824 SWEEP: every query below reads RLS-bearing tables (payments,
+	// subscriptions, prices, psps) on the base pool, which carries no
+	// app.merchant_id — under the production openrails_app role they return
+	// ZERO ROWS AND NO ERROR, so this dashboard reports all zeros. It works only
+	// where the connected role bypasses RLS. Fix shape: a SECURITY DEFINER
+	// aggregate (migration 0016 pattern) or a per-merchant walk. Tracked in #824.
 	out := &FleetAnalytics{WindowDays: windowDays}
 	if err := c.pool.QueryRow(ctx, `
 		SELECT count(*),

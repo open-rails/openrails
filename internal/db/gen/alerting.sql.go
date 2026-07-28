@@ -307,7 +307,11 @@ SELECT DISTINCT merchant_id FROM openrails.alert_rules WHERE enabled
 `
 
 // CROSS-MERCHANT (base pool / GenGlobal): the evaluator scheduler's armed-merchant
-// selection. Same base-pool posture as the #358 intent executor sweeps.
+// selection. Same base-pool posture as the #358 intent executor sweeps — and the
+// same #824 defect: alert_rules FORCEs RLS, the base pool sets no
+// app.merchant_id, so under the production openrails_app role this returns NO
+// MERCHANTS and the evaluator never runs. Needs the 0016 SECURITY DEFINER shape
+// or a per-merchant walk.
 func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedAlertMerchants)
 	if err != nil {

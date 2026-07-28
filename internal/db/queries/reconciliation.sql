@@ -109,7 +109,9 @@ WHERE id = sqlc.arg(id);
 
 -- name: ListArmedFindingsDigestMerchants :many
 -- #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
--- low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
+-- low-severity findings digest, mirroring ListArmedAlertMerchants's posture —
+-- including its #824 defect: reconciliation_findings FORCEs RLS and the base
+-- pool carries no app.merchant_id, so this selects nothing in production.
 SELECT DISTINCT merchant_id FROM openrails.reconciliation_findings
 WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
 
