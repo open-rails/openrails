@@ -1,0 +1,131 @@
+# SQL gate exemptions
+
+Three gates run in CI (`task sqlc-check`), on top of `sqlc vet`'s `db-prepare`
+correctness check:
+
+| gate | what it proves | allowlist |
+|---|---|---|
+| `internal/db/sqlaudit` | every query is bounded and index-backed | `AUDIT_ALLOWLIST.txt` |
+| `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
+| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` |
+
+Every allowlist entry is classified **PERMANENT** (bounded by design) or
+**DEBT** (a real bug, kept only so the gate could be switched on), carries a
+mandatory rationale, and is rejected if duplicated. An entry that stops tripping
+fails the build as stale — fixing a query deletes its line.
+
+## How the query auditor works
+
+`sqlc vet` PREPAREs each query, which proves it is valid SQL and nothing more.
+The auditor connects to the same throwaway vet DB, EXPLAINs every query, walks
+the plan in Go and applies four rules. Two facts make that meaningful on a
+database built from `migrations/` with zero rows:
+
+**`EXPLAIN (GENERIC_PLAN, FORMAT JSON)`** (PG16+) plans a parameterized
+statement without values, so no parameters are fabricated. All 526 queries plan;
+none are skipped. It must be sent over the **raw simple-query protocol**
+(`conn.PgConn().Exec`): pgx's extended protocol binds the query's own `$n` as
+parameters of the EXPLAIN ("expected N arguments, got 0"), and
+`QueryExecModeSimpleProtocol` interpolates them client-side ("insufficient
+arguments"). Because that is raw text, the auditor first proves via pg_query_go
+that the statement is exactly one statement.
+
+**Statistics are left alone — deliberately.** Inflating
+`pg_class.reltuples/relpages` does *not* work and actively backfires:
+`estimate_rel_size` takes the page count from the **physical file**, so an empty
+table yields `density × 0 = 0` rows, and a non-zero `relpages` simultaneously
+disables the "empty table ⇒ assume 10 pages" fallback. Measured here: every plan
+collapsed to `cost=0.00` Seq Scans. Postgres's default 10-page estimate already
+discriminates correctly — a query with a usable index plans as an Index Scan,
+one without as Seq Scan + Filter. Forcing it with `enable_seqscan = off` was
+measured across all 526 queries and changed *nothing*, so it is not used.
+Nothing here judges cost.
+
+The session runs as **`openrails_app` with `app.merchant_id` set**, so RLS
+predicates appear in the plan exactly as production sees them — which is also
+how the auditor verifies the RLS `merchant_id` predicate is index-backed.
+
+`supabase/index_advisor` + `hypopg` are **opt-in advice, off in CI**
+(`SQLAUDIT_INDEX_ADVISOR=1`). They cannot gate: without statistics index_advisor
+recommends an index for an already-indexed query at a 1.5% "improvement" and for
+a genuinely unindexed one at 29% — far too small a delta to threshold honestly.
+Once plan shape has already proven a problem, it is good at naming the column
+list. Enable locally with `apk add postgresql-hypopg` in the vet container plus
+index_advisor's SQL. (It calls `DEALLOCATE` internally, which poisons pgx's
+statement cache, so its connection uses `QueryExecModeExec`.)
+
+### Rules
+
+Rule names are shared with tensorhub's equivalent gate so allowlists stay
+portable. `unindexed-filter` is openrails-only: tensorhub has no RLS.
+
+- **`unbounded-many`** — a `:many` query over a merchant-scoped table with
+  no `LIMIT` and no bounding predicate. Bounding means `col = $n` on an indexed
+  column, or `col = ANY($n)` where col plus `merchant_id` covers a whole unique
+  key (so the caller's list caps the rows). `merchant_id` alone never bounds:
+  one merchant's entire table still grows with records on file.
+- **`unscoped-write`** — `UPDATE`/`DELETE` pinning neither `merchant_id` nor a
+  key, and not fed by a `LIMIT`ed claim CTE.
+- **`seq-scan`** — planner-proven: no usable index exists.
+- **`unplannable`** — the parser or EXPLAIN could not analyse the query. Fails
+  like any other finding; nothing is ever silently skipped.
+- **`unindexed-filter`** — the query looks something up by `col = $n`, the scan
+  is narrowed by nothing but `merchant_id`, and no index on that table covers
+  `col`. This is what a missing index looks like *under RLS*, where the
+  merchant_id index always hands the planner some index path.
+
+## AUDIT_ALLOWLIST.txt
+
+**PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
+`alert_rules`, `merchant_webhooks`. Row counts follow the merchant's own
+configuration, not customer activity, so listing them whole does not scale with
+records on file.
+
+**PERMANENT — capped by a caller-supplied list.**
+`LookupCustomerIDsBySubjects` is capped by `subjects[]`;
+`uq_customers_merchant_subject` is a *partial* unique index and the auditor
+deliberately refuses to credit partial indexes. `SnapshotPaymentCards` is capped
+by `transaction_ids[]` and index-backed by
+`idx_payments_merchant_rail_transaction`; a `UNIQUE(merchant_id, rail,
+transaction_id)` would make it provable.
+
+**PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
+listing. The predicate is absent on most calls, so no index serves it
+generically; the merchant index bounds the scan, the page `LIMIT` the result.
+
+**DEBT (or#837).** Everything else. These are real:
+
+- *Deployment-wide sweeps with no LIMIT* — `ListDueDunningSubscriptions` (the
+  or#837 flagship: runs every 4h across the deployment), the converge scans, and
+  the reconciliation/drift/intent scans.
+- *Unbatched retention and expiry writes* — `DeleteCompletedWebhookEventsBefore`,
+  `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
+  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
+  backlog makes each one a single long transaction.
+- *Missing indexes* — `solana_subscriptions.merchant_id` (its RLS predicate is
+  not index-backed; the only true `Seq Scan` in the codebase),
+  `product_usage_limit_bindings` (no index at all), `grants.payment_id`,
+  `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
+  `reprice_batches.price_key`.
+- *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
+  The caller's list is bounded but each element's row set is not.
+
+## LINT_ALLOWLIST.txt
+
+**PERMANENT** covers what sqlc cannot express: the DB layer itself (`MerchantTx`
+GUCs, RLS probes, the schema-rewrite wrapper, advisory locks), SQL built
+dynamically from operator definitions (metrics, fleet analytics, dump/restore
+over a dynamic table list), and privileged access that runs before merchant
+context exists (DEK bootstrap, merchant secret stores).
+
+**DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
+Nothing about them requires raw SQL.
+
+## .squawk.toml
+
+`assume_in_transaction` is set because the migrator applies each file inside one
+transaction. The nine existing migrations are excluded by path: `0001` is the
+squashed baseline (creates the schema from nothing, so lock-safety rules are
+vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
+excluded and must pass clean — including `require-lock-timeout` and
+`require-statement-timeout`, which only `0001` currently sets.

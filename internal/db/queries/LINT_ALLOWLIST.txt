@@ -1,0 +1,54 @@
+# scripts/sql-lint.sh exemptions — files allowed to issue raw pgx SQL.
+#
+#   CLASS  path/to/file.go   # short note
+#
+# PERMANENT = sqlc cannot express it (dynamic SQL, DDL, session/lock
+# statements, privileged pre-merchant-context access).
+# DEBT      = ordinary queries not yet ported to internal/db/queries/*.sql.
+#
+# Rationale per group lives in EXEMPTIONS.md. An entry whose file no longer
+# holds raw SQL fails the build as stale — delete it when you port a file.
+
+# --- PERMANENT: the DB layer itself -----------------------------------------
+PERMANENT internal/db/db_pgx.go            # MerchantTx GUC + tx plumbing
+PERMANENT internal/db/rls.go               # RLS role/GUC probes
+PERMANENT internal/db/schema_rewrite.go    # execution-time schema rewriting wrapper
+PERMANENT internal/http/handlers/admin_payments.go  # pg_advisory_xact_lock only
+
+# --- PERMANENT: dynamic SQL built from user/operator definitions ------------
+PERMANENT internal/modules/metrics/service.go       # compiled metric SQL (compile.go builds it)
+PERMANENT internal/controlplane/fleet_analytics.go  # cross-merchant analytics, dynamic grouping
+PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series, dynamic buckets
+PERMANENT internal/bootstrap/merchant_dump.go       # dump/restore over a dynamic table list
+PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
+PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
+
+# --- PERMANENT: privileged, runs before merchant context/RLS exists ---------
+PERMANENT internal/crypto/dek_store_db.go      # DEK bootstrap on the privileged pool
+PERMANENT internal/merchants/secrets_db.go     # merchant secret store (pre-context)
+PERMANENT internal/merchants/secrets_vault.go  # vault pointer store (pre-context)
+PERMANENT internal/merchants/credentials.go    # credential read (pre-context)
+
+# --- DEBT: ordinary queries that belong in sqlc -----------------------------
+DEBT internal/intents/store.go
+DEBT internal/billingimport/billingimport.go
+DEBT internal/reconcile/declared_import.go
+DEBT internal/controlplane/api_key.go
+DEBT internal/controlplane/bootstrap.go
+DEBT internal/controlplane/customer.go
+DEBT internal/merchants/delete.go
+DEBT internal/merchants/host_config.go
+DEBT internal/merchants/lifecycle.go
+DEBT internal/merchants/payment_provider_config.go
+DEBT internal/merchants/webhook_routing.go
+DEBT internal/modules/admission/policy.go
+DEBT internal/modules/money/credit_purchase.go
+DEBT internal/modules/money/enterprise.go
+DEBT internal/modules/money/metered_rating.go
+DEBT internal/modules/money/money_service.go
+DEBT internal/modules/productaccess/grant_repo.go
+DEBT internal/modules/solana/solanasubs/subscription_repo.go
+DEBT internal/river/jobs_provider_refresh.go
+DEBT internal/river/jobs_stripe_webhooks.go
+DEBT pkg/service/catalog_sidecars.go
+DEBT pkg/embedded/pull_provider.go

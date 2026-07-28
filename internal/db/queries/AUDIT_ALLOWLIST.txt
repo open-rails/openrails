@@ -1,0 +1,82 @@
+# sqlaudit exemptions — reviewed, never a dumping ground.
+#
+#   rule subject # rationale        (rationale is MANDATORY; duplicates rejected)
+#
+# under `## PERMANENT` (bounded by design) or `## DEBT` (a real bug, tracked).
+# Longer reasoning per group lives in EXEMPTIONS.md. An entry that stops
+# tripping fails the build as STALE — fix a query and its exemption goes too.
+#
+# Rules: unbounded-many, unscoped-write, seq-scan, unindexed-filter, unplannable.
+# Gate: internal/db/sqlaudit, run by `task sqlc-check`.
+
+## PERMANENT
+
+# Operator-declared catalog/config. Row counts follow the merchant's own
+# configuration, not customer activity.
+unbounded-many ListActiveProducts               # products: operator-declared catalog
+unbounded-many ListAllProducts                  # products: operator-declared catalog
+unbounded-many ListAllActivePricesWithProduct   # prices+products: operator-declared catalog
+unbounded-many ListAllPricesWithProduct         # prices+products: operator-declared catalog
+unbounded-many ReconcileListPricesWithPSPLinks  # prices: operator-declared catalog
+unbounded-many ListPSPsForMerchant              # psps: operator-declared, units per merchant
+unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same small set
+unbounded-many ListAlertRules                   # alert_rules: operator-configured
+unbounded-many ListEnabledAlertRules            # alert_rules: operator-configured
+unbounded-many ListArmedAlertMerchants          # alert_rules: DISTINCT over the same small set
+unbounded-many ListMerchantWebhooks             # merchant_webhooks: operator-configured
+
+# Optional admin filters (`$n IS NULL OR col = $n`) on a paged listing: absent on
+# most calls so no index serves them generically; merchant index bounds the scan,
+# page LIMIT bounds the result.
+unindexed-filter AdminListReconciliationFindings # optional admin filter, paged
+unindexed-filter ListReconciliationFindings      # optional admin filter, paged
+unindexed-filter ListRailIntents                 # optional admin filter, paged
+unindexed-filter CountRailIntents                # optional admin filter, paged
+unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
+
+# Capped by a caller-supplied key list the auditor cannot prove from the schema.
+unbounded-many LookupCustomerIDsBySubjects  # capped by subjects[]; uq index is PARTIAL so uncredited
+unscoped-write SnapshotPaymentCards         # capped by transaction_ids[]; idx_payments_merchant_rail_transaction
+
+## DEBT
+
+# or#837. These ARE unbounded; allowlisted only so the gate could be switched on
+# today. Fixing one means deleting its line.
+unbounded-many ListDueDunningSubscriptions                 # or#837 flagship: deployment-wide, every 4h
+unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge scan
+unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
+unbounded-many ListActionableReconciliationFindingsByProvider # or#837 converge scan
+unbounded-many CountOpenReconciliationFindingsByTypeSeverity  # or#837 converge scan
+unbounded-many ListArmedFindingsDigestMerchants            # or#837 cross-merchant findings scan
+unbounded-many ListOpenCatalogDriftEvents                  # or#837 scan of all open drift events
+unbounded-many CountOpenCatalogDriftByKind                 # or#837 scan of all open drift events
+unbounded-many ListStuckRailIntents                        # or#837 scan of all live intents
+unbounded-many ListWebhookExpectedRails                    # or#837 aggregate over all live subscriptions
+unbounded-many ListMoneyAccountPairs                       # or#837 aggregate over all ledger transfers
+unbounded-many ListBelowThresholdMoneyAccounts             # or#837 scan of all ledger accounts
+unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
+unbounded-many ListInvoiceThresholdCandidates              # or#837 scan of all open invoices + items
+
+# Unbounded fan-out: the caller's list is bounded, each element's row set is not.
+unbounded-many ListActiveSubscriptionsByPriceIDs         # or#837 fan-out per price
+unbounded-many ListSubscriptionsByPaymentMethodIDs       # or#837 fan-out per payment method
+unbounded-many ListLatestChargeByPaymentMethodIDs        # or#837 fan-out per payment method
+unbounded-many ListActiveEntitlementRecordsByCustomerIDs # or#837 fan-out per customer
+unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail
+
+# Unbatched sweeps: a large backlog makes each one a single long transaction.
+unscoped-write DeleteCompletedWebhookEventsBefore        # or#837 unbatched retention delete
+unscoped-write DeleteNotificationsBefore                 # or#837 unbatched retention delete
+unscoped-write DeleteSeenNotificationsBefore             # or#837 unbatched retention delete
+unscoped-write ExpireCheckoutSessions                    # or#837 unbatched cross-merchant UPDATE
+unscoped-write AutoResolveVanishedReconciliationFindings # or#837 unbatched cross-merchant UPDATE
+
+# Missing indexes. Each is one CREATE INDEX away from clean.
+seq-scan ReconcileListSolanaSubscriptionRefs      # or#837 no index on solana_subscriptions.merchant_id (RLS predicate unbacked)
+seq-scan ProductUsageLimitBindingExistsForGrant   # or#837 product_usage_limit_bindings has no index at all
+unindexed-filter ProductUsageLimitBindingExistsForGrant # or#837 grant_id, usage_limit_key
+unindexed-filter RevokeProductUsageLimitBindingsByGrant # or#837 grant_id
+unindexed-filter PaymentHasProtectedDependents         # or#837 grants.payment_id + checkout_sessions.payment_id
+unindexed-filter PruneDeleteCheckoutSessionsBySubscription # or#837 checkout_sessions.subscription_id
+unindexed-filter ListRepriceBatchesByPriceKey          # or#837 reprice_batches.price_key
+unbounded-many ListLiveOwnershipGrantIDsByPayment      # or#837 no index on grants.payment_id
