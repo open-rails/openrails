@@ -60,7 +60,7 @@ OpenRails' workers converge state around that:
 |---|---|---|
 | Provider-intent executor | 1 min (+ on start) | drains due outbound provider mutations from the intent ledger |
 | Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
-| Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, elapsed grace, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
+| Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
 | Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning-359)) |
 | Credit expiry | 1 h | expires credit lots |
@@ -144,10 +144,9 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   every provider intent is stamped with the provider-account row it was
   enqueued against, and the executor parks intents whose account no longer
   resolves — a queue built against one account never executes against another.
-  Options: restore the old account's credentials so the queue drains, let
-  stale intents expire, or deliberately rebind them to the new account. Rules
-  and the rebind procedure: [operations.md → Provider account guard /
-  credential rotation](operations.md#durability-model).
+  Options: restore the old account's credentials so the queue drains, or let
+  stale intents expire/supersede. Rules:
+  [operations.md → Durability model](operations.md#durability-model).
 
 ### Observability
 
