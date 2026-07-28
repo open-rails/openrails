@@ -6,3 +6,11 @@
 CVE-2026-14257
 # 2026-07-28: fast-uri — same provenance-downgrade refusal, same disposition.
 CVE-2026-16221
+# 2026-07-28: postcss source-map path traversal — BUILD-TIME console dep; the
+# attested-bump path is blocked (existing lockfile predates the tightened pnpm
+# policy, any install refuses). Re-bump with #853.
+GHSA-r28c-9q8g-f849
+# 2026-07-28: react-router CSRF bypass applies to RSC MODE only — the console is
+# a Vite SPA, RSC never enabled; the fix is a breaking 7->8 major. Re-evaluate
+# with #853.
+GHSA-qwww-vcr4-c8h2
