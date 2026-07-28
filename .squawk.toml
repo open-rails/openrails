@@ -1,0 +1,23 @@
+# Migration lint (or#838). Gate: scripts/migration-lint.sh, `task migration-lint`.
+#
+# Each migration file is applied inside one transaction by the migrator, so
+# per-statement rerunnability rules do not apply.
+assume_in_transaction = true
+
+# BASELINE: migrations already applied everywhere. They are frozen history —
+# 0001 is the squashed baseline (creates the schema from nothing, so lock-safety
+# rules are vacuous), 0002-0009 predate this gate. Rationale in
+# internal/db/queries/EXEMPTIONS.md. New migrations are NOT excluded: they must
+# pass clean, including require-lock-timeout / require-statement-timeout, which
+# only 0001 currently sets.
+excluded_paths = [
+    "migrations/postgres/0001_schema.up.sql",
+    "migrations/postgres/0002_enterprise_invoicing.up.sql",
+    "migrations/postgres/0003_psp_vocabulary.up.sql",
+    "migrations/postgres/0004_vaulted_card_token_type.up.sql",
+    "migrations/postgres/0005_payment_settlements.up.sql",
+    "migrations/postgres/0006_invoice_dunning.up.sql",
+    "migrations/postgres/0007_invoice_collection_payment_method.up.sql",
+    "migrations/postgres/0008_invoice_profile_customer_ownership.up.sql",
+    "migrations/postgres/0009_plan_migrations.up.sql",
+]

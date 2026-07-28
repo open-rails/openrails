@@ -82,7 +82,7 @@ func New(opts Options) (*Embedded, error) {
 	// bootstrap.Options relay layer is gone — this calls the app composition
 	// root directly.) Rail credentials are NEVER boot options (#788): rails
 	// arm per merchant through the manifest (MODE 1) or the management API
-	// (MODE 2) into rail_merchant_accounts + the merchant secret store.
+	// (MODE 2) into psps + the merchant secret store.
 	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,

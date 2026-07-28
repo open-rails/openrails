@@ -111,9 +111,12 @@ Verification, as implemented (CCBill has no HMAC):
 
 - **Source IP allowlist** — CCBill's documented provider-wide ranges
   (`64.38.212.0/24`, `64.38.215.0/24`, `64.38.240.0/24`, `64.38.241.0/24`)
-  are built in; nothing to configure. The check is bypassed only under
-  sandbox posture (`test_mode: sandbox`) with no live CCBill account
-  configured anywhere.
+  are built in; nothing to configure. Any OTHER source must be listed
+  explicitly in `ccbill_webhook_ip_allowlist` (a CIDR list; `/0` is refused),
+  and even then is accepted only under sandbox posture (`test_mode: sandbox`)
+  while the PSP catalog proves no live CCBill PSP exists anywhere. If that
+  cannot be proven — probe error, no DB — the entry is refused. There is no
+  "test_mode accepts any IP" bypass.
 - **Account match** — the payload's `clientAccnum`/`clientSubacc` must equal
   the pair derived from the declared `account_id`.
 - A merchant with no armed CCBill account rejects the webhook with a 5xx
@@ -130,8 +133,9 @@ non-retryable. Events are deduplicated by transaction id / payload hash.
 Set the global `test_mode: sandbox` (and typically `environment: test` on the
 PSP entry). Sandbox posture routes FlexForm URLs to
 `https://sandbox-api.ccbill.com/wap-frontflex/flexforms/...` instead of
-`api.ccbill.com`, and relaxes the webhook IP allowlist as described above so
-local/test harnesses can post webhooks directly.
+`api.ccbill.com`. To post webhooks from a local harness, declare its source
+explicitly, e.g. `ccbill_webhook_ip_allowlist: ["127.0.0.1/32"]` — sandbox
+posture alone accepts nothing extra.
 
 ### Rebill and cancellation semantics
 

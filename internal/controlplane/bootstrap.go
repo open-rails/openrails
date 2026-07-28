@@ -97,12 +97,9 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	res := &BootstrapResult{BootstrapMerchantSlug: slug}
 
 	// 0. Ensure the singleton root group exists and the declared containment is
-	//    seeded (idempotent) before creating typed groups.
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return nil, fmt.Errorf("controlplane: ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return nil, fmt.Errorf("controlplane: seed permission-group containment: %w", err)
+	//    seeded (idempotent, concurrent-boot tolerant) before creating typed groups.
+	if err := EnsureRootContainment(ctx, core); err != nil {
+		return nil, fmt.Errorf("controlplane: %w", err)
 	}
 
 	// 1. Ensure the merchant permission-group exists (idempotent: resolve, else
@@ -117,19 +114,32 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			OwnerSubjectID: strings.TrimSpace(opts.InitialAdminUserID),
 		})
 		if err != nil {
-			return nil, fmt.Errorf("controlplane: create merchant group %q: %w", slug, err)
+			// #844: concurrent first-boot loser — the winner created the group
+			// between resolve and create. Re-read and adopt (same pattern as
+			// EnsureCustomerPermissionGroup / embedded provision); the adopted
+			// path re-ensures the owner assignment below.
+			id, rerr := core.ResolveGroupIDForSlug(ctx, MerchantType, slug)
+			if rerr != nil {
+				return nil, fmt.Errorf("controlplane: create merchant group %q: %w", slug, err)
+			}
+			groupID = id
+		} else {
+			res.MerchantGroupCreated = true
+			log.WithField("merchant", slug).Info("controlplane: created merchant permission-group")
 		}
-		res.MerchantGroupCreated = true
-		log.WithField("merchant", slug).Info("controlplane: created merchant permission-group")
 	} else if err != nil {
 		return nil, fmt.Errorf("controlplane: resolve merchant group %q: %w", slug, err)
-	} else if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
-		// Group already existed: ensure the admin holds the owner role (idempotent).
-		if aerr := core.Genesis().AssignGroupRole(ctx, MerchantType, slug, adminID, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
-			return nil, fmt.Errorf("controlplane: assign merchant owner to initial admin: %w", aerr)
+	}
+	if !res.MerchantGroupCreated {
+		if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
+			// Group already existed (or was adopted from a race winner): ensure
+			// the admin holds the owner role (idempotent).
+			if aerr := core.Genesis().AssignGroupRole(ctx, MerchantType, slug, adminID, authcore.SubjectKindUser, MerchantRoleOwner); aerr != nil {
+				return nil, fmt.Errorf("controlplane: assign merchant owner to initial admin: %w", aerr)
+			}
+			log.WithFields(log.Fields{"merchant": slug, "user_id": adminID}).
+				Info("controlplane: assigned merchant owner to initial admin")
 		}
-		log.WithFields(log.Fields{"merchant": slug, "user_id": adminID}).
-			Info("controlplane: assigned merchant owner to initial admin")
 	}
 	res.BootstrapMerchantGroupID = groupID
 
@@ -187,6 +197,24 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	return res, nil
+}
+
+// EnsureRootContainment ensures the singleton root group exists and the
+// declared containment schema is seeded. Tolerant of concurrent cold boots on
+// an empty DB (#844): authkit's EnsureRootGroup is check-then-create, so two
+// racing nodes both observe "no root" and the loser dies on the singleton
+// unique index. Re-invoking the ensure re-reads and adopts the winner's row; a
+// genuine failure fails again and the original error is returned.
+func EnsureRootContainment(ctx context.Context, core *authcore.Client) error {
+	if _, err := core.EnsureRootGroup(ctx); err != nil {
+		if _, rerr := core.EnsureRootGroup(ctx); rerr != nil {
+			return fmt.Errorf("ensure root group: %w", err)
+		}
+	}
+	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
+		return fmt.Errorf("seed permission-group containment: %w", err)
+	}
+	return nil
 }
 
 func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, error) {

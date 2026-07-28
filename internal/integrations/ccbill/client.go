@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 type RESTClient struct {
@@ -17,14 +16,9 @@ func NewRESTClient(cfg *config.CCBillConfig) *RESTClient {
 	}
 }
 
-func (c *RESTClient) ValidateWebhookIP(clientIP string) error {
-	if iputil.IsValidCCBillIP(clientIP) {
-		return nil
-	}
-
-	return fmt.Errorf("webhook request from unauthorized IP: %s", clientIP)
-}
-
+// ValidateWebhookAuth pins an inbound callback to the ctx merchant's armed
+// CCBill account. Source-IP authentication lives in webhookauth.CCBillIPAllowed
+// at ingress; this is the per-merchant half.
 func (c *RESTClient) ValidateWebhookAuth(clientAccnum, clientSubacc string) error {
 	if clientAccnum != c.config.ClientAccNum {
 		return fmt.Errorf("webhook clientAccnum mismatch: got %s, expected %s", clientAccnum, c.config.ClientAccNum)

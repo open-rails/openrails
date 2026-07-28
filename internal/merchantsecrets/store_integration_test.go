@@ -132,3 +132,35 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 	require.NotEqual(t, plaintext, raw, "DB row must hold ciphertext, not plaintext")
 	require.NotContains(t, raw, plaintext)
 }
+
+// SEC-20: with no ENCRYPTION_MASTER_KEY the DB store must REFUSE to persist a
+// self-custody Solana signing key — the one secret whose plaintext is spendable
+// funds. The path is built with the canonical builder, exactly as production
+// does; the pre-fix guard pattern still named the retired
+// `rail_merchant_accounts/` prefix and could therefore never match, so the key
+// landed plaintext in openrails.merchant_secrets.
+func TestBuild_DevDBStoreNoMasterKey_RefusesSolanaPrivateKey(t *testing.T) {
+	pool, ctx := startSecretsPostgres(t)
+	cfg := &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
+	store, err := Build(ctx, cfg, pool)
+	require.NoError(t, err)
+
+	mid, _ := registerMerchant(t, ctx, pool, "sec20")
+	name, err := merchants.PSPSecretName("solana", "live", "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9", "private_key")
+	require.NoError(t, err)
+
+	_, err = store.Secrets.Put(ctx, mid, name, "5JsolanaSigningKeyPlaintext")
+	require.Error(t, err, "solana private key must not be storable without ENCRYPTION_MASTER_KEY")
+	require.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
+
+	var stored int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
+		mid.String(), name).Scan(&stored))
+	require.Zero(t, stored, "refused write must persist nothing")
+
+	// The refusal is targeted, not a blanket plaintext ban: dev still stores
+	// ordinary credentials.
+	_, err = store.Secrets.Put(ctx, mid, merchants.SecretStripeSecretKey, "sk_test_sec20")
+	require.NoError(t, err)
+}

@@ -23,11 +23,8 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	}
 	ownerSubject = strings.TrimSpace(ownerSubject)
 
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return "", fmt.Errorf("controlplane: ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return "", fmt.Errorf("controlplane: seed permission-group containment: %w", err)
+	if err := EnsureRootContainment(ctx, core); err != nil {
+		return "", fmt.Errorf("controlplane: %w", err)
 	}
 
 	groupID, err := core.ResolveGroupIDForSlug(ctx, CustomerType, customerID)

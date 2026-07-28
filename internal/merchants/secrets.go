@@ -252,6 +252,12 @@ type PSPKeyResolver interface {
 	PSPScopeByKey(ctx context.Context, merchantID merchant.ID, key, environment string) (PSPScope, bool, error)
 }
 
+// PSPRailScopesResolver lists every non-archived account on a rail kind —
+// checkout's unambiguous rail-kind fallback (#848).
+type PSPRailScopesResolver interface {
+	ActivePSPScopesForRail(ctx context.Context, merchantID merchant.ID, rail, environment string) ([]PSPScope, error)
+}
+
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
 // operation is namespaced by merchant id so one merchant can never read or
 // overwrite another merchant's Stripe credentials or webhook signing secrets.

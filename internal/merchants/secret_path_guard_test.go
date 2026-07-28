@@ -28,11 +28,23 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 		allowed  map[string]string // repo-relative path -> why
 	}{
 		{
-			// The durable provider-account secret-name prefix (#683).
+			// The durable PSP secret-name prefix (#683), path.Join form.
+			fragment: `path.Join("psps"`,
+			allowed: map[string]string{
+				"internal/merchants/secrets.go": "the canonical builder (PSPSecretName)",
+			},
+		},
+		{
+			// The same prefix, literal-path form (SEC-20: the hand-written
+			// pattern that survived the psps rename and silently disarmed the
+			// Solana plaintext-write guard was exactly this shape).
+			fragment: `"psps/`,
+			allowed:  map[string]string{},
+		},
+		{
+			// The RETIRED prefix. Only the loud rename checks may name it.
 			fragment: `"rail_merchant_accounts`,
 			allowed: map[string]string{
-				"internal/merchants/secrets.go":           "the canonical builder/parser (PSPSecretName)",
-				"internal/merchantsecrets/store.go":       "write-restriction MATCH pattern, not construction",
 				"internal/bootstrap/merchant_manifest.go": "legacy manifest-KEY rename check (config keys, not secret paths)",
 				"embed/provision.go":                      "legacy manifest-KEY rename check (config keys, not secret paths)",
 			},

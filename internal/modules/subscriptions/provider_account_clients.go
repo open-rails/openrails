@@ -24,7 +24,7 @@ type NMIClientSource interface {
 
 // NMIClientForExistingSubscription resolves the NMI client that owns sub —
 // the #704 stamped provider account when present, else the merchant's pull
-// scope — from the armed rail_merchant_accounts state (#788).
+// scope — from the armed psps state (#788).
 func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSource, sub *models.Subscription) (*nmi.NMIClient, string, bool, error) {
 	if sub == nil {
 		return nil, "", false, errors.New("subscription is nil")

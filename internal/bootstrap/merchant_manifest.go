@@ -363,10 +363,9 @@ type MerchantConfig struct {
 	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius), one rail each.
-	// merchants.<slug>. nothing else it could mean). DELIBERATE DIVERGENCE: the
-	// DB table and the merchant-secret name prefix REMAIN `rail_merchant_accounts`
-	// (#683 vocabulary; distinguishes rail_customer_accounts) — do not "fix" them
-	// to match this key.
+	// merchants.<slug>. nothing else it could mean). ONE word everywhere: the
+	// DB table (openrails.psps) and the merchant-secret name prefix (`psps/…`)
+	// speak the same vocabulary as this key.
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
 }
 
@@ -1487,12 +1486,10 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		return "", fmt.Errorf("merchant bootstrap: control plane core unavailable")
 	}
 
-	// Ensure the root group + containment exist before creating typed groups.
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return "", fmt.Errorf("merchant bootstrap: ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return "", fmt.Errorf("merchant bootstrap: seed containment: %w", err)
+	// Ensure the root group + containment exist before creating typed groups
+	// (concurrent-boot tolerant, #844).
+	if err := controlplane.EnsureRootContainment(ctx, core); err != nil {
+		return "", fmt.Errorf("merchant bootstrap: %w", err)
 	}
 
 	// Idempotently create the merchant permission-group (resolve, else create).
@@ -1504,7 +1501,14 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 			ParentPersona: authcore.RootPersona,
 		})
 		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
+			// #844: concurrent first-create loser — re-read and adopt the
+			// winner's group (the Reconcile path holds an advisory lock, but
+			// ProvisionMerchant callers do not).
+			id, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+			if rerr != nil {
+				return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
+			}
+			groupID = id
 		}
 	} else if err != nil {
 		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)

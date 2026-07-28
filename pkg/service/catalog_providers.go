@@ -446,7 +446,7 @@ type railAccountRef struct {
 }
 
 // merchantAccountRails maps the ctx merchant's declared account keys
-// (rail_merchant_accounts.display_name — the manifest `accounts.<key>` name,
+// (psps.key — the manifest `psps.<key>` name,
 // e.g. "mobius") to their rails. Best-effort: no merchant ctx / DB means only
 // rail names resolve.
 func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccountRef {
@@ -483,7 +483,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 
 // syncSecondaryCatalogAccounts best-effort find-or-creates the price in each
 // of the ctx merchant's non-archived declared accounts on a rail (#788: the
-// armed rail_merchant_accounts state, never a boot artifact). No links
+// armed psps state, never a boot artifact). No links
 // stored; find-or-create re-discovers by content key and failures are logged.
 func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
 	if s.rt == nil || s.rt.DB == nil {

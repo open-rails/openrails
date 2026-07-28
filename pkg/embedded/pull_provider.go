@@ -142,7 +142,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		}
 
 		// #699/#788: fetchers arm from the merchant's armed rail state
-		// (rail_merchant_accounts + secret store) — the ONLY credential plane.
+		// (psps + secret store) — the ONLY credential plane.
 		// An explicit --provider-account pins that rail to the named account
 		// (archived accounts stay addressable for drain, #655).
 		armed := reconcile.MerchantFetcherBuilder{

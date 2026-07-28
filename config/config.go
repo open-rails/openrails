@@ -205,6 +205,18 @@ type Config struct {
 	// range when deploying behind one. Env: TRUSTED_PROXIES (YAML list or a
 	// JSON array string, e.g. TRUSTED_PROXIES='["10.0.0.0/8"]').
 	TrustedProxies []string `koanf:"trusted_proxies,omitempty"`
+
+	// CCBillWebhookIPAllowlist lists EXTRA source CIDRs accepted as CCBill
+	// webhook origins on top of CCBill's own documented ranges (SEC-19).
+	// CCBill signs nothing, so the source IP IS the authentication: this list
+	// is a credential, not a convenience. It is honored ONLY under
+	// test_mode=sandbox and ONLY while the PSP catalog PROVES no live CCBill
+	// PSP exists anywhere; anything unproven refuses it. Empty (the default)
+	// accepts CCBill's ranges alone. It replaces the old implicit "test_mode
+	// accepts any IP" bypass — a loopback dev harness must now declare
+	// "127.0.0.1/32". Env: CCBILL_WEBHOOK_IP_ALLOWLIST (YAML list or a JSON
+	// array string).
+	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist,omitempty"`
 }
 
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop
@@ -620,6 +632,10 @@ var ReservedPSPRails = map[string]models.Rail{
 // Embedded hosts build them in code (embedded.PaymentProvider); standalone
 // declares rail accounts in the merchant config manifest instead.
 type PSPConfig struct {
+	// Key is the merchant's PSP key for this account (psps.key / the manifest
+	// `psps.<key>` map name, e.g. "mobius"). Resolution OUTPUT only — set by
+	// railresolve sources, never declared inside the entry itself.
+	Key string
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail
@@ -1224,22 +1240,34 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("merchant_source config validation failed: %w", err)
 	}
 
-	if err := validateTrustedProxies(cfg.TrustedProxies); err != nil {
+	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {
 		return fmt.Errorf("trusted_proxies config validation failed: %w", err)
+	}
+
+	if err := validateSourceCIDRs(cfg.CCBillWebhookIPAllowlist); err != nil {
+		return fmt.Errorf("ccbill_webhook_ip_allowlist config validation failed: %w", err)
 	}
 
 	return nil
 }
 
-// validateTrustedProxies rejects a malformed trusted_proxies CIDR at boot —
-// same posture as every other config typo in this file: a bad entry must
-// never silently no-op into a partially-trusting (or fully-untrusting)
-// resolver (#746). Self-contained: no other config region reads this list.
-func validateTrustedProxies(cidrs []string) error {
+// validateSourceCIDRs rejects a malformed CIDR at boot — a typo must never
+// silently no-op into an unintended trust posture (#746) — and, deliberately,
+// a /0 prefix. Both lists it guards feed transport-level authentication
+// (SEC-19): trusting 0.0.0.0/0 as a proxy makes every X-Forwarded-For
+// authoritative, and allowlisting ::/0 as a CCBill source accepts a forged
+// callback from anywhere — CCBill has no HMAC, so the source IP is its only
+// authentication. An operator who wants "everything" must say so one honest
+// CIDR at a time.
+func validateSourceCIDRs(cidrs []string) error {
 	for _, raw := range cidrs {
 		trimmed := strings.TrimSpace(raw)
-		if _, _, err := net.ParseCIDR(trimmed); err != nil {
+		_, ipNet, err := net.ParseCIDR(trimmed)
+		if err != nil {
 			return fmt.Errorf("invalid CIDR %q (expected e.g. \"10.0.0.0/8\"): %w", raw, err)
+		}
+		if ones, _ := ipNet.Mask.Size(); ones == 0 {
+			return fmt.Errorf("CIDR %q matches every address; enumerate the real ranges instead", raw)
 		}
 	}
 	return nil

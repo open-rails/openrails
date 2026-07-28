@@ -336,6 +336,51 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	return scope.exported(), true, nil
 }
 
+// ActivePSPScopesForRail lists every non-archived provider account declared on
+// rail/environment, newest first. Checkout uses it to accept a bare rail-kind
+// selector only when it is unambiguous (#848).
+func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, rail, environment string) ([]PSPScope, error) {
+	if s == nil || s.pool == nil || id.IsZero() {
+		return nil, nil
+	}
+	rail = normalizeProviderSecretType(rail)
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return nil, fmt.Errorf("provider account environment must be live or test")
+	}
+	var out []PSPScope
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
+				  FROM openrails.psps
+				 WHERE merchant_id = $1::uuid
+				   AND rail = lower($2)
+				   AND environment = $3
+				   AND archived = false
+				 ORDER BY created_at DESC, id DESC
+			`, id.String(), rail, environment)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		out = out[:0]
+		for rows.Next() {
+			var scope pspSecretScope
+			var evidence []byte
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
+				return err
+			}
+			scope.settings = pspSettings(evidence)
+			out = append(out, scope.exported())
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list provider accounts %s/%s: %w", rail, environment, err)
+	}
+	return out, nil
+}
+
 // pspSecretScopeByAccountID resolves the secret scope for a specific
 // account by its account_id (#641). Archived accounts remain addressable for
 // inbound webhooks and existing provider-bound obligations.
@@ -616,26 +661,101 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	}, true, nil
 }
 
-// HasLiveRailMerchantAccounts reports whether ANY merchant declares a provider
-// account on rail with environment=live (global, cross-merchant — same trust
-// boundary as ResolveRailMerchantAccountByIdentity). Webhook ingestion uses
-// it (#668): CCBill has no HMAC, so its test_mode IP-allowlist bypass is
-// refused while a live CCBill account exists anywhere in the catalog.
-func (s *Service) HasLiveRailMerchantAccounts(ctx context.Context, rail string) (bool, error) {
+// LiveRailPresence is the TRI-state answer to "does a live PSP exist on this
+// rail, anywhere in the catalog?". The zero value is Unknown so a dropped or
+// defaulted result fails closed.
+type LiveRailPresence int
+
+const (
+	// LiveRailUnknown means the probe proved nothing. Callers MUST treat it
+	// exactly as they treat LiveRailPresent.
+	LiveRailUnknown LiveRailPresence = iota
+	LiveRailPresent
+	LiveRailAbsent
+)
+
+func (p LiveRailPresence) String() string {
+	switch p {
+	case LiveRailPresent:
+		return "present"
+	case LiveRailAbsent:
+		return "absent"
+	default:
+		return "unknown"
+	}
+}
+
+// ProbeLiveRailPSPs reports whether ANY merchant declares a PSP on rail with
+// environment=live. Deliberately cross-merchant: webhook ingestion has no
+// merchant yet. It walks the control-plane merchant directory (a global,
+// non-RLS table) and asks each merchant INSIDE ITS OWN RLS scope, so the answer
+// is the same whether or not the connected role enforces RLS.
+//
+// SEC-19: the predecessor ran one no-GUC `EXISTS` on the base pool. psps FORCEs
+// RLS, so under the unprivileged app role — mandatory outside development — the
+// policy predicate is NULL and the query returns zero rows AND no error. The
+// probe therefore reported "no live accounts" everywhere it mattered, silently
+// disarming the guard built on it.
+//
+// Cost is O(merchants) small transactions, so this is for gate decisions on a
+// cold path (the CCBill dev-allowlist gate), not per-event work.
+func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailPresence, error) {
 	if s == nil || s.pool == nil {
-		return false, errors.New("merchants: pgx pool is required")
+		return LiveRailUnknown, errors.New("merchants: pgx pool is required")
 	}
 	rail = normalizeProviderSecretType(rail)
-	var exists bool
-	err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM openrails.psps
-			 WHERE rail = lower($1) AND environment = 'live'
-		)`, rail).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("merchants: probe live %s provider accounts: %w", rail, err)
+	if rail == "" {
+		return LiveRailUnknown, errors.New("merchants: rail is required")
 	}
-	return exists, nil
+	ids, err := s.allMerchantIDs(ctx)
+	if err != nil {
+		return LiveRailUnknown, fmt.Errorf("merchants: list merchants for live %s psp probe: %w", rail, err)
+	}
+	if len(ids) == 0 {
+		// An empty directory is indistinguishable from a directory read we were
+		// not allowed to make — prove nothing rather than claim absence.
+		return LiveRailUnknown, nil
+	}
+	live := "live"
+	for _, id := range ids {
+		found := false
+		if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			n, err := gen.New(tx).CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
+				MerchantID:  uuid.UUID(id),
+				Rail:        rail,
+				Environment: &live,
+			})
+			found = n > 0
+			return err
+		}); err != nil {
+			return LiveRailUnknown, fmt.Errorf("merchants: probe live %s psps for merchant %s: %w", rail, id, err)
+		}
+		if found {
+			return LiveRailPresent, nil
+		}
+	}
+	return LiveRailAbsent, nil
+}
+
+// allMerchantIDs lists every merchant, INCLUDING soft-deleted ones — their psps
+// rows survive the tombstone and still make a deployment "live".
+// openrails.merchants is a global control-plane table (no RLS), so this read is
+// legitimate on the base pool.
+func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM openrails.merchants ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []merchant.ID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, merchant.ID(id))
+	}
+	return ids, rows.Err()
 }
 
 // PutCredential stores/rotates a single per-merchant credential.

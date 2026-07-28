@@ -113,10 +113,34 @@ tasks:
       - '{{.SQLC}} vet'
 
   sqlc-check:
-    desc: CI gate — sqlc generate + vet, then fail if generated code is stale
-    deps: [sqlc]
+    desc: CI gate — sqlc generate + vet + query audit + SQL discipline lints
+    env:
+      # One throwaway vet DB serves generate, vet and the auditor (rebuilding it
+      # per step would triple the cost of the job).
+      SQLC_DATABASE_URL:
+        sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
     cmds:
+      - '{{.SQLC}} generate'
+      - '{{.SQLC}} vet'
       - git diff --exit-code -- internal/db/gen
+      # Efficiency+safety gate: EXPLAIN every query, walk the plan, apply rules.
+      # CGO_ENABLED=1 is mandatory, not incidental: sqlaudit is `//go:build cgo`
+      # (pg_query_go links the real Postgres parser) so that CGO_ENABLED=0
+      # builds of ./... stay green — without it the gate would silently match no
+      # packages and pass.
+      - CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run TestQueryAudit -count=1
+      - bash scripts/sql-lint.sh
+      - bash scripts/migration-lint.sh
+
+  sql-lint:
+    desc: Fail on raw SQL outside internal/db/gen (see internal/db/queries/LINT_ALLOWLIST.txt)
+    cmds:
+      - bash scripts/sql-lint.sh
+
+  migration-lint:
+    desc: Lock-safety lint (squawk) for migrations added after the .squawk.toml baseline
+    cmds:
+      - bash scripts/migration-lint.sh
 
   test:
     desc: Run tests

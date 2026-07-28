@@ -30,7 +30,7 @@ type platformMerchantItem struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
-	// RailsArmed is the distinct non-archived rail_merchant_accounts rails —
+	// RailsArmed is the distinct non-archived psps rails —
 	// the operator-declared account catalog, not a live credential probe.
 	RailsArmed []string `json:"rails_armed"`
 	// LastPaymentAt is the cheap last-activity proxy: latest payments.created_at
@@ -214,7 +214,7 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 }
 
 // enrichPlatformMerchant fills rails-armed + last-activity under a MerchantTx:
-// rail_merchant_accounts and payments are RLS merchant-isolated, so the probes
+// psps and payments are RLS merchant-isolated, so the probes
 // must run with the merchant GUC pinned (one tiny tx per directory row —
 // page-bounded, both queries indexed).
 func enrichPlatformMerchant(ctx context.Context, d *db.DB, id uuid.UUID, item *platformMerchantItem) error {

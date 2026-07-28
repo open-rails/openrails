@@ -66,7 +66,7 @@ type CheckoutSession struct {
 	// IdempotencyKey is request-scoped only (Redis owns checkout idempotency,
 	// #702 dropped the column); never persisted or round-tripped from the DB.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
-	// PspID is the provider_accounts row selected for this provider
+	// PspID is the psps row selected for this provider
 	// checkout. It prevents provider sessions from being confused across rotated
 	// Stripe/NMI/CCBill accounts.
 	PspID     *uuid.UUID `json:"psp_id,omitempty"`

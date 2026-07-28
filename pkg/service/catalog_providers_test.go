@@ -88,12 +88,27 @@ func TestCCBillAdapter_AutoCreatePending(t *testing.T) {
 
 func TestMobiusAdapter_Attach(t *testing.T) {
 	a := &nmiAdapter{}
+	// Unarmed + no override: the link stores plan_id only — no fabricated
+	// provider key (#845).
 	ids, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium_monthly"}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if ids[models.RailKeyPlanID] != "premium_monthly" || ids[models.RailKeyProvider] != "mobius" {
+	if ids[models.RailKeyPlanID] != "premium_monthly" {
 		t.Fatalf("unexpected ids: %v", ids)
+	}
+	if _, ok := ids[models.RailKeyProvider]; ok {
+		t.Fatalf("unarmed attach must not fabricate a provider key: %v", ids)
+	}
+	// An explicit link override is preserved.
+	ids, err = a.Attach(context.Background(), map[string]string{
+		models.RailKeyPlanID: "premium_monthly", models.RailKeyProvider: "Mobius",
+	}, autoCreateContext{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ids[models.RailKeyProvider] != "mobius" {
+		t.Fatalf("override provider must be preserved (lowercased): %v", ids)
 	}
 	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
 		t.Fatal("expected error when plan_id missing")

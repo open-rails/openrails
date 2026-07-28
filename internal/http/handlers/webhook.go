@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
+	"github.com/open-rails/openrails/internal/webhookauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -339,42 +340,25 @@ func webhookProviderEnvironment(r *httprequest.Request) string {
 	return config.ExpectedProviderEnvironment(r != nil && r.State != nil && r.State.Config != nil && r.State.Config.IsTestMode())
 }
 
-// ccbillWebhookIPAllowed is the single gate for CCBill webhook source-IP
-// authentication (#668). CCBill has no HMAC — the source-IP allowlist is its
-// ONLY authentication — so the dev bypass must never key off global test_mode
-// alone: test_mode is orthogonal to credential liveness (#355) and CCBill
-// credentials carry no intrinsic test/live marker. The bypass requires BOTH
-// test_mode AND no live CCBill provider account declared anywhere in the
-// catalog (a deployment that ran live keeps its environment=live rows after a
-// test_mode flip, so the allowlist stays enforced). Probe failure fails closed
-// to the allowlist.
+// ccbillWebhookIPAllowed binds the request to the ONE CCBill source-IP gate
+// (webhookauth.CCBillIPAllowed) that the embedded Service surface also calls.
 func ccbillWebhookIPAllowed(r *httprequest.Request, clientIP string) bool {
-	if iputil.IsValidCCBillIP(clientIP) {
-		return true
+	if r == nil || r.State == nil {
+		return iputil.IsValidCCBillIP(clientIP)
 	}
-	if r == nil || r.State == nil || r.State.Config == nil || !r.State.Config.IsTestMode() {
-		return false
-	}
-	hasLive, err := ccbillLiveAccountsExist(r)
-	if err != nil {
-		log.WithError(err).WithField("client_ip", clientIP).Warn("ccbill webhook: live-account probe failed; enforcing IP allowlist")
-		return false
-	}
-	if hasLive {
-		log.WithField("client_ip", clientIP).Warn("ccbill webhook: test_mode IP bypass refused - live ccbill provider account configured")
-		return false
-	}
-	log.WithField("client_ip", clientIP).Debug("CCBill webhook IP allowlist bypassed - sandbox posture (test_mode, no live ccbill account)")
-	return true
+	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, ccbillLivePSPProbe(r), clientIP)
 }
 
-// ccbillLiveAccountsExist probes the provider-account catalog; a var so handler
-// tests can stub the DB-backed merchants service.
-var ccbillLiveAccountsExist = func(r *httprequest.Request) (bool, error) {
+// ccbillLivePSPProbe binds the catalog probe to the request; a var so handler
+// tests can stub the DB-backed merchants service. Returning nil (no merchants
+// service) fails the gate closed.
+var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 	if r.State.Merchants == nil {
-		return false, errors.New("merchants service unavailable")
+		return nil
 	}
-	return r.State.Merchants.HasLiveRailMerchantAccounts(r.Request.Context(), subscriptions.RailCCBill)
+	return func(ctx context.Context) (merchants.LiveRailPresence, error) {
+		return r.State.Merchants.ProbeLiveRailPSPs(ctx, subscriptions.RailCCBill)
+	}
 }
 
 func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, bool) {

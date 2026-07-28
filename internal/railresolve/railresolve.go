@@ -2,7 +2,7 @@
 //
 // Every decision-time question — "is rail X armed for this merchant?", "give
 // me its credentials", "build me a rail client" — resolves an active
-// rail_merchant_accounts row (Layer B) plus scoped secrets through the
+// psps row (Layer B) plus scoped secrets through the
 // merchant secret-store interface. How the armed state got there (MODE 1
 // manifest convergence or MODE 2 API writes — Layer A) is invisible here:
 // both converge the same rows and the same secret names, so a new ingestion
@@ -47,7 +47,7 @@ type Source interface {
 }
 
 // MerchantsSource is the production Source: scope rows via merchants.Service
-// (rail_merchant_accounts) + scoped secrets via the merchant secret store.
+// (psps) + scoped secrets via the merchant secret store.
 type MerchantsSource struct {
 	Config *config.Config
 	// MerchantsFn returns the armed merchants service. Late-bound: manifest
@@ -161,6 +161,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
 	out := &config.PSPConfig{
+		Key:         scope.Key,
 		Rail:        models.Rail(scope.Rail),
 		AccountID:   scope.AccountID,
 		Environment: scope.Environment,
@@ -292,17 +293,27 @@ func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config
 	set := config.PSPSet(f)
 	railType := models.Rail(strings.ToLower(strings.TrimSpace(rail)))
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
-		if proc, ok := set.FindByAccountID(railType, accountID); ok && proc != nil {
-			return proc, nil
+		for _, key := range set.RailKeysByType(railType) {
+			if set[key].EffectiveAccountID() == accountID {
+				return withPSPKey(set[key], key), nil
+			}
 		}
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
-	_, proc, err := set.ActiveRailByType(railType)
+	key, proc, err := set.ActiveRailByType(railType)
 	if err != nil {
 		return nil, err
 	}
 	if proc == nil {
 		return nil, fmt.Errorf("rail %s: %w", rail, ErrRailNotArmed)
 	}
-	return proc, nil
+	return withPSPKey(proc, key), nil
+}
+
+// withPSPKey returns a copy of proc carrying its resolved PSP key (the set's
+// map name), matching MerchantsSource's scope.Key population.
+func withPSPKey(proc *config.PSPConfig, key string) *config.PSPConfig {
+	out := *proc
+	out.Key = strings.ToLower(strings.TrimSpace(key))
+	return &out
 }

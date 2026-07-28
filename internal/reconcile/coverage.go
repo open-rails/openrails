@@ -59,7 +59,7 @@ func (r *RunResult) PullProofs() PullProofs {
 //   - Absence proofs need EXHAUSTIVE coverage (SnapshotCoverage), never mere
 //     event-window watermark freshness.
 //   - A domain is proven only when EVERY rail in the merchant's declared
-//     rail_merchant_accounts catalog was covered — and only rails with exactly
+//     psps catalog was covered — and only rails with exactly
 //     ONE declared account (any environment) qualify, because a single
 //     credentials-set pull cannot prove absence across sibling accounts. An
 //     account-bound pull must be bound to that one account. An empty catalog

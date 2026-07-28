@@ -467,8 +467,11 @@ func (s *CCBillWebhookService) handleCCBillWebhookDispatch(ctx context.Context) 
 }
 
 func (s *CCBillWebhookService) validateWebhookAuth(ctx context.Context) error {
+	// Fail CLOSED: the accnum/subacc match against the ctx merchant's armed
+	// account is the only per-merchant authentication a CCBill callback gets
+	// (the rail has no HMAC). No client = nothing to check it against.
 	if s.CCBillClient == nil {
-		return nil
+		return fmt.Errorf("ccbill webhook auth failed: no armed ccbill account to authenticate against")
 	}
 
 	var common CCBillCommonFields

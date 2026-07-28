@@ -19,7 +19,7 @@ import (
 
 // #699/#788: the pull plane (provider refresh, unknown-cohort resolution,
 // per-sub probes, operator pulls) arms PER MERCHANT from the armed rail state
-// (rail_merchant_accounts rows + the merchant secret store) — the ONE Layer-C
+// (psps rows + the merchant secret store) — the ONE Layer-C
 // resolution seam. There is no boot-config plane anymore: a rail with no
 // declared account row is simply not armed. Missing or incomplete secrets
 // fail LOUD: the rail's fetcher/prober is absent and ONE WARN names the
