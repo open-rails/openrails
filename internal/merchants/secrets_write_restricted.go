@@ -6,8 +6,28 @@ import (
 	"path"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// SolanaPrivateKeyWritePattern is the path.Match pattern for a self-custody
+// Solana signing key in ANY environment, for ANY account. It is DERIVED from
+// PSPSecretName — the one canonical name builder — so the guard that uses it
+// can never drift from the names actually written (SEC-20: the hand-written
+// `rail_merchant_accounts/…` literal it replaced survived the psps rename and
+// could therefore never match, leaving the key to be stored PLAINTEXT).
+func SolanaPrivateKeyWritePattern() string {
+	name, err := PSPSecretName(string(models.RailSolana), "live", "account", "private_key")
+	if err != nil {
+		panic("merchants: canonical solana private-key secret name: " + err.Error())
+	}
+	parts := strings.Split(name, "/")
+	if len(parts) != 5 {
+		panic("merchants: unexpected psp secret name shape " + name)
+	}
+	parts[2], parts[3] = "*", "*" // any environment, any account
+	return strings.Join(parts, "/")
+}
 
 type writeRestrictedSecretStore struct {
 	inner   MerchantSecretStore

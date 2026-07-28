@@ -329,7 +329,7 @@ func WithClock(clock clockwork.Clock) StandaloneOption {
 }
 
 // WithRails arms the test merchant's rails (#788): the set is converged into
-// the SAME armed state production writers produce (rail_merchant_accounts
+// the SAME armed state production writers produce (psps
 // rows + scoped secrets) right after boot — never a boot-config bridge.
 func WithRails(rails config.PSPSet) StandaloneOption {
 	return func(c *standaloneConfig) { c.rails = rails }
@@ -422,7 +422,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	app := assembled.App
 	h.cleanup(func() { _ = app.Close(context.Background()) })
 
-	// #788: rails arm as rail_merchant_accounts rows + scoped secrets — the
+	// #788: rails arm as psps rows + scoped secrets — the
 	// canonical armed state every consumer resolves through the ONE seam.
 	if len(sc.rails) > 0 {
 		SeedRailMerchantAccounts(h.ctx, h.t, app.Runtime, dbtest.TestMerchantID, sc.rails)

@@ -7,7 +7,7 @@ import (
 
 // Fetcher/prober construction is per merchant (#699/#788): see
 // MerchantFetcherBuilder in merchant_wiring.go — the armed rail state
-// (rail_merchant_accounts + secret store) is the ONLY credential plane.
+// (psps + secret store) is the ONLY credential plane.
 
 // NewEngine assembles a DB-backed engine over the given fetchers. The caller
 // supplies a merchant-scoped context at Run time.

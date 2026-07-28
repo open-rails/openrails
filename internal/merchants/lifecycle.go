@@ -58,7 +58,7 @@ type Service struct {
 	secrets MerchantSecretStore
 	// providerEnvironment is the deployment posture (#681): test under
 	// test_mode, live otherwise. Scoped credential lookups resolve
-	// rail_merchant_accounts rows in THIS environment only.
+	// psps rows in THIS environment only.
 	providerEnvironment string
 	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the #348
 	// test_mode arm-time probe (refuseLiveNMIUnderTestMode) hits, so tests can

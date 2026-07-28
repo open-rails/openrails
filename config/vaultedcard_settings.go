@@ -9,7 +9,7 @@ import (
 
 // vaulted_card rail-account `settings` keys (#795). Declared under
 // merchants.<slug>.accounts.<key>.vaulted_card.settings and stored on the
-// rail_merchant_accounts row. account_id = the BT tenant id (operator-declared,
+// psps row. account_id = the BT tenant id (operator-declared,
 // no-whoami doctrine); the ONLY custodial secret is the private app key
 // (secrets.api_key). The public app key is checkout-page config, not a secret.
 const (

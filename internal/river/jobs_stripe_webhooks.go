@@ -40,7 +40,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	}
 	if w.Merchants == nil || w.Merchants.Secrets() == nil {
 		// #788: managed webhook registration resolves ONLY from the armed
-		// rail state (rail_merchant_accounts + secret store); without an
+		// rail state (psps + secret store); without an
 		// armed merchants service there is nothing to reconcile.
 		log.WithContext(ctx).Info("StripeWebhookReconcile: merchants service not armed; skipping")
 		return nil

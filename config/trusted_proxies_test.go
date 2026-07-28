@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func TestValidateTrustedProxies(t *testing.T) {
+func TestValidateSourceCIDRs(t *testing.T) {
 	cases := []struct {
 		name    string
 		cidrs   []string
@@ -15,12 +15,19 @@ func TestValidateTrustedProxies(t *testing.T) {
 		{"malformed CIDR rejected", []string{"not-a-cidr"}, true},
 		{"bare IP without prefix rejected", []string{"10.0.0.5"}, true},
 		{"one good one bad rejected", []string{"10.0.0.0/8", "garbage"}, true},
+		// SEC-19: /0 trusts every source. For trusted_proxies that makes every
+		// X-Forwarded-For authoritative; for the CCBill allowlist it accepts a
+		// forged callback from anywhere (that rail has no HMAC).
+		{"ipv4 default route rejected", []string{"0.0.0.0/0"}, true},
+		{"ipv6 default route rejected", []string{"::/0"}, true},
+		{"one good one wide-open rejected", []string{"10.0.0.0/8", "0.0.0.0/0"}, true},
+		{"a /1 is still the operator's call", []string{"0.0.0.0/1"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateTrustedProxies(tc.cidrs)
+			err := validateSourceCIDRs(tc.cidrs)
 			if tc.wantErr != (err != nil) {
-				t.Fatalf("validateTrustedProxies(%v) err=%v, wantErr=%v", tc.cidrs, err, tc.wantErr)
+				t.Fatalf("validateSourceCIDRs(%v) err=%v, wantErr=%v", tc.cidrs, err, tc.wantErr)
 			}
 		})
 	}
@@ -37,5 +44,23 @@ func TestValidateRejectsMalformedTrustedProxy(t *testing.T) {
 	}
 	if err := Validate(cfg); err == nil {
 		t.Fatal("Validate() should reject a malformed trusted_proxies entry")
+	}
+}
+
+// SEC-19: the CCBill source allowlist is authentication, so Validate must reject
+// both a typo and a wide-open entry.
+func TestValidateRejectsBadCCBillWebhookIPAllowlist(t *testing.T) {
+	for _, entry := range []string{"definitely-not-a-cidr", "0.0.0.0/0"} {
+		cfg := &Config{
+			Env:                      "development",
+			ProviderWriteMode:        ProviderWriteModeFull,
+			CCBillWebhookIPAllowlist: []string{entry},
+		}
+		if err := Validate(cfg); err == nil {
+			t.Fatalf("Validate() should reject ccbill_webhook_ip_allowlist entry %q", entry)
+		}
+	}
+	if err := validateSourceCIDRs([]string{"127.0.0.1/32"}); err != nil {
+		t.Fatalf("a loopback allowlist entry must be accepted: %v", err)
 	}
 }

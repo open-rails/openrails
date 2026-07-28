@@ -65,8 +65,17 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "stripe", "test", "acct_acme_test", "webhook_signing_secret", "whsec_acme_test")
 	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", "nmi_acme_test", "webhook_signing_secret", "nmi_acme_test")
 
-	rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}, Merchants: svc}
-	globalRT := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}, Merchants: svc}
+	// SEC-19: the CCBill source-IP gate has no blanket test_mode bypass — the
+	// httptest client's loopback address must be DECLARED, and is still only
+	// honored because the probe above proves no live ccbill PSP exists.
+	sandboxCfg := func() *config.Config {
+		return &config.Config{
+			TestMode:                 config.CredentialPostureSandbox,
+			CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
+		}
+	}
+	rt := &app.Runtime{Config: sandboxCfg(), Merchants: svc}
+	globalRT := &app.Runtime{Config: sandboxCfg(), Merchants: svc}
 	mux := http.NewServeMux()
 	httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/global", globalRT), globalRT)
 	httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, "/v1", rt), rt)

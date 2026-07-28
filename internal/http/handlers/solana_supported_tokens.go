@@ -88,7 +88,7 @@ type TokenBalance struct {
 // reaches the knobs — its boot plane is empty; the manifest declares them per
 // merchant. nil (with nil error) means no Solana account on either plane.
 // effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// config (#775/#788): the rail_merchant_accounts row's settings materialized
+// config (#775/#788): the psps row's settings materialized
 // over the test_mode-derived network + curated token defaults. nil = not
 // armed (callers fail closed with their "not configured" errors).
 func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {

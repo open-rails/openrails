@@ -189,7 +189,7 @@ type FetchParams struct {
 	Until          time.Time
 	SubscriptionID string
 	CustomerID     string
-	// PspID is the OpenRails rail_merchant_accounts.id being pulled.
+	// PspID is the OpenRails psps.id being pulled.
 	// Fetchers do not usually need it for API calls, but it is carried for
 	// evidence and for account-bound provider-pull wiring.
 	PspID     string
