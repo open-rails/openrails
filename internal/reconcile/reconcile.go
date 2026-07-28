@@ -206,19 +206,10 @@ type RailFetcher interface {
 	Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error)
 }
 
-// ProviderKeyer is implemented by fetchers/wrappers that know which configured
-// provider key backs the provider type. NMI is the important case: the local
-// provider is "nmi", but the configured key may be "mobius" or another NMI MID.
-type ProviderKeyer interface {
-	ProviderKey() string
-}
-
 type keyedFetcher struct {
 	RailFetcher
 	key string
 }
-
-func (f keyedFetcher) ProviderKey() string { return f.key }
 
 // rawJSON marshals v into a json.RawMessage for the Raw forensics fields,
 // falling back to a JSON-encoded error note rather than failing the fetch.
