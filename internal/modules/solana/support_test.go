@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func TestCalculateTokenQuote_USDPrice(t *testing.T) {
 	quote, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 10_000_000, "usd", nil, fakeTokenPriceProvider{"USDC": 1.0})
 	require.NoError(t, err)
 	require.Equal(t, uint64(10_000_000), quote.Units)
-	require.Equal(t, 10.0, quote.Decimal)
+	require.Equal(t, "10.000000", quote.Amount)
 	require.Equal(t, 1.0, quote.FXRate)
 	require.Equal(t, "usd", quote.FXCurrency)
 }
@@ -49,8 +50,8 @@ func TestCalculateTokenQuote_MicrosWirePin(t *testing.T) {
 	quote, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 19_990_000, "usd", nil, fakeTokenPriceProvider{"USDC": 1.0})
 	require.NoError(t, err)
 	require.Equal(t, uint64(19_990_000), quote.Units) // 19.99 USDC in base units
-	require.Equal(t, 19.99, quote.Decimal)
-	require.Equal(t, 19.99, quote.AmountUSD)
+	require.Equal(t, "19.990000", quote.Amount)
+	require.Equal(t, moneyutil.Micros(19_990_000), quote.AmountUSDMicros)
 }
 
 func TestCalculateTokenQuote_NonUSDPrice_RequiresFXProvider(t *testing.T) {
@@ -72,7 +73,7 @@ func TestCalculateTokenQuote_ZeroAmount(t *testing.T) {
 	quote, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 0, "usd", nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), quote.Units)
-	require.Equal(t, float64(0), quote.Decimal)
+	require.Equal(t, "0.000000", quote.Amount)
 }
 
 func TestCalculateTokenQuote_EmptyCurrencyDefaultsToUSD(t *testing.T) {
@@ -106,7 +107,7 @@ func TestCalculateTokenQuote_WithMockFXProvider(t *testing.T) {
 
 	quote, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 10_000_000, "eur", mockFX, fakeTokenPriceProvider{"USDC": 1.0})
 	require.NoError(t, err)
-	require.Equal(t, 10.80, quote.AmountUSD)
+	require.Equal(t, moneyutil.Micros(10_800_000), quote.AmountUSDMicros)
 	require.Equal(t, 1.08, quote.FXRate)
 	require.Equal(t, "eur", quote.FXCurrency)
 }

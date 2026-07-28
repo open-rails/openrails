@@ -1499,7 +1499,14 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 			newPrice.RecurringCycleHours(),
 			s.now(),
 		)
-		firstChargeBaseUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, s.priceProvider)
+		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
+		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, s.priceProvider)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
 		if firstChargeBaseUnits == 0 {
 			firstChargeBaseUnits = 1
 		}

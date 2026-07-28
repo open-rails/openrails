@@ -73,11 +73,53 @@ func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 			if tt.wantFirstMicros < tt.newFull && firstMicros >= tt.newFull {
 				t.Fatalf("expected a REDUCED first charge below the full new price")
 			}
-			gotUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstMicros), "USDC", nil)
+			gotUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstMicros), "USDC", 6, nil)
+			if err != nil {
+				t.Fatalf("convert first charge: %v", err)
+			}
 			if gotUnits != tt.wantBaseUnits {
 				t.Fatalf("first pull base units: expected %d, got %d", tt.wantBaseUnits, gotUnits)
 			}
 		})
+	}
+}
+
+// TestSolanaUpgradeFirstChargeHonoursTokenDecimals pins #817 on the
+// recurring/first-charge path: the SAME prorated micros must become different
+// base units per the merchant's configured token decimals. The old code
+// hardcoded 6, so a 9-decimal mint pulled 1/1000th of the intended charge.
+func TestSolanaUpgradeFirstChargeHonoursTokenDecimals(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	cycle := 30 * 24
+
+	// $20 -> $50 with 28 days left => 31_330_000 micros (see above).
+	firstMicros, _ := CalculateModelBUpgradeCharge(20_000_000, 50_000_000, timePtr(now.Add(28*24*time.Hour)), &cycle, now)
+	if firstMicros != 31_330_000 {
+		t.Fatalf("first charge micros: got %d", firstMicros)
+	}
+
+	cases := []struct {
+		decimals int
+		want     uint64
+	}{
+		{6, 31_330_000},
+		{8, 3_133_000_000},
+		{9, 31_330_000_000},
+	}
+	for _, tc := range cases {
+		got, err := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstMicros), "USDC", tc.decimals, nil)
+		if err != nil {
+			t.Fatalf("@%d decimals: %v", tc.decimals, err)
+		}
+		if got != tc.want {
+			t.Fatalf("@%d decimals: got %d base units, want %d", tc.decimals, got, tc.want)
+		}
+	}
+
+	// Missing decimals must fail loudly, never silently price at 10^0.
+	if _, err := solanamodule.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(firstMicros), "USDC", 0, nil); err == nil {
+		t.Fatal("expected an error for a token with no configured decimals")
 	}
 }
 
@@ -98,7 +140,10 @@ func TestSolanaDowngradeHasZeroFirstCharge(t *testing.T) {
 	if firstMicros != 0 {
 		t.Fatalf("a downgrade must not produce a positive Model-B first charge, got %d micros", firstMicros)
 	}
-	gotUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(context.Background(), moneyutil.Micros(firstMicros), "USDC", nil)
+	gotUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(context.Background(), moneyutil.Micros(firstMicros), "USDC", 6, nil)
+	if err != nil {
+		t.Fatalf("convert first charge: %v", err)
+	}
 	if gotUnits != 0 {
 		t.Fatalf("downgrade FirstChargeBaseUnits must be 0, got %d", gotUnits)
 	}
