@@ -215,6 +215,12 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
 		secrets = append(secrets, s)
 	}
+	// #856: through an api_version rollover the superseded endpoint keeps
+	// delivering with the OLD secret. Accepting it is what makes the rollover
+	// gapless — deliveries already queued there still verify.
+	if s := strings.TrimSpace(creds.WebhookSigningPrevious); s != "" {
+		secrets = append(secrets, s)
+	}
 	if len(secrets) == 0 {
 		r.ErrorJSON(http.StatusUnauthorized, "Merchant webhook signing secret not configured")
 		return

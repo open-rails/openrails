@@ -35,6 +35,10 @@ const (
 	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
 	// Destination signing secret (a single endpoint may receive both).
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
+	// SecretStripeWebhookSigningPrevious is the outgoing signing secret kept
+	// through an api_version rollover (#856), so deliveries still queued on the
+	// superseded endpoint keep verifying while both endpoints run.
+	SecretStripeWebhookSigningPrevious = "stripe/webhook_signing_secret_previous"
 	// SecretNMISecurityKey is the legacy broad NMI security-key secret.
 	SecretNMISecurityKey = "nmi/mobius/security_key"
 	// SecretNMITokenizationURL overrides the Collect.js script URL for a
@@ -62,6 +66,7 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretStripeSecretKey, Rail: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
 	{Name: SecretStripeWebhookSigning, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretStripeWebhookSigningThin, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
+	{Name: SecretStripeWebhookSigningPrevious, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe previous webhook signing secret (rollover overlap)", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretNMISecurityKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
 	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},

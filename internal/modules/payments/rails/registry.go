@@ -173,7 +173,10 @@ var descriptors = []Descriptor{
 		autoBilledNever,
 		cancelReversible, // cancel_at_period_end
 		"",               // CancelPortalURL
-		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}},
+		// webhook_signing_secret_previous (#856): the outgoing secret, retained
+		// for the rollover overlap so events still queued on the superseded
+		// endpoint keep verifying. Dropped when the last predecessor retires.
+		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}, {"webhook_signing_secret_previous", true}},
 	},
 	{
 		models.RailSolana,

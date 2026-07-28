@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -159,4 +160,128 @@ func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t 
 	sec, err := store.Get(ctx, merchantID, webhookName)
 	require.NoError(t, err)
 	require.Equal(t, "whsec_from_manifest", sec.Value)
+}
+
+// #856 trigger 2: a psps row's environment (or account_id) changed, so the
+// DERIVED secret name moved while the secret sat untouched under the old one.
+// The local record is repaired; the remote endpoint is never touched.
+func TestReconcileManagedStripeWebhookRepairsDriftedSecretName(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeStripeWebhooks()
+	svc := newWebhookTestSvc(t, fake)
+	store := merchants.NewMemorySecretStore()
+	merchantID := merchant.ID(uuid.New())
+
+	// Secrets were written while the psps row said environment=test.
+	oldWebhookName, err := merchants.PSPSecretName("stripe", "test", "acct_123", "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, merchantID, oldWebhookName, "whsec_still_valid")
+	require.NoError(t, err)
+	liveKeyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, merchantID, liveKeyName, "sk_test_123")
+	require.NoError(t, err)
+
+	// The live endpoint exists and is correct.
+	fake.endpoints["we_ok"] = &StripeWebhookEndpoint{
+		ID: "we_ok", URL: "https://billing.example.com/v1/merchants/acme/webhooks/stripe/acct_123",
+		Status: "enabled", APIVersion: stripeapi.APIVersion, Created: 1,
+		EnabledEvents: []string{"invoice.paid"},
+		Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
+	}
+
+	// The row now reads environment=live: the derived name misses.
+	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
+		SecretStore:         store,
+		MerchantID:          merchantID,
+		MerchantSlug:        "acme",
+		ProviderEnvironment: "live",
+		PspID:               "acct_123",
+		EnabledEvents:       []string{"invoice.paid"},
+		StripeBaseURL:       svc.BaseURL,
+	})
+	require.NoError(t, err)
+	require.Zero(t, fake.deletes, "a derived-name drift NEVER deletes the remote endpoint")
+	require.Zero(t, fake.creates, "and never mints a replacement either")
+	require.Equal(t, WebhookUnchanged, res.Result.Action)
+	require.Equal(t, oldWebhookName, res.RepairedFrom)
+	require.Empty(t, res.OperatorAction)
+
+	// The secret is now readable under the CURRENT derived name, unchanged.
+	sec, err := store.Get(ctx, merchantID, res.SecretName)
+	require.NoError(t, err)
+	require.Equal(t, "whsec_still_valid", sec.Value)
+}
+
+// #856 trigger 1 end-to-end at the registration layer: an api_version bump
+// rolls over with zero deletes, retains the outgoing secret so in-flight
+// deliveries on the superseded endpoint still verify, and raises an operator
+// action instead of self-deleting.
+func TestReconcileManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeStripeWebhooks()
+	svc := newWebhookTestSvc(t, fake)
+	store := merchants.NewMemorySecretStore()
+	merchantID := merchant.ID(uuid.New())
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI}
+
+	keyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, merchantID, keyName, "sk_test_123")
+	require.NoError(t, err)
+	webhookName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, merchantID, webhookName, "whsec_on_the_old_endpoint")
+	require.NoError(t, err)
+	previousName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "webhook_signing_secret_previous")
+	require.NoError(t, err)
+
+	// An endpoint pinned to a version we no longer ship.
+	fake.endpoints["we_old"] = &StripeWebhookEndpoint{
+		ID: "we_old", URL: "https://billing.example.com/v1/merchants/acme/webhooks/stripe/acct_123",
+		Status: "enabled", APIVersion: "2020-01-01", Created: 1,
+		EnabledEvents: []string{"invoice.paid"},
+		Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
+	}
+
+	params := ManagedStripeWebhookParams{
+		Config: cfg, SecretStore: store, MerchantID: merchantID, MerchantSlug: "acme",
+		ProviderEnvironment: "live", PspID: "acct_123",
+		EnabledEvents: []string{"invoice.paid"}, StripeBaseURL: svc.BaseURL, Now: now,
+	}
+	res, err := ReconcileManagedStripeWebhook(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, WebhookRolledOver, res.Result.Action)
+	require.Zero(t, fake.deletes, "an api_version bump deletes NOTHING")
+	require.Equal(t, "enabled", fake.endpoints["we_old"].Status, "the old endpoint keeps delivering")
+	require.Len(t, res.RetirePending, 1)
+	require.Contains(t, res.OperatorAction, "STILL ENABLED")
+
+	// Both secrets are live: the new one primary, the outgoing one retained, so
+	// a delivery already queued on we_old still verifies.
+	cur, err := store.Get(ctx, merchantID, webhookName)
+	require.NoError(t, err)
+	require.Equal(t, "whsec_fake_0", cur.Value)
+	prev, err := store.Get(ctx, merchantID, previousName)
+	require.NoError(t, err)
+	require.Equal(t, "whsec_on_the_old_endpoint", prev.Value)
+
+	// Retirement held: AllowRetire is false (the kill switch default).
+	params.Now = now.Add(WebhookRolloverOverlap + time.Hour)
+	res, err = ReconcileManagedStripeWebhook(ctx, params)
+	require.NoError(t, err)
+	require.Zero(t, fake.deletes, "kill switch off: nothing is ever deleted")
+	require.Contains(t, res.OperatorAction, "kill switch is off")
+
+	// Armed + past the overlap: the predecessor retires and its secret is dropped.
+	params.AllowRetire = true
+	res, err = ReconcileManagedStripeWebhook(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, []string{"we_old"}, res.Retired)
+	require.Equal(t, 1, fake.deletes)
+	require.Empty(t, res.OperatorAction)
+	_, err = store.Get(ctx, merchantID, previousName)
+	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 }

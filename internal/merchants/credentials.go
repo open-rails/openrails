@@ -29,6 +29,10 @@ type StripeCredentials struct {
 	SecretKey            string
 	WebhookSigningSecret string
 	WebhookSigningThin   string
+	// WebhookSigningPrevious is the outgoing secret during an api_version
+	// rollover (#856). Both endpoints deliver through the overlap, so inbound
+	// verification must accept both secrets.
+	WebhookSigningPrevious string
 }
 
 // NMITokenizationConfig is browser-facing NMI tokenization configuration for a
@@ -50,7 +54,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 		return creds, nil
 	}
 	if s.pool == nil {
-		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin)
+		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin, SecretStripeWebhookSigningPrevious)
 	}
 	scope, ok, err := s.activePSPSecretScope(ctx, id, "stripe", s.providerEnvironment)
 	if err != nil {
@@ -71,7 +75,11 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if err != nil {
 		return creds, err
 	}
-	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	if err != nil {
+		return creds, err
+	}
+	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
 }
 
 func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
@@ -135,7 +143,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	return cfg, nil
 }
 
-func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName string) (StripeCredentials, error) {
+func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName, previousName string) (StripeCredentials, error) {
 	var creds StripeCredentials
 	var err error
 	if creds.SecretKey, err = s.secretValue(ctx, id, secretKeyName); err != nil {
@@ -146,6 +154,11 @@ func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.I
 	}
 	if creds.WebhookSigningThin, err = s.secretValue(ctx, id, thinName); err != nil {
 		return creds, err
+	}
+	if previousName != "" {
+		if creds.WebhookSigningPrevious, err = s.secretValue(ctx, id, previousName); err != nil {
+			return creds, err
+		}
 	}
 	return creds, nil
 }
@@ -524,7 +537,11 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	if err != nil {
 		return creds, false, err
 	}
-	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	if err != nil {
+		return creds, false, err
+	}
+	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
 	return c, true, err
 }
 
