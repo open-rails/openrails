@@ -36,6 +36,12 @@ CREATE INDEX idx_payment_settlement_events_merchant_id
 CREATE INDEX idx_grants_payment_id
     ON openrails.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
 
+-- Credit-lot reads (ListSpendableCreditLots, SumCreditGrants) key on
+-- (customer, currency); currency was covered by no index and fell to a filter.
+CREATE INDEX idx_grants_customer_credit_currency
+    ON openrails.grants USING btree (merchant_id, customer_id, currency)
+    WHERE ((kind = 'credit'::text) AND (event = 'grant'::text));
+
 CREATE INDEX idx_checkout_sessions_payment_id
     ON openrails.checkout_sessions USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
 

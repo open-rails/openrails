@@ -1,6 +1,7 @@
 DROP INDEX IF EXISTS openrails.idx_reprice_batches_price_key;
 DROP INDEX IF EXISTS openrails.idx_checkout_sessions_subscription_id;
 DROP INDEX IF EXISTS openrails.idx_checkout_sessions_payment_id;
+DROP INDEX IF EXISTS openrails.idx_grants_customer_credit_currency;
 DROP INDEX IF EXISTS openrails.idx_grants_payment_id;
 DROP INDEX IF EXISTS openrails.idx_payment_settlement_events_merchant_id;
 DROP INDEX IF EXISTS openrails.idx_tier_schedules_merchant_id;

@@ -84,10 +84,10 @@ records on file.
 **PERMANENT — capped by a caller-supplied list.**
 `LookupCustomerIDsBySubjects` is capped by `subjects[]`;
 `uq_customers_merchant_subject` is a *partial* unique index and the auditor
-deliberately refuses to credit partial indexes. `SnapshotPaymentCards` is capped
-by `transaction_ids[]` and index-backed by
-`idx_payments_merchant_rail_transaction`; a `UNIQUE(merchant_id, rail,
-transaction_id)` would make it provable.
+deliberately refuses to credit partial indexes. (`SnapshotPaymentCards` was here
+too until or#831 made `UNIQUE(merchant_id, rail, transaction_id)` total: the
+`rail = 'stripe'` literal completes that key, so `transaction_ids[]` now caps it
+provably and the exemption is gone.)
 
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it
@@ -100,13 +100,15 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
   the reconciliation/drift/intent scans.
 - *Unbatched retention and expiry writes* — `DeleteCompletedWebhookEventsBefore`,
   `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
-  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
-  backlog makes each one a single long transaction.
-- *Missing indexes* — `solana_subscriptions.merchant_id` (its RLS predicate is
-  not index-backed; the only true `Seq Scan` in the codebase),
-  `product_usage_limit_bindings` (no index at all), `grants.payment_id`,
-  `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
-  `reprice_batches.price_key`.
+  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`,
+  `DeleteDeliveredPaymentSettlementsBefore`. A large backlog makes each one a
+  single long transaction.
+- *Missing indexes* — RETIRED by or#846 (migration 0011). Note the lesson: under
+  RLS every query carries `merchant_id = …`, so a missing index almost never
+  shows up as a `Seq Scan` — "no Seq Scans" is NOT evidence that indexing is
+  adequate. A merchant_id index that is *partial* leaves the RLS predicate
+  unbacked outside its predicate;
+  `TestMerchantIsolationPolicyIsIndexBacked` now fails the build on that shape.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
   The caller's list is bounded but each element's row set is not.
 

@@ -36,7 +36,6 @@ unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
 
 # Capped by a caller-supplied key list the auditor cannot prove from the schema.
 unbounded-many LookupCustomerIDsBySubjects  # capped by subjects[]; uq index is PARTIAL so uncredited
-unscoped-write SnapshotPaymentCards         # capped by transaction_ids[]; idx_payments_merchant_rail_transaction
 
 ## DEBT
 
@@ -70,13 +69,8 @@ unscoped-write DeleteNotificationsBefore                 # or#837 unbatched rete
 unscoped-write DeleteSeenNotificationsBefore             # or#837 unbatched retention delete
 unscoped-write ExpireCheckoutSessions                    # or#837 unbatched cross-merchant UPDATE
 unscoped-write AutoResolveVanishedReconciliationFindings # or#837 unbatched cross-merchant UPDATE
+unscoped-write DeleteDeliveredPaymentSettlementsBefore   # or#837 unbatched retention delete (RLS scopes it; batch it)
 
-# Missing indexes. Each is one CREATE INDEX away from clean.
-seq-scan ReconcileListSolanaSubscriptionRefs      # or#837 no index on solana_subscriptions.merchant_id (RLS predicate unbacked)
-seq-scan ProductUsageLimitBindingExistsForGrant   # or#837 product_usage_limit_bindings has no index at all
-unindexed-filter ProductUsageLimitBindingExistsForGrant # or#837 grant_id, usage_limit_key
-unindexed-filter RevokeProductUsageLimitBindingsByGrant # or#837 grant_id
-unindexed-filter PaymentHasProtectedDependents         # or#837 grants.payment_id + checkout_sessions.payment_id
-unindexed-filter PruneDeleteCheckoutSessionsBySubscription # or#837 checkout_sessions.subscription_id
-unindexed-filter ListRepriceBatchesByPriceKey          # or#837 reprice_batches.price_key
-unbounded-many ListLiveOwnershipGrantIDsByPayment      # or#837 no index on grants.payment_id
+# The whole "missing indexes" group is gone: or#846 added them (0011) and every
+# entry here went STALE. Leave the heading out — a new missing index is a
+# migration, not an exemption.
