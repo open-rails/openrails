@@ -30,8 +30,12 @@ func TestRPCProviderKeySelectsHeliusEndpoint(t *testing.T) {
 	if len(c.endpoints) < 2 {
 		t.Fatalf("expected helius plus public fallback, got %#v", c.endpoints)
 	}
-	if got := c.endpoints[0].URL; got != "https://devnet.helius-rpc.com/?api-key=rpc-key" {
+	// #SEC-17: the endpoint URL is credential-free; the key rides the transport.
+	if got := c.endpoints[0].URL; got != "https://devnet.helius-rpc.com/" {
 		t.Fatalf("expected helius devnet endpoint, got %q", got)
+	}
+	if got := c.endpoints[0].secret.Get("api-key"); got != "rpc-key" {
+		t.Fatalf("expected armed api-key, got %q", got)
 	}
 }
 

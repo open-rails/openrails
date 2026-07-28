@@ -110,7 +110,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		Signature:        strings.TrimSpace(req.Signature),
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 	r.SuccessJSON(sub)
@@ -170,7 +170,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 
 	res, err := svc.Prepare(r.Request.Context(), subscriptionID)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -249,7 +249,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 
 	svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
 	if err := svc.Confirm(r.Request.Context(), subscriptionID, req.Signature); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -393,13 +393,15 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		)
 		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err.Error()
+			status, msg := solanaClientError(err, http.StatusInternalServerError)
+			return nil, status, msg
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
 			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err.Error()
+			status, msg := solanaClientError(err, http.StatusInternalServerError)
+			return nil, status, msg
 		}
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the
@@ -503,7 +505,7 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -565,7 +567,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -611,7 +613,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		OldPeriodEndsAt:      resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 

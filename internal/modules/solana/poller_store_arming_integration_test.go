@@ -87,7 +87,9 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	assert.Contains(t, client.GetEndpoint(), "helius", "store rpc_provider wins")
-	assert.Contains(t, client.GetEndpoint(), storeKey, "store rpc_api_key wins")
+	// #SEC-17: the credential is armed out-of-band, never in the endpoint URL.
+	assert.NotContains(t, client.GetEndpoint(), storeKey, "credential must not be in the endpoint URL")
+	assert.Equal(t, solanarpc.CredentialFingerprint(storeKey), client.PrimaryCredentialFingerprint(), "store rpc_api_key wins")
 }
 
 // #788: there is no boot plane — a merchant with no declared solana account

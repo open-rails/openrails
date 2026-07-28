@@ -1,9 +1,13 @@
 package solana
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go/rpc"
@@ -92,4 +96,29 @@ func newSecretEndpoint(name, rawURL string, priority int, secret url.Values) RPC
 		}
 	}
 	return RPCEndpoint{Name: name, URL: safeURL, Priority: priority, secret: secret}
+}
+
+// CredentialFingerprint is a short, non-reversible digest of a credential. It
+// lets arming be asserted (tests, diagnostics) without the secret ever
+// appearing in a URL, log line or error (#SEC-17).
+func CredentialFingerprint(v string) string {
+	if v == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// PrimaryCredentialFingerprint fingerprints the credential armed on the
+// primary endpoint; empty when the endpoint carries none.
+func (c *RPCFallbackClient) PrimaryCredentialFingerprint() string {
+	if len(c.endpoints) == 0 {
+		return ""
+	}
+	vals := make([]string, 0, len(c.endpoints[0].secret))
+	for _, v := range c.endpoints[0].secret {
+		vals = append(vals, v...)
+	}
+	sort.Strings(vals)
+	return CredentialFingerprint(strings.Join(vals, "\x00"))
 }
