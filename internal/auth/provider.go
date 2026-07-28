@@ -38,10 +38,22 @@ func (p *Authenticator) Authenticate(_ context.Context, r *http.Request) (billin
 	}
 	raw, err := p.verifier.Verify(token)
 	if err != nil {
-		log.WithError(err).Warn("jwt verification failed")
+		// Non-JWT bearers (API keys, etc.) reach this verifier as an expected
+		// fallback in the credential chain — debug, not warn (#845).
+		if looksLikeJWT(token) {
+			log.WithError(err).Warn("jwt verification failed")
+		} else {
+			log.WithError(err).Debug("bearer token is not a jwt; jwt verification skipped")
+		}
 		return billingauth.UserContext{}, err
 	}
 	return userContextFromClaims(raw), nil
+}
+
+// looksLikeJWT mirrors controlplane.LooksLikeJWT (three dot-separated
+// segments) without importing the control plane.
+func looksLikeJWT(token string) bool {
+	return strings.Count(strings.TrimSpace(token), ".") == 2
 }
 
 func bearerToken(header string) string {

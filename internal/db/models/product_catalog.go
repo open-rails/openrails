@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // Product represents a product offering (e.g., Premium Membership)
@@ -336,18 +335,6 @@ func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
 	}
 	config[RailKeyRail] = string(rail)
 	p.PSPLinks[string(rail)] = config
-}
-
-// SetNMIConfig sets the NMI link under the "nmi" rail key. provider is the
-// provider-account NAME the plan lives under (default "mobius"); the rail key
-// itself is always RailNMI.
-func (p *Price) SetNMIConfig(planID, provider string) {
-	provider = normalize.FirstNonEmpty(normalize.Lower(provider), "mobius")
-	config := map[string]string{
-		RailKeyPlanID:   planID,
-		RailKeyProvider: provider,
-	}
-	p.SetRailConfig(RailNMI, config)
 }
 
 // SetCCBillConfig sets the CCBill rail configuration

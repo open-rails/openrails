@@ -42,9 +42,13 @@ import (
 const (
 	checkoutSessionIdempotencyOp  = "checkout_session_create"
 	checkoutSessionFingerprintKey = "_openrails_request_fingerprint"
-	checkoutSessionPendingLease   = 30 * time.Second
-	defaultCheckoutSessionTTL     = 15 * time.Minute
-	redirectCheckoutSessionTTL    = 24 * time.Hour
+	// checkoutSessionPSPFieldKey persists the resolved PSP key on the session's
+	// rail_fields when it differs from the rail kind, so execution (including
+	// idempotent resume) lands on the requested PSP, not a re-resolved one (#848).
+	checkoutSessionPSPFieldKey  = "psp"
+	checkoutSessionPendingLease = 30 * time.Second
+	defaultCheckoutSessionTTL   = 15 * time.Minute
+	redirectCheckoutSessionTTL  = 24 * time.Hour
 )
 
 // Idempotency types are the idempotency module's own (#666 — the copy that
@@ -87,6 +91,14 @@ type checkoutSessionExecutor interface {
 // Satisfied by *CheckoutService; test fakes may omit it.
 type railMerchantAccountIDResolver interface {
 	ResolvePSPID(ctx context.Context, rail string) *uuid.UUID
+}
+
+// railTargetResolver is the OPTIONAL executor capability (#848): resolve the
+// wire payment.rail selector (PSP key first, unambiguous rail-kind fallback)
+// into the target PSP + rail kind. Satisfied by *CheckoutService; test fakes
+// may omit it (the wire value is then treated as the rail kind directly).
+type railTargetResolver interface {
+	resolveRailTarget(ctx context.Context, requested string) (railTarget, error)
 }
 
 type solanaPaymentService interface {
@@ -430,7 +442,37 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
 
+	// #848: the wire payment.rail value speaks PSP vocabulary. Resolve it ONCE
+	// (PSP key first, unambiguous rail-kind fallback) into the rail KIND — used
+	// for dispatch and row vocabulary — plus the PSP the charge must land on.
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
+	pspSelector := rail
+	var pspID *uuid.UUID
+	if resolver, ok := s.checkoutService.(railTargetResolver); ok {
+		target, err := resolver.resolveRailTarget(ctx, rail)
+		if err != nil {
+			var ambiguous *AmbiguousRailError
+			var unknown *UnknownRailError
+			if errors.As(err, &ambiguous) || errors.As(err, &unknown) {
+				return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+			}
+			return nil, err
+		}
+		rail = target.Rail
+		pspSelector = target.PSP
+		// #704: pin provenance with the REAL resolved account — never invented.
+		if target.Scope != nil && target.Scope.ID != uuid.Nil {
+			id := target.Scope.ID
+			pspID = &id
+		}
+	} else if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
+		// #704 fallback for executors without target resolution (test fakes).
+		pspID = resolver.ResolvePSPID(ctx, rail)
+	}
+	if pspID != nil {
+		ctx = db.WithPSPID(ctx, *pspID)
+	}
+
 	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutSessionValidation)
 	}
@@ -441,18 +483,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 
 	if err := s.validatePayment(ctx, rail, &req.Payment, user); err != nil {
 		return nil, fmt.Errorf("error validating payment: %w", err)
-	}
-
-	// #704: resolve the active provider account for the selected rail and pin it
-	// on the session + into ctx so payment/subscription/payment-method rows this
-	// flow creates carry psp_id provenance. nil when no
-	// resolver / no active account — never invented.
-	var pspID *uuid.UUID
-	if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-		pspID = resolver.ResolvePSPID(ctx, rail)
-	}
-	if pspID != nil {
-		ctx = db.WithPSPID(ctx, *pspID)
 	}
 
 	now := s.now()
@@ -471,6 +501,10 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if requestFingerprint != "" {
 		railState[checkoutSessionFingerprintKey] = requestFingerprint
 	}
+	railFields := s.buildRailFields(rail, &req.Payment)
+	if pspSelector != "" && pspSelector != rail {
+		railFields[checkoutSessionPSPFieldKey] = pspSelector
+	}
 	session := &models.CheckoutSession{
 		ID:         sessionID,
 		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
@@ -482,7 +516,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		Currency:   price.Currency,
 		ExpiresAt:  timePtr(now.Add(ttl)),
 		Metadata:   normalizeMetadata(req.Metadata),
-		RailFields: s.buildRailFields(rail, &req.Payment),
+		RailFields: railFields,
 		RailState:  railState,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -1520,11 +1554,18 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		return fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
 
+	// #848: execute against the PSP the session pinned (falling back to the rail
+	// kind for sessions without a distinct PSP key), so the executor never
+	// re-resolves a kind onto a different account.
+	railSelector := string(session.Rail)
+	if psp, ok := session.RailFields[checkoutSessionPSPFieldKey].(string); ok && strings.TrimSpace(psp) != "" {
+		railSelector = strings.TrimSpace(psp)
+	}
 	req := &CheckoutRequest{
 		PriceID:           api.FormatPriceID(session.PriceID),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
-		Rail:              string(session.Rail),
+		Rail:              railSelector,
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
 		Metadata:          session.Metadata,

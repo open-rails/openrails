@@ -632,6 +632,10 @@ var ReservedPSPRails = map[string]models.Rail{
 // Embedded hosts build them in code (embedded.PaymentProvider); standalone
 // declares rail accounts in the merchant config manifest instead.
 type PSPConfig struct {
+	// Key is the merchant's PSP key for this account (psps.key / the manifest
+	// `psps.<key>` map name, e.g. "mobius"). Resolution OUTPUT only — set by
+	// railresolve sources, never declared inside the entry itself.
+	Key string
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail

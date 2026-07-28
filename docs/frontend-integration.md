@@ -10,8 +10,10 @@ deployment shapes:
   below that says "standalone" applies unchanged.
 
 All money amounts are **micros** (millionths of a currency unit): `$5.00 = 5_000_000`.
-A **rail** is the gateway kind (`mobius` = NMI-backed, `ccbill`, `stripe`, `solana`);
-your checkout request names the rail the user is paying with.
+A **rail** is the gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a **PSP** is the
+merchant's account on a rail, named by its key (`mobius` = an NMI account). Checkout's
+`payment.rail` value is the PSP key; a bare rail kind is also accepted when the merchant
+has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys).
 
 ### Auth: two shapes
 
@@ -118,7 +120,7 @@ POST /v1/me/checkout
   "price_id": "price_...",
   "mode": "subscription",            // optional; inferred from the price
   "payment": {
-    "rail": "mobius | ccbill | stripe | solana",
+    "rail": "mobius | ccbill | stripe | solana",  // PSP key (rail kind ok if unambiguous)
     "payment_method_id": "pm_...",   // saved card — mobius/stripe
     "payment_token": "tok_...",      // fresh browser-tokenized card — mobius/stripe
     "token_symbol": "USDC",          // solana

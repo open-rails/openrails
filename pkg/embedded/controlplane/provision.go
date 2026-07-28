@@ -73,12 +73,10 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	}
 	owner := strings.TrimSpace(req.OwnerUserID)
 
-	// Root group + declared containment first (idempotent), as bootstrap does.
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return nil, fmt.Errorf("control plane provision: ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return nil, fmt.Errorf("control plane provision: seed permission-group containment: %w", err)
+	// Root group + declared containment first (idempotent, concurrent-boot
+	// tolerant — #844), as bootstrap does.
+	if err := controlplane.EnsureRootContainment(ctx, core); err != nil {
+		return nil, fmt.Errorf("control plane provision: %w", err)
 	}
 
 	// Resolve-or-create the merchant permission-group — the merchant IS the

@@ -159,10 +159,11 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		return nil, errors.New("nmi provider configuration is required")
 	}
 
+	// No construction-time warn for a missing webhook secret: clients are built
+	// for catalog ops and credential probes where it is irrelevant (the arm PUT
+	// probe fires before the secret write lands, #845). The webhook path itself
+	// errors loudly when verification runs without a secret.
 	webhookSecret := strings.TrimSpace(cfg.WebhookSecret)
-	if webhookSecret == "" {
-		log.WithField("provider", provider).Warn("NMI webhook secret not configured - webhooks will be rejected")
-	}
 
 	securityKey := strings.TrimSpace(cfg.SecurityKey)
 	if !testMode && securityKey == "" {
