@@ -16,7 +16,7 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 | File | Owns | Loaded by |
 |---|---|---|
 | `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `UpsertMerchantConfig` |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `UpsertMerchantConfig` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
 
 Manifest anatomy and field semantics:
@@ -44,6 +44,11 @@ YAML is the base; mounted secret files overlay it; real `BILLING_MERCHANTS_*`
 environment variables win over both.
 
 ## What happens at boot
+
+The conventional file is optional: absent, the server boots control-plane-only
+(bind merchants later). An explicit `--merchant-manifest` path must exist —
+boot refuses otherwise. `merchant_source: api` (MODE 2) refuses a present
+manifest outright: two truths.
 
 1. The manifest parses strictly. Unknown fields, retired key names (the old
    `accounts:` key and `_ACCOUNTS_` / `_RAIL_MERCHANT_ACCOUNTS_` env anchors —
