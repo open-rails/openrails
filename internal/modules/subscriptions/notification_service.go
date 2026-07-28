@@ -2,7 +2,10 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -204,14 +207,21 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 			return nil
 		}
 
-		amountFloat, _ := notification.Data["amount"].(float64)
+		// amount_micros is a decimal INTEGER STRING, never a JSON number: a
+		// JSONB round-trip decodes numbers as float64, and no monetary value
+		// may pass through a float (#818). A malformed amount fails the
+		// delivery rather than emailing a fabricated one.
+		amountMicros, err := notificationAmountMicros(notification.Data["amount_micros"])
+		if err != nil {
+			return fmt.Errorf("one-off purchase notification amount: %w", err)
+		}
 		currency, _ := notification.Data["currency"].(string)
 		productName, _ := notification.Data["product_name"].(string)
 		paymentMethod, _ := notification.Data["payment_method"].(string)
 
 		return s.emailService.SendOneOffPurchaseReceipt(ctx, OneOffPurchaseEmailData{
 			UserEmail:     email,
-			Amount:        int64(amountFloat),
+			AmountMicros:  amountMicros,
 			Currency:      currency,
 			ProductName:   productName,
 			PaymentMethod: paymentMethod,
@@ -229,6 +239,27 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	default:
 		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")
 		return nil
+	}
+}
+
+// notificationAmountMicros reads a money field out of a notification payload
+// without ever touching a float. json.Number keeps the exact source text, so a
+// producer that wrote a JSON integer still round-trips; anything else must be a
+// decimal integer string.
+func notificationAmountMicros(raw any) (int64, error) {
+	switch v := raw.(type) {
+	case nil:
+		return 0, fmt.Errorf("missing amount_micros")
+	case string:
+		return strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	case json.Number:
+		return v.Int64()
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("amount_micros must be a decimal integer string, got %T", raw)
 	}
 }
 

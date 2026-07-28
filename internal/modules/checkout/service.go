@@ -1816,6 +1816,14 @@ func (s *CheckoutService) processUpgrade(
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
+	// Same rule for the successor's recurring enrollment charge, converted here
+	// so BOTH money conversions fail before any provider write happens.
+	recurringCents, err := moneyutil.MicrosToCentsExact(newPrice.Amount)
+	if err != nil {
+		err := fmt.Errorf("upgrade recurring amount must be representable in whole cents: %w", err)
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 
 	provider := target.Rail
 	if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
@@ -1904,7 +1912,7 @@ func (s *CheckoutService) processUpgrade(
 			PlanID:          nmiPlanID,
 			CustomerVaultID: customerVaultID,
 			BillingID:       vaultBillingID,
-			Amount:          moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(newPrice.Amount)), // NMI recurring amount is DOLLARS
+			Amount:          moneyutil.Cents(recurringCents),
 			Currency:        newPrice.Currency,
 			Email:           req.Email,
 			OrderID:         successorOrderID,

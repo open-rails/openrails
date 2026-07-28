@@ -127,7 +127,7 @@ func TestAddRecurringSubscription_StoredCredentialRecurringCIT(t *testing.T) {
 		PlanID:          "plan1",
 		CustomerVaultID: "v1",
 		Currency:        "USD",
-		Amount:          moneyutil.MajorUnits(19.99),
+		Amount:          moneyutil.Cents(1999),
 		StoredCredential: &StoredCredential{
 			InitiatedBy: InitiatedByCustomer,
 			Indicator:   IndicatorStored,
