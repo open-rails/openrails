@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,8 +117,10 @@ func probeServer(t *testing.T, authCode string, seen *[]url.Values) *httptest.Se
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/payments/auth":
+			// amount is decoded as json.Number (the exact wire TEXT), never
+			// float64 — a float decode hid the #818 sub-cent under-charge.
 			var req struct {
-				Amount         float64 `json:"amount"`
+				Amount         json.Number `json:"amount"`
 				PaymentDetails struct {
 					CardNumber string `json:"card_number"`
 					CardExp    string `json:"card_exp"`
@@ -130,15 +132,20 @@ func probeServer(t *testing.T, authCode string, seen *[]url.Values) *httptest.Se
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 			// The probe amount must stay in the randomized [$1.01, $1.99]
 			// band and the order id must keep the auditable prefix (#362).
-			require.GreaterOrEqual(t, req.Amount, 1.01)
-			require.LessOrEqual(t, req.Amount, 1.99)
+			// Compared in integer cents parsed from the exact wire text.
+			probeCents, cerr := moneyutil.ParseDecimalToCents(req.Amount.String())
+			require.NoError(t, cerr, "probe amount %q must be an exact decimal", req.Amount.String())
+			require.GreaterOrEqual(t, probeCents, int64(101))
+			require.LessOrEqual(t, probeCents, int64(199))
+			require.Equal(t, moneyutil.FormatCentsDecimal(probeCents), req.Amount.String(),
+				"probe amount must be a whole-cent two-decimal amount")
 			require.True(t, strings.HasPrefix(req.OrderDetails.ID, "openrails-testmode-probe-"),
 				"unexpected probe order id %q", req.OrderDetails.ID)
 			require.Equal(t, probeTestCard, req.PaymentDetails.CardNumber)
 			if seen != nil {
 				form := url.Values{}
 				form.Set("order_id", req.OrderDetails.ID)
-				form.Set("amount", strconv.FormatFloat(req.Amount, 'f', 2, 64))
+				form.Set("amount", req.Amount.String())
 				*seen = append(*seen, form)
 			}
 			_, _ = w.Write([]byte(`{"object":"transaction","id":"99001","response":"` + authCode + `","response_text":"PROBE","response_code":"100"}`))

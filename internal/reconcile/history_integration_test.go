@@ -126,8 +126,8 @@ func TestPGHistorySource(t *testing.T) {
 		require.Equal(t, "legacy-sub-"+sfx, imported.RailSubscriptionID)
 		require.Equal(t, "legacy-txn-"+sfx, imported.RailTransactionID)
 		require.Equal(t, "declined", imported.Status)
-		require.NotNil(t, imported.Amount)
-		require.InDelta(t, 9.99, *imported.Amount, 0.0001)
+		require.NotNil(t, imported.AmountMicros)
+		require.Equal(t, int64(9_990_000), *imported.AmountMicros)
 		require.True(t, imported.OccurredAt.Equal(t1))
 
 		failed := events[1]

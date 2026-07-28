@@ -32,9 +32,10 @@ type RecurringPaymentData struct {
 	Email        string
 	Currency     string
 	PaymentToken string
-	// Amount is DECIMAL MAJOR UNITS (dollars, typed #671) — NMI classic
-	// recurring takes a decimal amount string.
-	Amount     moneyutil.MajorUnits
+	// Amount is the enrollment first charge in integer CENTS (#818); it is
+	// rendered onto the classic wire by centsToDollarString — the same integer
+	// formatter the plan amount uses, so enrollment and plan never disagree.
+	Amount     moneyutil.Cents
 	OrderID    string
 	PONumber   string
 	CustomerID string
@@ -110,10 +111,9 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 		return nil, err
 	}
 
-	amtStr := strconv.FormatFloat(float64(data.Amount), 'f', 2, 64)
 	values := url.Values{
 		"type":              {"sale"},
-		"amount":            {amtStr},
+		"amount":            {centsToDollarString(data.Amount)},
 		"email":             {data.Email},
 		"plan_id":           {data.PlanID},
 		"billing_method":    {"recurring"},

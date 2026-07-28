@@ -193,15 +193,17 @@ func (s *Subscription) Cancel(reason string, cancelType *CancelType) error {
 	return nil
 }
 
-func (s *Subscription) Validate(amount float64) error {
+// Validate checks activation preconditions. amountCents is integer minor units
+// (#818) — no monetary value is ever carried as a float.
+func (s *Subscription) Validate(amountCents int64) error {
 	if s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Before(time.Now()) {
 		if s.Status == StatusActive {
 			return fmt.Errorf("cannot activate expired subscription without proper renewal")
 		}
 	}
 
-	if s.Status == StatusActive && amount <= 0 {
-		return fmt.Errorf("cannot activate subscription with invalid amount: %.2f", amount)
+	if s.Status == StatusActive && amountCents <= 0 {
+		return fmt.Errorf("cannot activate subscription with invalid amount: %d cents", amountCents)
 	}
 
 	if s.Status == StatusPastDue {

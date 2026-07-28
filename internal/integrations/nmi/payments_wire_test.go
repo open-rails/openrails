@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -63,22 +64,58 @@ func TestRefund_WirePinsCentsAmount(t *testing.T) {
 	assert.False(t, hasAmount, "full refund must omit the amount key")
 }
 
-func TestAddRecurringSubscription_WirePinsDollarsAmount(t *testing.T) {
-	var form string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		form = string(b)
-		fmt.Fprint(w, "response=1&responsetext=SUCCESS&subscription_id=sub1&transactionid=t3")
-	}))
-	defer server.Close()
+// The enrollment charge (type=sale + recurring=add_subscription) is real money:
+// known CENTS in ⇒ the literal two-decimal wire string out, identical to the
+// formatter the plan amount uses so the two can never disagree (#818).
+func TestAddRecurringSubscription_WirePinsCentsAmount(t *testing.T) {
+	cases := []struct {
+		name  string
+		cents moneyutil.Cents
+		want  string
+	}{
+		{"whole dollars", 5000, "50.00"},
+		{"dollars and cents", 1999, "19.99"},
+		{"sub-dollar", 5, "0.05"},
+		{"zero", 0, "0.00"},
+		{"negative", -1999, "-19.99"},
+		// The old float path formatted these via FormatFloat and lost the
+		// trailing digit; the integer path renders every cent.
+		{"whole cent above a dollar", 101, "1.01"},
+		{"one cent", 1, "0.01"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var form url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.NoError(t, r.ParseForm())
+				form = r.Form
+				fmt.Fprint(w, "response=1&responsetext=SUCCESS&subscription_id=sub1&transactionid=t3")
+			}))
+			defer server.Close()
 
-	client := newTestClient(t, server.URL)
-	_, err := client.AddRecurringSubscription(RecurringPaymentData{
-		PlanID:          "plan1",
-		CustomerVaultID: "v1",
-		Currency:        "USD",
-		Amount:          moneyutil.MajorUnits(19.99), // decimal DOLLARS
-	})
+			client := newTestClient(t, server.URL)
+			_, err := client.AddRecurringSubscription(RecurringPaymentData{
+				PlanID:          "plan1",
+				CustomerVaultID: "v1",
+				Currency:        "USD",
+				Amount:          tc.cents,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, form.Get("amount"))
+			// The enrollment charge and the plan amount MUST render identically.
+			assert.Equal(t, centsToDollarString(tc.cents), form.Get("amount"))
+		})
+	}
+}
+
+// A sub-cent price can never reach the wire: the caller-side conversion errors
+// rather than silently rounding a charge down (the #818 under-charge).
+func TestSubCentMicrosNeverReachTheRecurringWire(t *testing.T) {
+	for _, micros := range []int64{1_005_000, 999_999, 12_345, -1} {
+		_, err := moneyutil.MicrosToCentsExact(micros)
+		require.Error(t, err, "%d micros must not be representable in whole cents", micros)
+	}
+	cents, err := moneyutil.MicrosToCentsExact(19_990_000)
 	require.NoError(t, err)
-	assert.Contains(t, form, "amount=19.99", "recurring first-charge amount must be the two-decimal dollars rendering")
+	require.Equal(t, "19.99", centsToDollarString(moneyutil.Cents(cents)))
 }

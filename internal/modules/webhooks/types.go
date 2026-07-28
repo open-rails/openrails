@@ -70,15 +70,6 @@ func (s Stringish) IsEmpty() bool {
 	return strings.TrimSpace(string(s)) == ""
 }
 
-// Float64 parses the value as a float64 when present.
-func (s Stringish) Float64() (float64, error) {
-	trimmed := strings.TrimSpace(string(s))
-	if trimmed == "" {
-		return 0, errors.New("value is empty")
-	}
-	return strconv.ParseFloat(trimmed, 64)
-}
-
 // Intish models integer-like fields that may arrive as strings or numbers.
 type Intish int
 

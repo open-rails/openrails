@@ -21,11 +21,6 @@ type Micros int64
 // most card rails (NMI, Stripe) charge in for 2-decimal currencies.
 type Cents int64
 
-// MajorUnits is a float amount in major currency units (dollars for USD) —
-// used only where a provider wire format genuinely takes a decimal amount
-// (e.g. NMI classic recurring). Never do ledger math in this type.
-type MajorUnits float64
-
 func ParseDecimalToCents(value string) (int64, error) {
 	return parseDecimalScaled(value, CentsPerMajorUnit)
 }
@@ -43,14 +38,6 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 
 	scaled := new(big.Rat).Mul(parsed, big.NewRat(scale, 1))
 	return roundHalfAwayFromZero(scaled)
-}
-
-func MicrosToMajorUnits(micros int64) float64 {
-	return float64(micros) / float64(MicrosPerMajorUnit)
-}
-
-func CentsToMajorUnits(cents int64) float64 {
-	return float64(cents) / float64(CentsPerMajorUnit)
 }
 
 func CentsToMicros(cents int64) int64 {
