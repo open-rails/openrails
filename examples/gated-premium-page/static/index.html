@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gated Premium Page — OpenRails demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>Gated Premium Page</h1>
+    <p>A minimal OpenRails standalone-integration demo. The
+      <a href="/premium">premium page</a> is gated on an OpenRails entitlement;
+      without it you are redirected to checkout.</p>
+    <ol>
+      <li><a href="/login">Log in</a> as the demo user (fake signed-cookie session)</li>
+      <li>Visit <a href="/premium">/premium</a> — no entitlement yet, so you land on /buy</li>
+      <li>Pay with the sandbox test card <code>4111 1111 1111 1111</code>, expiry <code>10/29</code></li>
+      <li><a href="/premium">/premium</a> unlocks</li>
+    </ol>
+    <p><a href="/logout">Log out</a></p>
+  </main>
+</body>
+</html>

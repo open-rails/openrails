@@ -45,6 +45,14 @@ jobs:
         # v0.78.0, v0.80.0) broke them silently twice because default builds
         # never compile these files.
         run: go vet -tags integration ./...
+      - name: Build examples
+        # Each example is its own module (replace => ../..), invisible to the
+        # root ./... patterns — build them explicitly so engine changes that
+        # break an example fail the same PR.
+        run: |
+          for d in examples/*/; do
+            (cd "$d" && go build ./... && go vet ./...)
+          done
       - name: Test
         run: go test -race ./...
 
