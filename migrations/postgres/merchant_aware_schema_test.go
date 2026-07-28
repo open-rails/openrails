@@ -54,6 +54,7 @@ var (
 	reAlterKey    = regexp.MustCompile(`(?s)ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+)\s+ADD CONSTRAINT ([a-z0-9_]+) (?:PRIMARY KEY|UNIQUE)\s*(\(.*?);`)
 	reInlineKey   = regexp.MustCompile(`(?m)^\s*(?:CONSTRAINT ([a-z0-9_]+) )?(?:PRIMARY KEY|UNIQUE)\s*(\(.*)$`)
 	reRenameIndex = regexp.MustCompile(`ALTER INDEX openrails\.([a-z0-9_]+) RENAME TO ([a-z0-9_]+)`)
+	reBareIdent   = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 )
 
 // loadSchema001 reads the consolidated baseline alone (invariants that are
@@ -171,11 +172,10 @@ func leadingColumn(colList string) string {
 	if len(f) == 0 {
 		return ""
 	}
-	name := f[0]
-	if !regexp.MustCompile(`^[a-z_][a-z0-9_]*$`).MatchString(name) {
-		return ""
+	if name := f[0]; reBareIdent.MatchString(name) {
+		return name
 	}
-	return name
+	return ""
 }
 
 func parseIndex(name, colsAndTail string) schemaIndex {

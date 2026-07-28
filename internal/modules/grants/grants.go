@@ -511,7 +511,7 @@ func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.OpenrailsGrant
 	}
 	src, sid, lot, c := "grant_revoke", g.ID.String(), g.ID, g.CustomerID
 	_, err = l.money.Apply(ctx, ledger.Transfer{
-		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: "credit_revoke",
+		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: ledger.CreditRevoke,
 		Source: &src, SourceID: &sid, GrantID: &lot, Customer: &c,
 	})
 	return err

@@ -40,6 +40,29 @@ const (
 	World          AccountType = "world"
 )
 
+// TransferType is the closed vocabulary of ledger_transfers.transfer_type,
+// mirrored by the schema's ledger_transfers_type_check (#832). It was free text:
+// idx_ledger_transfers_lot_once — what stops a credit lot being deposited,
+// expired or revoked twice — is PARTIAL on named transfer_type literals, so a
+// typo fell outside the index and the duplicate posted silently.
+type TransferType string
+
+const (
+	Deposit      TransferType = "deposit"       // rail clearing -> customer balance
+	CreditSpend  TransferType = "credit_spend"  // customer balance -> platform revenue
+	CreditExpire TransferType = "credit_expire" // unspent lot remainder, time-lapsed
+	CreditRevoke TransferType = "credit_revoke" // unspent lot remainder, clawed back
+	OwedAccrual  TransferType = "owed_accrual"  // postpaid usage -> arrears liability
+	OwedPayment  TransferType = "owed_payment"  // arrears settled by an external charge
+)
+
+// AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
+var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, OwedAccrual, OwedPayment}
+
+// LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
+// idx_ledger_transfers_lot_once.
+var LotOnceTransferTypes = []TransferType{Deposit, CreditExpire, CreditRevoke}
+
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
 var ErrInsufficientFunds = errors.New("ledger: transfer breaches the debit account's sign constraint")
@@ -117,7 +140,7 @@ type Transfer struct {
 	Debit, Credit uuid.UUID
 	Amount        int64
 	Currency      string
-	Type          string
+	Type          TransferType
 	// Opaque control-plane references (ledger purity — no business logic here).
 	Source, SourceID *string
 	// GrantID attributes a credit_spend/credit_expire/deposit to its #514 credit
@@ -143,7 +166,7 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 		CreditAccountID:        t.Credit,
 		Amount:                 t.Amount,
 		Currency:               t.Currency,
-		TransferType:           t.Type,
+		TransferType:           string(t.Type),
 		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
 		Source:                 t.Source,
 		SourceID:               t.SourceID,
@@ -200,7 +223,7 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 	}
 	c := customer
 	t := Transfer{
-		Debit: clearing, Credit: cust, Amount: amount, Currency: currency, Type: "deposit",
+		Debit: clearing, Credit: cust, Amount: amount, Currency: currency, Type: Deposit,
 		Source: &source, SourceID: &sourceID, Customer: &c,
 	}
 	if grantID != uuid.Nil {
@@ -226,7 +249,7 @@ func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency st
 	}
 	c := customer
 	return l.Apply(ctx, Transfer{
-		Debit: liab, Credit: rev, Amount: amount, Currency: currency, Type: "owed_accrual",
+		Debit: liab, Credit: rev, Amount: amount, Currency: currency, Type: OwedAccrual,
 		Source: &source, SourceID: &sourceID, Customer: &c, Invoice: invoice,
 	})
 }
@@ -244,7 +267,7 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	}
 	c := customer
 	return l.Apply(ctx, Transfer{
-		Debit: clearing, Credit: liab, Amount: amount, Currency: currency, Type: "owed_payment",
+		Debit: clearing, Credit: liab, Amount: amount, Currency: currency, Type: OwedPayment,
 		Source: &source, SourceID: &sourceID, Customer: &c, Invoice: invoice,
 	})
 }

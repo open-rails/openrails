@@ -65,7 +65,7 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 		}
 		src, sid, lotID, c, inv, res := source, sourceID, lot.ID, customer, invoker, resource
 		if _, err := l.money.Apply(ctx, ledger.Transfer{
-			Debit: cust, Credit: rev, Amount: take, Currency: currency, Type: "credit_spend",
+			Debit: cust, Credit: rev, Amount: take, Currency: currency, Type: ledger.CreditSpend,
 			Source: &src, SourceID: &sid, GrantID: &lotID, Customer: &c, Invoker: &inv, Resource: &res,
 		}); err != nil {
 			return fmt.Errorf("grants: credit spend from lot %s: %w", lot.ID, err)
@@ -118,7 +118,7 @@ func (l *Ledger) ExpireLapsed(ctx context.Context, customer uuid.UUID, currency 
 		}
 		src, sid, lotID, c := "credit_expiry", lot.ID.String(), lot.ID, customer
 		if _, err := l.money.Apply(ctx, ledger.Transfer{
-			Debit: cust, Credit: exp, Amount: lot.Remaining, Currency: currency, Type: "credit_expire",
+			Debit: cust, Credit: exp, Amount: lot.Remaining, Currency: currency, Type: ledger.CreditExpire,
 			Source: &src, SourceID: &sid, GrantID: &lotID, Customer: &c,
 		}); err != nil {
 			return expired, fmt.Errorf("grants: expire lot %s: %w", lot.ID, err)
