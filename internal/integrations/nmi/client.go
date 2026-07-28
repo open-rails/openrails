@@ -223,27 +223,6 @@ func (c *NMIClient) checkConfiguration() error {
 	return nil
 }
 
-func newCustomerVaultError(rawResponse string, output url.Values) error {
-	message := output.Get("response_message")
-	if message == "" {
-		message = output.Get("responsetext")
-	}
-	if message == "" {
-		message = rawResponse
-	}
-	message = fmt.Sprintf("failed to create customer vault: %s", message)
-
-	responseCode := parseMobiusResponseCode(output)
-
-	return &CustomerVaultError{
-		Message:        message,
-		ResponseCode:   responseCode,
-		LocalizationID: nmiLocalizationID(responseCode),
-		Detail:         nmiResponseDetail(responseCode),
-		RawResponse:    rawResponse,
-	}
-}
-
 func newAddSubscriptionError(rawResponse string, output url.Values) error {
 	message := output.Get("response_message")
 	if message == "" {

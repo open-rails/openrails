@@ -370,21 +370,6 @@ func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID,
 	})
 }
 
-// Delete removes one invoker spend limit.
-func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) error {
-	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
-		return txStore.delete(ctx, tenantID, payer, scope, scopeKey)
-	})
-}
-
-func (s *InvokerSpendLimitStore) delete(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID, scope, scopeKey string) error {
-	_, err := s.db.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
-		MerchantID: tenantID, CustomerID: payer.UUID(),
-		Scope: budgets.NormalizeScope(scope), ScopeKey: strings.TrimSpace(scopeKey),
-	})
-	return err
-}
-
 // Replace atomically replaces the complete payer-owned policy document. Any
 // failed delete/upsert rolls the transaction back to the prior document.
 func (s *InvokerSpendLimitStore) Replace(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimit) error {

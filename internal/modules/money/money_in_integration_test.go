@@ -111,13 +111,6 @@ func (f *fakeCollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.
 	return money.ChargeResult{Rail: method.Rail, TransactionID: "tx_" + req.IdempotencyKey}, nil
 }
 
-type fakeAlerter struct{ calls int }
-
-func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.CustomerID, _, _ int64) error {
-	f.calls++
-	return nil
-}
-
 // latestBlockExpiry returns the expiry of the most recent credit lot (a #514
 // credit grant) for the payer — the money_blocks table is gone (#512 hard cut),
 // the credit grant carries the lot's amount + expiry.
@@ -224,30 +217,6 @@ func TestDeposit_ConfiguredExpiryHours(t *testing.T) {
 	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
 	require.NotNil(t, exp)
 	require.InDelta(t, 30, exp.Sub(time.Now().UTC()).Hours()/24, 1.5)
-}
-
-// --- #240 low-balance alerts ---
-
-func TestRunLowBalanceAlerts(t *testing.T) {
-	svc, _, payer, _, ctx := moneyInEnv(t)
-	thr := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{LowBalanceThreshold: &thr})
-	require.NoError(t, err)
-	// available 500 < 1000
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
-	require.NoError(t, err)
-
-	al := &fakeAlerter{}
-	n, err := svc.RunLowBalanceAlerts(ctx, al, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Equal(t, 1, al.calls)
-
-	// Re-run within cooldown -> deduped.
-	n2, err := svc.RunLowBalanceAlerts(ctx, al, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 0, n2)
-	require.Equal(t, 1, al.calls)
 }
 
 // --- #239/#674 auto-top-up (write-through topup_charge intents) ---

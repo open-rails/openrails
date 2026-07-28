@@ -54,8 +54,4 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbte
 	_, err = svc.AccrueOwed(ctx, payer, unit, "billing", uuid.NewString(), 100)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, money.ErrBillingUnitRequired), "got %v", err)
-
-	// (4) presentation: 350 stored @ 2dp -> "3.50"; 100 -> "1.00".
-	require.Equal(t, "1.00", money.FormatAmount(100, dec))
-	require.Equal(t, "3.50", money.FormatAmount(bal.Balance, dec))
 }

@@ -607,13 +607,6 @@ type errorEnvelope struct {
 	Message string `json:"message"`
 }
 
-func isErrorEnvelope(raw []byte) bool {
-	var probe struct {
-		Error json.RawMessage `json:"error"`
-	}
-	return json.Unmarshal(raw, &probe) == nil && len(probe.Error) > 0
-}
-
 // statusErrorFromBody maps a non-2xx response onto the canonical StatusError
 // (errors.go), the remote half of the bidirectional error contract.
 func statusErrorFromBody(status int, raw []byte) error {

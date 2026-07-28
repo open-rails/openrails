@@ -102,16 +102,6 @@ func BuildSignSubmitPresubmit(
 	}, presubmit)
 }
 
-func BuildSignSubmitWithPayer(
-	ctx context.Context,
-	rpc blockhashProvider,
-	payer solanago.PublicKey,
-	instructions []solanago.Instruction,
-	signMessage func([]byte) (solanago.Signature, error),
-) (solanago.Signature, error) {
-	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, signMessage, nil)
-}
-
 // BuildSignSubmitWithPayerPresubmit: see BuildSignSubmitPresubmit.
 func BuildSignSubmitWithPayerPresubmit(
 	ctx context.Context,

@@ -7,7 +7,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -179,18 +178,6 @@ func sortedAdapterNames(adapters map[string]providerAdapter) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// priceCycleToken renders the provider-cadence component of a price content key.
-// A recurring price (cycle > 0) renders the day count for day-granularity
-// providers; a one-time price (nil or
-// 0 cycle) renders the literal "onetime". This keeps the key unambiguous and
-// human-readable while still distinguishing one_time from recurring.
-func priceCycleToken(billingCycleDays *int) string {
-	if billingCycleDays != nil && *billingCycleDays > 0 {
-		return strconv.Itoa(*billingCycleDays)
-	}
-	return "onetime"
 }
 
 // openRailsPriceContentKey is the content key derived from a price's FINANCIAL

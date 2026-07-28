@@ -1628,20 +1628,6 @@ func validateVaultedCardRail(name string, proc *PSPConfig, isDev bool) error {
 	return nil
 }
 
-// ByRail returns all provider accounts on the given rail, keyed by account name.
-func (set PSPSet) ByRail(rail models.Rail) map[string]*PSPConfig {
-	result := make(map[string]*PSPConfig)
-	if set == nil {
-		return result
-	}
-	for name, proc := range set {
-		if proc != nil && proc.EffectiveRail(name) == rail {
-			result[strings.ToLower(name)] = proc
-		}
-	}
-	return result
-}
-
 // RailKeysByType returns configured account names on the given rail,
 // sorted for deterministic diagnostics and selection.
 func (set PSPSet) RailKeysByType(rail models.Rail) []string {
@@ -1704,12 +1690,6 @@ func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfi
 	return nil, false
 }
 
-// GetCCBillRail returns the configured active CCBill rail.
-func (set PSPSet) GetCCBillRail() *PSPConfig {
-	_, proc, _ := set.ActiveRailByType(models.RailCCBill)
-	return proc
-}
-
 // GetStripeRail returns the configured active Stripe rail.
 func (set PSPSet) GetStripeRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailStripe)
@@ -1720,27 +1700,6 @@ func (set PSPSet) GetStripeRail() *PSPConfig {
 func (set PSPSet) GetSolanaRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
-}
-
-// GetRail returns a rail config by name.
-func (set PSPSet) GetRail(name string) *PSPConfig {
-	if set == nil {
-		return nil
-	}
-	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if proc, ok := set[normalizedName]; ok && proc != nil {
-		return proc
-	}
-	return nil
-}
-
-// RailOf returns the rail of the named provider account, or "" if not found.
-func (set PSPSet) RailOf(name string) models.Rail {
-	proc := set.GetRail(name)
-	if proc == nil {
-		return ""
-	}
-	return proc.EffectiveRail(name)
 }
 
 func (cfg *Config) normalizedProviderWriteMode() string {

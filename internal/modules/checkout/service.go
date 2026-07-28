@@ -1098,17 +1098,6 @@ func (s *CheckoutService) nmiSubscriptionSuccessResponse(ctx context.Context, su
 	}, nil
 }
 
-func nmiSubscriptionOrderID(idempotencyKey string, metadata map[string]string) string {
-	orderID := nmiIdempotentOrderID("sub", idempotencyKey)
-	if orderID == "" {
-		orderID = uuid.New().String()
-	}
-	if runID := strings.TrimSpace(metadata["e2e_run_id"]); runID != "" {
-		orderID = fmt.Sprintf("%s_e2e_%s", orderID, nmiOrderIDSuffix(runID))
-	}
-	return orderID
-}
-
 func nmiSubscriptionAttemptTransactionID(orderID string) string {
 	return "nmi_sub_attempt:" + strings.TrimSpace(orderID)
 }
@@ -1119,43 +1108,6 @@ func nmiSubscriptionStartDate(coverage *CoverageInfo, now time.Time) (string, *t
 	}
 	startDate, startAt := buildNMIFutureStartDate(*coverage.EndDate, now)
 	return startDate, &startAt
-}
-
-func nmiSubscriptionAttemptMetadata(idempotencyKey string, orderID string, status string, providerSubscriptionID string, transactionID string, subscriptionID uuid.UUID, paymentMethodID *uuid.UUID, delayedStart *time.Time, requestMetadata map[string]string) map[string]any {
-	metadata := map[string]any{
-		"checkout_idempotency_key":  strings.TrimSpace(idempotencyKey),
-		"nmi_subscription_order_id": strings.TrimSpace(orderID),
-		"nmi_attempt_status":        status,
-		"local_subscription_id":     subscriptionID.String(),
-	}
-	if paymentMethodID != nil && *paymentMethodID != uuid.Nil {
-		metadata["payment_method_id"] = paymentMethodID.String()
-	}
-	if delayedStart != nil {
-		metadata["delayed_start"] = delayedStart.Format(time.RFC3339)
-	}
-	if providerSubscriptionID != "" {
-		metadata["provider_subscription_id"] = providerSubscriptionID
-	}
-	if transactionID != "" {
-		metadata["provider_transaction_id"] = transactionID
-	}
-	if runID := strings.TrimSpace(requestMetadata["e2e_run_id"]); runID != "" {
-		metadata["e2e_run_id"] = runID
-	}
-	return metadata
-}
-
-func nmiSubscriptionDelayedStartFromMetadata(metadata map[string]any) *time.Time {
-	raw := metadataString(metadata, "delayed_start")
-	if raw == "" {
-		return nil
-	}
-	parsed, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return nil
-	}
-	return &parsed
 }
 
 func metadataString(metadata map[string]any, key string) string {

@@ -168,17 +168,6 @@ func (s *Service) requireConfig() (*config.Config, error) {
 	return rt.Config, nil
 }
 
-func (s *Service) requireRailCustomerAndConfig() (*payments.RailCustomerService, *config.Config, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, nil, err
-	}
-	if rt.RailCustomerService == nil || rt.Config == nil {
-		return nil, nil, fmt.Errorf("billing service: not initialized")
-	}
-	return rt.RailCustomerService, rt.Config, nil
-}
-
 func (s *Service) requireAdminSubscriptionService() (*subscriptions.AdminSubscriptionService, error) {
 	rt, err := s.runtime()
 	if err != nil {

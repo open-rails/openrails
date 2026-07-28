@@ -28,14 +28,6 @@ var (
 	btKeyURLOverrideMu sync.RWMutex
 )
 
-// SetBasisTheoryWebhookKeyURL overrides the CDN key URL process-wide —
-// integration-test seam (a locally served keypair). "" restores the default.
-func SetBasisTheoryWebhookKeyURL(u string) {
-	btKeyURLOverrideMu.Lock()
-	btKeyURLOverride = strings.TrimSpace(u)
-	btKeyURLOverrideMu.Unlock()
-}
-
 func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
 	btKeyURLOverrideMu.RLock()
 	keyURL := btKeyURLOverride

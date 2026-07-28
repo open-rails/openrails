@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -103,29 +102,6 @@ func (s *MoneyService) validateUnit(ctx context.Context, code string) error {
 		return err
 	}
 	return ValidateCurrency(code)
-}
-
-// FormatAmount renders a stored integer minor-unit amount as a display string
-// using the unit's decimals (built-in or custom). Pure given the resolved
-// decimals; the API/admin boundary calls ResolveUnit first. e.g. 100 @ 2dp → "1.00".
-func FormatAmount(minor int64, decimals int) string {
-	if decimals <= 0 {
-		return strconv.FormatInt(minor, 10)
-	}
-	neg := minor < 0
-	if neg {
-		minor = -minor
-	}
-	scale := int64(1)
-	for i := 0; i < decimals; i++ {
-		scale *= 10
-	}
-	whole, frac := minor/scale, minor%scale
-	sign := ""
-	if neg {
-		sign = "-"
-	}
-	return fmt.Sprintf("%s%d.%0*d", sign, whole, decimals, frac)
 }
 
 // Registry writes live in the catalog sidecar push (#706): custom_credit_types

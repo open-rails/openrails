@@ -406,12 +406,11 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 }
 
 func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
-	worker := CCBillReconcileWorker{
+	return CCBillReconciler{
 		DB:                  w.DB,
 		DataLink:            dataLink,
 		NotificationService: w.NotificationService,
-	}
-	return worker.Work(ctx, &river.Job[CCBillReconcileArgs]{})
+	}.Run(ctx)
 }
 
 // runUnknownReconcile resolves the merchant's `unknown` subscription cohort (#632)

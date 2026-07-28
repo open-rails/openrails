@@ -190,19 +190,6 @@ func transactionAmountCandidates(body *NMITransactionEventBody) []string {
 	return candidates
 }
 
-func transactionCurrency(body *NMITransactionEventBody) string {
-	if body == nil {
-		return ""
-	}
-	if curr := body.Currency.Trimmed(); curr != "" {
-		return curr
-	}
-	if body.TransactionDetail != nil {
-		return body.TransactionDetail.Currency.Trimmed()
-	}
-	return ""
-}
-
 func normalizeNMICurrencyValue(primary string, fallbacks ...string) string {
 	allValues := append([]string{primary}, fallbacks...)
 	for _, value := range allValues {

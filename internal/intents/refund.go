@@ -324,23 +324,6 @@ func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (r
 	return "", false, nil
 }
 
-// nmiAmountToCents converts the Query API dollar amount ("5.00", "-5.00" on
-// refund actions) into absolute cents.
-func nmiAmountToCents(amount string) (int64, error) {
-	// MONEY-6: exact rational parse, half-away-from-zero. This value is
-	// compared for EQUALITY against our own refund amount to decide whether a
-	// provider refund is ours — a float round-trip could make that comparison
-	// miss and re-issue a refund.
-	cents, err := moneyutil.ParseDecimalToCents(amount)
-	if err != nil {
-		return 0, err
-	}
-	if cents < 0 {
-		cents = -cents
-	}
-	return cents, nil
-}
-
 // ============================================================================
 // Stripe
 // ============================================================================
