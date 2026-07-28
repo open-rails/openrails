@@ -41,27 +41,27 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		pspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID:                    m.ID,
-		MerchantID:            tid.UUID(),
-		CustomerID:            m.CustomerID,
-		Rail:                  string(m.Rail),
-		PspID:                 pspID,
-		RailCustomerRef:       m.RailCustomerRef,
-		RailMethodRef:         m.RailMethodRef,
-		RebillDriver:          m.RebillDriver, // "" -> DB default 'provider'
-		InitialTransactionID:  m.InitialTransactionID,
-		LastFour:              m.LastFour,
-		CardType:              m.CardType,
-		ExpiryDate:            m.ExpiryDate,
-		Metadata:              meta,
-		CreatedAt:             m.CreatedAt,
-		UpdatedAt:             m.UpdatedAt,
-		VaultProvider:         m.VaultProvider,
-		VaultFingerprint:      m.VaultFingerprint,
-		NetworkTokenID:        m.NetworkTokenID,
-		NetworkTokenStatus:    m.NetworkTokenStatus,
-		NetworkTokenPar:       m.NetworkTokenPAR,
-		ChargeVia:             m.ChargeVia, // "" -> DB default 'pan_proxy'
+		ID:                   m.ID,
+		MerchantID:           tid.UUID(),
+		CustomerID:           m.CustomerID,
+		Rail:                 string(m.Rail),
+		PspID:                pspID,
+		RailCustomerRef:      m.RailCustomerRef,
+		RailMethodRef:        m.RailMethodRef,
+		RebillDriver:         m.RebillDriver, // "" -> DB default 'provider'
+		InitialTransactionID: m.InitialTransactionID,
+		LastFour:             m.LastFour,
+		CardType:             m.CardType,
+		ExpiryDate:           m.ExpiryDate,
+		Metadata:             meta,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
+		VaultProvider:        m.VaultProvider,
+		VaultFingerprint:     m.VaultFingerprint,
+		NetworkTokenID:       m.NetworkTokenID,
+		NetworkTokenStatus:   m.NetworkTokenStatus,
+		NetworkTokenPar:      m.NetworkTokenPAR,
+		ChargeVia:            m.ChargeVia, // "" -> DB default 'pan_proxy'
 	})
 	if err != nil {
 		return err

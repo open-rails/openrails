@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Path-doctrine guard (#724, ADR docs/adr-custodial-merchant-secrets.md):
+// Path-doctrine guard (#724, custodial-merchant-secrets ADR):
 // merchant-secret isolation rests on ALL secret paths being derived from the
 // single PSPSecretName builder and the single vaultSecretStore
 // namespace builder. Ad-hoc construction anywhere else would silently escape the

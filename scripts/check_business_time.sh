@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ALLOWLIST="${ROOT}/docs/business-time-allowlist.txt"
+ALLOWLIST="${ROOT}/scripts/business-time-allowlist.txt"
 
 if [[ ! -f "${ALLOWLIST}" ]]; then
   echo "missing ${ALLOWLIST}" >&2

@@ -197,8 +197,8 @@ func (e errVaultKV) ReadSecret(context.Context, string) (map[string]string, int,
 func (e errVaultKV) WriteSecret(context.Context, string, map[string]string) (int, error) {
 	return 0, e.err
 }
-func (e errVaultKV) DeleteSecret(context.Context, string) error                   { return e.err }
-func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error)        { return nil, e.err }
+func (e errVaultKV) DeleteSecret(context.Context, string) error            { return e.err }
+func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error) { return nil, e.err }
 
 func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T) {
 	ctx := context.Background()

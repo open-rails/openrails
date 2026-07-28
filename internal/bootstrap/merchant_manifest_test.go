@@ -114,24 +114,24 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	}
 	// NMI gateway "mobius": live gateway-id + its sandbox.
 	require.Equal(t, "nmi", byRail["mobius"])
-	require.Equal(t, "579145", byName[key{"mobius", "live"}].AccountID)
+	require.Equal(t, "1234567", byName[key{"mobius", "live"}].AccountID)
 	require.False(t, byName[key{"mobius", "live"}].Archived)
 	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName[key{"mobius", "live"}].Settings["tokenization_key"])
-	require.Equal(t, "681902", byName[key{"mobius-sandbox", "test"}].AccountID)
+	require.Equal(t, "7654321", byName[key{"mobius-sandbox", "test"}].AccountID)
 
 	// #795 vaulted_card: BT tenant identity + linked NMI gateway settings; the
 	// private app key is the only custodial secret.
 	require.Equal(t, "vaulted_card", byRail["bt-vault"])
 	require.Equal(t, "replace-with-bt-tenant-id", byName[key{"bt-vault", "test"}].AccountID)
-	require.Equal(t, "681902", byName[key{"bt-vault", "test"}].Settings["gateway_account"])
+	require.Equal(t, "7654321", byName[key{"bt-vault", "test"}].Settings["gateway_account"])
 	require.Equal(t, "replace-with-bt-private-application-key", byName[key{"bt-vault", "test"}].Secrets["api_key"])
 	// A second NMI gateway (paykings) is archived/drain-only in the example.
 	require.True(t, byName[key{"paykings", "live"}].Archived)
 	// Stripe live + test side by side.
-	require.Equal(t, "acct_1M9QZULkdIwHu7ix", byName[key{"stripe", "live"}].AccountID)
-	require.Equal(t, "acct_1N2YbMLkdIwHu7ix", byName[key{"stripe-sandbox", "test"}].AccountID)
+	require.Equal(t, "acct_1AbCdEfGhIjKlMnOp", byName[key{"stripe", "live"}].AccountID)
+	require.Equal(t, "acct_1ZyXwVuTsRqPoNmL", byName[key{"stripe-sandbox", "test"}].AccountID)
 	// CCBill — one account.
-	require.Equal(t, "945280-0000", byName[key{"ccbill", "live"}].AccountID)
+	require.Equal(t, "999999-0000", byName[key{"ccbill", "live"}].AccountID)
 
 	// #711: the example's solana settings block carries the runtime knobs and
 	// passes the strict push-time validation.

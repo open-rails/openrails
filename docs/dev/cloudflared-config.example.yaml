@@ -6,7 +6,7 @@
 #
 # DO NOT COMMIT real tunnel credentials/tokens.
 #
-# Docs: docs/cloudflared-webhooks.md
+# Docs: docs/dev/local-webhooks.md
 
 tunnel: <tunnel-uuid-or-name>
 credentials-file: /path/to/<tunnel-uuid>.json

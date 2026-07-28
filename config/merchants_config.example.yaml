@@ -39,7 +39,7 @@ merchants:
       mobius:
         nmi:
           environment: live
-          account_id: "579145"
+          account_id: "1234567"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
             tokenization_key: replace-with-live-nmi-tokenization-key
@@ -50,7 +50,7 @@ merchants:
       mobius-sandbox:
         nmi:
           environment: test
-          account_id: "681902"
+          account_id: "7654321"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
             tokenization_key: replace-with-test-nmi-tokenization-key
@@ -61,7 +61,7 @@ merchants:
       paykings:
         nmi:
           environment: live
-          account_id: "884512"
+          account_id: "5551234"
           archived: true
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -80,7 +80,7 @@ merchants:
           environment: test
           account_id: replace-with-bt-tenant-id
           settings:
-            gateway_account: "681902"
+            gateway_account: "7654321"
             network_tokens: false
             public_api_key: replace-with-bt-public-application-key
           secrets:
@@ -90,7 +90,7 @@ merchants:
         ccbill:
           environment: live
           # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
-          account_id: "945280-0000"
+          account_id: "999999-0000"
           # Webhook source IPs are CCBill's documented provider-wide ranges,
           # built in (#710) — there is no per-merchant allowlist.
           secrets:
@@ -101,7 +101,7 @@ merchants:
       stripe:
         stripe:
           environment: live
-          account_id: acct_1M9QZULkdIwHu7ix
+          account_id: acct_1AbCdEfGhIjKlMnOp
           secrets:
             secret_key: replace-with-live-stripe-secret-key
             webhook_signing_secret: replace-with-live-stripe-webhook-secret
@@ -109,7 +109,7 @@ merchants:
       stripe-sandbox:
         stripe:
           environment: test
-          account_id: acct_1N2YbMLkdIwHu7ix
+          account_id: acct_1ZyXwVuTsRqPoNmL
           secrets:
             secret_key: replace-with-test-stripe-secret-key
             webhook_signing_secret: replace-with-test-stripe-webhook-secret
@@ -134,7 +134,7 @@ merchants:
               SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
               USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
           secrets:
-            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT
+            private_key: replace-with-base58-ed25519-keypair
 
       # Alternative Solana signer using Hashicorp Vault Transit.
       solana-vault:
