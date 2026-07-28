@@ -136,8 +136,13 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
+	// #836/#835: destructive convergence ships OFF and unarmed. These tests
+	// exercise an armed, reviewed deployment; the safe default has its own
+	// tests (TestKillSwitchHaltsAndResumesTheConvergeSweep).
+	dbtest.ArmDestructiveActions(ctx, t, dbi.Pool(), id.UUID())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
