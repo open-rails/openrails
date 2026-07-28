@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,11 @@ type issuerRegistryRefresh struct {
 // active merchant. Fail closed: the token is rejected even if well-formed.
 var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer maps to no active merchant")
 
+// ErrRemoteApplicationSourceUnavailable indicates the control plane has no
+// AuthKit core client to read remote_applications from (a partially-configured
+// plane). Refreshes degrade to the existing in-memory registry.
+var ErrRemoteApplicationSourceUnavailable = errors.New("controlplane: no remote_application source configured")
+
 // loadRemoteApplications loads AuthKit's ACTIVE remote_applications into the
 // delegated verifier (#481): standalone JWKS/issuer trust is AuthKit's
 // remote_application registry (#74), NOT an OpenRails-owned table (the
@@ -50,6 +56,13 @@ var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer
 func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
+	}
+	// Core() is CONCRETE (*authcore.Client): a nil one boxed into the verifier's
+	// RemoteApplicationSource interface is a non-nil interface, so authkit's own
+	// `src == nil` fallback never fires and the load nil-derefs. The core client
+	// IS the remote_application store — without it there is nothing to load.
+	if c.Core() == nil {
+		return ErrRemoteApplicationSourceUnavailable
 	}
 	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences); err != nil {
 		return err
@@ -83,7 +96,10 @@ func (c *ControlPlane) SetIssuerRegistryTTL(d time.Duration) {
 // verifier's own lazy-load-on-miss); convergence for updates/revocations is
 // bounded by TTL + one reload.
 func (c *ControlPlane) refreshIssuerRegistryIfStale() {
-	if c == nil || c.delegatedVerifier == nil {
+	// Core() nil => no remote_application store to re-sync from; don't spawn a
+	// goroutine that can only fail (a partially-configured plane keeps verifying
+	// against whatever registry it already holds).
+	if c == nil || c.delegatedVerifier == nil || c.Core() == nil {
 		return
 	}
 	ttl := time.Duration(c.issuerRefresh.ttl.Load())
@@ -98,6 +114,16 @@ func (c *ControlPlane) refreshIssuerRegistryIfStale() {
 	}
 	go func() {
 		defer c.issuerRefresh.busy.Store(false)
+		// A background timer must NEVER be able to kill the process: an
+		// unrecovered panic here is not request-scoped, it tears down the whole
+		// binary on a timer. Recover, log, and leave lastLoad unstamped so the
+		// next verification retries — same degradation as a returned error.
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(log.Fields{"panic": r, "stack": string(debug.Stack())}).
+					Error("controlplane: issuer-registry TTL refresh panicked; registry left stale")
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), issuerRegistryRefreshTimeout)
 		defer cancel()
 		// A failure leaves lastLoad unstamped so the next verification retries;
