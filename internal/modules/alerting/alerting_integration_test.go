@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/metrics"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -114,9 +115,12 @@ func removeChargebacks(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 
 func newService(appDB *db.DB, email alerting.EmailSender) *alerting.Service {
 	return alerting.NewService(alerting.Deps{
-		DB:             appDB,
-		Metrics:        metrics.NewService(appDB),
-		Email:          email,
+		DB:      appDB,
+		Metrics: metrics.NewService(appDB),
+		Email:   email,
+		// #SEC-21: the sinks under test are loopback httptest servers; the
+		// production policy (zero value) refuses those.
+		Outbound:       httpx.Policy{Allow: httpx.AllowLoopback},
 		WebhookBackoff: time.Millisecond,
 	})
 }

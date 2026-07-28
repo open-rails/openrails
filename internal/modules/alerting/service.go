@@ -3,7 +3,6 @@ package alerting
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/metrics"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 // Deps wires the alerting service.
@@ -22,9 +22,11 @@ type Deps struct {
 	// Email is the outbound alert-email sender seam (may be nil — email channel
 	// then fails soft with a note in the delivery record).
 	Email EmailSender
-	// HTTPClient is used for outbound webhooks (defaulted when nil).
-	HTTPClient *http.Client
-	Clock      clockwork.Clock
+	// Outbound is the SSRF policy for merchant-supplied webhook sinks (#SEC-21).
+	// The zero value is the strict production policy: publicly routable
+	// destinations only, enforced at the dialer and on every redirect hop.
+	Outbound httpx.Policy
+	Clock    clockwork.Clock
 	// DashboardBaseURL prefixes alert dashboard deep links (may be empty → the
 	// link is a relative path the console resolves).
 	DashboardBaseURL string
@@ -41,6 +43,7 @@ type Service struct {
 	deliverer        *deliverer
 	clock            clockwork.Clock
 	dashboardBaseURL string
+	outbound         httpx.Policy
 }
 
 // NewService builds the alerting service.
@@ -54,9 +57,10 @@ func NewService(deps Deps) *Service {
 		db:               deps.DB,
 		metrics:          deps.Metrics,
 		store:            st,
-		deliverer:        newDeliverer(deps.DB, st, deps.Email, deps.HTTPClient, deps.WebhookBackoff),
+		deliverer:        newDeliverer(deps.DB, st, deps.Email, deps.Outbound, deps.WebhookBackoff),
 		clock:            clock,
 		dashboardBaseURL: strings.TrimRight(deps.DashboardBaseURL, "/"),
+		outbound:         deps.Outbound,
 	}
 }
 
@@ -190,8 +194,10 @@ func (s *Service) CreateWebhook(ctx context.Context, in CreateWebhookInput) (Web
 	ve := &ValidationError{}
 	if strings.TrimSpace(in.URL) == "" {
 		ve.add("url", "required", "url is required")
-	} else if u, err := url.Parse(in.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		ve.add("url", "invalid_url", "url must be an http(s) URL")
+	} else if err := s.outbound.ValidateURL(in.URL); err != nil {
+		// #SEC-21: scheme alone is not validation — a sink that names an
+		// internal address turns this endpoint into an SSRF primitive.
+		ve.add("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
 	}
 	format := in.Format
 	if format == "" {

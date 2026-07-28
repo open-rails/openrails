@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -52,8 +52,13 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) 
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", false, fmt.Errorf("invalid api_url %q", base)
 	}
-	host := strings.ToLower(u.Hostname())
-	if u.Scheme != "https" || host == "localhost" || host == "0.0.0.0" || host == "127.0.0.1" || host == "::1" || net.ParseIP(host) != nil && net.ParseIP(host).IsPrivate() {
+	// #SEC-21: Stripe must be able to REACH this endpoint, so it has to be a
+	// public https host. The routability rule is the shared outbound policy —
+	// the local check here used to miss 169.254/16 and 100.64/10.
+	if u.Scheme != "https" {
+		return "", false, nil
+	}
+	if err := (httpx.Policy{}).ValidateURL(base); err != nil {
 		return "", false, nil
 	}
 	parts := []string{"v1"}

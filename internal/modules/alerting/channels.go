@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 // EmailSender is the config/host seam for outbound alert email. The SendGrid-
@@ -33,23 +34,25 @@ type deliverer struct {
 	store       *store
 	cfgStore    *merchantconfig.Store
 	email       EmailSender
+	outbound    httpx.Policy
 	http        *http.Client
 	backoff     time.Duration
 	maxAttempts int
 }
 
-func newDeliverer(database *db.DB, st *store, email EmailSender, httpClient *http.Client, backoff time.Duration) *deliverer {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
-	}
+func newDeliverer(database *db.DB, st *store, email EmailSender, outbound httpx.Policy, backoff time.Duration) *deliverer {
 	if backoff <= 0 {
 		backoff = 500 * time.Millisecond
 	}
 	return &deliverer{
-		store:       st,
-		cfgStore:    merchantconfig.NewStore(database),
-		email:       email,
-		http:        httpClient,
+		store:    st,
+		cfgStore: merchantconfig.NewStore(database),
+		email:    email,
+		outbound: outbound,
+		// #SEC-21: the delivery client is address-guarded at the DIALER, so a
+		// sink whose DNS flips between the 3 retries still cannot reach an
+		// internal address, and redirects are re-validated per hop.
+		http:        outbound.Client(10 * time.Second),
 		backoff:     backoff,
 		maxAttempts: 3,
 	}
@@ -137,10 +140,19 @@ func (d *deliverer) deliverWebhook(ctx context.Context, ch ChannelRef, alert Ale
 	if err != nil {
 		return DeliveryResult{Channel: label, OK: false, Detail: err.Error()}
 	}
+	// Re-validate at delivery: a sink stored before the policy tightened, or
+	// one whose scheme/host was edited out of band, never gets fetched (#SEC-21).
+	if err := d.outbound.ValidateURL(wh.URL); err != nil {
+		return DeliveryResult{Channel: label, OK: false, Detail: httpx.FailureDetail(err)}
+	}
 	attempts, err := d.postWithRetry(ctx, wh.URL, body)
 	res := DeliveryResult{Channel: label, Attempts: attempts, OK: err == nil}
 	if err != nil {
-		res.Detail = err.Error()
+		// #SEC-21: the raw dial error/status is an internal-network oracle —
+		// a tenant-driven port scanner. Log it, return a fixed message.
+		log.WithContext(ctx).WithError(err).WithField("webhook_id", ch.WebhookID.String()).
+			Warn("alerting: webhook delivery failed")
+		res.Detail = httpx.FailureDetail(err)
 	}
 	return res
 }
