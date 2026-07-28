@@ -23,7 +23,8 @@ type ProductObject struct {
 	Prices           []PriceObject                    `json:"prices,omitempty"`
 }
 
-// CreditGrantSpecObject describes a product-bundled credit grant.
+// CreditGrantSpecObject describes a product-bundled credit grant. A null/absent
+// expiry_hours means the granted balance never expires (#857).
 type CreditGrantSpecObject struct {
 	Unit        string `json:"unit,omitempty"`
 	Amount      int64  `json:"amount"`
