@@ -1,156 +1,81 @@
 # Merchant Provisioning, Credentials, and Webhook Routing
 
-OpenRails calls the billing/isolation namespace a **merchant**. AuthKit authority
-for that merchant is a top-level **merchant permission-group**. The merchant row
-carries `permission_group_id` pointing at that group (nullable for
-embedded-without-AuthKit).
+A **merchant** is OpenRails' billing/isolation namespace. In standalone
+deployments, AuthKit authority for a merchant is a top-level **merchant
+permission-group**; the merchant row carries `permission_group_id` pointing at
+it (nullable for embedded-without-AuthKit). Vocabulary: a **rail** is the
+gateway kind (`nmi`, `stripe`, `ccbill`, `solana`); a **PSP** is a merchant's
+concrete account on a rail (`mobius` on nmi, `stripe` on stripe). See
+[glossary.md](glossary.md).
 
-## Provisioning model (#527/#531)
+This is the provisioning deep-dive. Getting started end-to-end:
+[standalone-integration.md](standalone-integration.md). Day-2 operations
+(mutation flags in depth, provider pull, cutover): [operations.md](operations.md).
 
-OpenRails splits provisioning into three file-backed surfaces:
+## Provisioning model
 
-- `push-auth-bootstrap` applies AuthKit's standalone authority bootstrap
-  manifest: initial users, trusted remote applications, and root roles.
-- `push-merchant-config` declares merchants, profile/config, provider accounts,
-  provider secrets, and optional host-app issuer ownership.
-- `push-merchant-catalog` declares products, prices, product tier metadata, and provider
-  catalog links.
+Three file-backed push surfaces (example shapes in `config/bootstrap.example.yaml`,
+`config/merchants_config.example.yaml`, `config/catalog.example.yaml`):
 
-The merchant config manifest carries an inline `issuer` (the host application's
-JWKS or static public-key trust), which OpenRails registers under the merchant's
-permission-group. The host app's delegated tokens then fully
-administer that one merchant — and no other — because federated authority claims
-are stripped on verify and authority is the stored owner role:
+- `openrails push-auth-bootstrap` — AuthKit root authority: initial operator
+  users and trusted remote applications. Default file `/etc/openrails/bootstrap.yaml`.
+- `openrails push-merchant-config` — merchants: identity, profile, invoice
+  policy, issuer-as-owner, PSPs (rail accounts + secrets). Default file
+  `/etc/openrails/merchants.yaml`.
+- `openrails push-merchant-catalog` — products, prices, entitlements, per-PSP
+  links. Default file `/etc/openrails/catalog.yaml`.
 
-```text
-host-app issuer (JWKS) -> merchant permission-group role -> OpenRails merchant
-```
+All three share one **mutation-flag contract**: a bare command is plan-only
+(prints the diff, mutates nothing);
 
-OpenRails owns merchant authority; AuthKit owns root identity authority. Startup
-bootstrap, if `/etc/openrails/bootstrap.yaml` exists, is **first-run only** and
-limited to AuthKit authority (gated by AuthKit's bootstrap marker). A normal
-server restart never reapplies merchant config or catalog state. Change
-merchants with `openrails push-merchant-config`:
+- `--insert` creates missing state;
+- `--overwrite` re-asserts manifest values over existing state — without it,
+  secrets are **seed-once** (a value rotated out of band is never reverted to
+  the manifest seed);
+- `--prune` deletes merchant secrets (or archives catalog objects) absent from
+  the manifest.
 
-- no mutation flags: plan-only;
-- `--insert`: create missing merchant/config/secret state;
-- `--overwrite`: re-assert manifest secret values;
-- `--prune`: delete secrets absent from the manifest;
+The flags compose; full reconciliation is `--insert --overwrite --prune`.
 
-See `config/merchants.example.yaml` for the manifest shape.
+Startup behavior: if `/etc/openrails/bootstrap.yaml` exists, the server applies
+it **first-run only** (gated by AuthKit's bootstrap marker). Normal restarts
+never reapply merchant config or catalog manifests — with one deliberate
+exception: in MODE 1 (`merchant_source: manifest`, the default) the server
+itself re-converges the merchant manifest on **every** boot
+(insert+overwrite+prune, secrets held in memory). In MODE 2
+(`merchant_source: api`) boot manifests refuse to load and the push CLIs seed
+the persistent stores instead. Mode comparison:
+[standalone-integration.md](standalone-integration.md#two-merchant-source-modes);
+MODE 1 walkthrough: [self-hosting-mode1.md](self-hosting-mode1.md).
 
-Embedded hosts provision billing merchants explicitly with
-`embed.Runtime.UpsertMerchantConfig` and pass auth at HTTP mount time. The engine
-is not bound to one merchant at construction; in-process SDK calls pin the
-merchant with `openrails.WithMerchant(ctx, merchantID)`. The issuer-as-owner path
-is the standalone mechanism.
+Embedded hosts provision merchants programmatically
+(`embed.Runtime.UpsertMerchantConfig`, same manifest shape) and pass auth at
+HTTP mount time; the issuer-as-owner path below is the standalone mechanism.
 
-## Lifecycle
-
-The lifecycle service is `internal/merchants.Service`.
-
-| Operation | Behaviour |
-|---|---|
-| `Provision` | Creates or updates `openrails.merchants` and records `permission_group_id` for control-plane merchants. |
-| `Suspend` / `Resume` | Flips `status` and `suspended_at`. Suspended merchants deny writes while reads and rail webhook reconciliation can still proceed. |
-| `Export` | Writes a completed `merchant_exports` row with row counts and secret names, never secret values. |
-| `Delete` | Requires confirmation and a completed export, purges merchant-owned rows and secrets, then tombstones the merchant directory row. |
-
-## Secrets
-
-Merchant credentials are addressed by `(merchant_id, name)`. Provider credentials
-use provider-account-scoped names:
-
-```text
-rail_merchant_accounts/<rail>/<environment>/<account_id>/<secret_key>
-```
-
-Examples:
-
-- `rail_merchant_accounts/stripe/live/acct_123/secret_key`
-- `rail_merchant_accounts/stripe/live/acct_123/webhook_signing_secret`
-- `rail_merchant_accounts/nmi/live/579145/security_key`
-- `rail_merchant_accounts/ccbill/live/900000-0000/salt`
-- `rail_merchant_accounts/ccbill/live/900000-0000/datalink_username`
-- `rail_merchant_accounts/ccbill/live/900000-0000/datalink_password`
-
-CCBill's composite identity is dash-joined (`clientAccnum-clientSubacc`, #697),
-so no account_id embeds the `/` name delimiter.
-
-The `rail_merchant_accounts/` name prefix is deliberate #683 vocabulary and does
-NOT follow the manifest key rename: the config key is `accounts` (#698), while
-secret names and the DB table keep `rail_merchant_accounts`.
-
-Secret stores:
-
-- DB-backed store: `openrails.merchant_secrets`, envelope-encrypted by
-  `openrails.merchant_deks`.
-- In-memory store: tests and local development.
-- Vault store: maps `(merchant_slug, name)` to
-  `secret/openrails/merchants/<merchant-slug>/<name>`.
-
-Credentials are loaded by merchant id at request time. They are never global
-process configuration for a multi-merchant OpenRails instance. The
-`push-merchant-config` manifest is seed material: it reads values from env/file
-references and imports them into the configured runtime backend. With
-`vault.enabled: true`, provider secrets are written to Vault paths; otherwise
-they are written to `openrails.merchant_secrets` and envelope-encrypted when an
-`encryption.master_key` is configured.
-
-## Webhooks
-
-Rail webhooks resolve the merchant by explicit path slug.
-
-Path form:
-
-```text
-POST /v1/merchants/:merchant/webhooks/:provider
-POST /billing/v1/merchants/:merchant/webhooks/:provider
-```
-
-OpenRails always re-derives the merchant and loads that merchant's signing secret
-before verification. The router is not the trust boundary; signature verification
-with the resolved merchant's secret is.
-
-## Admin Surface
-
-OpenRails core no longer exposes cross-merchant lifecycle or credential routes.
-Merchant-owned admin APIs are scoped to the authenticated merchant; any
-future platform operator surface belongs in OpenRails SaaS.
-
-## Merchant Config Manifest
-
-The merchant config manifest used by `openrails push-merchant-config` declares
-OpenRails-owned merchants. Catalog state is pushed separately with
-`openrails push-merchant-catalog`.
-
-See `config/merchants_config.example.yaml` for a fuller example with
-merchant remote-application trust, profile data, rail merchant accounts, and
-secret seeds. The `accounts` key (#698) declares rail merchant accounts; secret
-values can also arrive via the `BILLING_MERCHANTS_*` env overlay (e.g.
-`BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY`).
+## Merchant manifest anatomy
 
 ```yaml
 version: 1
-
 merchants:
-  doujins:
-    display_name: Doujins
-    remote_application:
-      issuer: https://doujins.example
-      jwks_uri: https://doujins.example/.well-known/jwks.json
-    profile:
-      display_name: Doujins Billing
-      logo_url: https://doujins.example/logo.png
-      from_email: billing@doujins.example
-      support_url: https://doujins.example/support
-      signup_url: https://doujins.example/premium
-    accounts:
+  myapp:
+    display_name: MyApp
+    remote_application:            # issuer-as-owner
+      issuer: https://myapp.example
+      jwks_uri: https://myapp.example/.well-known/jwks.json
+    profile:                       # customer-facing display
+      display_name: MyApp Billing
+      logo_url: https://myapp.example/logo.png
+      from_email: billing@myapp.example
+      support_url: https://myapp.example/support
+    invoice:                       # arrears invoicing policy (amounts in micros)
+      billing_period_boundary: calendar_month
+      collection_threshold: 50_000_000
+      monthly_floor: 1_000_000
+    psps:                          # operator-declared rail accounts
       mobius:
         nmi:
           environment: live
-          account_id: "579145"
-          archived: false
+          account_id: "100001"
           settings:
             tokenization_key: replace-with-nmi-tokenization-key
           secrets:
@@ -158,28 +83,133 @@ merchants:
             webhook_signing_secret: replace-with-nmi-webhook-secret
 ```
 
-Catalog manifests are explicitly catalog-scoped and may contain one or more
-merchant catalog entries:
+Per merchant:
 
-See `config/catalog.example.yaml` for a fuller example with products, prices,
-provider fan-out, and provider links.
+- `remote_application` — the host app's issuer (JWKS URI, inline static
+  `jwks`, or raw `public_keys`), registered as merchant **owner**: delegated
+  tokens signed by that issuer fully administer this one merchant and no other.
+- `profile` — display name, logo, from-email, support/signup URLs.
+- `invoice` — arrears invoicing policy; amounts are micros.
+- `delegated_invoker_wasted_spend_windows` — per-invoker windowed spend caps.
+- `psps.<key>.<rail>` — one entry per PSP. `key` is the manifest PSP name
+  catalog `psp_links` and checkout use ("mobius"); the rail nests inside.
+  Fields: `environment` (`test`|`live` — an **assertion** cross-checked
+  against the deployment's `test_mode`, not a behavior selector; a
+  contradiction refuses to boot), `account_id`, `archived`, non-secret
+  `settings`, `secrets`, and (Solana) `signer`.
 
-```yaml
-version: 1
-catalogs:
-  - merchant: doujins
-    products:
-      - key: premium
-        display_name: Premium
-        prices:
-          - currency: usd
-            unit_amount: 23_000_000
-            duration: 30d
-            auto_renew: true
-            providers: [mobius]
+`account_id` is operator-declared, per rail (never derived from credentials at
+runtime — details in `docs/rails/*.md`):
+
+| Rail | `account_id` |
+|---|---|
+| nmi | the dashboard **Gateway ID** (NMI's merchant account id — not the ISO/reseller) — [rails/nmi.md](rails/nmi.md) |
+| stripe | `acct_…` (the one rail that self-discovers, via `GET /v1/account`) — [rails/stripe.md](rails/stripe.md) |
+| ccbill | `clientAccnum-clientSubacc`, dash-joined (`900000-0000`) — [rails/ccbill.md](rails/ccbill.md) |
+| solana | derived from the signer public key; a declared value is ignored — [rails/solana.md](rails/solana.md) |
+| vaulted_card | the Basis Theory tenant id (`settings.gateway_account` names the NMI account it detokenizes into) |
+
+### Env and secret-file overlays
+
+Secret values should not live in the YAML. Two overlays route into the same
+manifest tree, with precedence `yaml < secret files < env`:
+
+- **Secret files**: a directory (default `/vault/secrets`, override
+  `VAULT_SECRETS_PATH`) of files named like env vars, content = value.
+- **Env vars**: `BILLING_MERCHANTS_<MERCHANT>_PSPS_<KEY>_<RAIL>_…`, e.g.
+  `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY` →
+  `merchants.myapp.psps.mobius.nmi.secrets.security_key`.
+
+Both fail loudly on retired anchors (`_ACCOUNTS_`, `_RAIL_MERCHANT_ACCOUNTS_`,
+`_PROVIDER_ACCOUNTS_` → "renamed to PSPS") and on any `BILLING_MERCHANTS_*`
+name that routes to no manifest field — a typo is an error, never a silent drop.
+
+## Secrets: seeding vs runtime source of truth
+
+Secrets are addressed by `(merchant_id, name)`. PSP credentials use the
+canonical account-scoped name (built only by `merchants.PSPSecretName`):
+
+```text
+psps/<rail>/<environment>/<account_id>/<secret_key>
 ```
 
-Issuer/JWKS registration belongs in AuthKit remote applications under the
-merchant permission-group. OpenRails stores only the merchant permission-group
-link, merchant profile/configuration, provider-account bindings, and merchant
-secret values/references.
+Examples: `psps/nmi/live/100001/security_key`,
+`psps/stripe/live/acct_123/webhook_signing_secret`,
+`psps/ccbill/live/900000-0000/datalink_password`. The `account_id` segment is
+URL-escaped (CCBill's composite id is dash-joined precisely so it never embeds
+the `/` delimiter). Secret keys are validated against each rail's credential
+registry — unknown keys are rejected.
+
+Where the values live depends on the mode:
+
+- **MODE 1** (`merchant_source: manifest`): in memory only, seeded from the
+  manifest every boot. Nothing is persisted; there is no store to rotate —
+  edit the file/env and reboot.
+- **MODE 2** (`merchant_source: api`): a persistent backend, selected by
+  `secret_backend`:
+  - `vault` — Vault KV-v2 at `<mount>/openrails/merchants/<merchant-slug>/<name>`
+    (e.g. `secret/openrails/merchants/myapp/psps/nmi/live/100001/security_key`);
+    a Vault policy can scope a merchant to its own subtree.
+  - `db` — `openrails.merchant_secrets`, envelope-encrypted via
+    `openrails.merchant_deks`; `ENCRYPTION_MASTER_KEY` is required outside
+    development.
+
+  The backend is declared intent, never auto-detected — the data lives in
+  exactly one place. `push-merchant-config` is the seeding path: it resolves
+  manifest values (plus overlays) and writes them into the configured backend.
+
+Credentials are always loaded by merchant id at request time; they are never
+global process configuration.
+
+## Merchant lifecycle
+
+`internal/merchants.Service`; merchant status is `active` or `deleted`.
+
+| Operation | Behavior |
+|---|---|
+| `Provision` | Idempotently creates the `openrails.merchants` row and records `permission_group_id` for control-plane merchants. |
+| `Export` | Writes a completed `merchant_exports` row: per-table row counts plus secret **names** — values are never exported. |
+| `Delete` | Gated purge: requires `Confirm` and a completed export; purges every merchant-owned row and secret, then tombstones the directory row (`status='deleted'`, `deleted_at`). |
+
+## API keys
+
+Merchant-scoped backend credentials are minted through the self-serve surface
+(requires the control plane; embedded hosts without one answer 501):
+
+- `POST /v1/merchant/api-keys` `{"name": …, "role": …}` → 201 with the key
+  **secret exactly once** — it is never stored or retrievable again. The
+  non-secret `prefix` (`openrails_st_<key_id>`) identifies the key afterwards.
+- `GET /v1/merchant/api-keys` lists (live, expired, revoked — no secret material).
+- `DELETE /v1/merchant/api-keys/{id}` revokes; cross-merchant ids 404.
+
+Roles are the fixed merchant catalog: `viewer` (read-only — the right choice
+for LLM agents), `support`, `owner`. Minting requires
+`merchant:credentials:manage` (owner-only) and is no-escalation: a caller can
+never mint a key with authority beyond its own credential's.
+
+## Webhook routing
+
+Inbound rail webhooks resolve the merchant first, then verify. Three surfaces
+share one handler:
+
+```text
+POST /v1/webhooks/:provider                                  # standalone: merchant derived from the
+POST /v1/webhooks/:provider/:account_id                      #   payload's account identity (NMI/CCBill; Stripe with account)
+POST /v1/merchants/:merchant/webhooks/:provider              # merchant-scoped: slug in the path
+POST /v1/merchants/:merchant/webhooks/:provider/:account_id  #   (+ account for multi-account rails)
+POST /billing/v1/merchants/:merchant/webhooks/:provider      # embedded mount of the same handler
+```
+
+Deployments with per-merchant API hosts additionally resolve the merchant from
+the `Host` header at `/webhooks/:provider[/:account_id]` (see
+[operations.md](operations.md)). In every case the router is **not** the trust
+boundary: OpenRails re-derives the merchant, loads that merchant's signing
+secret, and verifies the signature. An unresolvable slug/host is rejected —
+never routed to a default merchant.
+
+## Admin surface
+
+OpenRails core exposes no cross-merchant lifecycle or credential routes.
+Merchant admin APIs are scoped to the authenticated merchant; in MODE 1 the
+catalog and payment-provider **mutation** routes answer `405 manifest_driven`
+([self-hosting-mode1.md](self-hosting-mode1.md)).

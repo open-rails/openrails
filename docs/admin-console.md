@@ -1,56 +1,60 @@
-# Merchant admin console (#740/#754)
+# Merchant admin console
 
-A React SPA (`web/admin`) served at `/admin/`, driving the existing
-`/v1/merchant/*` API. Off by default.
+### What it is
 
-**The engine ships no frontend bytes.** `go:embed` cannot cross module
-boundaries, so whoever builds the binary owns the embed and hands the engine an
-`fs.FS` (#754). Build output (`dist`) is never committed anywhere; Node is a
-build-time dependency only, and only for builds that opt into the console.
+A React SPA (`web/admin`, Vite) served by the engine at `/admin/`, driving the
+`/v1/merchant/*` API. It is the browser UI for the **merchant operator** — the
+human running a merchant on an OpenRails deployment: customers, subscriptions,
+payments, catalog, ops findings, team, API keys. It holds no state and no
+privileges of its own; every action is a merchant-API call under the caller's
+own permissions. Off by default.
 
-## Mount rule
+### Turning it on and off
 
-`/admin` routes exist ONLY when console assets are present AND
-`admin_console.enabled` is set:
+Two independent requirements, both needed (#740/#754):
+
+1. **Assets in the binary.** The engine ships no frontend bytes — `go:embed`
+   cannot cross module boundaries, so whoever builds the binary owns the embed
+   and hands the engine an `fs.FS` rooted at `index.html`. `dist` is never
+   committed; Node/pnpm is a build-time dependency only, and only for builds
+   that opt in.
+2. **Config.** `admin_console.enabled: true`.
 
 | assets | `admin_console.enabled` | result |
 |--------|-------------------------|--------|
-| yes    | true                    | console served at `/admin/` |
-| yes    | false                   | not mounted (`/admin/*` 404s) |
-| no     | false                   | silently absent (`/admin/*` 404s) |
-| no     | true                    | **loud boot error** naming the build step |
-| forgot to build dist before a `go:embed` build | — | **loud compile error** (`pattern all:dist: no matching files found`) |
+| yes | true | console served at `/admin/` |
+| yes | false | not mounted — `/admin/*` 404s |
+| no | false (default) | silently absent — `/admin/*` 404s |
+| no | true | **loud boot error** naming the build step |
+| dist missing at a `go:embed` build | — | **loud compile error** (`pattern all:dist: no matching files found`) |
 
 ```yaml
 admin_console:
   enabled: true
-  # auth_base_url: /auth      # default: the standalone control-plane authhttp mount
-  # api_base_url: /v1         # default standalone; embedded hosts use /billing/v1
+  # auth_base_url: /auth   # default: the standalone control-plane authhttp mount
+  # api_base_url: /v1      # default standalone; embedded hosts typically /billing/v1
 ```
 
-Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_AUTH_BASE_URL`, `ADMIN_CONSOLE_API_BASE_URL`.
-The SPA bootstraps from `GET /admin/config.json`
-(`{auth_base_url, api_base_url, nl_widgets_enabled}`).
+Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_AUTH_BASE_URL`,
+`ADMIN_CONSOLE_API_BASE_URL`. Turning it **off** is the default: leave
+`enabled` unset (and/or build without assets — plain `go build ./...` links
+zero frontend bytes and never needs Node).
 
-## Build flow A: the standalone openrails binary
-
-Assets live behind the `console_assets` build tag in the binary-boundary
-package `cmd/openrails/consoleassets` — plain `go build ./...` stays Node-free
-forever.
+**Standalone binary.** Assets live behind the `console_assets` build tag in the
+binary-boundary package `cmd/openrails/consoleassets` (untagged builds compile
+a `FS() = nil` stub):
 
 ```sh
-task admin-build            # scripts/build-admin-console.sh -> cmd/openrails/consoleassets/dist (gitignored)
-task build-console-binary   # admin-build + go build -tags console_assets
+task admin-build           # scripts/build-admin-console.sh -> cmd/openrails/consoleassets/dist (gitignored)
+task build-console-binary  # admin-build + go build -tags console_assets ./cmd/openrails
 ```
 
 The Dockerfile is multi-stage: a Node stage builds the SPA, the Go stage embeds
-it with the tag — the published image always carries the console (still
-config-gated at runtime).
+it with the tag — the published image always carries the console, still
+config-gated at runtime.
 
-## Build flow B: embedded hosts (the doujins shape)
-
-The host repo owns a tiny embed package over a **gitignored** dist its build
-pipeline produces:
+**Embedded hosts.** The host repo owns a tiny embed package over a
+**gitignored** dist its build pipeline produces:
 
 ```go
 // internal/consoleassets/assets.go
@@ -62,261 +66,114 @@ import "embed"
 var FS embed.FS
 ```
 
-Build the dist from the openrails module cache (no vendoring, no checkout):
+Build the dist straight from the openrails module cache (no vendoring; the
+script copies the read-only source to a temp dir before `pnpm install`):
 
 ```sh
 "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
 ```
 
-(The script copies `web/admin` out of the read-only module cache to a temp dir
-before `pnpm install`.) Then hand the FS to the engine:
+Then hand the FS to the engine:
 
 ```go
 sub, _ := fs.Sub(consoleassets.FS, "dist")
 rt, err := embed.New(ctx, opts, embed.WithAdminConsole(sub))
 ```
 
-- **Opt-out = do nothing**: skip the option and zero frontend bytes are linked
-  (`go list -deps ./embed` shows no assets package).
-- **Forgot to build** = loud `go:embed` compile error in the HOST repo.
-- Hosts that mount `adminconsole.Handler` on their own mux directly pass the
-  same `fs.FS` as its second argument (gate on `adminconsole.Present`).
+`WithAdminConsole` feeds the standalone surface (`embedded.StandaloneServer`),
+which mounts `/admin/` per the table above. The embedded mount surface
+(`embedded.MountHandler` / `Runtime.Client()`) does NOT serve `/admin` — hosts
+that mount billing under their own mux serve the console themselves by mounting
+`adminconsole.Handler(cfg, assets)` (package `pkg/adminconsole`), gated on
+`adminconsole.Present(assets)`, with `APIBaseURL` set to their billing mount
+(e.g. `/billing/v1`) and `AuthBaseURL` to their AuthKit base.
 
-## Auth
+Fail-loud behaviors, verified: enabled without assets refuses boot
+(`admin_console.enabled is set but no console assets were provided: …`);
+forgetting to build dist before a tagged/host `go:embed` build is a compile
+error; mounting `adminconsole.Handler` with no build answers every request 503
+naming the build step. Opt-out is doing nothing.
 
-Login is a real human login against AuthKit's authhttp surface at `auth_base_url`:
+### Security posture
 
-- **Standalone** — the control plane mounts authhttp at `/auth` on the same server.
-  Password login works out of the box (`POST /auth/password/login`). OIDC providers are
-  not configured by standalone openrails config, so the login page shows password-only.
-- **Embedded** — set `auth_base_url` to the HOST's AuthKit base (may be another origin;
-  CORS is the host's concern). The console reads `GET {auth_base_url}/capabilities` and
-  shows an OIDC button per login-capable provider; the redirect flow returns tokens in a
-  URL fragment (AuthKit's browser-OIDC contract — configure the AuthKit
-  `Frontend.OIDCReturnPath` to land inside `/admin/`).
+What the engine enforces (verified):
 
-The bearer + refresh token are held by the SPA (localStorage); 401 → refresh once →
-login page. Action permissions are enforced by the API's merchant permission catalog
-(#567); the console has no client-side RBAC copy — a 403 renders as a "role lacks
-permission" toast. Embedded hosts that mount `/v1/merchant/*` for host principals only
-(no user bearers) should keep the console disabled or wire a user authenticator (#739).
+- The SPA itself — static assets and `GET /admin/config.json` — is served with
+  **no authentication at the transport layer**. Anyone who can reach `/admin/`
+  gets the app shell and the bootstrap document (base URLs + feature flags; no
+  secrets, no data).
+- All **data and actions** go through `/v1/merchant/*` with a Bearer token
+  (AuthKit user session or merchant API key) and are enforced server-side by
+  the merchant permission catalog (#567) plus RLS merchant scoping. The console
+  has no client-side privilege of its own; a 403 renders as a
+  "role lacks permission" toast.
+- Core OpenRails imposes **no environment restriction** — `enabled: true`
+  serves the console in any env.
 
-## Local UI dev
+Recommendation (not engine-enforced): treat exposing `/admin/` like exposing
+any login page. If your deployment doesn't want the console reachable at all in
+production, gate it at boot — e.g. the doujins host refuses to boot with
+`admin_console.enabled` in a production-like env precisely because the SPA is
+unauthenticated at the transport layer, making it dev-only by convention.
+Standalone SaaS deployments that do serve it in production should front it with
+their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
+covers the auth endpoints).
 
-`cd web/admin && pnpm run dev` (proxies `/v1`, `/auth`, `/admin/config.json` to
-`localhost:3053`). `web/admin/node_modules` is fenced from `go build ./...` by
-the root go.mod `ignore` directive (no nested go.mod — that would prune
-`web/admin` from the module zip hosts build from).
+Embedded hosts that mount `/v1/merchant/*` for host principals only (no user
+bearers) should keep the console disabled or wire a user authenticator (#739).
 
-## Pages
+### Viewing it
 
-Customers (search → profile: subscriptions/payments/entitlements/payment methods,
-grant/revoke entitlement + product access, off-channel payment), Subscriptions (status
-filters incl. the past_due dunning view, cancel with typed confirmation, resume,
-NMI payment-method change), Payments (filters, detail, rail-aware refund — disabled on
-rails without API refunds), Catalog (products/prices CRUD + activate/deactivate,
-manifest publish with plan preview, drift view + refresh), Ops (findings queue with
-approve/ignore, repair alerts, worker health), Settings (merchant profile, team,
-payment providers, API keys, credit limit, trust level).
+Browse to `https://<your-openrails-host>/admin/` (bare `/admin` redirects). The
+SPA bootstraps from `GET /admin/config.json`:
+`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled}`.
 
-## API keys (#757)
+- `auth_base_url` — where AuthKit's authhttp surface lives. Standalone default
+  `/auth` (same server). Embedded: the host's AuthKit base, possibly another
+  origin (CORS is then the host's concern).
+- `api_base_url` — the merchant API base: `/v1` standalone, typically
+  `/billing/v1` embedded.
 
-Settings → **API keys** mints scoped, revocable Bearer credentials for agents and
-integrations — the easy alternative to session JWTs for programmatic callers
-(LLM agents querying `/v1/merchant/metrics/*`, server-side billing automation).
-Everything goes through AuthKit core; OpenRails never stores the secret (hash only).
+**Login** is a real human login against AuthKit: the SPA reads
+`{auth_base_url}/capabilities` and offers password login
+(`POST {auth_base_url}/password/login`) plus one button per login-capable OIDC
+provider; the OIDC redirect returns tokens in a URL fragment (configure
+AuthKit's `Frontend.OIDCReturnPath` to land inside `/admin/`). Tokens are held
+in `sessionStorage`; a 401 triggers one refresh (`POST {auth_base_url}/token`),
+then the login page. Who can log in and what they may do is the merchant team
+roster + fixed roles (`owner`/`support`/`viewer`) — see the merchant guide.
 
-- **Mint** — `POST /v1/merchant/api-keys` `{name, role}` → `201` with the full key
-  in `secret`, returned EXACTLY ONCE (the console shows a copy-once modal). `role`
-  must be one of the fixed merchant catalog roles (#567):
-  - `viewer` — read-only (metrics query/schema, payments, subscriptions, catalog,
-    settings reads). **The role to mint for LLM agents** — it can answer any
-    analytics question and cannot refund, cancel, or mutate anything.
-  - `support` — viewer reads plus customer operations (refunds, subscription
-    changes, entitlement grants). No settings/catalog/provider/credential writes.
-  - `owner` — `merchant:*`, full control. Explicit choice only; never the default.
-- **List** — `GET /v1/merchant/api-keys` → metadata only (`id`, `name`, `role`,
-  `prefix`, `created_at`, `last_used_at`, `revoked_at`); never secret material.
-  `prefix` is the non-secret token head (`openrails_st_<key_id>`) for matching a
-  stored credential.
-- **Revoke** — `DELETE /v1/merchant/api-keys/{id}`; takes effect immediately, keys
-  stay listed with `revoked_at` for audit. Revocation is the only recovery from a
-  lost or leaked secret.
+Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
+`/admin/config.json` to `localhost:3053`).
 
-The three routes are gated on `merchant:credentials:manage` — held only by the
-merchant **owner** in the fixed catalog (deliberately the same permission string
-AuthKit's own mint authorization checks). No-escalation holds on every path: a
-caller can only mint roles whose permissions its own credential already covers.
-Keys are per-merchant: merchant A's keys are invisible to (and irrevocable by) B.
+### Using it
 
-Use a key as a normal Bearer token against the same `/v1/merchant/*` surface:
+| Page | Route | What it does |
+|------|-------|--------------|
+| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant) + the Ask panel |
+| Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access; off-channel payment |
+| Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view; cancel (typed confirmation), resume, NMI payment-method change |
+| Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
+| Catalog | `/catalog` | Products/prices, price detail + change wizard, activate/deactivate, drift view, catalog copilot panel |
+| Ops | `/ops` | Findings queue (approve/ignore), repair alerts, worker health |
+| Settings | `/settings` | Tabs: Merchant profile, Team, Alerts, Payment providers, API keys, Customer controls |
 
-```sh
-curl -H "Authorization: Bearer openrails_st_..." \
-  https://billing.example.com/v1/merchant/metrics/schema
-```
+**Natural-language features** are fail-closed on the server's `llm:` config and
+mirrored into `config.json` so the UI shows a pointed empty-state (naming the
+knob) instead of a broken button:
 
-## Team (#760)
+| Feature | Gate (config / env) |
+|---------|--------------------|
+| NL widget generation (widgets are LLM-authored; sees only the metrics schema) | `llm.api_key` / `LLM_API_KEY` |
+| Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
+| Catalog copilot Q&A (read-only catalog/subscriber aggregates) | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
+| Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
 
-Settings → **Team** manages who can sign in to this merchant console. Every teammate
-is an AuthKit user holding exactly one fixed catalog role (#567) in the merchant
-permission-group; the whole surface rides AuthKit group membership through the control
-plane — OpenRails stores no team state of its own.
+`llm.provider` is `anthropic` (default) or `openai`; `llm.base_url` points
+`openai` at any OpenAI-compatible backend (Groq, Ollama, vLLM). Everything else
+on the dashboard works keyless.
 
-- **Roster** — `GET /v1/merchant/team` → `{data: [{user_id, email, username, role}]}`,
-  owner first. The synthetic bootstrap api-key actor (a non-login system owner seeded
-  on admin-less deployments) is filtered out — it is not a teammate and never counts
-  toward the owner total.
-- **Invite** — `POST /v1/merchant/team/invites` `{email, role}` → `201`. Two outcomes,
-  because AuthKit exposes no consumer-facing "consent invite" to a known user:
-  - the email is an **existing** user → they are added to the team immediately
-    (`{added: true, member}`); they see the merchant on next sign-in.
-  - the email is **unregistered** → a single-use register+join link is minted
-    (`{added: false, invite, url}`); the `url` is shown once for the owner to send.
-    This path requires the deployment to permit self-registration
-    (`ExternalInvitesEnabled`). **Locked-down standalone runs registration closed**, so
-    it returns `409 invites_disabled`: a new teammate must be provisioned by the
-    operator first, then added here by email. Hosted/embedded-open postures mint the
-    link. (This is the documented "register-then-accept hosted / operator-provisioned
-    embedded" split.)
-- **Pending invites** — `GET /v1/merchant/team/invites` → `{data: [...], invites_enabled}`
-  (the invite links, never the code); revoke with `DELETE /v1/merchant/team/invites/{id}`.
-- **Change role** — `PATCH /v1/merchant/team/{user_id}` `{role}`.
-- **Remove** — `DELETE /v1/merchant/team/{user_id}` (typed-confirm in the console).
-
-**Last-owner invariant.** A merchant must always keep at least one (human) owner:
-demoting or removing the sole owner is refused with a corrective `400 last_owner`.
-Self-demotion is therefore allowed only when another owner exists. The check counts
-human owners (the bootstrap actor is excluded); AuthKit's own `refuseIfLastOwner` is a
-backstop underneath.
-
-Reads gate on `merchant:members:read`, mutations on `merchant:members:manage` — both
-held only by the **owner** in the fixed catalog (the same built-in permission strings
-AuthKit's group-management authorization checks), so the team surface is owner-only,
-exactly like API keys. No-escalation holds on every grant: a caller can only assign a
-role whose permissions its own credential already covers. Teams are per-merchant:
-merchant A's members are invisible to (and unmanageable by) B.
-
-## Dashboard (#741, #755)
-
-The Dashboard page is a per-merchant WIDGET GRID over the #733 metrics API: every tile
-is a saved metrics query + viz (stat/line/area/bar/donut/table) + grid position,
-persisted via `GET/PUT /v1/merchant/dashboard` (one RLS-scoped row per merchant; no row
-= the seeded default template, usage widgets appearing only when the merchant has usage
-activity). Drag/resize/add/edit/remove; changes save automatically (debounced PUT).
-Reads need `merchant:metrics:read`; writes + generation need `merchant:dashboard:update`
-(owner + support roles).
-
-Widget queries are written by the LLM ONLY — by design (#755, there is no manual query
-builder). Creating a widget = a natural-language prompt ("count of users who cancelled
-per day, for the past 7 days") that a server-side LLM turns into a validated query — the
-model only ever sees the metrics schema, never data, and its output must pass the same
-compiler validation as any client query (corrective errors are fed back, max 2 retries).
-The result previews live through `/v1/merchant/metrics/query` before saving; the only
-human knobs are the title and the viz type (the LLM suggests both). Editing an existing
-widget is a REFINEMENT: the instruction ("make it weekly", "split by rail") is sent with
-the widget's current query as `base_query`, and the LLM edits it instead of starting
-over. Direct title/viz edits never touch the LLM. `GET /v1/merchant/metrics/schema`
-stays public for programmatic clients.
-
-FAIL-CLOSED, but visible: with no LLM configured the generate endpoint answers 501 and
-`config.json` carries `nl_widgets_enabled: false`; the add-widget button stays visible
-and opens a pointed empty-state naming the fix (`llm.api_key` / env `LLM_API_KEY`).
-Everything else works keyless: the seeded default template, drag/resize/delete,
-per-widget refresh, and direct title/viz edits of existing widgets — only creating or
-refining queries needs the key.
-
-```yaml
-llm:
-  # provider: anthropic      # anthropic (default) | openai — unknown values refuse boot
-  # model: ...               # default per provider (see matrix) — cheapest capable on purpose:
-  # the /schema examples + all-at-once corrective errors are designed so query generation needs
-  # no model cleverness; configure a bigger model only if generation quality demands it
-  api_key: "..."             # SECRET — prefer env LLM_API_KEY or a mounted secret file
-  # base_url: ...            # override the provider endpoint (OpenAI-compatible backends);
-  #                          # absolute URL, https outside development; env LLM_BASE_URL
-  # ask_enabled: true        # #756 metrics Q&A consent — see below; env LLM_ASK_ENABLED
-```
-
-Provider matrix (#761):
-
-| `provider` | default `model` | `base_url` |
-|---|---|---|
-| `anthropic` (default) | `claude-haiku-4-5-20251001` | optional; origin form, e.g. `https://api.anthropic.com` |
-| `openai` | `gpt-5.4-nano` | optional; version-inclusive form, e.g. `https://api.openai.com/v1` |
-| OpenAI-compatible (Groq, Together, Ollama, vLLM) | none — set `model` to the backend's id | `provider: openai` + required `base_url`, e.g. Ollama `http://localhost:11434/v1` (http = development only) |
-
-Defaults are the cheapest tool-capable model per provider (`gpt-5.4-nano`: $0.20/M in,
-$1.25/M out — the current-generation floor). Example — local Ollama in development:
-
-```yaml
-llm:
-  provider: openai
-  base_url: http://localhost:11434/v1
-  model: qwen3:8b            # any tool-capable local model
-  api_key: ollama            # compatible backends still require a bearer value
-```
-
-The provider is invisible to the frontend: the fail-closed gates
-(`nl_widgets_enabled` / `ask_enabled`) and every endpoint behave identically.
-
-## Ask your metrics (#756)
-
-The Ask panel on the Dashboard page answers free-form questions ("why did revenue dip
-last week?") via `POST /v1/merchant/metrics/ask`: the server-side LLM runs
-compiler-validated #733 queries as tools (RLS-pinned to the caller's merchant,
-aggregates only — never entity rows) and answers from the results. The response shows
-its work: the answer PLUS the verbatim result of every executed query as evidence
-tables — on-screen numbers come from the API responses, never from the model's prose.
-Each evidence query has an "Add as widget" button into the normal preview/save flow.
-One-shot: a new question replaces the previous answer. Asking needs only
-`merchant:metrics:read` (it is read-only over the same data as `/query`); each merchant
-is rate-limited (10 asks/min, 200/day) and each ask is capped at 5 queries.
-
-DATA-FLOW CONSENT — why a second flag: NL widget generation (#741) sends ONLY the
-metrics schema to the LLM provider; `/ask` also sends the AGGREGATE QUERY RESULTS
-(that is the point — the model reads the numbers to answer). So ask has its own
-fail-closed flag, `llm.ask_enabled` (env `LLM_ASK_ENABLED`, default false), on top of
-the key: a merchant deployment can have NL widgets without NL answers. Keyless or
-unconsented, the endpoint answers 501, `config.json` carries `ask_enabled: false`, and
-the panel renders a pointed empty-state naming both knobs.
-
-External agents get the same power against the raw API (schema + query endpoints with
-a merchant API key) — see `docs/metrics-for-llms.md` for the two-endpoint recipe and a
-copy-paste tool definition.
-
-## Catalog copilot (#779)
-
-The catalog copilot extends the Ask pattern above from METRICS to the CATALOG: a panel
-on the Catalog page answers questions about products, prices, subscriber counts, and
-pending migrations via `POST /v1/merchant/catalog/ask`. Read-only tools (`list_catalog`,
-`get_price`, `price_history`, `list_reprice_batches`) run against the caller's
-RLS-pinned merchant; every listing carries its active-subscriber and grandfathered
-counts inline (no second call needed), and "0 results"/"no pending migrations" are
-stated explicitly. Same rate limit/cap doctrine as `/metrics/ask` (its own budget, never
-shared). Needs only `merchant:catalog:read` — Q&A never mutates.
-
-```yaml
-llm:
-  catalog_copilot_enabled: true    # aggregate catalog/subscriber data flows to the LLM
-  # catalog_drafting_enabled: false  # Phase 2 — see below; env LLM_CATALOG_DRAFTING_ENABLED
-```
-
-**The one safety principle:** the model NEVER mutates. When
-`llm.catalog_drafting_enabled` is armed, the loop gains two more tools —
-`draft_price_change` (a #777 wizard plan: new amount + migration mode + effective date,
-with the affected-subscriber count and review text already computed) and
-`draft_catalog_diff` (a new tier on an existing product) — but both only return a DRAFT
-payload. The console opens the draft, pre-filled, at the wizard's review step (or a
-plain create-price confirm for a new tier); nothing changes until a human clicks
-Confirm, which calls the exact same API the hand-typed flow does. A request that would
-need cross-product migration (moving subscribers onto a different, pre-existing
-product — #778, explicitly deferred) is refused with a typed reason and the
-archive-and-grandfather workaround, never drafted.
-
-**`catalog_drafting_enabled` is an explicit per-deployment consent** (like
-`ask_enabled`) and is safe to enable: #781 (server-side notice-window enforcement
-for scheduled price increases) shipped 2026-07-07, so the copilot's safety story —
-"the API refuses what the wizard would refuse" — holds. Flag-off means the `draft_*`
-tools are entirely ABSENT from the tool list (the model cannot even attempt one),
-not present-but-erroring; flipping the flag on is the whole migration.
+Day-to-day workflows — catalog authoring, dunning, refund doctrine, team
+management, API keys for agents — live in [the merchant guide](merchant-guide.md).
+For programmatic access to the same metrics the console uses, see
+[metrics-for-llms.md](metrics-for-llms.md).

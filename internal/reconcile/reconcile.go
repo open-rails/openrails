@@ -128,7 +128,7 @@ type RemoteTransaction struct {
 	// Stripe failure_code) — the payments.failure_code stamp (#796): a
 	// backfilled decline without it reads failure_reason='unknown'.
 	DeclineCode string          `json:"decline_code,omitempty"`
-	Raw           json.RawMessage `json:"raw,omitempty"`
+	Raw         json.RawMessage `json:"raw,omitempty"`
 }
 
 // RemoteVaultEntry is one stored payment method as the rail declares it.

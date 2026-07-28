@@ -1,10 +1,12 @@
 # OpenRails API Reference
 
-OpenRails exposes public catalog routes, delegated browser/self-service APIs,
-delegated billing-admin APIs, rail webhooks, and an API-key server-to-server
-surface on the same public port. All responses are JSON encoded. Unless
-otherwise stated, errors follow the
-Stripe-style envelope:
+The HTTP surface of the standalone OpenRails server. Everything is served on ONE
+public port under the `/v1` prefix (plus unprefixed health probes and the `/auth`
+control-plane mount). Embedded hosts mount a subset of the same route groups —
+`GET /v1/capabilities` reports which groups a deployment actually serves.
+
+All requests and responses are JSON unless noted. Non-2xx responses use the
+Stripe-shaped error envelope from `pkg/api`:
 
 ```json
 {
@@ -17,589 +19,394 @@ Stripe-style envelope:
 }
 ```
 
-List endpoints use a Stripe-like envelope:
+List endpoints use a Stripe-like list envelope:
 
 ```json
-{
-  "object": "list",
-  "data": [],
-  "total": 0,
-  "limit": 20,
-  "offset": 0,
-  "has_more": false,
-  "url": "/v1/example"
-}
+{ "object": "list", "data": [], "total": 0, "limit": 20, "offset": 0, "has_more": false }
 ```
 
-`url` is included only on endpoints that use server-side pagination helpers; other list endpoints omit it.
-
-## Authentication & Security
-
-| Surface | How to authenticate |
-|---------|---------------------|
-| Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
-| Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub`. Embedded: the host's configured AuthKit/user bearer is adapted to the same customer principal. |
-| User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
-| Merchant API (`/v1/merchant/*`, same public port) | `Authorization: Bearer <generated API key, first-party service JWT, delegated JWT, or user access token>`; each route requires a `merchant:*` permission |
-| Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
-
-Delegated JWTs and machine credentials are intentionally different credentials.
-Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
-JWKS, audience, expiry, and optional permission checks. OpenRails stores/touches
-the payable customer reference `(merchant_id, subject)` needed for billing;
-`issuer` is audit/last-seen source metadata, not identity. OpenRails does not
-create OpenRails-native users for delegated subjects. Generated API keys and first-party service JWTs are backend
-credentials and are rejected by delegated self routes.
-
-Delegated JWT examples:
-
-- Doujins/Hentai0 membership UI: the host frontend presents a short-lived token
-  signed by its registered issuer with `aud: "openrails-app"` and
-  `delegated_sub: "<canonical-user-id>"`. `/v1/me/*` acts only on that subject.
-- Cozy Art billing-admin membership UI: an admin browser token is signed by the
-  Cozy issuer with `delegated_sub: "<admin-subject>"`; AuthKit bounds requested
-  permissions to that issuer's stored authority for `/v1/merchant/*`.
-- Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
-  subject is the upstream merchant/company subject to read its own balance
-  through browser/direct OpenRails routes. Backend
-  reserve/capture/release remains machine-credential-only.
-
-Verified AuthKit user-token `entitlements` claims are authoritative short-lived
-snapshots for premium/product access decisions. `sid` remains session identity
-for logout, reauth, and freshness flows; it is not profile data. Embedded
-deployments that need grant/revoke changes reflected before token expiry can
-configure a live freshness check, but standalone/remote mode accepts verified
-JWT entitlement claims without that optional check.
-
-## Idempotency-Key
-
-Any mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) on the public HTTP surface
-may carry an `Idempotency-Key` header. It is optional — clients that omit it
-get no replay protection, but every existing route keeps working exactly as
-before.
-
-- **Scope**: keys are scoped per merchant, not per subject/route — the same
-  key reused against a different mutating route+body will be treated as a
-  key-reuse conflict (see below), not a cross-route no-op.
-- **Window**: a completed response is cached for **24 hours**; after that the
-  key is free to reuse.
-- **Same key, same request body** (method + path + raw body): the ORIGINAL
-  response is replayed byte-for-byte, with an added
-  `Idempotent-Replayed: true` response header. The handler never runs a
-  second time — no duplicate checkout/subscription/charge.
-- **Same key, different request body**: `409` with
-  `{"error":{"type":"invalid_request_error","code":"idempotency_key_reuse",...}}`.
-- **A request with the same key is still in flight**: `409` with
-  `code":"idempotency_in_progress"`.
-- Server errors (`5xx`) and oversized responses are never cached — a retry
-  with the same key re-runs the handler.
-- This is a pure HTTP-response replay cache layered ON TOP of each route's own
-  correctness guards (e.g. the admin-refund DB dedup, the checkout service's
-  content-addressed intent identity) — it never replaces them.
-
-## Health & Service Banner
-
-### GET /
-Returns a short JSON banner (`{"service":"billing","status":"ok","endpoints":[...]}`) so load balancers can
-confirm the API is reachable.
-
-### GET /health/live, /healthz
-Unconditional liveness probes.
-
-### GET /health/ready, /readyz
-Runs readiness checks against Postgres, Redis, and the AuthKit verifier. Returns 200 when all checks pass,
-or 503 with `{ status: "not_ready", ... }`. Add `?verbose=1` to include dependency details.
-
-## Public Catalog Endpoints
-
-### GET /v1/products
-Lists products with embedded active prices. Query parameters mirror Stripe's `/v1/products`:
-`active` (default `true`, only honoured for admins), `limit` (1-100, default 20), `offset` (>=0).
-Response: `ListResponse<Product>`.
-
-### GET /v1/prices
-Lists price objects. Query parameters: `active`, `currency`, `product` (product ID), `type`
-(`recurring` or `one_time`), plus `limit`/`offset`. Response: `ListResponse<Price>`.
-
-### GET /v1/prices?product=prod_xxx
-Same endpoint; explicitly documenting that product filters accept either the `prod_` prefixed ID or a
-raw UUID.
-
-### GET /v1/solana/tokens
-Returns the currently supported Solana tokens and live pricing:
-
-```json
-{
-  "tokens": [
-    { "symbol": "USDC", "name": "USD Coin", "mint": "...", "decimals": 6, "price": 1.0 }
-  ]
-}
-```
-
-### POST /v1/webhooks/{provider}
-Receives rail webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed rail such as `mobius`.
-- `ccbill`: form-encoded payload, verified via source IP ranges (unless test mode).
-- NMI-backed rails (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
-  `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
-- `stripe`: JSON body with `Stripe-Signature` header (if configured).
-Returns 200 with `{ status: "accepted" }` on success, 401/403 for auth failures, 400 for unknown provider.
-
-### POST /v1/merchants/{merchant}/webhooks/{provider}
-Merchant-scoped webhook path for private/embedded multi-merchant installs. OpenRails resolves `{merchant}` first, then verifies with that merchant's provider signing secret. Unknown merchants return 404 and never fall back to a default merchant.
-
-## Checkout Sessions (Authenticated)
-
-### POST /v1/checkout
-Creates a checkout session for **new** subscriptions and one-off purchases.
-
-> **Note:** Tier upgrades/downgrades are **not** supported via this endpoint. If the user already has
-> an active subscription in the same tier group, the response will be `{ "status": "blocked" }` with a
-> message directing the client to use `POST /v1/me/subscriptions/change-tier` instead.
-
-- Auth: bearer token
-- Optional header: `Idempotency-Key` to dedupe create requests — see [Idempotency-Key](#idempotency-key)
-- Body:
-  - `price_id` (required)
-  - `mode` (optional) – `one_off` or `subscription`; if omitted, resolved from the price
-  - `payment` (required):
-    - `rail` (required) – `mobius`, `ccbill`, `solana`, or `stripe`
-    - `payment_method_id` or `payment_token` for `mobius`/`stripe`
-    - `token_symbol` for `solana`
-    - `flow` for `solana` – `transfer_request` (default) or `transaction_request`
-    - `wallet` required for `transaction_request`
-    - Billing details for `ccbill`/`stripe`: `email`, `first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`
-  - `metadata` (optional string map)
-- Response: `CheckoutSessionResponse` with `payment` details, `next_action` (redirect/solana), and optional
-  `payment_id` / `subscription_id` once completed.
-
-### GET /v1/checkout/{id}
-Retrieves a checkout session by ID. Returns `CheckoutSessionResponse`. Responds with 403 if the session
-belongs to another user.
-
-### POST /v1/checkout/{id}/confirm
-Confirms a Solana checkout session.
-- Body: `{ payment: { rail: "solana", signature: "...", wallet?: "..." } }`
-- Response: `CheckoutSessionResponse`
-- Errors: 400 validation, 403 forbidden, 404 not found, 409 conflict, 410 expired
-
-## Self-Service API (`/v1/me`)
-
-Every endpoint in this section requires an authenticated customer principal for
-the current user: a delegated JWT in standalone mode, or the embedded host's
-authenticated user bearer mapped to a customer principal.
-
-### GET /v1/me/balance
-Query param: `currency` (`USD`, `EUR`, `JPY`). Returns the caller's durable per-currency balance:
-`{ currency, balance_amount }`. Amounts use the currency's native internal precision; USD is micro-USD.
-
-### GET /v1/me/transactions
-Query params: `currency`, `limit`, `offset`. Lists the caller's ledger transactions newest first.
-
-### PUT /v1/me/settings
-Body accepts customer-owned self-imposed settings only: `currency`, `max_spend_per_day`,
-`max_spend_per_month`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`,
-and `auto_topup_payment_method_id`.
-
-### GET /v1/me/status
-Aggregated premium status: whether the user currently has an active membership, the enriched
-subscription object, the next renewal timestamp, and all entitlement records.
-Response includes `has_active_subscription`, `subscription`, `next_renewal_at`, and `entitlements`.
-
-### GET /v1/me/subscriptions
-History of the caller's subscriptions. Query params: `status` (`pending`, `active`, `past_due`, `cancelled`, or `all`),
-`limit`, `offset`. Response: `ListResponse<UserSubscription>` (with `product`, `price`, `access`).
-
-### GET /v1/me/subscriptions/{id}
-Retrieves a single subscription by ID with enriched product, price, and access data.
-Returns `UserSubscriptionResponse`. Returns 404 if subscription is not found or doesn't belong to the user.
-
-### PUT /v1/me/subscriptions/{id}/payment-method
-Request body `{ "payment_method_id": "pm_uuid" }`. Updates the card vault entry
-used for an NMI-backed subscription (CCBill/Solana subscriptions cannot be reassigned). Returns:
-`{ success, message, subscription_id, payment_method_id }`.
-
-### POST /v1/me/subscriptions/{id}/cancel
-Body `{ "feedback": "optional text" }`. Cancels the specified subscription and returns
-`202 { "status": "queued" }`. For CCBill subscriptions, returns
-`422 { error, support_url, code }` because cancellation must be performed via the CCBill portal.
-
-### POST /v1/me/subscriptions/{id}/resume
-Queues a resume for a cancelled Stripe subscription. Returns `202 { "status": "queued" }`.
-Returns 400 if the subscription is not cancelled or not a Stripe subscription.
-
-### POST /v1/me/subscriptions/{id}/change-tier
-Unified tier change endpoint for upgrades and downgrades across all rails.
-
-**Request:**
-- Body: `{ "price_id": "price_..." }`
-- Optional header: `Idempotency-Key` for retry safety — see [Idempotency-Key](#idempotency-key)
-
-**Response:** `TierChangeResponse`
-```json
-{
-  "object": "tier_change",
-  "status": "succeeded|requires_action|blocked",
-  "mode": "tier_change",
-  "action": "upgrade|downgrade",
-  "price_id": "price_...",
-  "url": "https://...",
-  "payment": { "rail": "stripe|mobius|ccbill" },
-  "subscription_id": "sub_...",
-  "next_action": { "type": "redirect_to_url", "redirect_to_url": { "url": "..." } },
-  "message": "...",
-  "delayed_start": "2024-02-15T00:00:00Z"
-}
-```
-
-**Rail behavior:**
-| Rail | Upgrade | Downgrade |
-|-----------|---------|-----------|
-| Stripe | `succeeded` (immediate with proration) | `succeeded` + `delayed_start` (scheduled for period end) |
-| NMI-backed rails | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
-| CCBill | `requires_action` + top-level `url` redirect to FlexForm | `blocked` + message |
-| Solana | HTTP 400 (not supported) | HTTP 400 (not supported) |
-
-**Notes:**
-- Target price must be in the same tier group as current subscription
-- For hosted rail actions, clients should redirect to top-level `url`
-- For scheduled downgrades, the change takes effect at `delayed_start`
-
-### GET /v1/me/payments
-Lists one-off payments. Query params: `type` (rail filter), `limit`, `offset`.
-Response: list of `PaymentRecord` entries (raw payment model with optional `price` and `subscription`).
-
-### GET /v1/me/payment-methods
-Query params: `limit`, `offset`, `include_inactive`. Response: list of stored payment methods.
-
-### POST /v1/me/payment-methods
-Body includes `payment_token` (Collect.js token) plus billing details (`first_name`, `last_name`, `address1`, `city`,
-`state`, `zip`, `country`, optional `email`, `phone`, `company`, `address2`, `provider`). Creates and activates an NMI
-vault record. Response: payment method object.
-
-### PUT /v1/me/payment-methods/{id}
-Body accepts a new `payment_token` and optional billing fields (all pointers). Replaces the stored vault card for the
-referenced method. Returns updated payment method.
-
-### DELETE /v1/me/payment-methods/{id}
-Soft-deletes the stored method. Response `{ success, message }`.
-
-### PUT /v1/me/payment-methods/{id}/activate
-Re-verifies and marks the method active. Response `{ success, message }`.
-
-### GET /v1/me/balance
-Query param: `currency` (`USD`, `EUR`, `JPY`). Returns the caller's durable per-currency balance:
-`{ currency, balance_amount }`. Amounts use the currency's native internal precision; USD is micro-USD.
-
-### GET /v1/me/transactions
-Query params: `currency`, `limit`, `offset`. Lists the caller's ledger transactions newest first.
-
-### PUT /v1/me/settings
-Body accepts customer-owned self-imposed settings only: `currency`, `max_spend_per_day`,
-`max_spend_per_month`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`,
-and `auto_topup_payment_method_id`.
-
-### GET /v1/me/notifications
-Query params: `limit` (1-100), `offset`, `seen` (`true`/`false`). Response list of
-notifications `{ id, event_type, data, seen, created_at }`.
-
-### GET /v1/me/notifications/unread-count
-Returns `{ unread_count: <int> }`.
-
-### POST /v1/me/notifications/{id}/read
-Marks the notification as read. Response `{ message: "notification marked as read" }`.
-
-### POST /v1/me/billing-portal
-Creates a billing portal session when the merchant has a provider that supports portal handoff.
-Response `{ "url": "https://..." }`.
-
-## Merchant API (`/v1/merchant/*`)
-
-Merchant endpoints live on the SAME public port as everything else (issue #222)
-- there is no private port, mTLS listener, or separate legacy API-key layer.
-Callers present one of:
-
-```
-Authorization: Bearer <openrails_st_...>
-Authorization: Bearer <service-jwt-signed-by-registered-issuer>
-Authorization: Bearer <delegated-jwt-or-user-access-token>
-```
-
-Generated API keys are resolved through the OpenRails-owned AuthKit control
-plane: their owning permission group maps to an OpenRails merchant, and granted
-`merchant:*` permissions gate what they may do. API-key resource scopes are gone;
-a merchant key acts within the merchant group it was minted under.
-
-First-party service JWTs are signed by a registered issuer and must carry
-standard JWT/OIDC claims plus `token_use=service`, `jti`, a maximum 15-minute
-lifetime, accepted `aud`, and self-assigned `permissions`. Registering the issuer
-to a merchant is the authorization: OpenRails resolves the issuer to its merchant,
-treats the token's `permissions` claim as authoritative, and scopes every
-resource to that merchant (a token can never reach another merchant's resources).
-
-The canonical merchant permission vocabulary is OpenRails-owned `merchant:*`.
-Every route passes through the same OpenRails principal gate regardless of
-credential type: API key, service JWT, delegated JWT, or live AuthKit user
-session.
-
-Credential examples:
-
-- Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
-  such as `service:doujins-runtime`, permission `merchant:customer-settings:read`,
-  resource `openrails.merchant=<merchant_uuid>`, route
-  `GET /v1/merchant/customers/{customer_id}/entitlements`.
-- Tensorhub reserve/capture/release: permission `merchant:admissions:create`;
-  resources include `openrails.merchant=<merchant_uuid>` and, for payer-scoped
-  generated tokens or service-JWT grants, `openrails.customer=<customer_uuid>`.
-
-| Route | Required permission |
-|-------|---------------------|
-| `GET /v1/merchant/customers/{customer_id}/entitlements`, `GET /v1/merchant/users/{user_id}/product-access`, `GET /v1/merchant/invokers/{invoker}/credits`, `GET /v1/merchant/trust-level`, `GET /v1/merchant/credit-limit`, `GET /v1/merchant/credits/balance` | `merchant:customer-settings:read` |
-| `POST /v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` |
-| `PUT /v1/merchant/credit-limit`, `POST /v1/merchant/credits/deposit`, `PUT /v1/merchant/customers/{customer_id}/spend-delegations`, `PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` |
-| `POST /v1/merchant/admissions`, `POST /v1/merchant/admissions/{id}/capture`, `POST /v1/merchant/admissions/{id}/release`, `POST /v1/merchant/wasted-spend` | `merchant:admissions:create` |
-| `GET /v1/merchant/settings` | `merchant:settings:read` |
-| `PUT /v1/merchant/settings` | `merchant:settings:update` |
-| `POST /v1/merchant/usage/rollup`, `POST /v1/merchant/usage/resource-revenue` | `merchant:usage:read` |
-
-Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
-after authorizing the action themselves.
-
-Terminology for this surface is defined in
-`docs/authkit-merchant-oidc-glossary.md`: OpenRails merchant = billing/integration
-boundary, delegated user = external OIDC `issuer` + `subject`, customer =
-payable identity, generated API key/service JWT = server-to-server
-credentials.
-
-### GET /v1/merchant/customers/{customer_id}/entitlements
-Returns active entitlements for the payable customer at the current time.
-Optional query param `at` (RFC3339) queries entitlements at a specific time.
-Response: array of entitlement records with `customer_id`. Merchant
-entitlement reads query `billing.entitlements.customer_id` directly; they
-do not translate the customer through legacy `user_id`.
-
-### GET /v1/merchant/invokers/{invoker}/credits
-Returns credit balance summary for an invoker. Optional query params:
-`customer_id` and `type` (defaults to `api_credits`, which must exist in
-`billing.credit_types`).
-Response: `{ type, balance, held_balance }`.
-
-### POST /v1/merchant/credits/deposit
-Deposit/grant credits. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
-Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(customer_id, credit_type, source, source_id)`.
-
-### POST /v1/merchant/admissions
-Pre-authorize spend and place holds. The returned admission id is the durable
-identifier you later capture or release.
-
-Idempotency:
-- Hold creation is idempotent per `(customer_id, credit_type, source, source_id)`; retries return the existing hold transaction.
-
-### POST /v1/merchant/admissions/{id}/capture
-Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
-
-### POST /v1/merchant/admissions/{id}/release
-Release a hold without spending credits. Response `{ ok: true }`.
-
-### Catalog (definition surface)
-
-#### Checkout prerequisites
-
-OpenRails does not seed products/prices/credit types in production. For checkout to work, the host must define:
-
-- `billing.products`: at least one active product.
-- `billing.prices`: at least one active price for that product.
-- Rail mappings on the price (`billing.prices.rails`) for any rail you intend to use:
-  - Stripe: `rails.stripe.price_id` (and optionally `rails.stripe.product_id`).
-  - NMI-backed rails: `rails.<provider>.plan_id` (for example `rails.mobius.plan_id`).
-  - CCBill: `rails.ccbill.form_name` + `rails.ccbill.flex_id`.
-- Any credit types referenced by `products.credits_spec` must exist in `billing.credit_types`.
-
-### POST /v1/merchant/catalog/products
-Create a product. Body includes at least `{ key, display_name }`, and may include `entitlements_spec` and `credits_spec`.
-
-#### `credits_spec` v2
-
-`credits_spec` is a JSON object keyed by credit type name (`billing.credit_types.name`). Example:
-
-```json
-{
-  "api_credits": { "amount": 100000, "expiry_hours": 720, "cadence": "per_renewal" },
-  "signup_bonus": { "amount": 5000, "expiry_hours": 2160, "cadence": "once" }
-}
-```
-
-- `amount` is in the credit type's base integer units (not USD cents).
-- `expiry_hours` is optional; when present, each grant expires after N hours.
-- `cadence` is `once` (default) or `per_renewal`.
-
-Renewal semantics:
-- `cadence=once` is granted on initial subscription activation.
-- `cadence=per_renewal` is granted on confirmed renewal/rebill success (Stripe invoice paid; NMI rebill success; CCBill RenewalSuccess).
-
-Idempotency / webhook replay safety:
-- Recurring grants are idempotent per `(subscription_id, credit_type_id, period_end)` by using a deterministic deposit `source_id` derived from those fields (no dedicated idempotency table).
-- Duplicate webhooks for the same period do not double-grant.
-
-Host policy defaults (current behavior):
-- Upgrades/downgrades do not trigger an immediate extra credit grant; recurring credits are granted on the next confirmed renewal.
-- Refunds do not claw back previously granted credits (no automatic negative adjustments).
-
-### PATCH /v1/merchant/catalog/products/{id}
-Update product definition fields (display_name, description, entitlements_spec, credits_spec, tier_group/tier_rank, is_active).
-
-### POST /v1/merchant/catalog/prices
-Create a price. Supports per-rail mapping mode: `{ rails: { stripe: { link: {...} } | { create: {...} }, ... } }`.
-
-Rail mapping modes:
-- `link`: host provides existing rail identifiers and OpenRails stores them in `billing.prices.rails`.
-- `create`: OpenRails attempts to create remote objects and stores the returned IDs.
-
-Auto-create support:
-- Stripe: supported (`create`), using Stripe API.
-- NMI-backed rails: link-only (provide `plan_id`).
-- CCBill: link-only (provide `form_name` + `flex_id`).
-
-### PATCH /v1/merchant/catalog/prices/{id}
-Update price rails mapping or the `archived` lifecycle flag.
-
-### Provider registration & content-addressed dedup
-
-OpenRails is the source of truth for catalog, product, entitlement, usage,
-invoice, and billing semantics. Provider catalog objects are payment/sync
-adapters: Stripe can mirror product/price objects, NMI-backed rails are
-link-only for recurring plans, and Solana carries payment identifiers rather
-than rich billing metadata. Do not rely on a provider round-trip to recover the
-full OpenRails catalog.
-
-When the catalog is synced, OpenRails find-or-creates the matching provider
-objects. Matching is **content-addressed** — it keys off the catalog product key and price terms, not
-the OpenRails row UUIDs — so re-syncing or wiping the DB and re-syncing always
-re-attaches to the existing provider objects rather than duplicating them.
-
-- **Price identity** is `(product_key, currency, unit_amount, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours)`.
-- **Stripe content keys** are derived from the product key and price terms.
-- These keys do not depend on row UUIDs, so a DB-wipe-and-resync that regenerates
-  UUIDs reattaches to the same Stripe objects. Re-sync is idempotent: re-attach,
-  never duplicate. Reconciliation reverse-matches Stripe objects to OpenRails
-  rows the same way (by content key, falling back from `openrails_price_key`
-  metadata to the `openrails.` lookup_key prefix).
-
-**Provider coverage:**
-
-| Provider | Registration |
-|----------|--------------|
-| Stripe | **Auto-creates** products and prices on sync (and stamps the content keys above). |
-| NMI-backed rails | **Link-only** — the operator must supply the existing NMI `plan_id` in the catalog. Not auto-created. |
-| CCBill | **Link-only** — the operator must supply the CCBill `form_name` + `flex_id` (FlexForm) in the catalog. Not auto-created. |
-
-A link-only provider with no operator-supplied ids is recorded as
-`pending_manual_link` (the price is still created in OpenRails) and the response
-carries a `pending_manual_actions` entry telling the operator which link ids to
-PATCH in.
-
-**Amount / billing-cycle changes (re-mint):** Stripe and NMI prices are
-immutable on financial terms — `unit_amount`, `currency`, and the billing cycle
-cannot be edited in place. When such a field changes on a key-stable price,
-reconcile **re-mints**: it creates a new Stripe price (which sets
-`transfer_lookup_key`, atomically moving the content `lookup_key` off the old
-price onto the new one) and archives the old price. Mutable-only drift (active
-flag) is propagated with a plain update. Re-mint requires `recreate=true` on the
-reconcile call; otherwise the price reports `drifted_no_recreate` / a missing
-remote reports `missing_no_recreate`.
-
-**Test vs. live:** registration runs in whichever environment `test_mode`
-selects. Stripe test and live are entirely separate namespaces (separate objects
-and lookup_keys), so a price registered in the test environment is never matched
-against a live object and vice versa.
-
-## Merchant Support API (`/v1/merchant`, `merchant:*` permissions)
-
-The old `/v1/admin/*` billing surface is removed. Staff/support calls use the
-resource-named merchant surface below. Merchant admins can read saved payment
-method metadata, but cannot create/update/delete customer payment methods.
-
-### GET /v1/merchant/customers/{customer_id}
-Returns the customer billing profile: customer id, trust level/status, balances,
-entitlements, product access, payment history, subscription history, and saved
-payment-method metadata. Requires `merchant:customer-settings:read`.
-
-### GET /v1/merchant/customers/{customer_id}/payment-methods
-Lists redacted saved payment-method metadata. Requires
-`merchant:customer-settings:read`.
-
-### GET /v1/merchant/customers/{customer_id}/payments
-Lists payment history for one customer. Requires `merchant:payments:read`.
-
-### POST /v1/merchant/customers/{customer_id}/payments/off-channel
-Records an off-channel/manual purchase and grants product entitlements through
-the normal checkout purchase path. Requires `merchant:customer-settings:update`.
-
-### PUT /v1/merchant/customers/{customer_id}/spend-delegations
-Atomically replaces the customer's complete payer-owned spend-delegation policy.
-Requires `merchant:customer-settings:update`.
-
-### PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert
-Atomically upserts one customer spend delegation without changing sibling grants.
-Requires `merchant:customer-settings:update`.
-
-### POST /v1/merchant/customers/{customer_id}/entitlements
-Manually grants an entitlement through the grant ledger. Requires
-`merchant:customer-settings:update`.
-
-### DELETE /v1/merchant/customers/{customer_id}/entitlements/{grant_id}
-Revokes a manual entitlement grant. Requires
-`merchant:customer-settings:update`.
-
-### POST /v1/merchant/customers/{customer_id}/product-access
-Manually grants product access through the grant ledger. Requires
-`merchant:customer-settings:update`.
-
-### DELETE /v1/merchant/customers/{customer_id}/product-access/{grant_id}
-Revokes a manual product-access grant. Requires
-`merchant:customer-settings:update`.
-
-### GET /v1/merchant/payments
-Lists merchant payments with filters. Requires `merchant:payments:read`.
-
-### GET /v1/merchant/payments/{id}
-Returns one payment with refund history. Requires `merchant:payments:read`.
-
-### POST /v1/merchant/payments/{id}/refunds
-Issues or records a refund through the underlying rail. `revoke_access`
-must be explicit when the refund should also revoke one-off access granted by
-that payment. Requires `merchant:payments:refund`.
-
-### GET /v1/merchant/subscriptions
-Lists merchant subscriptions with filters. Requires
-`merchant:subscriptions:read`.
-
-### GET /v1/merchant/subscriptions/{id}
-Returns one subscription. Requires `merchant:subscriptions:read`.
-
-### POST /v1/merchant/subscriptions/{id}/cancel
-Cancels a subscription. `revoke_access` must be explicit when cancellation
-should also revoke subscription/grace entitlements immediately. Requires
-`merchant:subscriptions:update`.
-
-### POST /v1/merchant/subscriptions/{id}/resume
-Resumes a canceling subscription where the rail supports it. Requires
-`merchant:subscriptions:update`.
-
-### PUT /v1/merchant/subscriptions/{id}/payment-method
-Reassigns a subscription to another saved payment method owned by the same
-customer and merchant. Requires `merchant:subscriptions:update`.
-
-### GET /v1/merchant/metrics
-Returns folded support metrics. Requires `merchant:usage:read`.
-
-### GET /v1/merchant/repair-alerts
-Returns merchant repair alerts. Requires `merchant:repair-alerts:read`.
-
-## Webhook Notes
-
-- **CCBill**: Must originate from the published IP ranges; the handler also validates `formName`/`flexId`
-  against the price metadata.
-- **NMI-backed rails**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
-  `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`. When test mode is enabled via config the signature
-  check is bypassed.
-- **Stripe**: Uses the `Stripe-Signature` header with the configured webhook secret.
+## Authentication overview
+
+| Caller class | Credential |
+|---|---|
+| Public (catalog, health, capabilities, solana pricing) | none |
+| Self-service `/v1/me/*`, customer treasury `/v1/customers/*` | `Authorization: Bearer <delegated JWT>` — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
+| Checkout `/v1/checkout` | any authenticated user bearer |
+| Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | delegated JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
+| Platform `/v1/platform/*` | human operator session checked against root-group grants (standalone only) |
+| Webhooks | provider signature / source-IP verification, no bearer |
+
+Merchant permissions: API keys carry the permissions they were minted with;
+service JWTs (`token_use=service`, max 15-min lifetime, signed by a registered
+issuer) carry a self-asserted `permissions` claim scoped to the issuer's
+merchant; human sessions are checked against the user's merchant-group role.
+The required permission is listed per route below.
+
+### Idempotency-Key
+
+Any mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) may carry an optional
+`Idempotency-Key` header. Keys are scoped per merchant and cached 24h. Same key
++ same method/path/body → the original response is replayed byte-for-byte with
+`Idempotent-Replayed: true`. Same key + different body → `409
+idempotency_key_reuse`. Key still in flight → `409 idempotency_in_progress`.
+5xx responses are never cached. This is a replay cache layered on top of each
+route's own dedup guards, never a replacement for them.
+
+## 1. Public routes
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/` | none | JSON service banner `{"service":"billing","status":"ok",...}` |
+| GET | `/health/live` (alias `/healthz`) | none | Unconditional liveness probe |
+| GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, Redis, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail |
+| GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
+| GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
+| GET | `/v1/captcha/client.js` | none | Captcha client script |
+| GET | `/v1/products` | optional | List products with embedded active prices. Query: `active`, `limit` (1-100, default 20), `offset` |
+| GET | `/v1/prices` | optional | List prices. Query: `active`, `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
+| GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
+
+There is no `/health` route — probes are `/health/live` and `/health/ready`.
+
+## 2. Checkout + rail-specific public routes
+
+Top-level checkout requires an authenticated user bearer. The same three
+handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
+`/v1/customers/{customer_id}/checkout/*` (customer grant) — see section 3.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/v1/checkout` | bearer | Create a checkout session for a new subscription or one-off purchase |
+| GET | `/v1/checkout/{id}` | bearer | Retrieve a session (403 if it belongs to another user) |
+| POST | `/v1/checkout/{id}/confirm` | bearer | Confirm a Solana session: `{ payment: { rail: "solana", signature, wallet? } }` |
+| GET | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transfer/transaction request for the session (buyer signs; mounted when a Solana rail is configured) |
+| POST | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transaction-request callback |
+| POST | `/v1/solana/recurring/enroll` | bearer (handler-enforced) | Confirm a Solana recurring enrollment after the wallet signs subscribe; OpenRails then charges the first cycle. Mounted only when OpenRails has a Solana signer |
+
+`POST /v1/checkout` body:
+
+- `price_id` (required)
+- `mode` (optional) — `one_off` or `subscription`; resolved from the price if omitted
+- `payment` (required):
+  - `rail` (required) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`)
+  - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
+  - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
+  - billing details for `ccbill`/`stripe`: `email`, `first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`
+- `metadata` (optional string map)
+
+Response: checkout session with `payment` details, `next_action`
+(redirect/solana), and `payment_id`/`subscription_id` once completed. Tier
+changes are NOT supported here — if the user already has an active subscription
+in the price's tier group the response is `{ "status": "blocked" }` pointing at
+`POST /v1/me/subscriptions/{id}/change-tier`.
+
+## 3. Self-service (`/v1/me/*`) and customer treasury (`/v1/customers/*`)
+
+All `/v1/me/*` routes require a delegated customer principal; every operation is
+scoped to the token's subject — no `:user_id` appears in any path.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (amounts in micros). Query: `currency` |
+| GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
+| PUT | `/v1/me/settings` | Self-imposed settings: `currency`, `max_spend_per_day`, `max_spend_per_month`, `low_balance_threshold`, `auto_topup_*` |
+| GET | `/v1/me/status` | Aggregated premium status: `has_active_subscription`, enriched `subscription`, `next_renewal_at`, `entitlements` |
+| GET | `/v1/me/usage` | Usage breakdown for the token's subject |
+| GET | `/v1/me/invoices` | List the subject's invoices |
+| GET | `/v1/me/invoices/{id}` | One invoice |
+| GET | `/v1/me/payments` | One-off payment history. Query: `type` (rail filter), `limit`, `offset` |
+| GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
+| GET | `/v1/me/products` | Products relevant to the subject |
+| GET | `/v1/me/products/{product_id}/access` | Whether the subject currently has access to a product |
+| GET | `/v1/me/notifications` | Notifications. Query: `limit`, `offset`, `seen` |
+| GET | `/v1/me/notifications/unread-count` | `{ unread_count }` |
+| POST | `/v1/me/notifications/{id}/read` | Mark one notification read |
+| POST | `/v1/me/billing-portal` | Provider billing-portal session `{ url }` (mounted only when a Stripe rail is configured) |
+
+### Subscriptions
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/me/subscriptions` | Subscription history. Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
+| GET | `/v1/me/subscriptions/{id}` | One subscription with enriched product/price/access (404 if not the caller's) |
+| POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
+| POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
+| POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
+| POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }` |
+
+Solana on-chain lifecycle (mounted only when OpenRails has a Solana signer;
+prepare → wallet signs → confirm):
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/me/subscriptions/{id}/solana-cancel-tx` | Prepare the on-chain cancel transaction for wallet signing |
+| POST | `/v1/me/subscriptions/{id}/solana-cancel` | Confirm the signed on-chain cancel |
+| POST | `/v1/me/subscriptions/{id}/solana-tier-change` | Prepare the on-chain tier-change transaction |
+| POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | Confirm the signed tier change |
+
+Tier-change response: `{ object: "tier_change", status: "succeeded"|"requires_action"|"blocked", action, price_id, url?, subscription_id?, next_action?, delayed_start?, message? }`.
+Stripe/NMI upgrades succeed immediately with proration; downgrades succeed with
+a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
+redirect `url`, downgrades are `blocked`; Solana tier changes go through the
+on-chain prepare/confirm routes above.
+
+### Payment methods
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset`, `include_inactive` |
+| POST | `/v1/me/payment-methods` | Create + activate a vault record. Body: `payment_token` (Collect.js) + billing details |
+| PUT | `/v1/me/payment-methods/{id}` | Replace the stored vault card (`payment_token` + optional billing fields) |
+| DELETE | `/v1/me/payment-methods/{id}` | Soft-delete the method |
+
+### Checkout (delegated)
+
+`POST /v1/me/checkout`, `GET /v1/me/checkout/{id}`,
+`POST /v1/me/checkout/{id}/confirm` — same semantics as `/v1/checkout`
+(section 2) with the delegated token as the buyer.
+
+### Customer treasury (`/v1/customers/{customer_id}/*`)
+
+The customer-as-payer surface: a customer (any payer, possibly a shared/company
+balance) acting on its OWN treasury, addressed by customer id. Handlers are
+shared with `/v1/me/*`; the delegated principal must additionally hold the
+listed `customer:*` grant for that customer (balances can be shared resources).
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:read` |
+| PUT | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:update` — replace the full payer-owned delegation policy |
+| PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | `customer:spend-delegations:update` — upsert one delegation |
+| GET | `/v1/customers/{customer_id}/balance` | `customer:balance:read` |
+| GET | `/v1/customers/{customer_id}/transactions` | `customer:balance:read` |
+| GET | `/v1/customers/{customer_id}/usage` | `customer:balance:read` |
+| GET | `/v1/customers/{customer_id}/payments` | `customer:balance:read` |
+| GET | `/v1/customers/{customer_id}/invoices` | `customer:balance:read` |
+| GET | `/v1/customers/{customer_id}/invoices/{id}` | `customer:balance:read` |
+| PUT | `/v1/customers/{customer_id}/settings` | `customer:billing:update` — billing mode (prepaid/arrears) + self-imposed caps |
+| GET/POST | `/v1/customers/{customer_id}/payment-methods` | `customer:payment-methods:update` |
+| PUT/DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | `customer:payment-methods:update` |
+| POST | `/v1/customers/{customer_id}/billing-portal` | `customer:payment-methods:update` (Stripe rail only) |
+| POST | `/v1/customers/{customer_id}/checkout` | `customer:checkout:create` — pre-pay / load credits |
+| GET | `/v1/customers/{customer_id}/checkout/{id}` | `customer:checkout:create` |
+| POST | `/v1/customers/{customer_id}/checkout/{id}/confirm` | `customer:checkout:create` |
+
+`/status` is deliberately not mounted here — it reports consumer concepts a
+payer does not own.
+
+## 4. Merchant machine surface (`/v1/merchant/*`, `/v1/import/*`)
+
+Server-to-server billing operations. Every route is gated on the listed
+`merchant:*` permission regardless of credential type.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` | Batch entitlement lookup by external subject |
+| GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
+| GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
+| GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
+| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ type, balance, held_balance }`. Query: `customer_id`, `type` (default `api_credits`) |
+| POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)` |
+| POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }` (≤ hold) |
+| POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |
+| POST | `/v1/merchant/wasted-spend` | `merchant:admissions:create` | Report wasted spend against admissions |
+| POST | `/v1/merchant/usage/report` | `merchant:admissions:create` | Record usage events |
+| POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
+| POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
+| GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
+| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Update merchant billing settings |
+| GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
+| GET | `/v1/merchant/credit-limit` | `merchant:customer-settings:read` | Read a customer's credit limit |
+| PUT | `/v1/merchant/credit-limit` | `merchant:customer-settings:update` | Set a customer's credit limit |
+| GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
+| POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }`. Idempotent per `(customer_id, credit_type, source, source_id)` when `source_id` is set |
+| POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |
+
+## 5. Merchant admin (human) routes
+
+Same `/v1/merchant` prefix and permission gate; these are the console/support
+surface. The merchant admin console SPA (when enabled and built) is served at
+`GET /admin/`, and the selected AuthKit control-plane route groups (login,
+tokens, membership) are mounted under `/auth/*` — see AuthKit's own reference
+for those routes.
+
+### Customers & support
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/customers` | `merchant:customer-settings:read` | Customer list/search |
+| GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | Full billing profile: trust, balances, entitlements, history, redacted payment-method metadata |
+| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | Redacted saved-method metadata (admins can never create/update/delete customer methods) |
+| GET | `/v1/merchant/customers/{customer_id}/payments` | `merchant:payments:read` | One customer's payment history |
+| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger) |
+| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
+| POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access |
+| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
+
+### Payments & subscriptions
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters |
+| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history |
+| POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail; `revoke_access` must be explicit to also revoke one-off access |
+| GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters |
+| GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
+| POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
+| POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
+| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | `merchant:subscriptions:update` | Reassign to another saved method of the same customer |
+| POST | `/v1/merchant/subscriptions/{id}/reprice` | `merchant:subscriptions:update` | Schedule one subscription's price move at its next renewal on/after `effective_at` |
+
+### Reprices & plan migrations
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/v1/merchant/catalog/reprice-all-prior-versions` | `merchant:subscriptions:update` | Bulk-reprice all subscriptions on prior versions of a price key |
+| GET | `/v1/merchant/catalog/reprice-all-prior-versions/preview` | `merchant:subscriptions:read` | Read-only affected-count dry run |
+| GET | `/v1/merchant/reprices` | `merchant:subscriptions:read` | List scheduled reprices |
+| GET | `/v1/merchant/reprices/batches` | `merchant:subscriptions:read` | Bulk reprice batches for a price key |
+| GET | `/v1/merchant/reprices/{id}` | `merchant:subscriptions:read` | One reprice |
+| POST | `/v1/merchant/reprices/{id}/cancel` | `merchant:subscriptions:update` | Cancel a pending reprice |
+| POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
+| POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
+| GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |
+| POST | `/v1/merchant/plan-migrations/{id}/cancel` | `merchant:subscriptions:update` | Cancel a migration |
+
+### Catalog (`/v1/merchant/catalog`)
+
+Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
+`merchant_source=manifest` deployments (mode 1, YAML-is-truth) every catalog and
+payment-provider WRITE answers `405` with code `manifest_driven` — edit the
+manifest and reboot instead. Reads stay live.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
+| GET | `/v1/merchant/catalog/products` | List products |
+| GET | `/v1/merchant/catalog/products/{id}` | One product |
+| GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
+| PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
+| POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
+| POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
+| POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids, or `create` where the provider supports auto-create — Stripe only; NMI/CCBill are link-only) |
+| GET | `/v1/merchant/catalog/prices` | List prices |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
+| GET | `/v1/merchant/catalog/prices/{id}` | One price |
+| PATCH | `/v1/merchant/catalog/prices/{id}` | Update links / `archived` flag |
+| POST | `/v1/merchant/catalog/prices/{id}/activate` | Activate |
+| POST | `/v1/merchant/catalog/prices/{id}/deactivate` | Deactivate |
+| POST | `/v1/merchant/catalog/prices/{id}/key` | Relabel a price's key (version-bump repoint on collision) |
+| GET | `/v1/merchant/catalog/drift` | List catalog↔provider drift (the pull reconciliation is alert-only, never mutating) |
+| POST | `/v1/merchant/catalog/drift/refresh` | Refresh drift detection |
+| POST | `/v1/merchant/catalog/publish` | Push OpenRails definitions to providers |
+| POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
+| POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only, exempt from the manifest guard) |
+
+### Payment providers (`/v1/merchant/payment-providers`)
+
+Reads: `merchant:payment-providers:read`; writes: `merchant:payment-providers:update`
+(writes are mounted only when the deployment can persist secrets, and are
+manifest-guarded like catalog writes).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/merchant/payment-providers` | List configured providers |
+| GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
+| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets |
+| DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
+
+### Metrics, dashboard, alerts, notifications
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/v1/merchant/metrics/query` | `merchant:metrics:read` | Composable metrics query (Postgres-backed) |
+| GET | `/v1/merchant/metrics/schema` | `merchant:metrics:read` | Metric registry / schema doc |
+| POST | `/v1/merchant/metrics/ask` | `merchant:metrics:read` | Natural-language metrics Q&A (rate-limited, consent-gated) |
+| GET | `/v1/merchant/dashboard` | `merchant:metrics:read` | Saved dashboard config |
+| PUT | `/v1/merchant/dashboard` | `merchant:dashboard:update` | Replace dashboard config |
+| POST | `/v1/merchant/dashboard/widgets/generate` | `merchant:dashboard:update` | NL widget generation |
+| GET | `/v1/merchant/alerts/templates` | `merchant:metrics:read` | Alert rule templates |
+| GET | `/v1/merchant/alerts/rules` | `merchant:metrics:read` | List alert rules |
+| POST | `/v1/merchant/alerts/rules` | `merchant:settings:update` | Create rule |
+| PATCH | `/v1/merchant/alerts/rules/{id}` | `merchant:settings:update` | Update rule |
+| DELETE | `/v1/merchant/alerts/rules/{id}` | `merchant:settings:update` | Delete rule |
+| POST | `/v1/merchant/alerts/rules/{id}/test` | `merchant:settings:update` | Test-fire a rule |
+| GET | `/v1/merchant/webhooks` | `merchant:metrics:read` | List outbound alert webhooks (distinct from inbound provider webhooks) |
+| POST | `/v1/merchant/webhooks` | `merchant:settings:update` | Create outbound webhook |
+| DELETE | `/v1/merchant/webhooks/{id}` | `merchant:settings:update` | Delete outbound webhook |
+| GET | `/v1/merchant/notifications` | `merchant:metrics:read` | Merchant notification feed |
+| GET | `/v1/merchant/notifications/unread-count` | `merchant:metrics:read` | Unread count |
+| POST | `/v1/merchant/notifications/{id}/read` | `merchant:settings:update` | Mark read |
+
+### Operations: repair, findings, worker health
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/repair-alerts` | `merchant:repair-alerts:read` | Merchant repair alerts |
+| GET | `/v1/merchant/worker-health` | `merchant:repair-alerts:read` | Background-worker health dashboard |
+| GET | `/v1/merchant/findings` | `merchant:repair-alerts:read` | Operator findings queue |
+| GET | `/v1/merchant/findings/{id}` | `merchant:repair-alerts:read` | One finding |
+| POST | `/v1/merchant/findings/{id}/resolve` | `merchant:findings:resolve` | Execute a finding's recommendation (cancel/refund/revoke/grant) — one at a time, no bulk endpoint |
+
+### API keys & team (owner-only, via AuthKit control plane)
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/v1/merchant/api-keys` | `merchant:credentials:manage` | Mint a scoped API key (permissions can never exceed the caller's) |
+| GET | `/v1/merchant/api-keys` | `merchant:credentials:manage` | List keys |
+| DELETE | `/v1/merchant/api-keys/{id}` | `merchant:credentials:manage` | Revoke a key |
+| GET | `/v1/merchant/team` | `merchant:members:read` | Team roster |
+| GET | `/v1/merchant/team/invites` | `merchant:members:read` | Pending invites |
+| POST | `/v1/merchant/team/invites` | `merchant:members:manage` | Invite a member (register/join links) |
+| DELETE | `/v1/merchant/team/invites/{id}` | `merchant:members:manage` | Revoke an invite |
+| PATCH | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Change a member's role |
+| DELETE | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Remove a member |
+
+On deployments without a control plane these routes stay mounted but answer 501.
+
+### Platform operator (`/v1/platform`, standalone only)
+
+Human operator sessions checked against the root permission group; no API keys,
+no merchant context.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/platform/merchants` | `root:merchants:read` | Cross-merchant directory |
+| GET | `/v1/platform/merchants/{id}` | `root:merchants:read` | One merchant |
+| DELETE | `/v1/platform/merchants/{id}` | `root:merchants:delete` | Soft-delete a merchant |
+| POST | `/v1/platform/merchants/{id}/restore` | `root:merchants:restore` | Restore a soft-deleted merchant |
+
+## 6. Webhooks (inbound, per rail)
+
+No bearer auth — each request is verified by provider signature or source IP
+AFTER merchant resolution (the signature, not the router, is the trust
+boundary). Success returns `200 { "status": "accepted" }`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/webhooks/{provider}` | Canonical standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
+| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving account pinned in the path (direct Stripe; multi-account rails) |
+| POST | `/v1/merchants/{merchant}/webhooks/{provider}` | Merchant-scoped: `{merchant}` slug resolves the merchant first, then THAT merchant's signing secret verifies the payload. The embedded surface's only webhook shape; standalone mounts it alongside the canonical one |
+| POST | `/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Merchant-scoped, per-account (e.g. multiple NMI accounts) |
+
+Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
+serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
+the Host header.
+
+Verification per rail:
+
+- **NMI-backed rails** (e.g. `mobius`): JSON body; `Webhook-Signature`
+  (`t=...,s=...`, preferred) or `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
+  Test mode (config) bypasses the check.
+- **CCBill**: form-encoded; verified via CCBill's published source-IP ranges
+  (unless test mode), plus `formName`/`flexId` validated against price metadata.
+- **Stripe**: JSON body; `Stripe-Signature` with the configured endpoint secret.
+
+Unknown providers return 400; verification failures return 401/403; an unknown
+`{merchant}` slug returns 404 and never falls back to a default merchant.

@@ -1,78 +1,99 @@
 # Entitlement Timeline Semantics
 
-OpenRails models each entitlement (e.g. `"premium"`) as a **timeline per user**. The host application should treat the timeline as the source of truth for “does user X have entitlement Y at time T?”.
+OpenRails models each entitlement (a plain string, e.g. `"premium"`) as a **timeline of
+windows per (customer, entitlement)**. The timeline is the single source of truth for
+"does user X have entitlement Y at time T?" — host apps read it for every access decision.
+
+## The row model
+
+`openrails.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `start_at`,
+`end_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
+`revoke_reason`, `deleted_at`. Windows are half-open `[start_at, end_at)`; a generated
+`period` tstzrange plus an exclusion constraint forbids overlap among active windows of
+one (merchant, customer, entitlement). Finite windows satisfy `start_at < end_at`.
+
+A window is **active at T** iff:
+
+```sql
+start_at <= T AND (end_at IS NULL OR end_at > T)
+AND revoked_at IS NULL AND deleted_at IS NULL
+```
+
+Revoked or soft-deleted windows are inactive and ignored by every active check.
+
+## Querying access
+
+Merchant API (API key or service token carrying `merchant:customer-settings:read`;
+prefix `/v1` standalone, `/billing/v1` embedded):
+
+- `POST /v1/merchant/customers/entitlements:batch` body `{"subjects": [...], "at": "RFC3339"}` —
+  the primary host check. Always batch (max 500 subjects); response is keyed by subject,
+  unknown subjects get `[]`, never an error. Omitted `at` = now.
+- `GET /v1/merchant/customers/{customer_id}/entitlements?at=` — active windows for one customer.
+- `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — reverse lookup:
+  customer ids holding an active window, keyset-paginated (`next_cursor`/`has_more`).
+- `GET /v1/me/entitlements/active?at=` — the delegated end-user token reads its own subject.
+
+Embedded hosts sharing the DB may run the SQL predicate above directly
+(add `customer_id = $1 AND entitlement = $2`); it is exactly what the API executes.
 
 ## Write API (stack-like)
 
-Entitlement windows are written via exactly two operations:
+Exactly two operations mutate a timeline (serialized per timeline by an advisory lock):
 
-- `PushNewEntitlement`: append a new window at the tail of the timeline (can be finite or indefinite).
-- `RevokeExistingEntitlement`: immediately remove access by revoking any currently-active window(s) and soft-deleting any future scheduled windows.
+- `PushNewEntitlement` — append a window at the **tail** (finite or indefinite).
+- `RevokeExistingEntitlement` — revoke currently-active window(s) and soft-delete future
+  scheduled ones.
 
-`end_at` is treated as immutable after creation: renewals or grace extensions create new windows; they do not modify existing windows.
+`end_at` is immutable after creation: renewals and grace extensions append new windows,
+never edit existing ones.
 
-## Invariants (per `customer_id` + `entitlement`)
+## Grants vs entitlements
 
-For active (not revoked, not soft-deleted) windows:
-
-- Windows are ordered by `start_at` ascending.
-- Finite windows satisfy `start_at < end_at`.
-- When OpenRails appends access, it does so at the **tail** of the timeline to avoid overlaps.
-
-Revoked (`revoked_at` set) or soft-deleted (`deleted_at` set) windows are treated as **inactive** and are ignored by active checks.
+The **grant ledger** (`openrails.grants`, #514) is the append-only access-domain sibling of
+the money ledger. Derive-1 appends immutable events (grant / revoke / expire / supersede —
+a revoke is a NEW event referencing the original); derive-2 (`MaterializeGrant`) folds the
+log into projections: **entitlement windows** (rows carry the producing `grant_id`), credit
+lots, and derived ownership for bundle includes. Grants are provenance and replayable
+truth; entitlement rows are the projection you query. The Convergence Engine's `derive.*`
+pass repairs any drift between the two.
 
 ## Sources
 
-Each entitlement window has a `source_type` + `source_id`:
-
-- `subscription`: paid access, sourced from a subscription row
-- `grace`: bounded, revocable generosity windows (renewal grace, dunning/retry grace)
-- `one_off`: one-time purchase sourced from a payment row
-- `admin`: admin-granted access sourced from an admin_grants row
+`source_type` + `source_id` on each window: `subscription` (paid access from a subscription),
+`one_off` (a one-time purchase), `admin` (admin-granted; source is the grant itself), and
+`grace` (below).
 
 ## Grace
 
-“Grace” is the general primitive for **bounded, revocable generosity**: paid
-windows stay truthful (`end_at` = period end, immutable), and any access
-beyond what was paid for is a **separate `grace` window** appended to the
-timeline (`source_type='grace'`, `source_id` = subscription id). Grace ends
-the moment truth arrives: the resolving path revokes any currently-active
-grace windows and soft-deletes any future scheduled ones; with no resolution,
-grace simply lapses by its own `end_at` — fail-closed eventually. The
-timeline’s period ranges are half-open (`[)`), so a grace window starting
-exactly at the paid end never overlaps it.
+Grace is the primitive for **bounded, revocable generosity**: paid windows stay truthful
+(`end_at` = period end), and any access beyond what was paid is a separate `grace` window
+appended to the timeline (`source_id` = subscription id). Grace ends the moment truth
+arrives — resolution revokes active grace and soft-deletes scheduled grace — and with no
+resolution it lapses by its own `end_at`: fail-closed eventually. Half-open ranges mean a
+grace window starting exactly at the paid end never overlaps it. Producers:
 
-Three producers use the primitive:
+- **Renewal grace (NMI-backed + Stripe, #368).** Activation and every renewal pre-append a
+  trailing grace window `[period_end, period_end + slack)`; slack = half the billing cycle
+  capped at 48h (12h for daily; not configurable — see `GraceSlack`). Pre-appended so a lost
+  webhook or provider day-boundary billing never gates a paying user. Renewal success revokes
+  the old grace and appends the next paid + grace pair; terminal failure revokes it with the
+  cancellation; a **deliberate cancel deletes the scheduled grace at cancel time** (access
+  ends at the period end the user expects). Months-stale period ends get no resurrection
+  grace — the push is skipped once `period_end + slack` is already past.
+- **CCBill retry grace.** The paid window still ends at the paid term; if CCBill reports the
+  next retry after it (`nextRetryDate`), grace windows extend up to that retry. CCBill's own
+  retry cadence drives its grace — it does not get the pre-appended renewal grace.
+- **NMI/Solana dunning grace.** When the dunning retry schedule extends past the paid term
+  end, the failure path models that access as grace up to the next retry.
 
-- **Renewal grace (#368, NMI-backed + Stripe).** Activation and every renewal
-  pre-append a trailing grace window `[period_end, period_end + slack)` where
-  slack = half the billing cycle capped at 48h (daily cycles get 12h; not a
-  config knob — see `GraceSlack`). Pre-appended (never granted lazily) so
-  silence at period end — a lost success webhook, a provider billing on its
-  own day boundary, a late webhook — never gates a paying user, regardless of
-  worker cadence. Resolution: renewal success revokes the old grace and
-  appends the next paid + grace pair; terminal failure / remote-confirmed
-  death revokes grace with the cancellation; a **deliberate cancel deletes
-  the scheduled grace at cancel time** (access ends at the period end the
-  user expects — no generosity for explicit cancellation); still-silence past
-  the slack lapses fail-closed while the unknown-cohort reconcile (#632/#665)
-  keeps verifying against the provider and can still repair later.
-  Months-stale period ends (imported subscriptions)
-  get no resurrection grace — the push is skipped once `period_end + slack`
-  is already in the past.
-- **CCBill retry grace.** The paid subscription window still ends at
-  `current_period_ends_at`; if CCBill reports the next retry after the paid
-  term end (`nextRetryDate`), OpenRails appends `grace` windows up to that
-  retry time. (CCBill does NOT get the pre-appended renewal grace — its own
-  retry cadence drives its grace.)
-- **NMI/Solana dunning grace.** When the dunning retry schedule extends past
-  the paid term end, the failure path models that access as grace windows up
-  to the next retry.
+Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day (`23:59:59Z`) to
+avoid access gaps from ambiguity.
 
-On renewal success (any producer), OpenRails revokes active grace windows and
-deletes future ones for that subscription before pushing the next paid window
-(so the grace tail never delays or swallows the paid push).
+## Never infer access from subscription rows
 
-### Date-only policy
-
-CCBill provides `nextRetryDate` / `nextRenewalDate` as `YYYY-MM-DD` with no time-of-day. OpenRails interprets these as the end of the given UTC day (`23:59:59Z`) to avoid accidental access gaps due to ambiguity.
+Subscription `status` is provider-lifecycle state, not an access decision: `past_due` and
+`unknown` still project standing access (providers like NMI retry indefinitely and forgive
+gaps; stale data parks as `unknown` rather than losing entitlements to a malfunction).
+Cancellation is last-resort and evidence-driven. All of that doctrine is already folded
+into the timeline — subscriptions *produce* windows; the windows are the answer.

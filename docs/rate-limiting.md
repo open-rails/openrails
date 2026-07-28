@@ -1,94 +1,87 @@
 # Rate Limiting
 
-OpenRails rate-limits requests on a fixed 1-minute window. Limits are enforced
-per *bucket* (endpoint category) and across multiple *subjects* (dimensions)
-simultaneously — a request is throttled if **any** applicable subject is over its
-limit. Counters live in Redis when configured, with an in-memory fallback.
+OpenRails rate-limits on a fixed 1-minute window, per *bucket* (endpoint category) and per
+*subject* (dimension). Every request is counted against each applicable subject and blocked when
+**any** trips — headers reflect the strictest. Counters live in Redis when configured; a Redis
+error falls back to a per-process in-memory counter for that check. One net/http middleware
+(`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
+embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.
 
-Implementation: [`internal/http/middleware/ratelimit_neutral.go`](../internal/http/middleware/ratelimit_neutral.go).
+**On by default** (#742): standalone `config.Load` and `embedded.New` both seed the curated
+defaults below whenever `rate_limits`/`captcha` are left nil. To opt out (your own gateway fronts
+billing), set `rate_limits_disabled: true` (env `RATE_LIMITS_DISABLED`) — the middleware becomes
+a pure passthrough. Host-facing summaries: [frontend-integration.md](frontend-integration.md),
+[embedded-integration.md](embedded-integration.md).
 
-## Subjects (dimensions)
+## Subjects
 
-Every request is counted against each subject that applies to it:
+| Subject | Key | Applies to |
+|---|---|---|
+| IP | `ip:<addr>` | all requests |
+| User | `user:<user_id>` | authenticated requests (mount auth before the limiter) |
 
-| Subject  | Key                  | Applies to                | Limit        |
-|----------|----------------------|---------------------------|--------------|
-| IP       | `ip:<addr>`          | All requests              | Bucket limit |
-| User     | `user:<user_id>`     | Authenticated requests    | Bucket limit |
+The IP is the proxy-aware resolved client (#746): with `trusted_proxies` empty (default) it is
+the raw socket peer — a spoofed `X-Forwarded-For` has zero effect; with your LB's CIDRs
+configured, `X-Forwarded-For` is walked right-to-left past trusted hops to the real client. Set
+it whenever OpenRails sits behind a proxy, or all traffic collapses onto the proxy's one IP
+bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 
-- **IP** is the resolved client IP (see "Trusted proxies" below) — by default
-  the socket peer address (`RemoteAddr`), not `X-Forwarded-For`, so it cannot be
-  spoofed by a client header. Behind a load balancer, configure `trusted_proxies`
-  so the IP subject keys on the real client instead of the LB's own address.
-- **User** keys on the authenticated JWT `user_id`, so a single account is limited
-  even as it rotates IPs.
+## Buckets
 
-## Trusted proxies
+`ClassifyBucket` maps path + method; defaults (`rate_limits.<key>.requests_per_minute`):
 
-`trusted_proxies` (env `TRUSTED_PROXIES`) is a list of CIDRs (e.g. `10.0.0.0/8`)
-whose `X-Forwarded-For` is trusted. It is the ONE client-IP resolver shared by
-rate limiting, abuse tracking, webhook `IPAddress` recording, and the CCBill
-webhook IP allowlist (`internal/shared/iputil.TrustedProxies`).
+| Bucket | Config key | Default rpm | Routes |
+|---|---|---|---|
+| `checkout` | `checkout` | 10 | `POST /v1/checkout*` only — see note |
+| `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
+| `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
+| `webhook` | `webhook` | 1200 | `/v1/webhooks*`, `/v1/merchants/*/webhooks/*` |
+| `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
+| `default` | `default` | 300 | everything else |
 
-- **Empty (default): trust nothing.** Every resolution uses the raw socket
-  peer — a spoofed `X-Forwarded-For` has zero effect.
-- **Configured:** when the direct socket peer falls inside a trusted CIDR,
-  `X-Forwarded-For` is walked right-to-left, skipping trusted hops, to the
-  first untrusted address — that's the resolved client IP. A peer outside the
-  trusted ranges never gets to inject a forwarded address at all.
+A bucket with no configured limit falls back to the `default` entry; a configured limit ≤ 0
+means 60 rpm.
 
-Set this to your load balancer's/reverse proxy's address range whenever
-OpenRails sits behind one — otherwise every request appears to come from the
-proxy, collapsing rate limits onto one shared bucket and, for CCBill, 403ing
-every live webhook (the LB's address is never in CCBill's own IP ranges).
+> **Honest classification note**: the `checkout` bucket matches only the `/v1/checkout` path
+> prefix (the public checkout surface). The browser self-service `POST /v1/me/checkout` and the
+> customer-treasury `POST /v1/customers/{id}/checkout` are **not** classified as `checkout` —
+> they land in `default` (300 rpm), so the tight card-testing limit does not apply to them.
 
-## Buckets (endpoint categories)
+> **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
+> IPs). The high default absorbs rebill runs and event bursts without 429-ing payment events;
+> webhooks are independently protected by signature verification, the IP allowlist, and per-rail
+> body caps — this limit is a DoS floor, not the primary control.
 
-Buckets are classified by path + method in `classifyBucket`. Defaults
-(`config.yaml` → `rate_limits`, requests per minute):
+## Payload-size shedding
 
-| Bucket            | Config key   | Default rpm | Routes                                   |
-|-------------------|--------------|-------------|------------------------------------------|
-| `checkout`        | `checkout`   | 10          | `POST /v1/checkout*`                      |
-| `subscriptions`   | `subscribe`  | 20          | `POST/PUT/DELETE /v1/me/subscriptions*`   |
-| `payment-methods` | `payment`    | 40          | `/v1/me/payment-methods*`                 |
-| `webhook`         | `webhook`    | 1200        | `/v1/webhooks/*`                          |
-| `default`         | `default`    | 300         | everything else under `/v1/*`             |
-| `captcha`         | —            | unlimited   | `/v1/captcha/status`, `/v1/captcha/client.js` |
-
-> **Webhooks are per-IP, and all webhooks from a rail share one source-IP
-> bucket** (fixed rail IPs). The high `webhook` default exists so rebill runs
-> and event bursts are never throttled into 429s (which would delay payment/
-> entitlement processing). Webhooks are independently protected by signature
-> verification, the IP allowlist, and per-rail body caps — the rate limit is
-> a DoS floor, not the primary control. Because it is per-IP, raising it does not
-> meaningfully help an attacker (each attacker IP is still capped on its own).
-
-## Payload-size throttling
-
-Before any counting or body read, requests are rejected early with
-`413 Payload Too Large` when the declared `Content-Length` exceeds the bucket
-ceiling (`bucketMaxContentLength`):
-
-| Bucket            | Max Content-Length |
-|-------------------|--------------------|
-| `checkout`        | 64 KiB             |
-| `subscriptions`   | 64 KiB             |
-| `payment-methods` | 64 KiB             |
-| `default`         | 1 MiB              |
-
-Webhook routes are intentionally absent here — they enforce per-rail caps
-(CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) directly in the webhook handler, on
-top of the global 1 MiB body limit.
+Before any counting, a declared `Content-Length` over the bucket ceiling is rejected with `413`
+(+ `Retry-After: 60`); the body is also wrapped in `MaxBytesReader` so chunked uploads are capped
+on read. Ceilings: `checkout`/`subscriptions`/`payment-methods` 64 KiB, `default` 1 MiB.
+Webhooks are deliberately absent — the handler enforces per-rail caps (CCBill 16 KiB, NMI 64 KiB,
+Basis Theory 64 KiB, Stripe 256 KiB).
 
 ## Response headers
 
-- `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` reflect the
+- `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (epoch seconds) reflect the
   strictest applicable subject.
-- `Retry-After` (seconds) is set on `429` and on the `413` payload rejection.
+- `Retry-After` (seconds) on `429` and on the `413` payload rejection.
+- `X-Captcha-Required: true` on captcha challenges (`403`).
 
 ## Captcha escalation
 
-When captcha is enabled, an IP/user that blows past an *extreme* multiple of its
-limit is challenged; subsequent requests must carry a valid `X-Captcha-Token`
-until the challenge TTL expires. See [`internal/captcha`](../internal/captcha).
+Configuring `captcha.site_key` + `captcha.secret_key` IS the enablement — there is no separate
+knob. `captcha.provider` is `turnstile` (default), `recaptcha-v3`, or `hcaptcha`; verify/script
+URLs, thresholds, and TTLs are hardcoded policy, not config.
+
+- A subject whose request count reaches **3×** its bucket limit within the window is marked
+  challenged for **15 minutes**. Only the `checkout`, `payment-methods`, and `subscriptions`
+  buckets escalate — but once challenged, the subject must solve on **any** `/v1` route except
+  webhooks and the captcha endpoints.
+- While challenged, requests get `403` with `X-Captcha-Required` and error code
+  `captcha_required` (metadata carries provider, site key, bucket) until a valid token is sent in
+  the `X-Captcha-Token` header. A successful solve clears the challenge and resets the
+  challenged buckets' counters.
+- A site-wide card-testing attack mode (#371) can require a solve from every subject regardless
+  of individual counts; an individual solve never clears it.
+- Clients poll `GET /v1/captcha/status` and load `/v1/captcha/client.js` — both exempt from
+  limiting.

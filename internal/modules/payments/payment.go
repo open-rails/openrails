@@ -95,9 +95,9 @@ func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
 // recorded through the same negative-row mechanics as a refund, but the kind
 // discriminator keeps them distinguishable for metrics.
 const (
-	ReversalRefund           = "refund"
-	ReversalChargeback       = "chargeback"
-	ReversalDisputeReversal  = "dispute_reversal"
+	ReversalRefund          = "refund"
+	ReversalChargeback      = "chargeback"
+	ReversalDisputeReversal = "dispute_reversal"
 )
 
 // Refund records a reversal as a negative payment entry linked by transaction
