@@ -85,13 +85,21 @@ func (s Scope) IsGlobal() bool { return s.Customer == nil && s.Subscription == n
 // RecommendedAction is the operator-readable prose for ADMIN findings (#692);
 // the machine-executable shape rides in Evidence under recommend.EvidenceKey.
 type ConvergeFinding struct {
-	Type              string // finding_type, e.g. "derive.grant.excess"
-	Shape             Shape
-	Class             Class
-	Severity          Severity
-	SubjectKey        string // stable per-finding identity within (merchant, provider, type)
-	Provider          string // "self" for internal planes; a provider name for PULL
-	SourceDomain      SourceDomain
+	Type         string // finding_type, e.g. "derive.grant.excess"
+	Shape        Shape
+	Class        Class
+	Severity     Severity
+	SubjectKey   string // stable per-finding identity within (merchant, provider, type)
+	Provider     string // "self" for internal planes; a provider name for PULL
+	SourceDomain SourceDomain
+	// Ungated opts a ShapeExcess repair OUT of the §3.2 confirmed-absence gate.
+	// Only legitimate when the retraction is justified by a LOCAL terminal fact
+	// rather than by an absence in provider data — retracting the effect of an
+	// already-terminated grant, expiring an abandoned checkout session. Every
+	// use must say why in a comment. #842: the gate used to be skipped
+	// implicitly by leaving SourceDomain empty, so the dangerous sites and the
+	// harmless ones were indistinguishable.
+	Ungated           bool
 	Evidence          map[string]any
 	RecommendedAction string                          // prose; "" = none
 	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
@@ -279,7 +287,17 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 // reconcile_required until its source domain is proven fully reconciled for the
 // merchant.
 func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeFinding) (string, error) {
-	if f.Shape == ShapeExcess && f.SourceDomain != DomainNone {
+	// #842: EVERY retraction passes the gate now. It used to fire only when a
+	// finding happened to carry a SourceDomain, so the sites that forgot one —
+	// including life.subscription.pending_stale, which cancels a subscription
+	// off a TIMEOUT — retracted freely while the gate guarded the sites that
+	// had already thought about it.
+	if f.Shape == ShapeExcess && !f.Ungated {
+		if f.SourceDomain == DomainNone {
+			// A retraction that names no source of truth cannot prove the thing
+			// it is retracting is really gone. That is a human decision.
+			return "requires_review", nil
+		}
 		reconciled, err := e.DB.Gen(ctx).IsSourceDomainReconciled(ctx, gen.IsSourceDomainReconciledParams{
 			MerchantID: scope.Merchant.UUID(), SourceDomain: string(f.SourceDomain),
 		})

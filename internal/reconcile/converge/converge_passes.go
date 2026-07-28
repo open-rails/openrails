@@ -101,9 +101,12 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	for i := range unretracted {
 		g := unretracted[i]
 		out = append(out, ConvergeFinding{
-			Type:       "derive.grant_effect.excess",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
+			Type:  "derive.grant_effect.excess",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// Ungated: the justification is a LOCAL terminal fact — this grant
+			// was already terminated — not an absence in provider data.
+			Ungated:    true,
 			Severity:   "high",
 			SubjectKey: "grant_effect:" + g.ID.String(),
 			Provider:   "self",
@@ -431,9 +434,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	for i := range stale {
 		id := stale[i]
 		out = append(out, ConvergeFinding{
-			Type:       "life.checkout_session.stale",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
+			Type:  "life.checkout_session.stale",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// Ungated: expiring an abandoned checkout session retracts no
+			// access, no money and no provider object.
+			Ungated:    true,
 			Severity:   "low",
 			SubjectKey: "checkout_session:" + id.String(),
 			Provider:   "self",
@@ -526,7 +532,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 
 	// life.subscription.pending_stale — a `pending` sub that never confirmed
 	// within the threshold is abandoned; cancel it (no entitlements/money to
-	// unwind). Time-driven EXCESS → AUTO, not gated.
+	// unwind). EXCESS → gated on the `subscriptions` domain (#842): the repair
+	// is justified by an absence (no confirmation arrived), and an absence is
+	// only proof once provider truth has been fully reconciled.
 	stalePending, err := q.ListStalePendingSubscriptions(ctx, gen.ListStalePendingSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-pendingStaleAfter),
 	})
@@ -536,13 +544,17 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	for i := range stalePending {
 		subID := stalePending[i]
 		out = append(out, ConvergeFinding{
-			Type:       "life.subscription.pending_stale",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
-			Severity:   "low",
-			SubjectKey: "subscription:" + subID.String(),
-			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": subID.String()},
+			Type:  "life.subscription.pending_stale",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// #842: this cancels a subscription because a confirmation did not
+			// ARRIVE — an absence, and absence needs the §3.2 proof. A delayed
+			// or dropped webhook is not evidence the customer did not pay.
+			SourceDomain: DomainSubscriptions,
+			Severity:     "low",
+			SubjectKey:   "subscription:" + subID.String(),
+			Provider:     "self",
+			Evidence:     map[string]any{"subscription_id": subID.String()},
 			Repair: func(ctx context.Context) error {
 				// Terminal cancel through the shared core. A never-confirmed pending
 				// sub has no entitlements/money to unwind (RevokeSources empty); the
