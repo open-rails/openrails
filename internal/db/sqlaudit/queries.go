@@ -85,6 +85,7 @@ type Structure struct {
 	Relations   []string            // every table referenced
 	WriteTables []string            // tables an UPDATE/DELETE targets
 	EqParams    map[string]struct{} // columns pinned by `col = $n` (parameter, not constant)
+	EqConsts    map[string]struct{} // columns pinned by `col = 'literal'`
 	AnyParams   map[string]struct{} // columns pinned by `col = ANY($n)` (caller-supplied list)
 	WhereCols   map[string]struct{} // every column referenced anywhere in a WHERE
 }
@@ -105,6 +106,7 @@ func (q Query) Parse() (*Structure, error) {
 	}
 	s := &Structure{
 		EqParams:  map[string]struct{}{},
+		EqConsts:  map[string]struct{}{},
 		AnyParams: map[string]struct{}{},
 		WhereCols: map[string]struct{}{},
 	}
@@ -170,6 +172,14 @@ func collectWhere(where *pgq.Node, s *Structure) {
 				if c := colName(e.Rexpr); c != "" && isParam(e.Lexpr) {
 					s.EqParams[c] = struct{}{}
 				}
+				// A literal pins a key column just as hard as a parameter, which
+				// is what lets a UNIQUE key be *completed* by `rail = 'stripe'`.
+				if c := colName(e.Lexpr); c != "" && isConst(e.Rexpr) {
+					s.EqConsts[c] = struct{}{}
+				}
+				if c := colName(e.Rexpr); c != "" && isConst(e.Lexpr) {
+					s.EqConsts[c] = struct{}{}
+				}
 			case pgq.A_Expr_Kind_AEXPR_OP_ANY, pgq.A_Expr_Kind_AEXPR_IN:
 				// `col = ANY($n)` / `col IN (...)`: the caller's list is the bound.
 				if c := colName(e.Lexpr); c != "" && isParam(e.Rexpr) {
@@ -221,6 +231,20 @@ func colName(n *pgq.Node) string {
 		return ""
 	}
 	return cr.Fields[len(cr.Fields)-1].GetString_().GetSval()
+}
+
+// isConst reports whether a node is a literal constant, possibly cast.
+func isConst(n *pgq.Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.GetAConst() != nil {
+		return true
+	}
+	if tc := n.GetTypeCast(); tc != nil {
+		return isConst(tc.Arg)
+	}
+	return false
 }
 
 // isParam reports whether a node is a query parameter, possibly cast.
