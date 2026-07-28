@@ -17,12 +17,24 @@ import (
 	"github.com/open-rails/openrails/cmd/openrails/consoleassets"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// bootNMIProbeV5BaseURL is a test-only override for the #348 test_mode NMI
+// arm probe target during the boot-manifest reconcile; empty in production.
+var bootNMIProbeV5BaseURL string
+
+func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "openrails",
 		Short: "OpenRails server",
@@ -74,6 +86,7 @@ func main() {
 		Short:   "Start the OpenRails server",
 	}
 	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
+	serverCmd.Flags().String("merchant-manifest", "", "MODE-1 (#723) merchant manifest converged at boot (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
 
 	workerCmd := &cobra.Command{
 		Use:   "run-worker",
@@ -116,10 +129,7 @@ func main() {
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newPushCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newIntentsLogCmd())
-
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
@@ -155,11 +165,25 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
-	// mounted, apply control-plane authority on first run only. Merchant config
-	// and catalog reconciliation stay explicit CLI/init-job operations.
+	// mounted, apply control-plane authority on first run only. Catalog
+	// reconciliation stays an explicit CLI/init-job operation.
 	if err := applyStartupBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("startup bootstrap: %w", err)
+	}
+
+	// MODE 1 (#723/#847): converge the boot merchant manifest EVERY boot —
+	// DB rows as projections (insert+overwrite+prune), secrets seeded into the
+	// in-memory plane. Same semantics as serverboot.NewServer: the conventional
+	// file is optional, an explicit --merchant-manifest path must exist, and
+	// merchant_source=api refuses a present manifest.
+	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
+	if err != nil {
+		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
+	}
+	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), cfg, embeddedApp.App(), manifestPath, bootNMIProbeV5BaseURL); err != nil {
+		cleanupOnError = true
+		return err
 	}
 
 	cleanupOnError = false

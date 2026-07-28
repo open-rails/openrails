@@ -242,9 +242,9 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 }
 
 // applyStartupBootstrap applies the AuthKit authority manifest on the FIRST
-// server start only. Merchant config and catalog files are never reconciled from
-// normal server startup; operators run those explicit CLI commands as init jobs
-// or manual operations.
+// server start only. Catalog files are never reconciled from normal server
+// startup (explicit CLI/init-job); the MODE-1 merchant manifest converges
+// separately EVERY boot (#847, serverboot.ReconcileBootMerchantManifest).
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {

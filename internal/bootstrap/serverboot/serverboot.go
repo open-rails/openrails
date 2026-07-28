@@ -56,6 +56,11 @@ type Options struct {
 	// admin_console.enabled without assets is a boot error.
 	ConsoleAssets fs.FS
 
+	// NMIProbeV5BaseURL is a test-only seam: overrides the base URL the #348
+	// test_mode NMI arm probe hits during the boot-manifest reconcile. Empty in
+	// production (the probe uses nmi.NewClient's documented default).
+	NMIProbeV5BaseURL string
+
 	ConfiguredMerchant merchant.ID
 }
 
@@ -106,8 +111,9 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 	// declared-but-unloadable manifest refuses boot; an absent conventional file
 	// boots control-plane-only (merchants can be bound later; there is no
 	// implied truth to miss). MODE 2 refuses a present manifest (two truths).
-	if err := reconcileBootMerchantManifest(context.Background(), cfg, application,
-		optsValue(opts, func(o *Options) string { return o.MerchantManifestPath })); err != nil {
+	if err := ReconcileBootMerchantManifest(context.Background(), cfg, application,
+		optsValue(opts, func(o *Options) string { return o.MerchantManifestPath }),
+		optsValue(opts, func(o *Options) string { return o.NMIProbeV5BaseURL })); err != nil {
 		return nil, err
 	}
 
@@ -137,10 +143,14 @@ func optsValue[T any](opts *Options, pick func(*Options) T) T {
 	return pick(opts)
 }
 
-// reconcileBootMerchantManifest implements the standalone rows of the #723
-// boot matrix. path empty → the conventional manifest location, which is
-// optional; an EXPLICIT path must exist.
-func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path string) error {
+// ReconcileBootMerchantManifest implements the standalone rows of the #723
+// boot matrix, shared by NewServer and cmd/openrails runServer (#847): every
+// boot converges the MODE-1 merchant manifest — DB rows as projections
+// (insert+overwrite+prune), secrets seeded into the in-memory plane. path
+// empty → the conventional manifest location, which is optional; an EXPLICIT
+// path must exist. api mode refuses a present manifest (two truths).
+// nmiProbeV5BaseURL is the test-only probe seam (Options.NMIProbeV5BaseURL).
+func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path, nmiProbeV5BaseURL string) error {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
@@ -167,10 +177,11 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		return fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
 	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, bootstrap.MerchantManifestReconcileOptions{
-		Insert:      true,
-		Overwrite:   true,
-		Prune:       true,
-		SecretStore: rt.ManifestSecrets.Seeder(),
+		Insert:            true,
+		Overwrite:         true,
+		Prune:             true,
+		SecretStore:       rt.ManifestSecrets.Seeder(),
+		NMIProbeV5BaseURL: nmiProbeV5BaseURL,
 	}); err != nil {
 		return fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
