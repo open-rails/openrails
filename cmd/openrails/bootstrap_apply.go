@@ -32,6 +32,7 @@ type pushMerchantConfigOptions struct {
 	insert    bool
 	overwrite bool
 	prune     bool
+	seed      bool
 }
 
 func newPushAuthBootstrapCmd() *cobra.Command {
@@ -66,6 +67,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
+	cmd.Flags().BoolVar(&opts.seed, "seed", false, "merchant_source=api only (#851): seed-once import — create missing merchants/PSPs/secrets into the persistent stores; existing values are never touched and the HTTP APIs own merchant config afterward")
 	return cmd
 }
 
@@ -156,11 +158,13 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
-	// #723: in api mode (MODE 2) a merchant manifest is a second truth — the
-	// APIs own merchant config. Manifest mode applies DB projections (secrets
-	// are validated but never persisted; the server holds them in memory).
-	if !cfg.IsManifestMerchantSource() {
-		return fmt.Errorf("merchant_source=api refuses push-merchant-config (two truths, #723/#724): provision merchants via the HTTP APIs, or run merchant_source=manifest")
+	// #723/#851: in api mode (MODE 2) the APIs own merchant config, so a bare
+	// run refuses (two truths) — but --seed runs the command as a seed-once
+	// importer into the persistent stores. Manifest mode applies DB projections
+	// (secrets are validated but never persisted; the server holds them in memory).
+	reconcileOpts, err := bootstrap.ResolvePushMerchantConfigOptions(cfg, opts.seed, opts.insert, opts.overwrite, opts.prune)
+	if err != nil {
+		return err
 	}
 
 	application := &app.App{Config: cfg}
@@ -174,11 +178,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, opts.dryRun, bootstrap.MerchantManifestReconcileOptions{
-		Insert:    opts.insert,
-		Overwrite: opts.overwrite,
-		Prune:     opts.prune,
-	})
+	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, opts.dryRun, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {

@@ -88,4 +88,6 @@ environment variables win over both.
 `BILLING_MERCHANTS_*` env, or mounted secret files — refuses boot: two
 truths), merchants/catalog mutate over the HTTP APIs, secrets live in Vault
 KV or the DEK-encrypted DB store, and a secret backend is REQUIRED outside
-development.
+development. Initial bootstrap is `openrails push-merchant-config --seed` — a
+one-time, create-only import of a manifest file into those stores (the command
+refuses without `--seed`; the stores are the truth afterward).

@@ -37,14 +37,23 @@ All three share one **mutation-flag contract**: a bare command is plan-only
 
 The flags compose; full reconciliation is `--insert --overwrite --prune`.
 
+MODE 2 (`merchant_source: api`) replaces this contract for
+`push-merchant-config` with a single flag: `--seed` runs the command as a
+**seed-once importer** (create-only — missing merchants/PSPs/secrets are
+created into the persistent stores; existing values are never touched).
+Without `--seed` the command refuses, and `--seed` refuses to combine with the
+mutation flags: after seeding, the HTTP APIs own merchant config and the
+manifest is never re-asserted over them.
+
 Startup behavior: if `/etc/openrails/bootstrap.yaml` exists, the server applies
 it **first-run only** (gated by AuthKit's bootstrap marker). Normal restarts
 never reapply merchant config or catalog manifests — with one deliberate
 exception: in MODE 1 (`merchant_source: manifest`, the default) the server
 itself re-converges the merchant manifest on **every** boot
 (insert+overwrite+prune, secrets held in memory). In MODE 2
-(`merchant_source: api`) boot manifests refuse to load and the push CLIs seed
-the persistent stores instead. Mode comparison:
+(`merchant_source: api`) boot manifests refuse to load; the one-time bootstrap
+path is `push-merchant-config --seed`, which imports the manifest into the
+persistent stores. Mode comparison:
 [standalone-integration.md](standalone-integration.md#two-merchant-source-modes);
 MODE 1 walkthrough: [self-hosting-mode1.md](self-hosting-mode1.md).
 
@@ -155,8 +164,14 @@ Where the values live depends on the mode:
     development.
 
   The backend is declared intent, never auto-detected — the data lives in
-  exactly one place. `push-merchant-config` is the seeding path: it resolves
-  manifest values (plus overlays) and writes them into the configured backend.
+  exactly one place. `push-merchant-config --seed` is the bootstrap path: a
+  seed-once import of a manifest file into the configured backend, through the
+  same store services the HTTP APIs write through. It is idempotent and
+  create-only — a re-run never reverts a value rotated via the API — and the
+  store, not the file, is the runtime truth afterward. Keep the seed file
+  outside `/etc/openrails/merchants.yaml` (a manifest at the conventional path
+  refuses MODE-2 server boot) and delete it once seeded — it holds secret
+  values.
 
 Credentials are always loaded by merchant id at request time; they are never
 global process configuration.
