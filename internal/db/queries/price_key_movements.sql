@@ -15,8 +15,3 @@ ORDER BY effective_at DESC;
 
 -- The price row that was current for `key` as of `as_of` — "what did key K
 -- sell on date D".
--- name: GetPriceKeyMovementAsOf :one
-SELECT * FROM openrails.price_key_movements
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND effective_at <= sqlc.arg(as_of)::timestamptz
-ORDER BY effective_at DESC
-LIMIT 1;

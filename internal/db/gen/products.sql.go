@@ -88,18 +88,6 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 	return result.RowsAffected(), nil
 }
 
-const deleteProduct = `-- name: DeleteProduct :execrows
-DELETE FROM openrails.products WHERE id = $1
-`
-
-func (q *Queries) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteProduct, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getProductByID = `-- name: GetProductByID :one
 SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE id = $1
 `

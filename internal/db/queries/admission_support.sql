@@ -45,11 +45,6 @@ ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at;
 
--- name: DeleteInvokerSpendLimit :execrows
-DELETE FROM openrails.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2
-  AND scope = $3 AND scope_key = $4;
-
 -- name: DeleteAllInvokerSpendLimits :execrows
 -- Full-document replacement removes the exact merchant+payer set before
 -- inserting the canonical replacement. This also purges legacy non-canonical
