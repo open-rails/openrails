@@ -27,6 +27,9 @@ var rlsExemptTables = []string{
 // below ever breaks, the derived set collapses and every loop becomes a no-op.
 const minMerchantScopedTables = 60
 
+// minParsedIndexes guards the #846 index guard against the same vacuous pass.
+const minParsedIndexes = 250
+
 // rlsExemptMarker is the machine-checkable classification a table COMMENT must
 // carry to opt out of merchant isolation.
 const rlsExemptMarker = "RLS-exempt by design:"
@@ -42,6 +45,15 @@ var (
 	rePolicy        = regexp.MustCompile(`CREATE POLICY merchant_isolation ON openrails\.([a-z0-9_]+)`)
 	reDropPolicy    = regexp.MustCompile(`DROP POLICY (?:IF EXISTS )?merchant_isolation ON openrails\.([a-z0-9_]+)`)
 	reExemptComment = regexp.MustCompile(`(?s)COMMENT ON TABLE openrails\.([a-z0-9_]+) IS '((?:[^']|'')*)'`)
+
+	// #846 index inventory. Indexes reach the schema three ways: CREATE INDEX,
+	// an ALTER TABLE ADD CONSTRAINT PRIMARY KEY/UNIQUE, and an in-body table
+	// constraint. All three back an RLS predicate identically, so all three count.
+	reCreateIndex = regexp.MustCompile(`(?s)CREATE (?:UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?([a-z0-9_]+)\s+ON openrails\.([a-z0-9_]+)\s*(?:USING [a-z0-9_]+\s*)?(\(.*?);`)
+	reDropIndex   = regexp.MustCompile(`DROP INDEX (?:CONCURRENTLY )?(?:IF EXISTS )?(?:openrails\.)?([a-z0-9_]+)`)
+	reAlterKey    = regexp.MustCompile(`(?s)ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+)\s+ADD CONSTRAINT ([a-z0-9_]+) (?:PRIMARY KEY|UNIQUE)\s*(\(.*?);`)
+	reInlineKey   = regexp.MustCompile(`(?m)^\s*(?:CONSTRAINT ([a-z0-9_]+) )?(?:PRIMARY KEY|UNIQUE)\s*(\(.*)$`)
+	reRenameIndex = regexp.MustCompile(`ALTER INDEX openrails\.([a-z0-9_]+) RENAME TO ([a-z0-9_]+)`)
 )
 
 // loadSchema001 reads the consolidated baseline alone (invariants that are
@@ -95,6 +107,95 @@ type schemaTables struct {
 	force           map[string]bool   // FORCE ROW LEVEL SECURITY
 	policy          map[string]bool   // merchant_isolation policy
 	rlsExemptMarked map[string]bool   // classified RLS-exempt by a table COMMENT
+	indexes         map[string][]schemaIndex
+}
+
+// schemaIndex is one parsed index/key: its leading column and whether a WHERE
+// predicate makes it partial. A partial index cannot serve the RLS predicate
+// for rows outside its predicate.
+type schemaIndex struct {
+	name    string
+	leading string
+	partial bool
+}
+
+// splitTopLevel splits a parenthesised list on commas at depth 0 and reports
+// what follows the closing paren (where a WHERE predicate would live).
+func splitTopLevel(s string) (cols []string, tail string) {
+	depth, start := 0, 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+			if depth == 1 {
+				start = i + 1
+			}
+		case ')':
+			depth--
+			if depth == 0 {
+				cols = append(cols, s[start:i])
+				return splitCommas(cols[0]), s[i+1:]
+			}
+		}
+	}
+	return nil, ""
+}
+
+func splitCommas(s string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
+}
+
+// leadingColumn returns the bare column name an index leads with, or "" for an
+// expression / functional leading term (which cannot serve `merchant_id = $1`).
+func leadingColumn(colList string) string {
+	cols, _ := splitTopLevel(colList)
+	if len(cols) == 0 {
+		return ""
+	}
+	f := strings.Fields(strings.TrimSpace(cols[0]))
+	if len(f) == 0 {
+		return ""
+	}
+	name := f[0]
+	if !regexp.MustCompile(`^[a-z_][a-z0-9_]*$`).MatchString(name) {
+		return ""
+	}
+	return name
+}
+
+func parseIndex(name, colsAndTail string) schemaIndex {
+	_, tail := splitTopLevel(colsAndTail)
+	return schemaIndex{
+		name:    name,
+		leading: leadingColumn(colsAndTail),
+		partial: strings.Contains(strings.ToUpper(tail), "WHERE"),
+	}
+}
+
+// hasPlainMerchantIndex: at least one NON-partial index leads with merchant_id,
+// so the RLS predicate is index-backed for EVERY row of the table.
+func (s schemaTables) hasPlainMerchantIndex(tbl string) bool {
+	for _, ix := range s.indexes[tbl] {
+		if ix.leading == "merchant_id" && !ix.partial {
+			return true
+		}
+	}
+	return false
 }
 
 func deriveSchemaTables(t *testing.T, schema string) schemaTables {
@@ -106,11 +207,43 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 		force:           map[string]bool{},
 		policy:          map[string]bool{},
 		rlsExemptMarked: map[string]bool{},
+		indexes:         map[string][]schemaIndex{},
 	}
 	for _, m := range reCreateTable.FindAllStringSubmatch(schema, -1) {
 		s.blocks[m[1]] = m[2]
 		if reMerchantIDCol.MatchString(m[2]) {
 			s.merchantScoped[m[1]] = true
+		}
+		for _, k := range reInlineKey.FindAllStringSubmatch(m[2], -1) {
+			s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(k[1], k[2]))
+		}
+	}
+	for _, m := range reCreateIndex.FindAllStringSubmatch(schema, -1) {
+		s.indexes[m[2]] = append(s.indexes[m[2]], parseIndex(m[1], m[3]))
+	}
+	for _, m := range reAlterKey.FindAllStringSubmatch(schema, -1) {
+		s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(m[2], m[3]))
+	}
+	// Renames before drops: 0003's psps hardcut renames indexes that a later
+	// migration drops by their NEW name.
+	for _, m := range reRenameIndex.FindAllStringSubmatch(schema, -1) {
+		for _, ixs := range s.indexes {
+			for i := range ixs {
+				if ixs[i].name == m[1] {
+					ixs[i].name = m[2]
+				}
+			}
+		}
+	}
+	for _, m := range reDropIndex.FindAllStringSubmatch(schema, -1) {
+		for tbl, ixs := range s.indexes {
+			kept := ixs[:0]
+			for _, ix := range ixs {
+				if ix.name != m[1] {
+					kept = append(kept, ix)
+				}
+			}
+			s.indexes[tbl] = kept
 		}
 	}
 	for _, m := range reAddMerchantID.FindAllStringSubmatch(schema, -1) {
@@ -119,6 +252,7 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 	for _, m := range reDropTable.FindAllStringSubmatch(schema, -1) {
 		delete(s.blocks, m[1])
 		delete(s.merchantScoped, m[1])
+		delete(s.indexes, m[1])
 	}
 	for _, m := range reEnableRLS.FindAllStringSubmatch(schema, -1) {
 		s.enable[m[1]] = true
@@ -149,6 +283,10 @@ func (s schemaTables) rename(old, next string) {
 	if body, ok := s.blocks[old]; ok {
 		s.blocks[next] = body
 		delete(s.blocks, old)
+	}
+	if ixs, ok := s.indexes[old]; ok {
+		s.indexes[next] = append(s.indexes[next], ixs...)
+		delete(s.indexes, old)
 	}
 	for _, m := range []map[string]bool{s.merchantScoped, s.enable, s.force, s.policy, s.rlsExemptMarked} {
 		if m[old] {
@@ -245,6 +383,51 @@ func TestEveryMerchantIDTableRequiresRLS(t *testing.T) {
 			t.Errorf("merchant-scoped table %q missing %v — every merchant_id table needs the standard "+
 				"merchant_isolation RLS, or an explicit '%s ...' table COMMENT", tbl, missing, rlsExemptMarker)
 		}
+	}
+}
+
+// TestMerchantIsolationPolicyIsIndexBacked (#846). RLS appends
+// `merchant_id = current_setting('app.merchant_id')` to EVERY query on a
+// policy-bearing table. If the only merchant_id-leading index is PARTIAL, that
+// predicate is unindexed for rows outside the partial predicate and the table
+// seq-scans in production — and because SOME index path usually exists, the
+// seq-scan detector does not reliably surface it. So assert it structurally:
+// every merchant_isolation table needs at least one NON-partial index leading
+// with merchant_id.
+func TestMerchantIsolationPolicyIsIndexBacked(t *testing.T) {
+	s := deriveSchemaTables(t, loadAllSchema(t))
+
+	if len(s.policy) < minMerchantScopedTables {
+		t.Fatalf("derived only %d policy-bearing tables (< %d): schema parsing is broken",
+			len(s.policy), minMerchantScopedTables)
+	}
+	// Vacuity guard: index parsing must actually find indexes.
+	total := 0
+	for _, ixs := range s.indexes {
+		total += len(ixs)
+	}
+	if total < minParsedIndexes {
+		t.Fatalf("parsed only %d indexes (< %d): index parsing is broken, the guard would pass vacuously",
+			total, minParsedIndexes)
+	}
+
+	var missing []string
+	for tbl := range s.policy {
+		if !s.hasPlainMerchantIndex(tbl) {
+			missing = append(missing, tbl)
+		}
+	}
+	sort.Strings(missing)
+	for _, tbl := range missing {
+		var have []string
+		for _, ix := range s.indexes[tbl] {
+			if ix.leading == "merchant_id" {
+				have = append(have, ix.name+" (PARTIAL)")
+			}
+		}
+		t.Errorf("table %q has a merchant_isolation policy but no NON-partial index leading with merchant_id "+
+			"(merchant_id-leading indexes: %v) — its RLS predicate is unindexed and it seq-scans under production RLS",
+			tbl, have)
 	}
 }
 
