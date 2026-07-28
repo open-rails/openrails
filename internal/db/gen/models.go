@@ -312,6 +312,16 @@ type OpenrailsDashboardConfig struct {
 	UpdatedBy *string
 }
 
+// RLS-exempt by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
+type OpenrailsDestructiveActionSwitch struct {
+	ID        uuid.UUID
+	Singleton bool
+	Enabled   bool
+	UpdatedBy *string
+	Reason    *string
+	UpdatedAt time.Time
+}
+
 type OpenrailsEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
@@ -571,6 +581,19 @@ type OpenrailsMerchantDek struct {
 	KeyVersion int32
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// #836/#835 per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
+type OpenrailsMerchantDestructivePolicy struct {
+	ID                        uuid.UUID
+	MerchantID                uuid.UUID
+	DestructiveActionsEnabled bool
+	// #835: NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
+	EnforceArmedAt       *time.Time
+	FirstPullCompletedAt *time.Time
+	UpdatedBy            *string
+	Reason               *string
+	UpdatedAt            time.Time
 }
 
 // Merchant logical-export bookkeeping (issue #225). Merchant deletion is gated on a completed export row (export-before-delete). Merchant-owned and RLS protected.

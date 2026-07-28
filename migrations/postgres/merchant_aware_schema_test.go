@@ -21,6 +21,12 @@ var rlsExemptTables = []string{
 	"merchants",      // the tenant directory itself — the scope, not a scoped row
 	"probe_verdicts", // instance-level credential state
 	"worker_health",  // per-worker-kind process health
+	// #836 instance-level operator kill switch for destructive convergence.
+	// Deliberately readable from the no-GUC background connections it polices
+	// (intent runner, sweep scheduler); carries no tenant data — the
+	// per-merchant half lives in the RLS-protected
+	// merchant_destructive_policy.
+	"destructive_action_switch",
 }
 
 // minMerchantScopedTables guards against a vacuous pass: if the SQL parsing
