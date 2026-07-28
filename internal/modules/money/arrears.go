@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -232,24 +233,30 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 	if err != nil {
 		return 0, err
 	}
+	// One invoice's failure (ambiguous transport, claim race, provider error)
+	// must not abort the rest of the merchant's batch (#828): record it,
+	// continue, and surface the joined errors at the end.
 	count := 0
+	var errs []error
 	for _, r := range invoiceRows {
 		claim, ok, err := s.claimInvoiceCollection(ctx, identity.CustomerID(r.CustomerID), r.ID, minThreshold, false, s.now())
 		if err != nil {
-			return count, err
+			errs = append(errs, fmt.Errorf("claim invoice %s: %w", r.ID, err))
+			continue
 		}
 		if !ok {
 			continue
 		}
 		charged, err := s.chargeClaimedInvoice(ctx, charger, claim)
 		if err != nil {
-			return count, err
+			errs = append(errs, fmt.Errorf("collect invoice %s: %w", r.ID, err))
+			continue
 		}
 		if charged {
 			count++
 		}
 	}
-	return count, nil
+	return count, errors.Join(errs...)
 }
 
 func (s *MoneyService) arrearsExposureTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (int64, error) {
@@ -317,7 +324,9 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 	cleanupCtx, cancel := collectionCleanupContext(ctx)
 	defer cancel()
 	if res.Declined {
-		action := invoiceCollectionAction(res.Rail, res.FailureCode, r.FailureCount, r.FirstFailureAt, now)
+		// Arrears invoices bill on the monthly cadence; the schedule is the ONE
+		// collection-core table (#828) — the same offsets subscription dunning uses.
+		action := collection.FailureAction(collection.MonthlyCycleHours, res.Rail, res.FailureCode, int(r.FailureCount), r.FirstFailureAt, now)
 		if err := s.recordInvoiceCollectionFailure(cleanupCtx, claim, optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, action, now); err != nil {
 			markCtx, markCancel := collectionCleanupContext(ctx)
 			defer markCancel()
@@ -329,8 +338,30 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		return false, nil
 	}
 
+	charged, err := s.settleClaimedInvoiceCharge(cleanupCtx, claim, res.Rail, res.TransactionID, res.ExternalInvoiceID, now, false)
+	if err != nil {
+		markCtx, markCancel := collectionCleanupContext(ctx)
+		defer markCancel()
+		if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
+			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err, markErr)
+		}
+		return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
+	}
+	return charged, nil
+}
+
+// settleClaimedInvoiceCharge records one CONFIRMED provider charge for a
+// claimed attempt: apply the snapshot to the invoice, settle the arrears
+// liability on the ledger (deduped on the attempt key), settle the attempt
+// row. fromUnknown = the invoice is parked collection_outcome_unknown and the
+// charge was confirmed by the verifier's provider read (#828) rather than a
+// live response; the unknown park is cleared once the payment applies.
+func (s *MoneyService) settleClaimedInvoiceCharge(ctx context.Context, claim *invoiceCollectionClaim, railName, transactionID, externalInvoiceID string, now time.Time, fromUnknown bool) (bool, error) {
+	r := claim.account
+	snapshot := r.AmountDue
+	key := claim.idempotencyKey
 	charged := false
-	err = s.db.MerchantTx(cleanupCtx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		n, uerr := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, InvoiceID: r.InvoiceID,
@@ -344,7 +375,7 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		// unless this key was already recorded, record the settled payment below —
 		// unapplied to amount_due — and alert for repair.
 		applied := n > 0
-		if !applied {
+		if !applied && !fromUnknown {
 			if _, err := q.MarkInvoiceCollectionOutcomeUnknown(ctx, gen.MarkInvoiceCollectionOutcomeUnknownParams{
 				MerchantID: r.MerchantID,
 				CustomerID: r.CustomerID,
@@ -355,12 +386,12 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 			}
 		}
 		if applied {
-			if externalInvoiceID := optionalString(res.ExternalInvoiceID); externalInvoiceID != nil {
+			if extID := optionalString(externalInvoiceID); extID != nil {
 				if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{
 					MerchantID:        r.MerchantID,
 					CustomerID:        r.CustomerID,
 					InvoiceID:         r.InvoiceID,
-					ExternalInvoiceID: externalInvoiceID,
+					ExternalInvoiceID: extID,
 					Now:               now,
 				}); err != nil {
 					return err
@@ -386,8 +417,8 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 				return err
 			}
 		}
-		rail := optionalRail(res.Rail)
-		railPaymentID := optionalString(res.TransactionID)
+		rail := optionalRail(railName)
+		railPaymentID := optionalString(transactionID)
 		updated, err := q.SettleClaimedInvoicePaymentAttempt(ctx, gen.SettleClaimedInvoicePaymentAttemptParams{
 			MerchantID:       r.MerchantID,
 			CustomerID:       r.CustomerID,
@@ -405,6 +436,18 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 			return fmt.Errorf("settle claimed invoice payment attempt: claim lost")
 		}
 		charged = true
+		if applied && fromUnknown {
+			// The verifier confirmed the charge; a fully-paid invoice already
+			// cleared its failure code via the snapshot apply, a partially-covered
+			// one resumes the schedule immediately (:execrows 0 when fully paid).
+			next := now
+			if _, err := q.ResolveInvoiceCollectionUnknown(ctx, gen.ResolveInvoiceCollectionUnknownParams{
+				MerchantID: r.MerchantID, CustomerID: r.CustomerID, InvoiceID: r.InvoiceID,
+				NextAttemptAt: &next, Now: now,
+			}); err != nil {
+				return err
+			}
+		}
 		if !applied {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"invoice_id": r.InvoiceID, "customer_id": r.CustomerID, "amount": snapshot, "rail_payment_id": derefStr(railPaymentID),
@@ -413,17 +456,12 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		return nil
 	})
 	if err != nil {
-		markCtx, markCancel := collectionCleanupContext(ctx)
-		defer markCancel()
-		if markErr := s.markInvoiceCollectionOutcomeUnknown(markCtx, claim, s.now()); markErr != nil {
-			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err, markErr)
-		}
-		return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
+		return false, err
 	}
 	return charged, nil
 }
 
-func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim *invoiceCollectionClaim, rail, railPaymentID, failureCode, failureMessage *string, action invoiceCollectionFailureAction, now time.Time) error {
+func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim *invoiceCollectionClaim, rail, railPaymentID, failureCode, failureMessage *string, action collection.Action, now time.Time) error {
 	r := claim.account
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -451,8 +489,8 @@ func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim
 			CustomerID:           r.CustomerID,
 			InvoiceID:            r.InvoiceID,
 			ExpectedFailureCount: r.FailureCount,
-			Terminal:             action.terminal,
-			NextAttemptAt:        action.nextAttemptAt,
+			Terminal:             action.Terminal,
+			NextAttemptAt:        action.NextAttemptAt,
 			FailureCode:          failureCode,
 			FailureMessage:       failureMessage,
 			Now:                  now,

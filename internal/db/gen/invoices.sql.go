@@ -519,6 +519,51 @@ func (q *Queries) GetInvoicePaymentAttemptByKey(ctx context.Context, arg GetInvo
 	return i, err
 }
 
+const getLatestAttemptedInvoicePayment = `-- name: GetLatestAttemptedInvoicePayment :one
+SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND status = 'attempted'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAttemptedInvoicePaymentParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+}
+
+// #828: the in-flight claimed attempt an unknown outcome hangs off.
+func (q *Queries) GetLatestAttemptedInvoicePayment(ctx context.Context, arg GetLatestAttemptedInvoicePaymentParams) (OpenrailsInvoicePayment, error) {
+	row := q.db.QueryRow(ctx, getLatestAttemptedInvoicePayment, arg.MerchantID, arg.CustomerID, arg.InvoiceID)
+	var i OpenrailsInvoicePayment
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.InvoiceID,
+		&i.LedgerTransferID,
+		&i.Currency,
+		&i.Amount,
+		&i.Status,
+		&i.Rail,
+		&i.RailPaymentID,
+		&i.FailureCode,
+		&i.FailureMessage,
+		&i.AttemptedAt,
+		&i.SettledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.FailureReason,
+		&i.PaymentMethodID,
+		&i.IdempotencyKey,
+	)
+	return i, err
+}
+
 const insertInvoice = `-- name: InsertInvoice :exec
 INSERT INTO openrails.invoices (
     id, merchant_id, customer_id, currency,
@@ -1061,6 +1106,63 @@ func (q *Queries) ListPendingInvoiceItemsByPayer(ctx context.Context, arg ListPe
 	return items, nil
 }
 
+const listUnknownOutcomeInvoices = `-- name: ListUnknownOutcomeInvoices :many
+SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
+       i.collection_failure_count, i.collection_failed_at
+FROM openrails.invoices i
+WHERE i.merchant_id = $1
+  AND i.last_collection_failure_code = 'collection_outcome_unknown'
+  AND i.updated_at <= $2::timestamptz
+ORDER BY i.updated_at ASC
+LIMIT $3::bigint
+`
+
+type ListUnknownOutcomeInvoicesParams struct {
+	MerchantID       uuid.UUID
+	ResolvableBefore time.Time
+	Batch            int64
+}
+
+type ListUnknownOutcomeInvoicesRow struct {
+	ID                     uuid.UUID
+	MerchantID             uuid.UUID
+	CustomerID             uuid.UUID
+	Currency               string
+	AmountDue              int64
+	CollectionFailureCount int32
+	CollectionFailedAt     *time.Time
+}
+
+// #828: invoices parked collection_outcome_unknown, due for the verifier's
+// provider read. Indexed by activity, not by records on file.
+func (q *Queries) ListUnknownOutcomeInvoices(ctx context.Context, arg ListUnknownOutcomeInvoicesParams) ([]ListUnknownOutcomeInvoicesRow, error) {
+	rows, err := q.db.Query(ctx, listUnknownOutcomeInvoices, arg.MerchantID, arg.ResolvableBefore, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnknownOutcomeInvoicesRow
+	for rows.Next() {
+		var i ListUnknownOutcomeInvoicesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.AmountDue,
+			&i.CollectionFailureCount,
+			&i.CollectionFailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markInvoiceCollectionOutcomeUnknown = `-- name: MarkInvoiceCollectionOutcomeUnknown :execrows
 UPDATE openrails.invoices
 SET status = 'past_due',
@@ -1275,6 +1377,42 @@ func (q *Queries) ReleaseInvoiceCollectionRetry(ctx context.Context, arg Release
 		arg.FailureCode,
 		arg.FailureMessage,
 		arg.UncollectibleAt,
+		arg.Now,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const resolveInvoiceCollectionUnknown = `-- name: ResolveInvoiceCollectionUnknown :execrows
+UPDATE openrails.invoices
+SET last_collection_failure_code = NULL,
+    last_collection_failure_message = NULL,
+    next_collection_attempt_at = $3::timestamptz,
+    updated_at = $4::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $5
+  AND last_collection_failure_code = 'collection_outcome_unknown'
+`
+
+type ResolveInvoiceCollectionUnknownParams struct {
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	NextAttemptAt *time.Time
+	Now           time.Time
+	InvoiceID     uuid.UUID
+}
+
+// #828: an unknown outcome was RESOLVED (verifier provider read, or admin
+// unpark): clear the park so the schedule resumes. Status stays past_due.
+func (q *Queries) ResolveInvoiceCollectionUnknown(ctx context.Context, arg ResolveInvoiceCollectionUnknownParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveInvoiceCollectionUnknown,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.NextAttemptAt,
 		arg.Now,
 		arg.InvoiceID,
 	)

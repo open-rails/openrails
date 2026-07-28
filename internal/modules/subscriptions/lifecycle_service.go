@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -795,7 +796,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		// Calculate new billing period. A renewing subscription's price is
 		// recurring; fall back to 30d (720h) if its cadence is somehow unset.
-		cycleHours := BillingCycleHoursOf(price)
+		cycleHours := collection.BillingCycleHoursOf(price)
 		if cycleHours <= 0 {
 			// #651: a renewing subscription should carry a recurring cadence; if it
 			// doesn't, warn instead of silently inventing 30d.
@@ -1847,11 +1848,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// #359: the dunning cadence is a hardcoded function of the price's
 			// billing cycle (monthly: 5 failures total, progressive retries at
 			// +2d/+5d/+9d/+13d; weekly-ish: retries at +1d/+2d; daily-ish: the
-			// first failure is terminal). See DunningRetryOffsets.
-			cycleHours := BillingCycleHoursOf(subscription.Price)
+			// first failure is terminal). See collection.RetryOffsets.
+			cycleHours := collection.BillingCycleHoursOf(subscription.Price)
 			if cycleHours <= 0 {
 				if price, perr := priceService.GetByID(ctx, subscription.PriceID); perr == nil {
-					cycleHours = BillingCycleHoursOf(price)
+					cycleHours = collection.BillingCycleHoursOf(price)
 				}
 			}
 			if cycleHours <= 0 {
@@ -1862,7 +1863,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					"price_id":        subscription.PriceID,
 				}).Warn("FailMembership: subscription has no billing cycle (one-time price?); using monthly dunning schedule")
 			}
-			maxFailures := DunningMaxFailures(cycleHours)
+			maxFailures := collection.MaxFailures(cycleHours)
 
 			terminal := params.Terminal
 			if !terminal {
@@ -1895,7 +1896,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.EndedAt = &now
 				subscription.ClearRetrySchedule()
 			} else {
-				nextRetry := now.Add(DunningNextRetryIn(cycleHours, *subscription.RetryAttempts))
+				nextRetry := now.Add(collection.NextRetryIn(cycleHours, *subscription.RetryAttempts))
 				subscription.NextRetryAt = &nextRetry
 			}
 		}
