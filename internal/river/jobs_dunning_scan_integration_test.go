@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -269,7 +270,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	require.NotNil(t, retryAttempts)
 	assert.EqualValues(t, 1, *retryAttempts)
 	require.NotNil(t, nextRetryAt)
-	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(720, 1)), nextRetryAt.UTC(), time.Minute,
+	assert.WithinDuration(t, time.Now().UTC().Add(collection.NextRetryIn(720, 1)), nextRetryAt.UTC(), time.Minute,
 		"soft failure reschedules on the cadence-derived monthly schedule")
 
 	// --- Sub B: pm-less = provider-auto-billed (#635) -> untouched ---

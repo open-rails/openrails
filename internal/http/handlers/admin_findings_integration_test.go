@@ -197,6 +197,10 @@ func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.Openr
 	return nil, false, nil
 }
 
+func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, gen.OpenrailsPaymentMethod, string) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, nil
+}
+
 func (fx *findingsFixture) exec(sql string, args ...any) {
 	fx.t.Helper()
 	_, err := fx.dbi.Pool().Exec(fx.ctx, sql, args...)

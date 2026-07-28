@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -529,7 +530,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 
 	// Create a subscription at max retries (one more failure = cancelled).
 	// Monthly billing cycle -> 5 failures total (#359).
-	retryAttempts := subscriptions.DunningMaxFailures(30*24) - 1 // One retry left
+	retryAttempts := collection.MaxFailures(30*24) - 1 // One retry left
 	nextRetry := startTime
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,

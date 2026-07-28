@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -259,23 +260,23 @@ func (w *DunningWorker) processSubscription(
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
-	// one day of slack — see subscriptions.DunningWindow). Anything
+	// one day of slack — see collection.Window). Anything
 	// older (e.g. months-stale subscriptions imported from a legacy system)
 	// must never be surprise-charged — cancel + downgrade instead, and the
 	// rail-side subscription is stopped via the scheduled deferred-delete
 	// mechanism so NMI quits retrying it. A sub-4-day cycle derives a ZERO
 	// window: any past_due daily sub is immediately terminal here.
-	cycleHours := subscriptions.BillingCycleHoursOf(sub.Price)
+	cycleHours := collection.BillingCycleHoursOf(sub.Price)
 	if cycleHours <= 0 && priceSvc != nil {
 		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
-			cycleHours = subscriptions.BillingCycleHoursOf(p)
+			cycleHours = collection.BillingCycleHoursOf(p)
 		}
 	}
 	if cycleHours <= 0 {
 		logEntry.WithField("price_id", sub.PriceID).
 			Warn("Dunning: subscription has no billing cycle (one-time price?); using monthly dunning window")
 	}
-	window := subscriptions.DunningWindow(cycleHours)
+	window := collection.Window(cycleHours)
 	if w.now().UTC().After(periodEnd.Add(window)) {
 		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, rail, periodEnd, window)
 	}
@@ -479,7 +480,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 		reason = "rebill declined"
 	}
 	responseCode := manualRebillEvidenceResponseCode(intent)
-	hardDecline := subscriptions.ClassifyNMIDecline(responseCode) == subscriptions.DeclineHard
+	hardDecline := collection.ClassifyNMIDecline(responseCode) == collection.DeclineHard
 	var failureCode *string
 	if responseCode != 0 {
 		code := fmt.Sprintf("%d", responseCode)

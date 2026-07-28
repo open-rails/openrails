@@ -27,7 +27,7 @@ import (
 // parked as `unknown` (needs_verification). Since #691 it carries ZERO access
 // stakes — an auto-renew sub's entitlement window is STANDING and closes only
 // on proof, so this constant only paces state transitions. Evaluated against
-// the cadence-derived subscriptions.DunningWindow for that pacing role and
+// the cadence-derived collection.Window for that pacing role and
 // deliberately kept: Decide is pure and price-less, and a pure internal
 // debounce doesn't warrant threading price cadence through every plane.
 const PeriodGrace = 48 * time.Hour

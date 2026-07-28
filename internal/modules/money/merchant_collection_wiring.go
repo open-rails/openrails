@@ -54,11 +54,13 @@ type CollectionEndpoints struct {
 }
 
 // CollectionPlane is the runtime-facing per-merchant credential resolver
-// surface (#725/#788): store-armed collection adapters plus raw NMI clients.
+// surface (#725/#788): store-armed collection adapters plus raw NMI clients,
+// plus the #828 in-doubt-charge provider read.
 // Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
 type CollectionPlane interface {
 	CollectionAdapterResolver
 	NMIClientResolver
+	CollectionVerifier
 }
 
 // NMIClientResolver is the raw-client NMI leg of the #725 store resolver, for
@@ -179,6 +181,68 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 		return nil, false, err
 	}
 	return client, true, nil
+}
+
+// VerifyCollectionCharge (#828) is the invoice-side ambiguity resolver's
+// provider READ: for NMI-family rails it arms the store-scoped client and
+// asks the Query API for a successful sale carrying the wire order reference
+// — the same probe the manual-rebill intent verifier trusts for its
+// no-double-charge invariant. vaulted_card charges settle on the LINKED NMI
+// gateway account, so the read arms that gateway's client. Rails without a
+// usable read (Stripe relies on its own request idempotency and cannot park
+// ambiguous mid-transport) report Supported=false.
+func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, wireOrderRef string) (CollectionVerifyResult, error) {
+	if b == nil {
+		return CollectionVerifyResult{}, nil
+	}
+	svc := b.merchants()
+	if svc == nil || b.DB == nil {
+		return CollectionVerifyResult{}, nil
+	}
+	rail := normalizeRail(method.Rail)
+	var client *nmi.NMIClient
+	switch {
+	case rails.IsNMI(models.Rail(rail)):
+		c, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, method.PspID)
+		if err != nil {
+			return CollectionVerifyResult{}, err
+		}
+		if !ok {
+			return CollectionVerifyResult{}, nil
+		}
+		client = c
+	case rail == string(models.RailVaultedCard):
+		mid := merchant.ID(method.MerchantID)
+		scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.PspID)
+		if err != nil {
+			return CollectionVerifyResult{}, err
+		}
+		if !ok {
+			return CollectionVerifyResult{}, nil
+		}
+		settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
+		if err != nil {
+			return CollectionVerifyResult{}, fmt.Errorf("vaulted_card account %s: %w", scope.AccountID, err)
+		}
+		gwScope, ok, err := svc.PSPScopeByAccountID(ctx, mid, string(models.RailNMI), settings.GatewayAccount)
+		if err != nil {
+			return CollectionVerifyResult{}, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
+		}
+		if !ok {
+			return CollectionVerifyResult{}, nil
+		}
+		client, err = b.nmiClient(ctx, svc, mid, gwScope)
+		if err != nil {
+			return CollectionVerifyResult{}, err
+		}
+	default:
+		return CollectionVerifyResult{}, nil
+	}
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(wireOrderRef)
+	if err != nil {
+		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", wireOrderRef, err)
+	}
+	return CollectionVerifyResult{Supported: true, Settled: found, TransactionID: txnID}, nil
 }
 
 func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
