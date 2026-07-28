@@ -20,7 +20,7 @@ import (
 )
 
 // RequireStripeSecretKey resolves the ctx merchant's armed Stripe account —
-// the rail_merchant_accounts row plus scoped secrets (Layer C, #788). It never
+// the psps row plus scoped secrets (Layer C, #788). It never
 // reads a boot-config artifact; an unarmed rail fails closed.
 func RequireStripeSecretKey(ctx context.Context, src railresolve.Source) (*config.PSPConfig, string, error) {
 	if src == nil {

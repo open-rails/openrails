@@ -95,13 +95,12 @@ func (c *CCBillClient) computeSignature(query url.Values) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (c *CCBillClient) VerifyCallbackSignature(params url.Values) bool {
-	signature := params.Get("X-signature")
-
-	hash := sha256.Sum256([]byte(c.createSignatureInput(params)))
-	return hex.EncodeToString(hash[:]) == strings.ToLower(signature)
-}
-
+// createSignatureInput is the OUTBOUND FlexForm signature input only. It binds
+// nothing but the username, and the resulting value is handed to the customer's
+// browser in the redirect URL — it is not, and can never be, an inbound
+// callback authenticity check (SEC-19 deleted the VerifyCallbackSignature that
+// pretended otherwise). Inbound CCBill callbacks authenticate by source IP plus
+// the armed clientAccnum/clientSubacc match.
 func (c *CCBillClient) createSignatureInput(params url.Values) string {
 	return params.Get("username") + c.config.Salt
 }

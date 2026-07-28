@@ -126,7 +126,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 }
 
 // checkoutRailConfigured reports whether rail is usable for this request's
-// checkout: ANY rail with an active armed rail_merchant_accounts row for the
+// checkout: ANY rail with an active armed psps row for the
 // request merchant + environment (#775/#788 — the ONE resolution seam; how
 // the account was armed, manifest or API, is invisible here). Fail closed on
 // resolution errors.

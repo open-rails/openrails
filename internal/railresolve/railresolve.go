@@ -2,7 +2,7 @@
 //
 // Every decision-time question — "is rail X armed for this merchant?", "give
 // me its credentials", "build me a rail client" — resolves an active
-// rail_merchant_accounts row (Layer B) plus scoped secrets through the
+// psps row (Layer B) plus scoped secrets through the
 // merchant secret-store interface. How the armed state got there (MODE 1
 // manifest convergence or MODE 2 API writes — Layer A) is invisible here:
 // both converge the same rows and the same secret names, so a new ingestion
@@ -47,7 +47,7 @@ type Source interface {
 }
 
 // MerchantsSource is the production Source: scope rows via merchants.Service
-// (rail_merchant_accounts) + scoped secrets via the merchant secret store.
+// (psps) + scoped secrets via the merchant secret store.
 type MerchantsSource struct {
 	Config *config.Config
 	// MerchantsFn returns the armed merchants service. Late-bound: manifest

@@ -11,9 +11,10 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
+	"github.com/open-rails/openrails/internal/webhookauth"
 )
 
 // HandleWebhook processes an incoming webhook from a payment rail.
@@ -154,26 +155,19 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 	if err != nil {
 		return nil, err
 	}
-	// Use global test_mode for CCBill IP allowlist bypass.
-	isTestMode := cfg.IsTestMode()
+	// SEC-19: the SAME gate the HTTP surface uses. This surface previously
+	// skipped the IP check on bare test_mode with no live-PSP guard at all.
+	if !webhookauth.CCBillIPAllowed(ctx, cfg, s.ccbillLivePSPProbe(), req.ClientIP) {
+		log.WithFields(log.Fields{
+			"client_ip":  req.ClientIP,
+			"rail":       "ccbill",
+			"event_type": req.EventType,
+		}).Warn("CCBill webhook rejected - unauthorized IP address")
 
-	if !isTestMode {
-		// Verify CCBill webhook comes from authorized IP ranges
-		if !iputil.IsValidCCBillIP(req.ClientIP) {
-			log.WithFields(log.Fields{
-				"client_ip":  req.ClientIP,
-				"rail":       "ccbill",
-				"event_type": req.EventType,
-			}).Warn("CCBill webhook rejected - unauthorized IP address")
-
-			return &WebhookResult{
-				Accepted: false,
-				Error:    "unauthorized webhook source",
-			}, nil
-		}
-		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authenticated - valid IP range")
-	} else {
-		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authentication bypassed - test env enabled")
+		return &WebhookResult{
+			Accepted: false,
+			Error:    "unauthorized webhook source",
+		}, nil
 	}
 
 	prepared, err := webhookutil.PrepareCCBill(req.Body, req.EventType)
@@ -198,6 +192,18 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		Accepted:  true,
 		EventType: prepared.EventType,
 	}, nil
+}
+
+// ccbillLivePSPProbe binds the cross-merchant live-PSP catalog probe for the
+// CCBill IP gate. nil (no merchants service on this runtime) fails it closed.
+func (s *Service) ccbillLivePSPProbe() webhookauth.LiveRailProbe {
+	if s == nil || s.rt == nil || s.rt.Merchants == nil {
+		return nil
+	}
+	svc := s.rt.Merchants
+	return func(ctx context.Context) (merchants.LiveRailPresence, error) {
+		return svc.ProbeLiveRailPSPs(ctx, string(models.RailCCBill))
+	}
 }
 
 func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {

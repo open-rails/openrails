@@ -133,7 +133,7 @@ func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]u
 	return w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
 }
 
-// merchantHasRailAccounts: cheap accounts-exist predicate. rail_merchant_accounts
+// merchantHasRailAccounts: cheap accounts-exist predicate. psps
 // is RLS-isolated, so the EXISTS runs under the merchant GUC. Archived rows
 // count — drain pulls still arm (#655). Environment is NOT filtered: a
 // wrong-environment row enqueues a job that arms nothing (fail open, cheap).
@@ -178,7 +178,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	if n := len(merchantIDs); n > 0 {
 		spacing = w.stagger() / time.Duration(n)
 	}
-	// #788: the armed rail state (rail_merchant_accounts) is the only
+	// #788: the armed rail state (psps) is the only
 	// credential plane, so a merchant with zero declared accounts has nothing
 	// to refresh — always skip it before enqueue.
 	var enqueued, deduped, skipped, failed, slot int
@@ -424,7 +424,7 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	for _, provider := range providers {
 		// Runtime provider-account identity resolution was removed (#592):
 		// watermarks key globally per merchant+provider and reconcile runs
-		// account-agnostic (provider_accounts is an operator-declared catalog).
+		// account-agnostic (psps is an operator-declared catalog).
 		providerRes := w.runProviderEventWindows(ctx, mid, provider, nil, nil, fetchers)
 		result.add(providerRes)
 	}

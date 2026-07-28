@@ -33,8 +33,8 @@ merchants:
       - { key: burst, window: 15m, limit: 5_000_000 }
       - { key: sustained, window: 5h, limit: 20_000_000 }
 
-    # Operator-declared PSPs: the merchant's payment service providers, keyed by
-    # PSP key, one rail each (secret names use the psps/<rail>/... prefix).
+    # Operator-declared PSP catalog: one word everywhere — this key, the DB table
+    # (openrails.psps) and the merchant-secret name prefix (`psps/…`). One rail each.
     psps:
       mobius:
         nmi:

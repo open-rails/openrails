@@ -106,7 +106,7 @@ func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) 
 
 // Apply builds the CCBill webhook service from the dispatcher and runs it.
 // The CCBill client is built PER MERCHANT at dispatch time from the armed
-// rail_merchant_accounts state (#788): the ctx merchant plus the routed
+// psps state (#788): the ctx merchant plus the routed
 // account id (empty = the active account) resolve through RailConfigs. An
 // unarmed rail or a resolution failure rejects the webhook — retryable, so
 // the provider redelivers once the rail is armed; never default-allow.

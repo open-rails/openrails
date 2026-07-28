@@ -20,7 +20,7 @@ import (
 // SeedRailMerchantAccounts is the test-side Layer-A writer (#788): it converges
 // the given rail credential set into the SAME armed state production writers
 // (MODE 1 manifest convergence / MODE 2 API writes) produce —
-// rail_merchant_accounts rows + scoped secrets in the runtime's merchant
+// psps rows + scoped secrets in the runtime's merchant
 // secret store. Everything downstream (checkout, webhooks, pulls, rebills)
 // then resolves it through the ONE Layer-C seam exactly like production.
 func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {

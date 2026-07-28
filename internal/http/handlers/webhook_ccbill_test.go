@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,10 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
+	"github.com/open-rails/openrails/internal/webhookauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -28,12 +31,26 @@ func credentialPostureFromBool(sandbox bool) config.CredentialPosture {
 }
 
 // stubCCBillLiveProbe swaps the catalog probe for the duration of a test.
-func stubCCBillLiveProbe(t *testing.T, hasLive bool, err error) {
+func stubCCBillLiveProbe(t *testing.T, presence merchants.LiveRailPresence, err error) {
 	t.Helper()
-	orig := ccbillLiveAccountsExist
-	ccbillLiveAccountsExist = func(*httprequest.Request) (bool, error) { return hasLive, err }
-	t.Cleanup(func() { ccbillLiveAccountsExist = orig })
+	orig := ccbillLivePSPProbe
+	ccbillLivePSPProbe = func(*httprequest.Request) webhookauth.LiveRailProbe {
+		return func(context.Context) (merchants.LiveRailPresence, error) { return presence, err }
+	}
+	t.Cleanup(func() { ccbillLivePSPProbe = orig })
 }
+
+// stubCCBillNoProbe simulates a runtime with no merchants service wired.
+func stubCCBillNoProbe(t *testing.T) {
+	t.Helper()
+	orig := ccbillLivePSPProbe
+	ccbillLivePSPProbe = func(*httprequest.Request) webhookauth.LiveRailProbe { return nil }
+	t.Cleanup(func() { ccbillLivePSPProbe = orig })
+}
+
+// devAllowlist is the explicit operator-declared source allowlist the SEC-19
+// gate requires before any non-CCBill address can be considered at all.
+var devAllowlist = []string{"203.0.113.0/24"}
 
 func newCCBillWebhookRequest(t *testing.T, testMode bool, remoteAddr string) (*httprequest.Request, *httptest.ResponseRecorder) {
 	t.Helper()
@@ -43,16 +60,19 @@ func newCCBillWebhookRequest(t *testing.T, testMode bool, remoteAddr string) (*h
 	req.RemoteAddr = remoteAddr
 	req.SetPathValue("provider", "ccbill")
 	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
-	rt := &app.Runtime{Config: &config.Config{TestMode: credentialPostureFromBool(testMode)}}
+	rt := &app.Runtime{Config: &config.Config{
+		TestMode:                 credentialPostureFromBool(testMode),
+		CCBillWebhookIPAllowlist: devAllowlist,
+	}}
 	return httprequest.NewHTTP(w, req, rt), w
 }
 
 // #668: CCBill has no HMAC — the source-IP allowlist is its only
-// authentication. The test_mode bypass must be refused whenever a live CCBill
-// provider account is declared: live posture + test_mode=true must still 403
-// a webhook from a non-CCBill IP.
+// authentication. The declared dev allowlist must be refused whenever a live
+// CCBill PSP exists: live posture + test_mode=true must still 403 a webhook
+// from a non-CCBill IP.
 func TestCCBillWebhookLivePostureRejectsForgedIPDespiteTestMode(t *testing.T) {
-	stubCCBillLiveProbe(t, true, nil)
+	stubCCBillLiveProbe(t, merchants.LiveRailPresent, nil)
 	r, w := newCCBillWebhookRequest(t, true, "203.0.113.5:12345")
 
 	Webhook(r)
@@ -60,12 +80,11 @@ func TestCCBillWebhookLivePostureRejectsForgedIPDespiteTestMode(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
-// Sandbox posture (test_mode, no live CCBill account anywhere) keeps the dev
-// bypass: a non-CCBill IP passes IP auth and the request proceeds to enqueue
-// (which 500s here only because no River producer is wired — the point is it
-// is NOT a 403).
-func TestCCBillWebhookSandboxPostureKeepsDevBypass(t *testing.T) {
-	stubCCBillLiveProbe(t, false, nil)
+// Sandbox posture + an explicitly declared source + a probe that PROVES no live
+// CCBill PSP exists: the request proceeds to enqueue (which 500s here only
+// because no River producer is wired — the point is it is NOT a 403).
+func TestCCBillWebhookSandboxPostureHonorsDeclaredAllowlist(t *testing.T) {
+	stubCCBillLiveProbe(t, merchants.LiveRailAbsent, nil)
 	r, w := newCCBillWebhookRequest(t, true, "203.0.113.5:12345")
 
 	Webhook(r)
@@ -74,30 +93,60 @@ func TestCCBillWebhookSandboxPostureKeepsDevBypass(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, w.Code) // enqueue fails: no River producer in test runtime
 }
 
+// SEC-19: an UNPROVEN probe (the shape the pre-fix code produced structurally —
+// a silent empty RLS read — plus probe errors and a missing merchants service)
+// must fail CLOSED, even with a declared allowlist entry and sandbox posture.
+func TestCCBillWebhookUnprovenLiveProbeFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(*testing.T)
+	}{
+		{"probe proves nothing (RLS-silent empty read)", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, nil) }},
+		{"probe errors", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, errors.New("catalog unavailable")) }},
+		{"probe errors but still claims absent", func(t *testing.T) {
+			stubCCBillLiveProbe(t, merchants.LiveRailAbsent, errors.New("catalog unavailable"))
+		}},
+		{"no merchants service wired", func(t *testing.T) { stubCCBillNoProbe(t) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.apply(t)
+			r, w := newCCBillWebhookRequest(t, true, "203.0.113.5:12345")
+
+			Webhook(r)
+
+			require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		})
+	}
+}
+
 func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
-	newReq := func(testMode bool) *httprequest.Request {
+	newReq := func(testMode bool, allowlist []string) *httprequest.Request {
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", nil)
-		return httprequest.NewHTTP(httptest.NewRecorder(), req, &app.Runtime{Config: &config.Config{TestMode: credentialPostureFromBool(testMode)}})
+		return httprequest.NewHTTP(httptest.NewRecorder(), req, &app.Runtime{Config: &config.Config{
+			TestMode:                 credentialPostureFromBool(testMode),
+			CCBillWebhookIPAllowlist: allowlist,
+		}})
 	}
 
 	// Allowlisted CCBill source IP always passes, regardless of posture.
-	stubCCBillLiveProbe(t, true, nil)
-	require.True(t, ccbillWebhookIPAllowed(newReq(false), "64.38.212.5"))
-	require.True(t, ccbillWebhookIPAllowed(newReq(true), "64.38.212.5"))
+	stubCCBillLiveProbe(t, merchants.LiveRailPresent, nil)
+	require.True(t, ccbillWebhookIPAllowed(newReq(false, nil), "64.38.212.5"))
+	require.True(t, ccbillWebhookIPAllowed(newReq(true, nil), "64.38.212.5"))
 
-	// test_mode off: non-allowlisted IP is always rejected.
-	require.False(t, ccbillWebhookIPAllowed(newReq(false), "203.0.113.5"))
+	// test_mode off: a non-CCBill IP is rejected even when declared.
+	require.False(t, ccbillWebhookIPAllowed(newReq(false, devAllowlist), "203.0.113.5"))
 
-	// test_mode on + live CCBill account declared: bypass refused.
-	require.False(t, ccbillWebhookIPAllowed(newReq(true), "203.0.113.5"))
+	// test_mode on + live CCBill PSP declared: the declared source is refused.
+	require.False(t, ccbillWebhookIPAllowed(newReq(true, devAllowlist), "203.0.113.5"))
 
-	// Probe failure fails closed to the allowlist.
-	stubCCBillLiveProbe(t, false, errors.New("catalog unavailable"))
-	require.False(t, ccbillWebhookIPAllowed(newReq(true), "203.0.113.5"))
-
-	// Sandbox posture (test_mode, no live account): dev bypass applies.
-	stubCCBillLiveProbe(t, false, nil)
-	require.True(t, ccbillWebhookIPAllowed(newReq(true), "203.0.113.5"))
+	stubCCBillLiveProbe(t, merchants.LiveRailAbsent, nil)
+	// SEC-19: sandbox + provably no live PSP is NOT enough on its own — the
+	// source must be explicitly declared. An empty allowlist accepts nothing.
+	require.False(t, ccbillWebhookIPAllowed(newReq(true, nil), "203.0.113.5"))
+	// ...and an address outside the declared range is still refused.
+	require.False(t, ccbillWebhookIPAllowed(newReq(true, devAllowlist), "198.51.100.7"))
+	// All three conditions met.
+	require.True(t, ccbillWebhookIPAllowed(newReq(true, devAllowlist), "203.0.113.5"))
 
 	// Nil config / nil state never bypass.
 	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", nil)
@@ -159,7 +208,7 @@ func newCCBillWebhookRequestBehindProxy(t *testing.T, remoteAddr, forwardedFor s
 // not the proxy's own socket address, is what's evaluated. Exercises the full
 // Webhook() dispatch path, not just the allowlist helper in isolation.
 func TestCCBillWebhookAllowsRequestBehindTrustedProxy(t *testing.T) {
-	stubCCBillLiveProbe(t, false, nil)
+	stubCCBillLiveProbe(t, merchants.LiveRailAbsent, nil)
 
 	r, w := newCCBillWebhookRequestBehindProxy(t, "10.0.0.5:443", "64.38.212.5", []string{"10.0.0.0/8"})
 
@@ -176,7 +225,7 @@ func TestCCBillWebhookAllowsRequestBehindTrustedProxy(t *testing.T) {
 // claiming to be a CCBill IP has ZERO effect — the socket peer (the actual
 // sender) is what's evaluated, and an off-allowlist sender correctly 403s.
 func TestCCBillWebhookRejectsSpoofedForwardedForWithoutTrustedProxies(t *testing.T) {
-	stubCCBillLiveProbe(t, false, nil)
+	stubCCBillLiveProbe(t, merchants.LiveRailAbsent, nil)
 
 	r, w := newCCBillWebhookRequestBehindProxy(t, "203.0.113.9:443", "64.38.212.5", nil)
 
@@ -190,7 +239,7 @@ func TestCCBillWebhookRejectsSpoofedForwardedForWithoutTrustedProxies(t *testing
 // 403s — trusting a CIDR range never means trusting an arbitrary claimed
 // X-Forwarded-For from an untrusted direct connection outside that range.
 func TestCCBillWebhookIPAllowedIgnoresForwardedForFromUntrustedPeer(t *testing.T) {
-	stubCCBillLiveProbe(t, false, nil)
+	stubCCBillLiveProbe(t, merchants.LiveRailAbsent, nil)
 
 	r, w := newCCBillWebhookRequestBehindProxy(t, "203.0.113.9:443", "64.38.212.5", []string{"10.0.0.0/8"})
 

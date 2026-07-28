@@ -78,6 +78,22 @@ func (t *TrustedProxies) ResolveClientIP(remoteAddr, forwardedFor string) string
 	return peer
 }
 
+// IPInAnyCIDR reports whether clientIP falls inside any of cidrs. For
+// operator-declared source allowlists, NOT proxy trust. Malformed entries are
+// skipped — config.Validate rejects them at boot.
+func IPInAnyCIDR(clientIP string, cidrs []string) bool {
+	ip := net.ParseIP(strings.TrimSpace(clientIP))
+	if ip == nil {
+		return false
+	}
+	for _, raw := range cidrs {
+		if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(raw)); err == nil && ipNet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func hostOnly(remoteAddr string) string {
 	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		return host

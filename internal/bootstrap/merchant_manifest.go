@@ -363,10 +363,9 @@ type MerchantConfig struct {
 	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius), one rail each.
-	// merchants.<slug>. nothing else it could mean). DELIBERATE DIVERGENCE: the
-	// DB table and the merchant-secret name prefix REMAIN `rail_merchant_accounts`
-	// (#683 vocabulary; distinguishes rail_customer_accounts) — do not "fix" them
-	// to match this key.
+	// merchants.<slug>. nothing else it could mean). ONE word everywhere: the
+	// DB table (openrails.psps) and the merchant-secret name prefix (`psps/…`)
+	// speak the same vocabulary as this key.
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
 }
 

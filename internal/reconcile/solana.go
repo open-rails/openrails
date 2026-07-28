@@ -178,7 +178,7 @@ type SolanaFetcher struct {
 	// Resolve resolves #713 memo local-ids against local records for the
 	// wallet scan. Nil parks every memo-recognized discovery (unverifiable).
 	Resolve SolanaLocalRecordResolver
-	// MerchantWallet is the declared rail_merchant_accounts.account_id (the
+	// MerchantWallet is the declared psps.account_id (the
 	// receiving wallet) the #714 scan walks. FetchParams.AccountID overrides.
 	MerchantWallet string
 	// SignatureLimit bounds the per-subscription signature listing (default 50).

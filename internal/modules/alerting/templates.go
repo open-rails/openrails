@@ -59,7 +59,7 @@ type evalContext struct {
 
 // templateEvalDeps is the small non-metrics surface a template may need (the
 // digest hits payment_methods directly since #733 defers that measure; the
-// webhook_silence expectation gate reads rail_merchant_accounts+subscriptions).
+// webhook_silence expectation gate reads psps+subscriptions).
 type templateEvalDeps interface {
 	countPaymentMethodsExpiring(ctx context.Context, now time.Time, daysAhead int) (int64, error)
 	// webhookExpectedRails: rails that are ARMED and have subscriptions projected

@@ -157,7 +157,7 @@ type Runtime struct {
 	CollectionResolver money.CollectionPlane
 	// RailConfigs is the ONE Layer-C rail resolution seam (#788): every
 	// decision-time rail credential/armed-state read resolves the ctx
-	// merchant's rail_merchant_accounts row + scoped secrets through it.
+	// merchant's psps row + scoped secrets through it.
 	RailConfigs railresolve.Source
 	// CCBillDataLinkEndpoint overrides the DataLink endpoint on store-armed
 	// CCBill intent clients (test seam; empty = real endpoint). Read at

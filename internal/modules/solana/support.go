@@ -198,7 +198,7 @@ func RequireTokenDecimals(ctx context.Context, src railresolve.Source, symbol st
 }
 
 // RequireSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// account (Layer C, #788): the rail_merchant_accounts row's settings
+// account (Layer C, #788): the psps row's settings
 // materialized into the runtime Solana config. Unarmed fails closed.
 func RequireSolanaRailConfig(ctx context.Context, src railresolve.Source) (*config.PSPConfig, error) {
 	if src == nil {

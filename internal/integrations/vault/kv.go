@@ -148,8 +148,8 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 // to path, recursively descending KV-v2 directory entries ("name/"). KV-v2 LIST
 // returns one level only, but the merchant store's List contract (matching the
 // DB store, #724 backend parity) is full relative names such as
-// "rail_merchant_accounts/<rail>/<env>/<acct>/<key>" — without recursion the
-// status surfaces would see only "rail_merchant_accounts/" and report every
+// "psps/<rail>/<env>/<acct>/<key>" — without recursion the
+// status surfaces would see only "psps/" and report every
 // credential unconfigured.
 func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
 	return a.listSecrets(ctx, strings.TrimSuffix(path, "/"), "", 0)
