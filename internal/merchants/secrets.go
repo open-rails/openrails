@@ -301,6 +301,20 @@ func validateSecretRef(merchantID merchant.ID, name string) error {
 	return nil
 }
 
+// cleanSecretName normalises a secret name. It REJECTS (by returning "") a
+// name containing a path-traversal segment: every caller allowlists the name
+// and accountID is PathEscaped, so this is not reachable today — but the
+// function's output is joined into a Vault path, and a guard that only trims
+// slashes is one refactor away from being the hole (SEC-24 item 6).
 func cleanSecretName(name string) string {
-	return strings.Trim(strings.TrimSpace(name), "/")
+	cleaned := strings.Trim(strings.TrimSpace(name), "/")
+	if cleaned == "." || cleaned == ".." {
+		return ""
+	}
+	for _, seg := range strings.Split(cleaned, "/") {
+		if seg == ".." || seg == "." {
+			return ""
+		}
+	}
+	return cleaned
 }

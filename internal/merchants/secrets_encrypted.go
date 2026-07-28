@@ -42,7 +42,7 @@ func (e *encryptedSecretStore) Get(ctx context.Context, merchantID merchant.ID, 
 	if err != nil {
 		return Secret{}, err
 	}
-	plain, derr := e.enc.Decrypt(ctx, merchantID, s.Value)
+	plain, derr := e.enc.Decrypt(ctx, merchantID, crypto.SecretAAD(merchantID, name), s.Value)
 	if derr != nil {
 		return Secret{}, fmt.Errorf("merchants: decrypt secret %q: %w", name, derr)
 	}
@@ -63,7 +63,7 @@ func (e *encryptedSecretStore) Put(ctx context.Context, merchantID merchant.ID, 
 		return Secret{}, err
 	}
 
-	ciphertext, err := e.enc.Encrypt(ctx, merchantID, []byte(value))
+	ciphertext, err := e.enc.Encrypt(ctx, merchantID, crypto.SecretAAD(merchantID, name), []byte(value))
 	if err != nil {
 		return Secret{}, fmt.Errorf("merchants: encrypt secret %q: %w", name, err)
 	}

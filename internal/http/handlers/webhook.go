@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -335,8 +337,13 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		if !ok {
 			return true, false
 		}
+		// SEC-24 item 7: handled=true, accepted=FALSE. processResolvedMerchantWebhook
+		// writes its OWN response — 401 on a failed signature, 200 on success.
+		// Returning accepted=true made the caller write {"status":"accepted"}
+		// again on top, so a body-parsing monitor saw a REJECTED FORGERY
+		// reported as accepted. The status was always right; the body lied.
 		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
-		return true, true
+		return true, false
 	default:
 		return false, false
 	}
@@ -599,9 +606,14 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 		return nil, fmt.Errorf("stripe secret key not configured for thin event hydration")
 	}
 
-	url := strings.TrimSpace(envelope.RelatedObject.URL)
-	if !strings.HasPrefix(url, "http") {
-		url = "https://api.stripe.com" + url
+	// SEC-24 item 5. The payload-supplied value is ALWAYS a path, never a URL.
+	// The previous `if !strings.HasPrefix(url, "http")` was the inverse of a
+	// guard: an absolute URL was accepted verbatim and then handed
+	// `Authorization: Bearer sk_live_…`, so a leaked webhook secret escalated
+	// into live-API-key exfiltration. The host is ours and is not negotiable.
+	url, err := stripeRelatedObjectURL(envelope.RelatedObject.URL)
+	if err != nil {
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -633,6 +645,43 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 	}{ID: envelope.ID, Type: envelope.Type}
 	synthesized.Data.Object = object
 	return json.Marshal(synthesized)
+}
+
+// stripeAPIBase is the ONE host thin-event hydration may reach. Not derived
+// from the payload, not configurable per request.
+const stripeAPIBase = "https://api.stripe.com"
+
+// stripeRelatedObjectURL treats the payload's related-object value strictly as a
+// PATH under the Stripe API host. Anything that could redirect the request
+// elsewhere — a scheme, a protocol-relative "//host", a backslash, a control
+// character — is refused rather than normalised, because a normaliser is
+// something to be outwitted and a refusal is not.
+func stripeRelatedObjectURL(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return "", fmt.Errorf("thin event related object has no url")
+	}
+	if strings.ContainsAny(p, "\\\x00") || strings.ContainsRune(p, '\n') || strings.ContainsRune(p, '\r') {
+		return "", fmt.Errorf("thin event related object url is not a plain path")
+	}
+	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
+		return "", fmt.Errorf("thin event related object url must be a path, not an absolute or protocol-relative url")
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	// A parsed path must stay a path: no host, no scheme, no ".." escape.
+	u, err := neturl.Parse(p)
+	if err != nil {
+		return "", fmt.Errorf("thin event related object url is unparseable: %w", err)
+	}
+	if u.Scheme != "" || u.Host != "" || u.User != nil {
+		return "", fmt.Errorf("thin event related object url must be a path, not an absolute url")
+	}
+	if u.Path != path.Clean(u.Path) {
+		return "", fmt.Errorf("thin event related object path is not canonical")
+	}
+	return stripeAPIBase + u.String(), nil
 }
 
 func nmiWebhookAccountID(body []byte) string {
