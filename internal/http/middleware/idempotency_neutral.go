@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -110,7 +111,11 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 				target += "?" + r.URL.RawQuery
 			}
 			operation := "http:" + r.Method + " " + target
-			storeKey := mid.String() + ":" + hashIdempotencyKey(key)
+			// #SEC-23: the bucket is (merchant, ACTING PRINCIPAL, key). Without
+			// the principal, one caller's key collides with another's — and
+			// since this middleware replays WITHOUT invoking the route handler
+			// or its auth, that collision answers a request that never ran.
+			storeKey := mid.String() + ":" + requestSubject(r) + ":" + hashIdempotencyKey(key)
 			fp := fingerprint(r.Method, target, body)
 			ctx := r.Context()
 
@@ -165,8 +170,11 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			if status >= 500 || cw.over {
-				// Do not cache server errors or oversized bodies; a retry re-runs.
+			if status >= 400 || cw.over {
+				// #SEC-23: never cache a 4xx. A cached 401/403 would let an
+				// unauthorized attempt pre-answer a later AUTHORIZED request
+				// carrying the same key. Server errors and oversized bodies are
+				// likewise not cached; a retry re-runs the handler.
 				_ = svc.Fail(ctx, operation, storeKey, fmt.Errorf("status %d not cached", status))
 				resolved = true
 				return
@@ -189,6 +197,23 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 			}
 		})
 	}
+}
+
+// requestSubject identifies the acting principal at this point in the chain.
+// The optional authenticator runs upstream, so a verified user subject is
+// available and preferred — it is stable across token refresh. API-key and
+// remote-application credentials are resolved later, at the route gate, so they
+// bind by a digest of the presented credential instead. No credential at all is
+// its own bucket, never shared with an authenticated one.
+func requestSubject(r *http.Request) string {
+	if uc, ok := billingauth.FromContext(r.Context()); ok && strings.TrimSpace(uc.UserID) != "" {
+		return "u:" + uc.UserID
+	}
+	if cred := strings.TrimSpace(r.Header.Get("Authorization")); cred != "" {
+		sum := sha256.Sum256([]byte(cred))
+		return "c:" + hex.EncodeToString(sum[:])[:32]
+	}
+	return "anon"
 }
 
 func hashIdempotencyKey(key string) string {

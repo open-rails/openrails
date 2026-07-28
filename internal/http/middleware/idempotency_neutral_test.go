@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -254,5 +255,126 @@ func TestIdempotencyHTTP(t *testing.T) {
 
 		require.EqualValues(t, 2, calls.Load(), "distinct query strings are distinct operations")
 		require.Empty(t, w2.Header().Get("Idempotent-Replayed"))
+	})
+}
+
+// #SEC-23: the replay cache sits in the GLOBAL chain, ahead of route-level
+// auth, and a hit answers the request WITHOUT invoking the handler. Two things
+// must therefore hold: a 4xx is never cached, and the bucket is bound to the
+// acting principal.
+func TestIdempotencyHTTPAuthorizationBinding(t *testing.T) {
+	t.Run("poisoned 401 does not answer a later authorized request", func(t *testing.T) {
+		svc := idempotency.NewIdempotencyService(nil)
+		t.Cleanup(svc.Close)
+		var calls atomic.Int64
+		// Stands in for the route gate: no credential => 401, otherwise 201.
+		h := IdempotencyHTTP(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if r.Header.Get("Authorization") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"1"}`))
+		}))
+
+		// Keys derived from an order/cart id are guessable; the attacker
+		// pre-poisons one with an unauthenticated 401.
+		key := "order-4711"
+		body := `{"amount":100}`
+
+		poison := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(body))
+		poison.Header.Set("Idempotency-Key", key)
+		wp := httptest.NewRecorder()
+		h.ServeHTTP(wp, poison)
+		require.Equal(t, http.StatusUnauthorized, wp.Code)
+
+		// The legitimate, authenticated request with the same key must EXECUTE.
+		legit := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(body))
+		legit.Header.Set("Idempotency-Key", key)
+		legit.Header.Set("Authorization", "Bearer real-token")
+		wl := httptest.NewRecorder()
+		h.ServeHTTP(wl, legit)
+
+		require.Equal(t, http.StatusCreated, wl.Code, "an authorized request must never be answered from a poisoned cache")
+		require.Empty(t, wl.Header().Get("Idempotent-Replayed"))
+		require.EqualValues(t, 2, calls.Load(), "the handler (and its auth) must run")
+	})
+
+	t.Run("4xx is not cached: the same caller's retry re-runs the handler", func(t *testing.T) {
+		svc := idempotency.NewIdempotencyService(nil)
+		t.Cleanup(svc.Close)
+		var calls atomic.Int64
+		var status atomic.Int64
+		status.Store(http.StatusForbidden)
+		h := IdempotencyHTTP(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(int(status.Load()))
+		}))
+
+		key := uuid.NewString()
+		body := `{"amount":100}`
+		send := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(body))
+			req.Header.Set("Idempotency-Key", key)
+			req.Header.Set("Authorization", "Bearer same-token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			return w
+		}
+		require.Equal(t, http.StatusForbidden, send().Code)
+		status.Store(http.StatusCreated)
+		require.Equal(t, http.StatusCreated, send().Code)
+		require.EqualValues(t, 2, calls.Load())
+	})
+
+	t.Run("distinct principals do not share a bucket", func(t *testing.T) {
+		svc := idempotency.NewIdempotencyService(nil)
+		t.Cleanup(svc.Close)
+		var calls atomic.Int64
+		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
+
+		key := uuid.NewString()
+		body := `{"amount":100}`
+		send := func(subject billingauth.UserContext, cred string) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(body))
+			req.Header.Set("Idempotency-Key", key)
+			req.Header.Set("Authorization", cred)
+			if subject.UserID != "" {
+				req = req.WithContext(billingauth.SetUserContext(req.Context(), subject))
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		send(billingauth.UserContext{UserID: uuid.NewString()}, "Bearer a")
+		send(billingauth.UserContext{UserID: uuid.NewString()}, "Bearer b")
+		send(billingauth.UserContext{}, "ApiKey sk_live_xyz") // API key: bound by credential digest
+		send(billingauth.UserContext{}, "")                   // anonymous: its own bucket
+
+		require.EqualValues(t, 4, calls.Load(), "each principal gets its own replay bucket")
+	})
+
+	t.Run("same principal still replays", func(t *testing.T) {
+		svc := idempotency.NewIdempotencyService(nil)
+		t.Cleanup(svc.Close)
+		var calls atomic.Int64
+		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
+
+		key := uuid.NewString()
+		body := `{"amount":100}`
+		uid := uuid.NewString()
+		send := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(body))
+			req.Header.Set("Idempotency-Key", key)
+			req.Header.Set("Authorization", "Bearer token-v1")
+			req = req.WithContext(billingauth.SetUserContext(req.Context(), billingauth.UserContext{UserID: uid}))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			return w
+		}
+		require.Equal(t, http.StatusCreated, send().Code)
+		w2 := send()
+		require.Equal(t, "true", w2.Header().Get("Idempotent-Replayed"))
+		require.EqualValues(t, 1, calls.Load(), "a genuine retry from the same principal still replays")
 	})
 }
