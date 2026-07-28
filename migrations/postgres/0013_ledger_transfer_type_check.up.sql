@@ -11,6 +11,7 @@ ALTER TABLE openrails.ledger_transfers
         'credit_spend'::text,
         'credit_expire'::text,
         'credit_revoke'::text,
+        'credit_reinstate'::text,
         'owed_accrual'::text,
         'owed_payment'::text
     ])));

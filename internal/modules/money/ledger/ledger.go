@@ -52,12 +52,15 @@ const (
 	CreditSpend  TransferType = "credit_spend"  // customer balance -> platform revenue
 	CreditExpire TransferType = "credit_expire" // unspent lot remainder, time-lapsed
 	CreditRevoke TransferType = "credit_revoke" // unspent lot remainder, clawed back
-	OwedAccrual  TransferType = "owed_accrual"  // postpaid usage -> arrears liability
-	OwedPayment  TransferType = "owed_payment"  // arrears settled by an external charge
+	// CreditReinstate reverses a clawback (revoked_credits -> customer_balance).
+	// The revoke is deliberately reversible (#514); this is how.
+	CreditReinstate TransferType = "credit_reinstate"
+	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> arrears liability
+	OwedPayment     TransferType = "owed_payment" // arrears settled by an external charge
 )
 
 // AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, OwedAccrual, OwedPayment}
+var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // idx_ledger_transfers_lot_once.

@@ -82,7 +82,7 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	require.NoError(t, err)
 	src, sid, c := "grant_reinstate", lot.ID.String(), customer
 	_, err = ml.Apply(ctx, ledger.Transfer{
-		Debit: revAcc, Credit: custAcc, Amount: 100, Currency: cur, Type: "credit_reinstate",
+		Debit: revAcc, Credit: custAcc, Amount: 100, Currency: cur, Type: ledger.CreditReinstate,
 		Source: &src, SourceID: &sid, GrantID: &lot.ID, Customer: &c,
 	})
 	require.NoError(t, err)
