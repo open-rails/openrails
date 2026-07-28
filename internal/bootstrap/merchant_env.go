@@ -42,7 +42,7 @@ func MerchantBillingEnvKey(envName string) string {
 	rest := tokens[1+sectionIdx+sectionWidth:]
 	base := "merchants." + merchantKey + "." + section
 	switch section {
-	case "display_name", "delegated_invoker_wasted_spend_windows":
+	case "display_name", "api_host", "delegated_invoker_wasted_spend_windows":
 		if len(rest) == 0 {
 			return base
 		}
@@ -62,6 +62,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		key string
 	}{
 		{"DISPLAY_NAME", "display_name"},
+		{"API_HOST", "api_host"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
 		{"PSPS", "psps"},

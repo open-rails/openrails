@@ -12,6 +12,7 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 	tests := map[string]string{
 		"BILLING_VERSION":                                                             "version",
 		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                      "merchants.doujins.display_name",
+		"BILLING_MERCHANTS_DOUJINS_API_HOST":                                          "merchants.doujins.api_host",
 		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                "merchants.doujins.profile.from_email",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.psps.mobius.nmi.secrets.security_key",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_url",

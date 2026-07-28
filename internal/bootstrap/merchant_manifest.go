@@ -252,6 +252,9 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
+	if strings.TrimSpace(src.APIHost) != "" {
+		dst.APIHost = src.APIHost
+	}
 	if src.RemoteApplication != nil {
 		dst.RemoteApplication = src.RemoteApplication
 	}
@@ -347,6 +350,11 @@ func mergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src Provider
 
 type MerchantConfig struct {
 	DisplayName string `yaml:"display_name" koanf:"display_name"`
+	// APIHost is the merchant's canonical #734 API host (e.g. "api.myapp.example"):
+	// the Host-header value public routes resolve this merchant from (#850).
+	// Globally unique across active merchants. Omitted leaves the stored value
+	// untouched (it can also be assigned via PUT /v1/merchant/api-host).
+	APIHost string `yaml:"api_host,omitempty" koanf:"api_host"`
 	// RemoteApplication is the host application's AuthKit remote_application trust
 	// for THIS merchant (#527). When set, it is registered as owner of the
 	// merchant's permission-group, so host-app delegated tokens administer this
@@ -790,6 +798,18 @@ func pspEntries(in map[string]PSPConfig) []railMerchantAccountEntry {
 
 func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, slug string, mt MerchantConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
+	// #850: declared api_host is asserted on every apply (declarative identity,
+	// like display_name — not seed-once); omitted leaves the stored value
+	// untouched, so a host assigned via the merchant-admin route survives.
+	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
+		dir, err := merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return fmt.Errorf("api_host %q: %w", host, err)
+		}
+		if err := dir.SetHostConfig(ctx, merchantID, host); err != nil {
+			return fmt.Errorf("set api_host %q: %w", host, err)
+		}
+	}
 	// Apply the merchant_configurations payload (#646): profile, invoice/collection
 	// policy, and delegated-invoker abuse windows. Load once, mutate only the
 	// declared parts (omit = leave-as-is), upsert if anything changed.

@@ -55,10 +55,10 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 
 	var merchantID string
-	var displayName *string
+	var displayName, apiHost *string
 	if err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, display_name FROM openrails.merchants WHERE slug = $1
-	`, slug).Scan(&merchantID, &displayName); err != nil {
+		SELECT id::text, display_name, api_host FROM openrails.merchants WHERE slug = $1
+	`, slug).Scan(&merchantID, &displayName, &apiHost); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("merchant %q not found", slug)
 		}
@@ -74,6 +74,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	mt := MerchantConfig{DisplayName: slug}
 	if displayName != nil && strings.TrimSpace(*displayName) != "" {
 		mt.DisplayName = *displayName
+	}
+	if apiHost != nil && strings.TrimSpace(*apiHost) != "" {
+		mt.APIHost = *apiHost
 	}
 
 	// merchant_configurations payload: profile + invoice + delegated-invoker windows.

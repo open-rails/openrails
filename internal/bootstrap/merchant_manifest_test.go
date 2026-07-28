@@ -284,6 +284,16 @@ merchants:
 			want: "profile.logo_url",
 		},
 		{
+			name: "api_host with scheme rejected (#850)",
+			body: base("    api_host: https://api.cozy.art\n"),
+			want: "api_host",
+		},
+		{
+			name: "api_host with path rejected (#850)",
+			body: base("    api_host: api.cozy.art/v1\n"),
+			want: "api_host",
+		},
+		{
 			name: "renamed key rail_merchant_accounts rejected with pointer (#698)",
 			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
 			want: "merchants.cozy-art.rail_merchant_accounts was renamed to psps",

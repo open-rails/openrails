@@ -17,19 +17,59 @@ import (
 // merchant (#734: api_host is globally unique).
 var ErrAPIHostTaken = errors.New("merchants: api host already assigned to another merchant")
 
+// ErrInvalidAPIHost indicates a host that is not a plausible DNS hostname
+// (#850: api_host is operator-supplied, so the format is enforced here).
+var ErrInvalidAPIHost = errors.New("merchants: api host must be a bare lowercase hostname (no scheme, port, or path)")
+
 // NormalizeAPIHost canonicalizes a Host-header value for #734 resolution:
-// lowercased, whitespace-trimmed, and stripped of a ":port" suffix (Go's
-// net/http leaves the port on Request.Host for non-default ports, and local-dev
-// deployments commonly run on a non-443/80 port). Empty in, empty out.
+// lowercased, whitespace-trimmed, and stripped of a NUMERIC ":port" suffix
+// (Go's net/http leaves the port on Request.Host for non-default ports, and
+// local-dev deployments commonly run on a non-443/80 port). Only a real port
+// is stripped — SplitHostPort accepts any junk after the colon, and stripping
+// e.g. "https://x" down to its "https" prefix would launder a scheme'd
+// operator input into a valid-looking label (#850). Empty in, empty out.
 func NormalizeAPIHost(host string) string {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return ""
 	}
-	if h, _, err := net.SplitHostPort(host); err == nil {
+	if h, p, err := net.SplitHostPort(host); err == nil && isNumericPort(p) {
 		host = h
 	}
 	return strings.ToLower(host)
+}
+
+func isNumericPort(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, c := range p {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateAPIHost checks a NORMALIZED api_host (NormalizeAPIHost output) is a
+// plausible DNS hostname: dot-separated labels of [a-z0-9-], 1-63 chars each,
+// no leading/trailing hyphen, 253 chars total. Empty is invalid — callers
+// treat empty as "clear the mapping" before validating.
+func ValidateAPIHost(host string) error {
+	if host == "" || len(host) > 253 {
+		return fmt.Errorf("%w: %q", ErrInvalidAPIHost, host)
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("%w: %q", ErrInvalidAPIHost, host)
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return fmt.Errorf("%w: %q", ErrInvalidAPIHost, host)
+			}
+		}
+	}
+	return nil
 }
 
 // SetHostConfig sets a merchant's canonical API host (#734): the per-merchant
@@ -45,6 +85,11 @@ func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost str
 		return errors.New("merchants: merchant id is required")
 	}
 	host := NormalizeAPIHost(apiHost)
+	if host != "" {
+		if err := ValidateAPIHost(host); err != nil {
+			return err
+		}
+	}
 
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE openrails.merchants

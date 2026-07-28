@@ -43,10 +43,12 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     display_name        TEXT,
     status              TEXT NOT NULL DEFAULT 'active',
     permission_group_id     TEXT,
+    api_host            TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at          TIMESTAMPTZ
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_api_host ON openrails.merchants (api_host) WHERE api_host IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_configurations (
     merchant_id uuid NOT NULL,

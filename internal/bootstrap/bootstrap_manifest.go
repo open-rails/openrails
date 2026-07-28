@@ -34,6 +34,11 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if strings.TrimSpace(t.DisplayName) == "" {
 			return fmt.Errorf("merchant %q display_name is required", slug)
 		}
+		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
+			if err := merchants.ValidateAPIHost(host); err != nil {
+				return fmt.Errorf("merchant %q api_host: %w", slug, err)
+			}
+		}
 		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
 		}

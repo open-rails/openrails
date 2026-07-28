@@ -770,6 +770,17 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
 	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 
+	// #850 merchant api_host (#734 Host routing): read + assign the merchant's
+	// canonical API host. Reads gate on merchant:settings:read; the write on
+	// merchant:settings:update — owner-only in the fixed #567 catalog. No
+	// MerchantDBConnMW: the merchants directory service writes the directory
+	// row (openrails.merchants, not an RLS-scoped merchant table) with its own
+	// pool.
+	apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
+	apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+	rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
+	rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
+
 	// #760 merchant team management: roster, invites (register+join links),
 	// role changes, and removal — all through AuthKit group membership. Reads
 	// gate on merchant:members:read; mutations on merchant:members:manage. Only

@@ -14,6 +14,11 @@ merchants:
   local-stack:
     display_name: Local Stack
 
+    # Canonical API host (#734/#850): the Host header public routes resolve
+    # this merchant from. Bare lowercase hostname, globally unique. Optional —
+    # omitted leaves any stored value untouched.
+    # api_host: api.local-stack.example
+
     remote_application:
       issuer: https://local-stack.example
       jwks_uri: https://local-stack.example/.well-known/jwks.json
