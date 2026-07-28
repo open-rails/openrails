@@ -159,9 +159,6 @@ type ListRepriceBatchesByPriceKeyParams struct {
 	PageLimit  int32
 }
 
-// #777: the console's price page needs "is there a pending migration for this
-// price key" without already knowing a batch id — list a key's bulk reprice
-// operations, most recent first.
 func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]OpenrailsRepriceBatch, error) {
 	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey, arg.PriceKey, arg.PageOffset, arg.PageLimit)
 	if err != nil {

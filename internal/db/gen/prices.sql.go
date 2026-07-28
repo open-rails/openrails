@@ -111,8 +111,6 @@ type GetCurrentPriceByKeyParams struct {
 	Key        string
 }
 
-// #774: the CURRENT (non-archived) row for a key, if any. At most one exists
-// per (merchant, key) by uq_prices_merchant_key_current.
 func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceByKeyParams) (OpenrailsPrice, error) {
 	row := q.db.QueryRow(ctx, getCurrentPriceByKey, arg.MerchantID, arg.Key)
 	var i OpenrailsPrice

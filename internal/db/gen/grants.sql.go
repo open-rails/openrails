@@ -818,7 +818,7 @@ WHERE g.merchant_id = $1::uuid
   )
   AND EXISTS (
       SELECT 1 FROM openrails.payments p
-      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.status = 'refunded'
+      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
   )
 ORDER BY g.id
 `
@@ -1095,6 +1095,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND p.deleted_at IS NULL
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
@@ -1162,6 +1163,7 @@ FROM openrails.subscriptions s
 JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
   AND s.status IN ('active', 'cancelled', 'unknown')
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
@@ -1247,6 +1249,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND p.deleted_at IS NULL
   AND p.rail = 'solana'
   AND p.status = 'completed'
   AND p.amount > 0

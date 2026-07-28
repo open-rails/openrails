@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeCardDetails is the raw card payload that appears under
@@ -68,7 +69,15 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 	if database == nil || card == nil || len(txnIDs) == 0 {
 		return nil
 	}
+	// The merchant is pinned EXPLICITLY, not left to RLS (#227): the payments
+	// transaction-id unique is partial on deleted_at since or#858, so
+	// transaction_id alone no longer bounds this write.
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("snapshot payment card: %w", err)
+	}
 	if err := database.Gen(ctx).SnapshotPaymentCards(ctx, gen.SnapshotPaymentCardsParams{
+		MerchantID:     merchantID.UUID(),
 		CardBrand:      card.Brand,
 		CardLast4:      card.Last4,
 		TransactionIds: txnIDs,

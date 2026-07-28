@@ -253,6 +253,9 @@ type OpenrailsCheckoutSession struct {
 	CustomerID     uuid.UUID
 	// PSP selected for this provider checkout/session.
 	PspID *uuid.UUID
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	DeletedAt        *time.Time
+	DestructiveRunID *uuid.UUID
 }
 
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
@@ -322,6 +325,28 @@ type OpenrailsDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
+// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. Rows a run destroyed carry its id (destructive_run_id); `openrails prune rollback --run <id>` reverses one. kind=prune is the first user; converge_enforce / declared_import / plan_migration / catalog_push / merchant_delete follow.
+type OpenrailsDestructiveRun struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	PspID      *uuid.UUID
+	Kind       string
+	Actor      string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	DryRun     bool
+	// The SnapshotCoverage absence proof that authorised the run, verbatim — the guard that should have stopped an empty-roster mass cancellation, made auditable after the fact rather than only preventive.
+	Coverage []byte
+	// The operator's typed confirmation. A run whose discovered row count differs refuses before writing anything.
+	ExpectedRows *int64
+	Affected     []byte
+	ReversedAt   *time.Time
+	ReversedBy   *string
+	// running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.
+	Status string
+	Note   *string
+}
+
 type OpenrailsEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
@@ -337,8 +362,9 @@ type OpenrailsEntitlement struct {
 	Period       pgtype.Range[pgtype.Timestamptz]
 	MerchantID   uuid.UUID
 	// OpenRails payable tenant subject for this entitlement window.
-	CustomerID uuid.UUID
-	GrantID    *uuid.UUID
+	CustomerID       uuid.UUID
+	GrantID          *uuid.UUID
+	DestructiveRunID *uuid.UUID
 }
 
 // #787: one row per merchant recording when the low-severity reconciliation-findings digest last fired.
@@ -348,7 +374,6 @@ type OpenrailsFindingDigestState struct {
 	UpdatedAt      time.Time
 }
 
-// #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
 type OpenrailsFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
@@ -696,7 +721,6 @@ type OpenrailsNotificationQueue struct {
 	EmailedAt *time.Time
 }
 
-// #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
 type OpenrailsOrphanedEpisode struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -760,6 +784,9 @@ type OpenrailsPayment struct {
 	ReversalKind *string
 	// #796 credential form presented to the network: network_token | pan_via_vault | provider_vault. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	DeletedAt        *time.Time
+	DestructiveRunID *uuid.UUID
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -1152,6 +1179,9 @@ type OpenrailsSubscription struct {
 	CustomerID          uuid.UUID
 	// PSP that produced this remote subscription mirror row.
 	PspID *uuid.UUID
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	DeletedAt        *time.Time
+	DestructiveRunID *uuid.UUID
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).

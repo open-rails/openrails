@@ -1175,7 +1175,6 @@ func (q *Queries) StandingSubscriptionEntitlementExists(ctx context.Context, arg
 }
 
 const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
-
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
     WHERE ent.customer_id = $1
@@ -1191,10 +1190,6 @@ type TimelineHasIndefiniteParams struct {
 	Entitlement string
 }
 
-// Timeline-service queries (#334: modules/entitlements PushNewEntitlement /
-// RevokeExistingEntitlement). Tenant scoping comes from RLS via TenantTx; the
-// timeline key is (customer_id, entitlement), matching the bun-era
-// service which never added an explicit tenant predicate here.
 func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasIndefiniteParams) (bool, error) {
 	row := q.db.QueryRow(ctx, timelineHasIndefinite, arg.CustomerID, arg.Entitlement)
 	var exists bool

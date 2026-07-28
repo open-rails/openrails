@@ -55,6 +55,14 @@ type PullProviderOptions struct {
 	Prune        bool
 	Out          io.Writer
 
+	// PruneExpectRows is the operator's typed confirmation and the ONLY way a
+	// prune writes (or#858). Nil = dry-run: discover, report the number to
+	// confirm, change nothing. Set = apply, refusing if the number disagrees
+	// with what the pass found.
+	PruneExpectRows *int
+	// PruneActor is recorded on the destructive run. Empty = "unknown".
+	PruneActor string
+
 	// MerchantManifest is the parsed MODE-1 merchant manifest (#723) for this
 	// one-off process — embedded hosts pass the same manifest they boot from.
 	// Nil falls back to MerchantManifestPath.
@@ -177,19 +185,34 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		var pruneLogs []pullProviderPruneLog
 		var pruneChanges []reconcile.MutationRecord
 		if opts.Prune && runErr == nil {
+			// The typed confirmation is a per-PSP number, so applying across
+			// several armed PSPs at once would check the SAME count against each
+			// of them — an operator confirming 3 for Mobius would silently
+			// authorise 3 for every other account too. Applying is one PSP at a
+			// time; planning across all of them is fine.
+			if opts.PruneExpectRows != nil && len(bindings) > 1 {
+				return fmt.Errorf("refusing to apply a prune across %d provider accounts at once: --expect-rows is a per-account count. Scope it with --provider-account=<uuid> and apply one at a time", len(bindings))
+			}
 			for provider, binding := range bindings {
 				fetcher, ok := fetchers[provider]
 				if !ok {
 					continue
 				}
 				pr, err := reconcile.PruneRailMerchantAccountExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
-					Since: sinceT, Until: untilT, Apply: true,
+					Since: sinceT, Until: untilT,
+					Apply:        opts.PruneExpectRows != nil,
+					ExpectedRows: opts.PruneExpectRows,
+					Actor:        opts.PruneActor,
 				})
 				if err != nil {
 					return fmt.Errorf("prune %s (%s): %w", provider, binding.AccountID, err)
 				}
-				pruneLogs = append(pruneLogs, pullProviderPruneLog{Provider: provider, Binding: binding, Result: pr})
-				pruneChanges = append(pruneChanges, pruneMutationRecords(provider, pr, "applied")...)
+				phase := "planned"
+				if opts.PruneExpectRows != nil {
+					phase = "applied"
+				}
+				pruneLogs = append(pruneLogs, pullProviderPruneLog{Provider: provider, Binding: binding, Result: pr, Applied: opts.PruneExpectRows != nil})
+				pruneChanges = append(pruneChanges, pruneMutationRecords(provider, pr, phase)...)
 			}
 		}
 
@@ -224,7 +247,9 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			return err
 		}
 		appliedChanges := append([]reconcile.MutationRecord(nil), res.AppliedChanges...)
-		appliedChanges = append(appliedChanges, pruneChanges...)
+		if opts.PruneExpectRows != nil {
+			appliedChanges = append(appliedChanges, pruneChanges...)
+		}
 		logPath, err := writePullProviderLog(opts.LogDir, run, res, appliedChanges, pruneLogs, convergeLog, pullProviderMutationFlags{
 			Insert: opts.Insert, Overwrite: opts.Overwrite, Prune: opts.Prune,
 		})
@@ -522,6 +547,8 @@ type pullProviderPruneLog struct {
 	Provider reconcile.Provider
 	Binding  reconcile.RailMerchantAccountBinding
 	Result   reconcile.PruneResult
+	// Applied=false is the default: a plan, nothing written (or#858).
+	Applied bool
 }
 
 type pullProviderConvergeLog struct {
@@ -603,10 +630,10 @@ func writePullProviderLog(logDir string, run reconcile.RunRecord, res *reconcile
 func pruneMutationRecords(provider reconcile.Provider, pr reconcile.PruneResult, phase string) []reconcile.MutationRecord {
 	var out []reconcile.MutationRecord
 	for _, id := range pr.SubscriptionIDs {
-		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "subscriptions", Operation: "delete", RowID: id.String(), RowsAffected: 1})
+		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "subscriptions", Operation: "soft_delete", RowID: id.String(), RowsAffected: 1})
 	}
 	for _, id := range pr.PaymentIDs {
-		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "payments", Operation: "delete", RowID: id.String(), RowsAffected: 1})
+		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "payments", Operation: "soft_delete", RowID: id.String(), RowsAffected: 1})
 	}
 	return out
 }
@@ -628,6 +655,17 @@ func renderPullProviderStdout(w io.Writer, format, logPath string, run reconcile
 	fmt.Fprintf(w, "applied: %s\n", formatMutationCounts(counts["applied"]))
 	if len(pruneLogs) > 0 {
 		fmt.Fprintf(w, "prune: %s\n", formatPruneCounts(pruneCounts))
+		for _, pl := range pruneLogs {
+			if pl.Applied && pl.Result.RunID != uuid.Nil {
+				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails prune rollback --merchant <slug> --run %s`, then re-pull and converge\n",
+					pl.Provider, pl.Binding.AccountID, pl.Result.RunID, pl.Result.RunID)
+			}
+		}
+		if !prunePlanApplied(pruneLogs) {
+			if n := prunePlanTotal(pruneLogs); n > 0 {
+				fmt.Fprintf(w, "  PLAN ONLY — nothing was written. To apply: re-run with --expect-rows %d\n", n)
+			}
+		}
 	}
 	if convergeLog != nil {
 		fmt.Fprintf(w, "converge: %d finding(s), %d auto-fixed, %d reconcile-required, %d requires-review\n", convergeLog.Findings, convergeLog.AutoFixed, convergeLog.ReconcileRequired, convergeLog.RequiresReview)
@@ -651,10 +689,16 @@ func summarizePrune(logs []pullProviderPruneLog) pruneCounts {
 		out[table][key] += n
 	}
 	for _, log := range logs {
-		add("subscriptions", "deleted", log.Result.Subscriptions)
+		key := "would_prune"
+		if log.Applied {
+			key = "soft_deleted"
+		}
+		add("subscriptions", key, log.Result.Subscriptions)
 		add("subscriptions", "skipped", log.Result.SubscriptionsSkipped)
-		add("payments", "deleted", log.Result.Payments)
+		add("payments", key, log.Result.Payments)
 		add("payments", "skipped", log.Result.PaymentsSkipped)
+		add("checkout_sessions", key, log.Result.CheckoutSessions)
+		add("entitlements", key, log.Result.Entitlements)
 	}
 	return out
 }
@@ -719,7 +763,7 @@ func formatPruneCounts(counts pruneCounts) string {
 	var parts []string
 	for _, table := range tables {
 		var values []string
-		for _, key := range []string{"deleted", "skipped"} {
+		for _, key := range []string{"soft_deleted", "would_prune", "skipped"} {
 			if n := counts[table][key]; n > 0 {
 				values = append(values, fmt.Sprintf("%s=%d", key, n))
 			}
@@ -844,4 +888,22 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// prunePlanTotal is the number a dry-run asks the operator to confirm.
+func prunePlanTotal(logs []pullProviderPruneLog) int {
+	n := 0
+	for _, l := range logs {
+		n += l.Result.Subscriptions + l.Result.Payments
+	}
+	return n
+}
+
+func prunePlanApplied(logs []pullProviderPruneLog) bool {
+	for _, l := range logs {
+		if l.Applied {
+			return true
+		}
+	}
+	return false
 }

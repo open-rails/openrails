@@ -125,12 +125,18 @@ type DeclaredBilling struct {
 	// classifies identically whenever the import runs.
 	AsOf time.Time `json:"as_of"`
 	// SubscriptionsExhaustive: this call covers the merchant's ENTIRE book
-	// (absence proof). MUST be false for batched imports.
-	SubscriptionsExhaustive bool                    `json:"subscriptions_exhaustive,omitempty"`
-	Customers               []DeclaredCustomer      `json:"customers,omitempty"`
-	PaymentMethods          []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
-	Subscriptions           []DeclaredSubscription  `json:"subscriptions,omitempty"`
-	Transactions            []DeclaredTransaction   `json:"transactions,omitempty"`
+	// (absence proof — every local subscription it omits is CANCELLED). MUST be
+	// false for batched imports.
+	SubscriptionsExhaustive bool `json:"subscriptions_exhaustive,omitempty"`
+	// ExpectedSubscriptions is the typed confirmation required alongside
+	// SubscriptionsExhaustive (or#858): how many subscriptions the exhaustive
+	// book contains. A mismatch refuses the whole import — a partial batch
+	// declared exhaustive cannot slip through as a boolean typo.
+	ExpectedSubscriptions *int                    `json:"expected_subscriptions,omitempty"`
+	Customers             []DeclaredCustomer      `json:"customers,omitempty"`
+	PaymentMethods        []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
+	Subscriptions         []DeclaredSubscription  `json:"subscriptions,omitempty"`
+	Transactions          []DeclaredTransaction   `json:"transactions,omitempty"`
 }
 
 // Options configures Import. Merchant scoping: MerchantID when the caller
@@ -329,7 +335,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			facts = append(facts, f)
 		}
 
-		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, database, lc, deferDelete, merchantID.UUID(), facts, txns, opts.Book.SubscriptionsExhaustive, asOf)
+		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, database, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
+			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
+			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
+		}, asOf)
 		if err != nil {
 			return err
 		}

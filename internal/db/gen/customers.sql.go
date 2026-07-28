@@ -22,6 +22,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 `
 
@@ -182,6 +183,7 @@ const searchCustomers = `-- name: SearchCustomers :many
 SELECT c.id, c.subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
+       AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
 FROM openrails.customers c
@@ -193,6 +195,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 ORDER BY c.last_seen_at DESC
 LIMIT $4 OFFSET $3

@@ -267,9 +267,9 @@ type CountDestructiveIntentsByActorSinceParams struct {
 // Destructive user/admin intents THIS actor created in the rolling window.
 func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg CountDestructiveIntentsByActorSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsByActorSince, arg.Actor, arg.IntentTypes, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var count_destructive_intents_by_actor_since int64
+	err := row.Scan(&count_destructive_intents_by_actor_since)
+	return count_destructive_intents_by_actor_since, err
 }
 
 const countDestructiveIntentsGlobalSince = `-- name: CountDestructiveIntentsGlobalSince :one
@@ -286,11 +286,18 @@ type CountDestructiveIntentsGlobalSinceParams struct {
 // Destructive user/admin intents ALL actors + ALL merchants created in the
 // rolling window — the absolute frying-protection ceiling even if many actor
 // identities are forged.
+//
+// or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
+// a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
+// openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
+// structurally never exceeded — a fail-OPEN safety control. The definer RAISES
+// when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
+// instead of silently permitting unlimited destructive intents.
 func (q *Queries) CountDestructiveIntentsGlobalSince(ctx context.Context, arg CountDestructiveIntentsGlobalSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsGlobalSince, arg.IntentTypes, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var count_destructive_intents_since int64
+	err := row.Scan(&count_destructive_intents_since)
+	return count_destructive_intents_since, err
 }
 
 const countDestructiveRailIntentsExecutedSince = `-- name: CountDestructiveRailIntentsExecutedSince :one

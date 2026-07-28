@@ -22,6 +22,7 @@ WHERE id = $1
   AND status = 'requires_action'
   AND (reference IS NULL OR reference = $2)
   AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = $5::text)
+  AND deleted_at IS NULL
 `
 
 type BindSolanaCheckoutSessionParams struct {
@@ -123,6 +124,7 @@ UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 `
 
 type ExpireCheckoutSessionByIDParams struct {
@@ -145,6 +147,7 @@ UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1
 WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
@@ -156,7 +159,8 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (in
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions WHERE id = $1
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (OpenrailsCheckoutSession, error) {
@@ -183,13 +187,16 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (Ope
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
+  AND cs.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -217,17 +224,20 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions cs
 WHERE cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
   AND cs.status IN ('created', 'requires_action')
   AND (cs.expires_at IS NULL OR cs.expires_at > $4::timestamptz)
+  AND cs.deleted_at IS NULL
 ORDER BY cs.created_at DESC
 LIMIT 1
 `
@@ -268,6 +278,8 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -278,6 +290,7 @@ WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 ORDER BY expires_at
 `
 
@@ -329,6 +342,7 @@ UPDATE openrails.checkout_sessions SET
     psp_id = $17,
     updated_at = $18
 WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 type UpdateCheckoutSessionParams struct {

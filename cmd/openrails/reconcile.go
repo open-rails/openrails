@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -32,6 +33,7 @@ func newPullProviderCmd() *cobra.Command {
 		insert       bool
 		overwrite    bool
 		prune        bool
+		expectRows   int
 	)
 
 	cmd := &cobra.Command{
@@ -43,9 +45,16 @@ func newPullProviderCmd() *cobra.Command {
 			"the changes it WOULD make, writing nothing. Mutation classes are explicit and compose: `--insert` imports " +
 			"provider-observed records missing locally; `--overwrite` updates existing local mirror rows from provider " +
 			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
-			"that are ABSENT from the provider source. The remote rails are NEVER mutated.",
+			"that are ABSENT from the provider source — SOFT-deleted and reversible, never row-deleted (or#858). The remote rails are NEVER mutated.\n\n" +
+			"`--prune` alone is a PLAN: it reports what it would remove and writes nothing. Applying needs the typed confirmation " +
+			"`--expect-rows N`, which must equal the number the plan reported; an empty provider roster refuses outright rather than " +
+			"matching everything. An applied prune is reversible in one step with `openrails prune rollback --run <id>`.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runPullProvider(c, providers, psp, since, until, format, merchantSlug, logDir, manifestPath, insert, overwrite, prune)
+			var expect *int
+			if c.Flags().Changed("expect-rows") {
+				expect = &expectRows
+			}
+			return runPullProvider(c, providers, psp, since, until, format, merchantSlug, logDir, manifestPath, insert, overwrite, prune, expect)
 		},
 	}
 	cmd.Flags().StringSliceVar(&providers, "rail", nil, "Rail(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
@@ -58,7 +67,8 @@ func newPullProviderCmd() *cobra.Command {
 	cmd.Flags().StringVar(&logDir, "log-dir", "openrails-pull-provider-logs", "Directory for pull-provider .log files")
 	cmd.Flags().BoolVar(&insert, "insert", false, "Insert provider-observed records that are missing locally")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing local mirror rows from provider-observed truth")
-	cmd.Flags().BoolVar(&prune, "prune", false, "Delete eligible local subscriptions/payments for the pulled provider account that are ABSENT from the provider source")
+	cmd.Flags().BoolVar(&prune, "prune", false, "Soft-delete eligible local subscriptions/payments for the pulled provider account that are ABSENT from the provider source (plan-only without --expect-rows)")
+	cmd.Flags().IntVar(&expectRows, "expect-rows", 0, "Typed confirmation: how many rows --prune should remove. Required to APPLY a prune; refuses if it disagrees with the plan")
 
 	reportCmd := &cobra.Command{
 		Use:   "report",
@@ -75,7 +85,7 @@ func newPullProviderCmd() *cobra.Command {
 	return cmd
 }
 
-func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAccountStr, sinceStr, untilStr, format, merchantSlug, logDir, manifestPath string, insert, overwrite, prune bool) error {
+func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAccountStr, sinceStr, untilStr, format, merchantSlug, logDir, manifestPath string, insert, overwrite, prune bool, expectRows *int) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	return embedded.PullProvider(cmd.Context(), embedded.PullProviderOptions{
 		Config:               cfg,
@@ -90,6 +100,8 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, railMerchantAcc
 		Insert:               insert,
 		Overwrite:            overwrite,
 		Prune:                prune,
+		PruneExpectRows:      expectRows,
+		PruneActor:           cliActor(),
 		Out:                  os.Stdout,
 	})
 }
@@ -103,4 +115,68 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 		Format:       format,
 		Out:          os.Stdout,
 	})
+}
+
+// newPruneCmd wires the or#858 reversal surface:
+//
+//	openrails prune list     --merchant <slug>
+//	openrails prune rollback --merchant <slug> --run <id>
+//
+// A prune no longer deletes rows — it soft-deletes them and stamps each one
+// with the destructive run that took it, so an operator who pruned against a
+// bad snapshot gets the book back with one command.
+func newPruneCmd() *cobra.Command {
+	var merchantSlug, runID, format string
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Inspect and reverse `pull-provider --prune` runs (or#858)",
+	}
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List this merchant's destructive runs, newest first",
+		RunE: func(c *cobra.Command, _ []string) error {
+			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			return embedded.PruneList(c.Context(), embedded.PruneListOptions{
+				Config: cfg, MerchantSlug: merchantSlug, Limit: limit, Format: format, Out: os.Stdout,
+			})
+		},
+	}
+	listCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	listCmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")
+	listCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
+
+	rollbackCmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Reverse one prune run by id — restores every row it soft-deleted",
+		Long: "Reverse one prune run by id. Every subscription, payment, checkout session and entitlement that run\n" +
+			"soft-deleted is restored in a single transaction; rows soft-deleted by anything else are untouched.\n\n" +
+			"A rollback is not a complete operation: it puts local state back to before the run while the provider\n" +
+			"has moved on. Follow it with `openrails pull-provider --insert --overwrite` to re-converge.",
+		RunE: func(c *cobra.Command, _ []string) error {
+			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			return embedded.PruneRollback(c.Context(), embedded.PruneRollbackOptions{
+				Config: cfg, MerchantSlug: merchantSlug, RunID: runID, Actor: cliActor(), Format: format, Out: os.Stdout,
+			})
+		},
+	}
+	rollbackCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	rollbackCmd.Flags().StringVar(&runID, "run", "", "Destructive run id to reverse (required; see `openrails prune list`)")
+	rollbackCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
+
+	cmd.AddCommand(listCmd, rollbackCmd)
+	return cmd
+}
+
+// cliActor attributes a destructive run to whoever ran it. Best-effort: the
+// point is an audit trail, not authentication.
+func cliActor() string {
+	for _, key := range []string{"OPENRAILS_ACTOR", "SUDO_USER", "USER", "LOGNAME"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return "unknown"
 }

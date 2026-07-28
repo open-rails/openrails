@@ -193,17 +193,48 @@ Manual-only — **never scheduled**. It never writes to a provider.
 ```
 openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--provider-account=<uuid>]
                         [--since=… --until=…] [--manifest=…] [--format table|json]
-                        [--log-dir=…] [--insert] [--overwrite] [--prune]
+                        [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
 openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
+openrails prune list     --merchant=<slug> [--limit=N] [--format table|json]
+openrails prune rollback --merchant=<slug> --run=<id>
 ```
 
 A bare `pull-provider` pulls provider truth, diffs, logs what it WOULD
 change, and persists nothing; the mutation flags follow the standard contract
-(`--prune` deletes eligible local subscriptions/payments attributed to the
+(`--prune` retires eligible local subscriptions/payments attributed to the
 pulled PSP that are absent from the provider source). `--rail` is repeatable
 (default: every configured rail); `--merchant` is required; `--manifest` arms
 mode-1 credentials from a merchant manifest. After a mutating pull the engine
 runs a one-shot `Converge(merchant)`.
+
+### `--prune` is reversible, and refuses uncertainty
+
+A prune acts on ABSENCE — "the provider did not list this row" — the weakest
+evidence there is. So it is built to be undone and hard to fire by accident:
+
+- **Nothing is deleted.** Eligible rows are soft-deleted (`deleted_at`) and
+  stamped with a destructive-run id. They vanish from every live read; the data
+  stays.
+- **`--prune` alone is a plan.** It reports what it would retire and writes
+  nothing. Applying needs `--expect-rows N`, and N must equal the number the
+  plan reported — an operator who miscounts is stopped, not obeyed.
+- **An empty provider roster refuses outright.** A successful-but-empty pull is
+  indistinguishable from a misdeclared `account_id`, a credential rotated onto a
+  sibling sub-account, or a provider incident. It never means "prune everything".
+- **Grant-entangled rows are skipped**, as before: retraction goes through
+  convergence, never removal.
+
+To undo one:
+
+```
+openrails prune list --merchant=<slug>            # find the run id
+openrails prune rollback --merchant=<slug> --run=<id>
+openrails pull-provider --merchant=<slug> --insert --overwrite
+```
+
+The final pull is not optional. A rollback restores local state to before the
+run while the provider has moved on; `rollback → pull → converge` is the
+complete operation.
 
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows

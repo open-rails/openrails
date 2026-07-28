@@ -81,6 +81,38 @@ const (
 // backfill, capped at #634's 3y).
 const declaredImportLookback = 200 * 365 * 24 * time.Hour
 
+// DeclaredCoverage is the importer's absence claim, plus the typed confirmation
+// that makes the claim expensive to get wrong (or#858).
+//
+// SubscriptionsExhaustive says "this call is the merchant's ENTIRE book", and
+// that is an absence proof: every local subscription NOT in the batch is
+// cancelled. An importer that batches its book and forgets to clear the flag
+// therefore cancels everything it did not happen to send. A boolean cannot tell
+// the two apart — a count can, so the caller must also state how many
+// subscriptions the exhaustive book contains, and it must match what arrived.
+type DeclaredCoverage struct {
+	SubscriptionsExhaustive bool
+	// ExpectedSubscriptions is required when SubscriptionsExhaustive. It must
+	// equal the number of facts in the call.
+	ExpectedSubscriptions *int
+}
+
+func (c DeclaredCoverage) validate(got int) error {
+	if !c.SubscriptionsExhaustive {
+		return nil
+	}
+	if got == 0 {
+		return fmt.Errorf("declared import: refusing an EXHAUSTIVE book with zero subscriptions — that is an absence proof that would cancel every local subscription for this merchant. Send the book, or declare it non-exhaustive")
+	}
+	if c.ExpectedSubscriptions == nil {
+		return fmt.Errorf("declared import: an EXHAUSTIVE book must declare expected_subscriptions (it cancels every local subscription it omits). This call carries %d", got)
+	}
+	if *c.ExpectedSubscriptions != got {
+		return fmt.Errorf("declared import: refusing an EXHAUSTIVE book — expected_subscriptions says %d but the call carries %d. A partial batch declared exhaustive cancels every subscription it omits", *c.ExpectedSubscriptions, got)
+	}
+	return nil
+}
+
 // ImportDeclaredSubscriptions lands one merchant's declared facts. Must run on
 // a merchant-scoped connection. asOf is the evidence horizon: Decide evaluates
 // at it, and lc's clock should be pinned to it so lifecycle writes are
@@ -95,7 +127,7 @@ func ImportDeclaredSubscriptions(
 	merchantID uuid.UUID,
 	facts []DeclaredSubscriptionFact,
 	txns []RemoteTransaction,
-	subscriptionsExhaustive bool,
+	coverage DeclaredCoverage,
 	asOf time.Time,
 ) (map[string]DeclaredOutcome, error) {
 	if database == nil || lc == nil {
@@ -103,6 +135,9 @@ func ImportDeclaredSubscriptions(
 	}
 	if asOf.IsZero() {
 		return nil, fmt.Errorf("declared import: AsOf horizon is required")
+	}
+	if err := coverage.validate(len(facts)); err != nil {
+		return nil, err
 	}
 	out := make(map[string]DeclaredOutcome, len(facts))
 	q := database.Gen(ctx)
@@ -114,7 +149,7 @@ func ImportDeclaredSubscriptions(
 		Provider:     Provider("declared"),
 		FetchedAt:    asOf,
 		Transactions: txns,
-		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: subscriptionsExhaustive},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: coverage.SubscriptionsExhaustive},
 	}
 	for i := range facts {
 		f := &facts[i]

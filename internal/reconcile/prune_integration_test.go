@@ -15,9 +15,9 @@ import (
 )
 
 // #511 pull-provider --prune: an account-bound local subscription ABSENT from the
-// provider snapshot is excess. A bare excess sub is deleted (with its checkout
-// sessions + entitlements); an excess sub that fed the #514 grant ledger is
-// SKIPPED (retracted via convergence, never row-deleted). Dry-run writes nothing.
+// provider snapshot is excess. A bare excess sub is SOFT-deleted (with its
+// checkout sessions + entitlements, or#858); an excess sub that fed the #514
+// grant ledger is SKIPPED (retracted via convergence). Dry-run writes nothing.
 func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -46,7 +46,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 		sub := func(id, prodID, priceID uuid.UUID, tag, psub string) {
 			exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				prodID, "prune-"+tag+"-"+suffix, "prune-tier-"+tag+"-"+suffix, merchantID)
-			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`, priceID, prodID, merchantID)
+			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, prodID, merchantID)
 			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 			      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 				id, priceID, prodID, psub, paID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), customer, merchantID)
@@ -84,7 +84,14 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	fetcher := &fakeFetcher{provider: ProviderNMI, snap: snap}
 	binding := RailMerchantAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-" + suffix}
 
+	// or#858: "exists" means VISIBLE to a live read. The row itself is never
+	// removed — subRowPresent proves that separately.
 	subExists := func(ctx context.Context, id uuid.UUID) bool {
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
+		return n == 1
+	}
+	subRowPresent := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1`, id).Scan(&n))
 		return n == 1
@@ -96,7 +103,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	incompleteSnap.Coverage = SnapshotCoverage{}
 	incompleteFetcher := &fakeFetcher{provider: ProviderNMI, snap: &incompleteSnap}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, incompleteFetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		res, err := PruneRailMerchantAccountExcess(ctx, appDB, incompleteFetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Subscriptions)
 		require.Equal(t, 3, res.SubscriptionsSkipped)
@@ -111,20 +118,33 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: false})
 		require.NoError(t, err)
-		require.Equal(t, 1, res.Subscriptions, "subGone would be deleted")
+		require.Equal(t, 1, res.Subscriptions, "subGone would be pruned")
 		require.Equal(t, 1, res.SubscriptionsSkipped, "subGrant is entangled -> skipped")
-		require.True(t, subExists(ctx, subGone), "dry-run deletes nothing")
+		require.Equal(t, uuid.Nil, res.RunID, "a dry-run opens no destructive run")
+		require.True(t, subExists(ctx, subGone), "dry-run writes nothing")
 		require.True(t, subExists(ctx, subGrant))
 		return nil
 	}))
 
-	// Apply: deletes the bare excess sub, skips the grant-entangled one.
+	// Apply without the typed confirmation: refuses, writes nothing.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		_, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		require.ErrorContains(t, err, "--expect-rows")
+		require.True(t, subExists(ctx, subGone), "a refused prune writes nothing")
+		return nil
+	}))
+
+	// Apply: soft-deletes the bare excess sub, skips the grant-entangled one.
+	var runID uuid.UUID
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(1)})
 		require.NoError(t, err)
+		runID = res.RunID
+		require.NotEqual(t, uuid.Nil, runID, "an applied prune records a reversible run")
 		require.Equal(t, 1, res.Subscriptions)
 		require.Equal(t, 1, res.SubscriptionsSkipped)
-		require.False(t, subExists(ctx, subGone), "bare excess sub deleted")
+		require.False(t, subExists(ctx, subGone), "bare excess sub soft-deleted")
+		require.True(t, subRowPresent(ctx, subGone), "or#858: the row is never removed")
 		require.True(t, subExists(ctx, subKeep), "present sub untouched")
 		require.True(t, subExists(ctx, subGrant), "grant-entangled excess sub preserved for convergence retraction")
 		return nil
@@ -132,13 +152,28 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 
 	// Idempotent: subGone already gone; only the skipped grant sub remains excess.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
-		require.Equal(t, 0, res.Subscriptions, "nothing left to delete")
+		require.Equal(t, 0, res.Subscriptions, "nothing left to prune")
 		require.Equal(t, 1, res.SubscriptionsSkipped)
 		return nil
 	}))
+
+	// or#858: the whole run reverses in one step.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		rb, err := RollbackDestructiveRun(ctx, appDB, runID, "tester")
+		require.NoError(t, err)
+		require.EqualValues(t, 1, rb.Subscriptions)
+		require.True(t, subExists(ctx, subGone), "rollback restores the pruned subscription")
+		require.True(t, subExists(ctx, subKeep))
+
+		_, err = RollbackDestructiveRun(ctx, appDB, runID, "tester")
+		require.ErrorContains(t, err, "already reversed")
+		return nil
+	}))
 }
+
+func intp(n int) *int { return &n }
 
 func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) {
 	appDB := startReconcilePostgres(t)
@@ -164,13 +199,13 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 			paID, merchantID, "acct-pay-"+suffix)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
-		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
+		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'USD','completed',$4,$5,$6,$7)`,
 			payKeep, priceID, suffix, since.Add(24*time.Hour), customer, merchantID, paID)
 		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
-		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'usd','completed',$4,$5,$6,$7)`,
+		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'USD','completed',$4,$5,$6,$7)`,
 			payGone, priceID, suffix, since.Add(48*time.Hour), customer, merchantID, paID)
 		return nil
 	}))
@@ -186,7 +221,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 
 	paymentExists := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1`, id).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 		return n == 1
 	}
 	binding := RailMerchantAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-pay-" + suffix}
@@ -198,7 +233,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 	}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: snap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true})
+		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: snap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Payments)
 		require.Equal(t, 2, res.PaymentsSkipped)
@@ -216,7 +251,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 		TransactionWindowUntil:        timePtrIfSet(until),
 	}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: &completeSnap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true})
+		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: &completeSnap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(1)})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Payments)
 		require.Equal(t, 0, res.PaymentsSkipped)

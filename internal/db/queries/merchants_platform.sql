@@ -53,5 +53,6 @@ ORDER BY rail;
 SELECT created_at
 FROM openrails.payments
 WHERE merchant_id = $1
+  AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1;

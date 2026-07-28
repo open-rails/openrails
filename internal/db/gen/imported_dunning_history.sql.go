@@ -87,6 +87,7 @@ FROM (
     FROM openrails.payments p
     WHERE p.merchant_id = $1::uuid
       AND p.rail = ANY($2::text[])
+      AND p.deleted_at IS NULL
       AND p.status = 'failed'
 ) ev
 WHERE ($3::timestamptz IS NULL OR ev.occurred_at >= $3::timestamptz)
