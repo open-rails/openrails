@@ -38,7 +38,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: successFetcher,
 		})
 		require.Equal(t, 2, res.Windows)
@@ -53,7 +53,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	failingFetcher := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe, err: errors.New("provider offline")}
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		before, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID)
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: failingFetcher,
 		})
 		require.Zero(t, res.Windows)
@@ -131,7 +131,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(merchant.WithID(context.Background(), merchant.ID(merchantID)), func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: &providerRefreshSnapshotFetcher{provider: reconcile.ProviderStripe, snap: snap},
 		})
 		require.Equal(t, 1, res.Windows)

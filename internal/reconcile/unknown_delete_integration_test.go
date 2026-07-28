@@ -71,15 +71,17 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	})
 
 	// NMI snapshot: rsGone is roster-confirmed cancelled; rsStale is absent from
-	// a NON-exhaustive roster but has a stale declined renewal → terminal cancel
-	// with the remote possibly still alive and retrying.
+	// a NON-exhaustive roster but carries a stale NON-RETRYABLE declined renewal
+	// (NMI 261, "stop all recurring payments") → terminal cancel with the remote
+	// possibly still alive and retrying. #821: the decline code is what makes
+	// this certainty — a soft decline here would park as `unknown` instead.
 	nmiSnap := &RemoteSnapshot{
 		Provider: ProviderNMI,
 		Subscriptions: []RemoteSubscription{
 			{RailSubscriptionID: rsGone, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, DeclineCode: "261", AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
 	fetchers := map[Provider]RailFetcher{

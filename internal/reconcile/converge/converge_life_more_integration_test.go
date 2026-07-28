@@ -44,6 +44,7 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1 AND source_domain='subscriptions'`, merchantID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
@@ -51,6 +52,31 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 		})
 	})
 
+	// #842: pending_stale cancels because a confirmation did NOT arrive — an
+	// absence — so it is now behind the §3.2 confirmed-absence gate. Until the
+	// merchant's `subscriptions` domain is proven fully reconciled, a delayed or
+	// dropped webhook must not be read as "the customer never paid".
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Findings)
+		require.Equal(t, 0, res.AutoFixed, "ungated retraction: the gate must hold it")
+		require.Equal(t, 1, res.ReconcileRequired)
+		var status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.Equal(t, "pending", status, "the subscription must survive an unproven absence")
+		return nil
+	}))
+
+	// Prove the domain (what a completed exhaustive pull does) and the same
+	// repair proceeds.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := appDB.Qx(ctx).Exec(ctx,
+			`INSERT INTO openrails.reconciliation_state (merchant_id, source_domain, fully_reconciled, last_full_pull_at)
+			 VALUES ($1,'subscriptions',true,now())
+			 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET fully_reconciled = true`, merchantID)
+		return err
+	}))
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)

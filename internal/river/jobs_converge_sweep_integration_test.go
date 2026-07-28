@@ -29,6 +29,12 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
 
+	// #836: destructive convergence ships OFF and unarmed. A test that
+	// exercises it must put itself in the state a live, reviewed deployment
+	// would be in. (TestKillSwitchHaltsAndResumesTheConvergeSweep asserts the
+	// safe default itself.)
+	dbtest.ArmDestructiveActions(baseCtx, t, dbi.Pool(), merchantID)
+
 	suffix := uuid.NewString()[:8]
 	feature := "feat_" + suffix
 	productID, priceID := uuid.New(), uuid.New()
