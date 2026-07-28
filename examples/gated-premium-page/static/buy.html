@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buy premium</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>Buy premium</h1>
+    <p>Sandbox test card: <code>4111 1111 1111 1111</code>, expiry <code>10/29</code>, any CVV.</p>
+
+    <h2>1. Pick a plan</h2>
+    <div id="products">Loading catalog…</div>
+
+    <h2>2. Card</h2>
+    <!-- Collect.js renders NMI-hosted iframes into these divs; the card
+         number never touches this app or OpenRails (SAQ-A). -->
+    <div id="ccnumber" class="field"></div>
+    <div id="ccexp" class="field"></div>
+    <div id="cvv" class="field"></div>
+
+    <button id="pay" disabled>Pay</button>
+    <p id="status"></p>
+    <p><a href="/">Back home</a></p>
+  </main>
+  <script src="/static/buy.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #222; }
+main { max-width: 40rem; margin: 4rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+h1 { margin-top: 0; }
+code { background: #eee; padding: .1em .3em; border-radius: 3px; }
+button { font: inherit; padding: .5em 1.2em; border: 1px solid #444; border-radius: 5px; background: #222; color: #fff; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+.field { border: 1px solid #ccc; border-radius: 5px; padding: .2em .5em; margin: .4em 0; height: 2.4em; background: #fff; }
+#status { min-height: 1.5em; font-weight: 600; }
+.price { display: block; width: 100%; text-align: left; margin: .4em 0; background: #fff; color: #222; }
+.price.selected { background: #222; color: #fff; }
