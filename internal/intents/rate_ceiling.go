@@ -146,8 +146,14 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 
 	since := now.Add(-RateCeilingWindow).UTC()
 	types := DestructiveIntentTypes()
-	// Counts MUST span all merchants: run on the base pool, not the caller's
-	// merchant-pinned (RLS-scoped) connection.
+	// Counts MUST span all merchants — and the base pool CANNOT do that. It is
+	// the same openrails_app role; dropping the GUC does not bypass rail_intents'
+	// policy, it fails it, so the count came back 0 and this ceiling never
+	// tripped (or#860). Both queries now call migration 0021's SECURITY DEFINER
+	// readers, which RAISE if their owner cannot bypass RLS — so a mis-owned
+	// schema fails loudly here instead of silently permitting the burst.
+	// GenGlobal is still the right accessor: the definer needs no merchant GUC,
+	// and a merchant-pinned connection would scope nothing.
 	q := c.db.GenGlobal()
 
 	globalCount, err := q.CountDestructiveIntentsGlobalSince(ctx, gen.CountDestructiveIntentsGlobalSinceParams{

@@ -225,6 +225,7 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'
+  AND deleted_at IS NULL
 `
 
 // The breaker's budget baseline: max(floor, pct of active subscriptions).
@@ -237,11 +238,10 @@ func (q *Queries) CountActiveSubscriptionsByMerchant(ctx context.Context, mercha
 
 const countDestructiveIntentsByActorSince = `-- name: CountDestructiveIntentsByActorSince :one
 
-SELECT count(*) FROM openrails.rail_intents
-WHERE actor = $1::text
-  AND origin IN ('user', 'admin')
-  AND intent_type = ANY ($2::text[])
-  AND created_at >= $3::timestamptz
+SELECT openrails.count_destructive_intents_by_actor_since(
+    $1::text,
+    $2::text[],
+    $3::timestamptz)
 `
 
 type CountDestructiveIntentsByActorSinceParams struct {
@@ -259,10 +259,11 @@ type CountDestructiveIntentsByActorSinceParams struct {
 // credential-theft surface; origin='system' (automated dunning / decline
 // cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
 // CREATION (created_at), not execution: the ceiling stops the burst at the
-// producer chokepoint, before the write-ahead intent is even created. These
-// run cross-merchant (per-actor AND global), so callers must execute them on a
-// non-merchant-pinned connection (the base pool), like the other cross-tenant
-// worker sweeps.
+// producer chokepoint, before the write-ahead intent is even created. These run
+// cross-merchant (per-actor AND global) through migration 0021's SECURITY
+// DEFINER readers — NOT the base pool. The base pool is not privileged: it is
+// the same openrails_app role, so a GUC-less count is not cross-merchant, it is
+// EMPTY (or#824/or#860).
 // Destructive user/admin intents THIS actor created in the rolling window.
 func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg CountDestructiveIntentsByActorSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsByActorSince, arg.Actor, arg.IntentTypes, arg.Since)
@@ -272,10 +273,9 @@ func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg C
 }
 
 const countDestructiveIntentsGlobalSince = `-- name: CountDestructiveIntentsGlobalSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE origin IN ('user', 'admin')
-  AND intent_type = ANY ($1::text[])
-  AND created_at >= $2::timestamptz
+SELECT openrails.count_destructive_intents_since(
+    $1::text[],
+    $2::timestamptz)
 `
 
 type CountDestructiveIntentsGlobalSinceParams struct {

@@ -132,8 +132,10 @@ func (s *store) touchEvaluated(ctx context.Context, id uuid.UUID, evaluatedAt ti
 }
 
 // listArmedMerchants returns every merchant with at least one enabled rule.
-// CROSS-MERCHANT: runs on the base pool (GenGlobal), the same posture as the
-// #358 provider-intent executor sweeps.
+// CROSS-MERCHANT via migration 0021's SECURITY DEFINER reader (or#861) — a
+// base-pool SELECT could not answer this: no GUC means alert_rules' RLS matches
+// nothing, so the evaluator had never run. Ids only; each merchant's rules are
+// then read under its own merchant scope.
 func (s *store) listArmedMerchants(ctx context.Context) ([]uuid.UUID, error) {
 	return s.db.GenGlobal().ListArmedAlertMerchants(ctx)
 }
@@ -250,7 +252,8 @@ func (s *store) markFindingNotified(ctx context.Context, id uuid.UUID, at time.T
 
 // listArmedFindingsDigestMerchants: merchants with at least one undigested
 // low-severity requires_review finding — the digest sweep's work set.
-// CROSS-MERCHANT (base pool), same posture as listArmedMerchants.
+// CROSS-MERCHANT via 0021's SECURITY DEFINER reader, same as listArmedMerchants
+// and for the same reason (or#861).
 func (s *store) listArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
 	return s.db.GenGlobal().ListArmedFindingsDigestMerchants(ctx)
 }

@@ -311,7 +311,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- The breaker's budget baseline: max(floor, pct of active subscriptions).
 -- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
+  AND deleted_at IS NULL;
 
 -- The breaker's per-merchant standing finding (stable identity —
 -- merchant x finding_type x subject_key is UNIQUE).
@@ -330,24 +331,30 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- credential-theft surface; origin='system' (automated dunning / decline
 -- cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
 -- CREATION (created_at), not execution: the ceiling stops the burst at the
--- producer chokepoint, before the write-ahead intent is even created. These
--- run cross-merchant (per-actor AND global), so callers must execute them on a
--- non-merchant-pinned connection (the base pool), like the other cross-tenant
--- worker sweeps.
+-- producer chokepoint, before the write-ahead intent is even created. These run
+-- cross-merchant (per-actor AND global) through migration 0021's SECURITY
+-- DEFINER readers — NOT the base pool. The base pool is not privileged: it is
+-- the same openrails_app role, so a GUC-less count is not cross-merchant, it is
+-- EMPTY (or#824/or#860).
 
 -- Destructive user/admin intents THIS actor created in the rolling window.
 -- name: CountDestructiveIntentsByActorSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE actor = sqlc.arg(actor)::text
-  AND origin IN ('user', 'admin')
-  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
-  AND created_at >= sqlc.arg(since)::timestamptz;
+SELECT openrails.count_destructive_intents_by_actor_since(
+    sqlc.arg(actor)::text,
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
 
 -- Destructive user/admin intents ALL actors + ALL merchants created in the
 -- rolling window — the absolute frying-protection ceiling even if many actor
 -- identities are forged.
+--
+-- or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
+-- a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
+-- openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
+-- structurally never exceeded — a fail-OPEN safety control. The definer RAISES
+-- when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
+-- instead of silently permitting unlimited destructive intents.
 -- name: CountDestructiveIntentsGlobalSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE origin IN ('user', 'admin')
-  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
-  AND created_at >= sqlc.arg(since)::timestamptz;
+SELECT openrails.count_destructive_intents_since(
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
