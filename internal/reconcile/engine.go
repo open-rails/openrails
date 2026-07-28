@@ -74,6 +74,12 @@ type RunParams struct {
 	Mutations *LocalMutationPolicy
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
+	// PSPCoverage (#841) declares, per provider, how many PSPs the merchant has
+	// active on that rail and how many this pass actually read. A pull arms
+	// from ONE PSP, so anything short of complete coverage strips
+	// SubscriptionsExhaustive: a roster that saw one of two accounts cannot
+	// prove a subscription of the OTHER account is gone.
+	PSPCoverage map[Provider]PSPCoverage
 	// PSPs optionally binds each provider section to one
 	// merchant-scoped provider account. When set, the engine scopes local mirror
 	// reads and local materialization writes to that account id.
@@ -330,6 +336,16 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	if binding.ID != uuid.Nil {
 		snap.PspID = binding.ID.String()
+	}
+	// #841: strip the absence proof when the pass did not read every active PSP
+	// on the rail. A merchant running mobius + paykings on NMI would otherwise
+	// have the non-armed PSP's entire book cancelled as "absent from an
+	// exhaustive roster".
+	if cov, ok := params.PSPCoverage[provider]; ok && !cov.Complete() && snap.Coverage.SubscriptionsExhaustive {
+		snap.Coverage.SubscriptionsExhaustive = false
+		log.WithContext(ctx).WithFields(log.Fields{
+			"provider": provider, "active_psps": cov.Declared, "pulled_psps": cov.Pulled,
+		}).Warn("reconcile: rail is covered by only some of its active PSPs; the roster is NOT an absence proof (#841)")
 	}
 	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)

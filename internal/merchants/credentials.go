@@ -744,3 +744,34 @@ func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, va
 func (s *Service) TestStripeCredential(ctx context.Context, id merchant.ID, tester func(ctx context.Context, secretKey string) error) error {
 	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", tester)
 }
+
+// CountActivePSPsForRail is how many PSPs the merchant has ACTIVE for new work
+// on a rail/environment. More than one is a supported state that only warns at
+// credential-resolution time (the newest wins), but it is decisive for the pull
+// plane: a pull arms from exactly ONE PSP, so a rail with N>1 active PSPs is
+// only partially covered and its roster can never prove absence for the
+// siblings it did not read (#841).
+func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, rail, environment string) (int, error) {
+	if s == nil || s.pool == nil || id.IsZero() {
+		return 0, nil
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return 0, fmt.Errorf("provider account environment must be live or test")
+	}
+	rail = normalizeProviderSecretType(rail)
+	var count int64
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		var e error
+		count, e = gen.New(tx).CountActivePSPsForNewWork(ctx, gen.CountActivePSPsForNewWorkParams{
+			MerchantID:  id.UUID(),
+			Rail:        rail,
+			Environment: &environment,
+		})
+		return e
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count active provider accounts %s/%s: %w", rail, environment, err)
+	}
+	return int(count), nil
+}

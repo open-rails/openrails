@@ -8,6 +8,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -384,7 +385,10 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Store:    intents.NewStoreGated(r.DB, r.RateCeiling()),
 		Registry: registry,
 		Breaker:  intents.NewVolumeBreaker(r.DB), // #679: gate destructive types everywhere
-		Clock:    clock,
+		// #836: the operator kill switch — one UPDATE halts every destructive
+		// provider write on every node, no deploy.
+		Destructive: destructive.New(r.DB),
+		Clock:       clock,
 	}
 	if r.Config != nil {
 		runner.Config = r.Config

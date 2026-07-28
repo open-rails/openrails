@@ -134,3 +134,10 @@ func strPtr(s string) *string {
 	}
 	return &s
 }
+
+// AllowDestructive implements the intents runner's gate: it opens its own
+// merchant-scoped read, and fails closed.
+func (g *Gate) AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string) {
+	v := g.CheckMerchant(ctx, merchantID)
+	return v.Allowed, v.Reason
+}

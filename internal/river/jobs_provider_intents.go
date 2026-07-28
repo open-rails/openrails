@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 )
 
@@ -58,7 +59,10 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 		// per merchant; over-budget intents park until an operator resolves
 		// the life.provider_intent.held_bulk finding.
 		Breaker: intents.NewVolumeBreaker(w.DB),
-		Clock:   w.Clock,
+		// #836: the DB-backed operator kill switch, checked before every
+		// destructive provider write.
+		Destructive: destructive.New(w.DB),
+		Clock:       w.Clock,
 	}
 	stats, err := runner.RunExecuteOnce(ctx)
 	if err != nil {

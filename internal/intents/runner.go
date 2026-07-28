@@ -56,6 +56,11 @@ type Runner struct {
 	// Breaker halts destructive intent execution on merchant-level volume
 	// anomalies (#679). nil = ungated (unit tests, non-destructive-only runners).
 	Breaker *VolumeBreaker
+	// Destructive is the #836 DB-backed operator kill switch, checked before
+	// every destructive intent so an operator can halt in-flight provider
+	// deletes with one UPDATE instead of a deploy. Same convention as Breaker:
+	// nil = ungated (unit tests); production wiring always sets it.
+	Destructive DestructiveGate
 	Clock   clockwork.Clock
 	Lease   time.Duration
 	Batch   int64
@@ -162,6 +167,16 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
 		r.park(ctx, logEntry, stats, intent.ID, now, reason)
 		return
+	}
+
+	// #836 kill switch: an operator can halt every destructive provider write
+	// on every node with one UPDATE. Parks (never fails) so the intent resumes
+	// the moment the switch is flipped back.
+	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) {
+		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
+			r.park(ctx, logEntry, stats, intent.ID, now, reason)
+			return
+		}
 	}
 
 	// #679 volume breaker: destructive types park (stay pending) while the
@@ -420,4 +435,13 @@ func mutationLogEvidence(intent gen.OpenrailsRailIntent, evidence map[string]any
 		out[k] = v
 	}
 	return out
+}
+
+// DestructiveGate is the #836 operator kill switch as the runner needs it.
+// internal/destructive.Gate implements it; the indirection keeps intents free
+// of a database dependency it does not otherwise have.
+type DestructiveGate interface {
+	// AllowDestructive reports whether destructive provider writes may execute
+	// for a merchant. It must FAIL CLOSED: an unreadable policy denies.
+	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
 }

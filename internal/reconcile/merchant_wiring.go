@@ -37,7 +37,27 @@ type MerchantPullClients struct {
 	// CCBillDataLink feeds the CCBill DataLink bulk lane (the ACTIVEMEMBERS
 	// roster reconcile) with the same per-merchant client the fetcher uses.
 	CCBillDataLink *ccbill.DataLinkClient
+	// Coverage (#841) records, per armed rail, how many PSPs the merchant
+	// declares ACTIVE on it versus how many this pass actually read. A pull
+	// arms from exactly ONE PSP, so a merchant running two NMI PSPs has half
+	// its book invisible to the roster — and "absent from an exhaustive roster"
+	// would cancel every subscription of the PSP that was not read.
+	Coverage map[Provider]PSPCoverage
 }
+
+// PSPCoverage is one rail's PSP coverage for a pull pass.
+type PSPCoverage struct {
+	// Declared is how many PSPs are active for new work on the rail.
+	Declared int
+	// Pulled is how many of them this pass read (a fetcher arms from one).
+	Pulled int
+	// Binding is the PSP the pass armed from.
+	Binding RailMerchantAccountBinding
+}
+
+// Complete reports whether the pass read every active PSP on the rail — the
+// precondition for treating its roster as an absence proof.
+func (c PSPCoverage) Complete() bool { return c.Declared > 0 && c.Pulled >= c.Declared }
 
 // ProviderEndpoints overrides provider base URLs on store-armed clients — a
 // test seam for fake provider HTTP servers. Zero value = real endpoints.
@@ -69,6 +89,7 @@ func (b MerchantFetcherBuilder) Build(ctx context.Context, mid merchant.ID) Merc
 	out := MerchantPullClients{
 		Fetchers: map[Provider]RailFetcher{},
 		Probers:  map[Provider]SubscriptionProber{},
+		Coverage: map[Provider]PSPCoverage{},
 	}
 	b.buildNMI(ctx, mid, &out)
 	b.buildCCBill(ctx, mid, &out)
@@ -97,6 +118,42 @@ func (b MerchantFetcherBuilder) environment() string {
 // means the merchant declares NO account on the rail → nothing is armed for
 // this pass (no boot-config plane exists to fall back to, #788).
 func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.ID, provider Provider) (merchants.PSPScope, bool) {
+	return b.resolveScopeCoverage(ctx, mid, provider, nil)
+}
+
+// resolveScopeCoverage is resolveScope plus the #841 coverage record: how many
+// PSPs the merchant declares active on the rail versus the one this pass arms
+// from.
+func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid merchant.ID, provider Provider, out *MerchantPullClients) (merchants.PSPScope, bool) {
+	scope, ok := b.resolveScopeInner(ctx, mid, provider)
+	if !ok || out == nil {
+		return scope, ok
+	}
+	declared := 1
+	if b.Merchants != nil {
+		if n, err := b.Merchants.CountActivePSPsForRail(ctx, mid, string(provider), b.environment()); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"merchant_id": mid.String(), "rail": string(provider),
+			}).Warn("provider pull: active-PSP count failed; treating the rail as partially covered (absence proves nothing)")
+			declared = 2 // fail safe: unknown coverage is INCOMPLETE coverage
+		} else if n > 0 {
+			declared = n
+		}
+	}
+	if declared > 1 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"merchant_id": mid.String(), "rail": string(provider), "active_psps": declared,
+		}).Warn("provider pull: rail has multiple active PSPs but a pull arms from ONE — its roster cannot prove absence for the siblings it did not read (#841)")
+	}
+	out.Coverage[provider] = PSPCoverage{
+		Declared: declared,
+		Pulled:   1,
+		Binding:  RailMerchantAccountBinding{ID: scope.ID, Rail: scope.Rail, AccountID: scope.AccountID},
+	}
+	return scope, true
+}
+
+func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid merchant.ID, provider Provider) (merchants.PSPScope, bool) {
 	if b.Merchants == nil {
 		return merchants.PSPScope{}, false
 	}
@@ -174,7 +231,7 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.
 }
 
 func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
-	if scope, ok := b.resolveScope(ctx, mid, ProviderNMI); ok {
+	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderNMI, out); ok {
 		securityKey, ok := b.requireSecret(ctx, mid, scope, "security_key")
 		if !ok {
 			return // fail closed: a declared account never falls back across planes
@@ -205,7 +262,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, o
 }
 
 func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
-	if scope, ok := b.resolveScope(ctx, mid, ProviderCCBill); ok {
+	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderCCBill, out); ok {
 		// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc,
 		// e.g. 945280-0000). Both parts are numeric, so the first dash splits.
 		acc, sub, cut := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
@@ -241,7 +298,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID
 }
 
 func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
-	if scope, ok := b.resolveScope(ctx, mid, ProviderStripe); ok {
+	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderStripe, out); ok {
 		secretKey, ok := b.requireSecret(ctx, mid, scope, "secret_key")
 		if !ok {
 			return
@@ -265,7 +322,7 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 	if b.DB == nil {
 		return
 	}
-	if scope, ok := b.resolveScope(ctx, mid, ProviderSolana); ok {
+	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderSolana, out); ok {
 		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
 		if err != nil {
 			b.warnScopeError(ctx, mid, ProviderSolana, err)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -51,6 +52,16 @@ type ConvergeSweepWorker struct {
 func (ConvergeSweepWorker) Kind() string { return KindConvergeSweep }
 
 func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSweepArgs]) error {
+	// #836: the sweep had NO readonly check at all, unlike the refresh and
+	// dunning workers — so `provider_write_mode: readonly` did not make it an
+	// observer. Its pending_stale branch cancels and its grant_effect.mismatch
+	// branch closes entitlement windows, every 15 minutes, RunOnStart, across
+	// every active merchant.
+	if w.Config != nil && w.Config.IsProviderReadOnly() {
+		log.WithContext(ctx).WithField("worker", KindConvergeSweep).
+			Warn("Readonly mode: converge sweep skipped (pure observer; no local convergence)")
+		return nil
+	}
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()
@@ -71,11 +82,20 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		return fmt.Errorf("converge sweep: list merchants: %w", err)
 	}
 
-	var swept, findings, autoFixed, reconcileRequired, adminRequired int
+	// #836: the runtime kill switch, read per merchant so one merchant's stop
+	// does not halt the fleet and the fleet-wide stop halts every merchant.
+	gate := destructive.New(w.DB)
+
+	var swept, findings, autoFixed, reconcileRequired, adminRequired, gated int
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		var res converge.ConvergeResult
+		var blocked string
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+			if v := gate.Check(ctx, mid); !v.Allowed {
+				blocked = v.Reason
+				return nil
+			}
 			var e error
 			res, e = engine.Converge(ctx, converge.Scope{Merchant: merchant.ID(mid)})
 			return e
@@ -85,15 +105,20 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 				Error("converge sweep: merchant failed; continuing")
 			continue
 		}
+		if blocked != "" {
+			gated++
+			logger.WithField("merchant_id", mid).Warn("converge sweep: destructive actions gated — " + blocked)
+			continue
+		}
 		swept++
 		findings += res.Findings
 		autoFixed += res.AutoFixed
 		reconcileRequired += res.ReconcileRequired
 		adminRequired += res.AdminRequired
 	}
-	if findings > 0 {
+	if findings > 0 || gated > 0 {
 		logger.WithFields(log.Fields{
-			"merchants": swept, "findings": findings, "auto_fixed": autoFixed,
+			"merchants": swept, "gated": gated, "findings": findings, "auto_fixed": autoFixed,
 			"reconcile_required": reconcileRequired, "admin_required": adminRequired,
 		}).Info("converge sweep completed")
 	}
