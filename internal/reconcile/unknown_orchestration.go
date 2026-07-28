@@ -25,6 +25,12 @@ type UnknownReconcileOptions struct {
 	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> 14d)
 	LookbackCap   time.Duration // never pull a window wider than this (#634 3y bound; 0 -> 3y)
 	WindowSlack   time.Duration // pull from (oldest period end - slack) (0 -> 48h)
+	// CancelBudget (#834/#837) caps how many of this cohort ONE pass may
+	// cancel. Over the cap the rail applies NOTHING. Zero value = defaults.
+	CancelBudget CancelBudget
+	// Breaker (#834) refuses to read absence from an implausibly small roster.
+	// Zero value = defaults.
+	Breaker RosterBreaker
 }
 
 func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
@@ -51,6 +57,7 @@ type UnknownReconcileResult struct {
 	Cancelled     int
 	StillUnknown  int
 	Probed        int                 // per-subscription probe fallbacks attempted (#665)
+	Held          int                 // cancellations a pass-level guard withheld (#834)
 	Backfilled    int                 // payments imported (#634)
 	RailCustomers int                 // rail_customer_accounts materialized from a remote customer id (#635)
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
@@ -130,6 +137,42 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			}
 		}
 
+		// #834: the pass-level brakes this path never had. It had ONLY a 500-row
+		// FETCH cap: every unknown row absent from the snapshot hit
+		// `absent_from_exhaustive_roster` -> cancel + entitlement revoke, and
+		// because those cancels carry RemoteGone=true they create NO provider
+		// intent, so the #679 volume breaker could not see — let alone stop — a
+		// single one of them.
+		localLive, cerr := q.CountLiveLinkedSubscriptionsForRail(ctx, gen.CountLiveLinkedSubscriptionsForRailParams{
+			MerchantID: merchantID.UUID(), Rail: rail,
+		})
+		if cerr != nil {
+			return res, fmt.Errorf("reconcile unknown: count live %s book: %w", rail, cerr)
+		}
+		if snap != nil {
+			remoteLive := len(snap.Subscriptions)
+			if tripped, reason := opts.Breaker.Implausible(provider, remoteLive, int(localLive)); tripped {
+				// The roster is not believable, so it proves nothing about absence.
+				// Strip the proof rather than abort: the rows stay `unknown`,
+				// entitlements stay intact, and a per-sub probe can still resolve
+				// them individually on real evidence.
+				snap.Coverage.SubscriptionsExhaustive = false
+				log.WithContext(ctx).WithFields(log.Fields{
+					"merchant_id": merchantID.String(), "rail": rail,
+					"remote_live": remoteLive, "local_live": localLive,
+				}).Error("reconcile unknown: roster ratio breaker tripped; absence will not be read as cancellation")
+				recordGuardFinding(ctx, q, merchantID, provider, "roster_ratio", reason)
+			}
+		}
+
+		// Decide the WHOLE cohort before applying any of it, so the cancellation
+		// cap sees the pass as a whole rather than one row at a time.
+		type pendingDecision struct {
+			id       uuid.UUID
+			decision Decision
+		}
+		decisions := make([]pendingDecision, 0, len(rows))
+		cancels := 0
 		for _, r := range rows {
 			state := SubscriptionState{
 				Status:             string(models.StatusUnknown),
@@ -153,7 +196,26 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 					decision = Decide(state, EvidenceBundle{Snapshot: psnap}, now, opts.DunningWindow)
 				}
 			}
-			if err := applyUnknownDecision(ctx, database, lc, q, r.ID, decision, now, opts.LookbackCap, &res); err != nil {
+			if decision.Kind == TransitionCancel {
+				cancels++
+			}
+			decisions = append(decisions, pendingDecision{id: r.ID, decision: decision})
+		}
+
+		// #837 all-or-nothing cap on the LOCAL cancel + entitlement revoke.
+		if exceeded, reason := opts.CancelBudget.Exceeded(cancels, int(localLive)); exceeded {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"merchant_id": merchantID.String(), "rail": rail,
+				"planned_cancellations": cancels, "local_live": localLive,
+			}).Error("reconcile unknown: cancellation cap exceeded; applied nothing for this rail")
+			recordGuardFinding(ctx, q, merchantID, provider, "cancellation_cap", reason)
+			res.Held += cancels
+			res.StillUnknown += len(rows)
+			continue
+		}
+
+		for _, d := range decisions {
+			if err := applyUnknownDecision(ctx, database, lc, q, d.id, d.decision, now, opts.LookbackCap, &res); err != nil {
 				return res, err
 			}
 		}
@@ -269,4 +331,23 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		inserted += int(n)
 	}
 	return inserted, nil
+}
+
+// recordGuardFinding persists the operator-facing record of a pass-level guard
+// that withheld cancellations (#834). Best-effort: the guard has already done
+// its job in memory, and failing to write the finding must never turn a SAFE
+// outcome into an error that retries into an unsafe one.
+func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID merchant.ID, provider Provider, subject, reason string) {
+	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID:        merchantID.UUID(),
+		FindingType:       string(FindingCancellationCapped),
+		SubjectKey:        string(provider) + ":unknown_cohort:" + subject,
+		Severity:          string(SeverityCritical),
+		Status:            string(FindingStatusRequiresReview),
+		RecommendedAction: &reason,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"merchant_id": merchantID.String(), "rail": string(provider), "guard": subject,
+		}).Error("reconcile unknown: could not persist the guard finding (the guard still held; investigate the roster)")
+	}
 }

@@ -434,6 +434,10 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		lc.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
 	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
+	if res.Held > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
+			Error("Provider Refresh: unknown-cohort cancellations withheld by a pass-level guard; a requires_review finding is open")
+	}
 	if res.Renewed+res.Adopted+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
