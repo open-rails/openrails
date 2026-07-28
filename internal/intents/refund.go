@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/railresolve"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -327,18 +327,18 @@ func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (r
 // nmiAmountToCents converts the Query API dollar amount ("5.00", "-5.00" on
 // refund actions) into absolute cents.
 func nmiAmountToCents(amount string) (int64, error) {
-	trimmed := strings.TrimSpace(amount)
-	if trimmed == "" {
-		return 0, errors.New("empty amount")
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
+	// MONEY-6: exact rational parse, half-away-from-zero. This value is
+	// compared for EQUALITY against our own refund amount to decide whether a
+	// provider refund is ours — a float round-trip could make that comparison
+	// miss and re-issue a refund.
+	cents, err := moneyutil.ParseDecimalToCents(amount)
 	if err != nil {
 		return 0, err
 	}
-	if f < 0 {
-		f = -f
+	if cents < 0 {
+		cents = -cents
 	}
-	return int64(f*100 + 0.5), nil
+	return cents, nil
 }
 
 // ============================================================================

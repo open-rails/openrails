@@ -369,28 +369,26 @@ type nmiPlanJob struct {
 func mapNMIPlansJob(plans []nmi.V5Plan) []nmiPlanJob {
 	out := make([]nmiPlanJob, 0, len(plans))
 	for _, p := range plans {
+		cents, err := dollarStringToCentsJob(p.PlanAmount)
+		if err != nil {
+			// FAB-6: an unparseable provider amount is not a zero-dollar plan.
+			log.WithError(err).WithFields(log.Fields{"plan_id": p.ID, "plan_amount": p.PlanAmount}).
+				Warn("nmi catalog drift: skipping plan with unparseable amount")
+			continue
+		}
 		out = append(out, nmiPlanJob{
 			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
-			AmountCents: dollarStringToCentsJob(p.PlanAmount),
+			AmountCents: cents,
 		})
 	}
 	return out
 }
 
-func dollarStringToCentsJob(dollars string) int64 {
-	trimmed := strings.TrimSpace(dollars)
-	if trimmed == "" {
-		return 0
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0
-	}
-	if f < 0 {
-		return -int64(-f*100 + 0.5)
-	}
-	return int64(f*100 + 0.5)
+// dollarStringToCentsJob parses an NMI dollar amount exactly (MONEY-6); a blank
+// or malformed value errors rather than becoming a silent zero (FAB-6).
+func dollarStringToCentsJob(dollars string) (int64, error) {
+	return moneyutil.ParseDecimalToCents(dollars)
 }
 
 // computeNMIDriftJob is the worker-side mirror of

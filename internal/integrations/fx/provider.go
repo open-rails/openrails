@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,9 +78,52 @@ func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurre
 	if !ok {
 		return 0, nil, fmt.Errorf("money: unknown currency %q", to)
 	}
-	converted := float64(amount) * q.Rate * math.Pow10(toScale-fromScale)
-	if converted > float64(math.MaxInt64) {
+	rate, err := ratFromRate(q.Rate)
+	if err != nil {
+		return 0, nil, err
+	}
+	// MONEY-3: the RATE is a float, the AMOUNT never is. amount * rate *
+	// 10^(toScale-fromScale) is evaluated as an exact rational with a single
+	// final ceiling — a float multiply followed by math.Ceil rounds the binary
+	// representation error up into a phantom internal unit.
+	v := new(big.Rat).SetInt64(amount)
+	v.Mul(v, rate)
+	if shift := toScale - fromScale; shift >= 0 {
+		v.Mul(v, new(big.Rat).SetInt(pow10(shift)))
+	} else {
+		v.Quo(v, new(big.Rat).SetInt(pow10(-shift)))
+	}
+	n := ceilRat(v)
+	if !n.IsInt64() {
 		return 0, nil, fmt.Errorf("converted amount overflows int64")
 	}
-	return int64(math.Ceil(converted)), q, nil
+	return n.Int64(), q, nil
+}
+
+// ratFromRate converts an FX RATE (legitimately a float) to the exact rational
+// of its shortest DECIMAL form — 1.08 becomes 108/100, not the binary double
+// 1.0800000000000000710…. Mirrors internal/modules/solana's helper of the same
+// name. Past this point no amount touches a float.
+func ratFromRate(rate float64) (*big.Rat, error) {
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate <= 0 {
+		return nil, fmt.Errorf("invalid fx rate %v", rate)
+	}
+	r, ok := new(big.Rat).SetString(strconv.FormatFloat(rate, 'g', -1, 64))
+	if !ok || r.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid fx rate %v", rate)
+	}
+	return r, nil
+}
+
+func pow10(n int) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
+}
+
+// ceilRat returns ceil(r) for r >= 0.
+func ceilRat(r *big.Rat) *big.Int {
+	q, rem := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
+	if rem.Sign() > 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q
 }

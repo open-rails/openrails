@@ -2260,11 +2260,6 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 			return 0
 		}
 		return uint64(val)
-	case float64:
-		if val < 0 {
-			return 0
-		}
-		return uint64(val)
 	case string:
 		if parsed, err := strconv.ParseUint(strings.TrimSpace(val), 10, 64); err == nil {
 			return parsed
@@ -2324,7 +2319,10 @@ func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPric
 		return fmt.Errorf("%w: quote expiry missing", ErrCheckoutSessionValidation)
 	}
 
-	railState["token_amount"] = tokenAmount
+	// MONEY-3: the token AMOUNT is written as a decimal string. A JSONB
+	// round-trip decodes numbers as float64, so a base-unit count past 2^53
+	// would come back wrong. The two RATES below are rates, not amounts.
+	railState["token_amount"] = strconv.FormatUint(tokenAmount, 10)
 	railState["token_price_usd"] = tokenPriceUSD
 	railState["fx_rate"] = fxRate
 	railState["fx_currency"] = strings.TrimSpace(fxCurrency)
@@ -2358,9 +2356,11 @@ func checkoutStateUint64(state map[string]any, key string) uint64 {
 		if v > 0 {
 			return uint64(v)
 		}
-	case float64:
-		if v > 0 {
-			return uint64(v)
+	case string:
+		// The canonical JSONB shape for a base-unit amount (MONEY-3): a
+		// decimal string, so the value survives the round-trip exactly.
+		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			return parsed
 		}
 	}
 	return 0
