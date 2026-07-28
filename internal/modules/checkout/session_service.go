@@ -1519,6 +1519,10 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 		return nil, fmt.Errorf("%w: tier change must stay within the same tier group", ErrCheckoutSessionValidation)
 	}
+	// #820: same FX refusal as CheckoutService.TierChange.
+	if err := RequireSameCurrency(PriceAmountOf(oldPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+	}
 
 	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
 	out := &resolvedSolanaLifecycleTierChange{
@@ -1529,13 +1533,16 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		oldPeriodEndsAt: oldSub.CurrentPeriodEndsAt,
 	}
 	if isUpgrade {
-		firstChargeMicros, _ := CalculateModelBUpgradeCharge(
-			oldPrice.Amount,
-			newPrice.Amount,
+		firstChargeMicros, _, err := CalculateModelBUpgradeCharge(
+			PriceAmountOf(oldPrice),
+			PriceAmountOf(newPrice),
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			s.now(),
 		)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
 		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)

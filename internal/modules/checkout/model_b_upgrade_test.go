@@ -9,6 +9,9 @@ import (
 
 func intPtr(v int) *int { return &v }
 
+// usd tags a micro amount with its currency for the Model-B helper (#820).
+func usd(micros int64) PriceAmount { return PriceAmount{Micros: micros, Currency: "usd"} }
+
 // TestCalculateModelBUpgradeCharge pins the live card-billing math for #268.
 // Model B: first_charge = new_full - old_unused, where
 // old_unused = ceilToCent(old_full * hoursRemaining / cycleHours) with integer
@@ -147,7 +150,10 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			first, cycle := CalculateModelBUpgradeCharge(tt.oldFull, tt.newFull, tt.periodEnd, tt.cycleHours, now)
+			first, cycle, err := CalculateModelBUpgradeCharge(usd(tt.oldFull), usd(tt.newFull), tt.periodEnd, tt.cycleHours, now)
+			if err != nil {
+				t.Fatalf("same-currency proration must not error: %v", err)
+			}
 			if first != tt.expectFirst {
 				t.Fatalf("first charge: expected %d, got %d", tt.expectFirst, first)
 			}
@@ -176,7 +182,7 @@ func TestUpgradeWirePinning(t *testing.T) {
 	cycle := 30 * 24
 
 	// $20 -> $50 with 28 of 30 days left.
-	firstMicros, _ := CalculateModelBUpgradeCharge(20_000_000, 50_000_000, timePtr(now.Add(28*24*time.Hour)), &cycle, now)
+	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
 	if firstMicros != 31_330_000 {
 		t.Fatalf("preview micros: expected 31_330_000, got %d", firstMicros)
 	}
@@ -208,7 +214,7 @@ func TestUpgradeWirePinning(t *testing.T) {
 
 	// A price not representable in whole cents must ERROR at the sale seam,
 	// never round: 0 hours remaining => first charge = newFull = sub-cent.
-	subCent, _ := CalculateModelBUpgradeCharge(20_000_000, 50_000_001, timePtr(now), &cycle, now)
+	subCent, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_001), timePtr(now), &cycle, now)
 	if _, err := moneyutil.MicrosToCentsExact(subCent); err == nil {
 		t.Fatalf("sub-cent proration must error, got cents for %d micros", subCent)
 	}
@@ -218,8 +224,8 @@ func TestUpgradeWirePinning(t *testing.T) {
 // NMI/Stripe upgrade paths: the new period is [now, now+cycleHours].
 func TestModelBNewPeriodEnd(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	_, cycle := CalculateModelBUpgradeCharge(
-		20_000_000, 50_000_000,
+	_, cycle, _ := CalculateModelBUpgradeCharge(
+		usd(20_000_000), usd(50_000_000),
 		timePtr(now.Add(28*24*time.Hour)),
 		intPtr(30*24),
 		now,

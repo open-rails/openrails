@@ -199,16 +199,13 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 		)
 	}
 
-	switch normalized {
-	case "840":
-		return "usd", nil
-	case "978":
-		return "eur", nil
-	case "392":
-		return "jpy", nil
-	default:
-		return normalized, nil
+	// #819: same table the outbound FlexForm picks currencyCode from, read in
+	// reverse — every currency we can bill maps back, so a real charge can never
+	// be rejected here as a "mismatch" against the price it was billed for.
+	if currency, ok := ccbill.CurrencyFromCode(normalized); ok {
+		return currency, nil
 	}
+	return normalized, nil
 }
 
 func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {

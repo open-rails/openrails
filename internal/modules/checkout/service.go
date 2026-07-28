@@ -528,6 +528,9 @@ func (s *CheckoutService) processCCBillSubscription(
 		FlexID:        flexID,
 		FormName:      formName,
 		ReservationID: req.CheckoutSessionID,
+		// #819: bill the PRICE's currency. An unbillable/absent currency errors
+		// below — before a form exists, therefore before any charge.
+		Currency: price.Currency,
 	}
 
 	response, err := ccbillClient.GenerateFlexFormURL(flexFormParams)
@@ -590,6 +593,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 		Email:                  *user.Email,
 		FormName:               formName,
 		FlexID:                 flexID,
+		Currency:               newPrice.Currency, // #819
 		OriginalSubscriptionID: existingSub.RailSubscriptionID,
 	}
 
@@ -1791,13 +1795,17 @@ func (s *CheckoutService) processUpgrade(
 	if billingCycleHours == nil || *billingCycleHours <= 0 {
 		billingCycleHours = oldPrice.RecurringCycleHours()
 	}
-	prorationAmount, cycleHours := CalculateModelBUpgradeCharge(
-		oldPrice.Amount,
-		newPrice.Amount,
+	prorationAmount, cycleHours, err := CalculateModelBUpgradeCharge(
+		PriceAmountOf(oldPrice),
+		PriceAmountOf(newPrice),
 		existingSub.CurrentPeriodEndsAt,
 		billingCycleHours,
 		now,
 	)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 
 	log.WithFields(log.Fields{
 		"user_id":          user.ID,
@@ -2327,7 +2335,13 @@ func (s *CheckoutService) processDowngrade(
 // billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
 // full period, and then rebilled `newFull` at `now + cycle`.
 //
-// UNITS: oldFull/newFull and the returned first charge are MICROS. The unused
+// CURRENCY (#820): `newFull - oldUnused` is only meaningful inside ONE
+// currency — across an FX boundary the subtraction silently invents a rate of
+// 1.0. Both operands therefore arrive as PriceAmount (amount + currency) and a
+// mismatched or absent currency returns ErrTierChangeCrossCurrency with NO
+// amount, matching how reprice and plan migration refuse an FX crossing.
+//
+// UNITS: the amounts and the returned first charge are MICROS. The unused
 // credit is rounded UP to a whole cent (customer-favored), so for whole-cent
 // prices the first charge is a whole number of cents — chargeable on every
 // rail (NMI cents, Stripe cents, Solana base units) with preview == charge.
@@ -2351,12 +2365,17 @@ func (s *CheckoutService) processDowngrade(
 // (e.g. the Solana path in #267) can reuse the exact same math. cycleHours is
 // returned so callers can advance the period end (now + cycleHours).
 func CalculateModelBUpgradeCharge(
-	oldFull int64,
-	newFull int64,
+	old PriceAmount,
+	new PriceAmount,
 	periodEndsAt *time.Time,
 	billingCycleHours *int,
 	now time.Time,
-) (firstChargeMicros int64, cycleHours int) {
+) (firstChargeMicros int64, cycleHours int, err error) {
+	if err := RequireSameCurrency(old, new); err != nil {
+		return 0, 0, err
+	}
+	oldFull, newFull := old.Micros, new.Micros
+
 	// Default to a 30-day (720h) cycle if not specified.
 	cycleHours = 30 * 24
 	if billingCycleHours != nil && *billingCycleHours > 0 {
@@ -2388,7 +2407,7 @@ func CalculateModelBUpgradeCharge(
 		// only reachable with bad inputs (e.g. a "downgrade" routed here).
 		firstChargeMicros = 0
 	}
-	return firstChargeMicros, cycleHours
+	return firstChargeMicros, cycleHours, nil
 }
 
 // cancelNMISubscription cancels a subscription at NMI
@@ -2464,6 +2483,13 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		if strings.TrimSpace(*currentProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 			return nil, ErrTierChangeDifferentGroup
 		}
+	}
+	// A tier group may mix currencies (the catalog allows a per-currency price
+	// per plan), but a SUBSCRIPTION cannot move across one: proration would
+	// subtract across an FX boundary on the way up, and the schedule would
+	// silently change currency on the way down (#820).
+	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, err
 	}
 
 	// 5. Determine action (upgrade vs downgrade)
@@ -2553,6 +2579,11 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 			return nil, ErrTierChangeDifferentGroup
 		}
 	}
+	// Same FX refusal as TierChange (#820) — the preview must never quote a
+	// number the charge would refuse to honour.
+	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, err
+	}
 
 	rail := string(existingSub.Rail)
 	now := s.now()
@@ -2584,7 +2615,10 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	firstCharge, cycleHours := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	firstCharge, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	if err != nil {
+		return nil, err
+	}
 	nextDate := now.Add(time.Duration(cycleHours) * time.Hour)
 	resp.Action = "upgrade"
 	resp.AmountDueNow = firstCharge
@@ -2734,6 +2768,22 @@ func (s *CheckoutService) processTierChangeStripe(
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
+
+	// The success-toast estimate is computed BEFORE the provider write, and from
+	// the OLD price + period (the local reset below overwrites them), so it
+	// matches the preview's now-amount and so any money error — an FX crossing
+	// (#820) above all — fails before Stripe is touched.
+	stripeNow := s.now()
+	oldAmount := PriceAmountOf(existingSub.Price)
+	if existingSub.Price == nil {
+		// No old price loaded => no credit is known. Zero credit carries no
+		// currency risk; the estimate is simply the full new price.
+		oldAmount = PriceAmount{Micros: 0, Currency: newPrice.Currency}
+	}
+	estimatedNow, _, err := CalculateModelBUpgradeCharge(oldAmount, PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), stripeNow)
+	if err != nil {
+		return nil, err
+	}
 	// Pass newPrice.ID so the subscription's metadata[internal_price_id] is
 	// rewritten to the new tier; otherwise the proration invoice and every future
 	// renewal would resolve the stale old price in the invoice.paid webhook (#268).
@@ -2745,22 +2795,11 @@ func (s *CheckoutService) processTierChangeStripe(
 	// #268: Model B reset the billing cycle at Stripe (anchor "now"), so reflect
 	// the fresh period [now, now+cycle] locally. Stripe webhooks remain the
 	// source of truth and will reconcile the exact period boundaries.
-	stripeNow := s.now()
 	stripeCycleHours := 30 * 24
 	if ch := newPrice.RecurringCycleHours(); ch != nil {
 		stripeCycleHours = *ch
 	}
 	stripePeriodEnd := stripeNow.Add(time.Duration(stripeCycleHours) * time.Hour)
-
-	// Capture the OLD price + period BEFORE the local reset below overwrites them,
-	// so the success-toast estimate matches the preview's now-amount. Stripe
-	// finalizes the exact prorated total on its side, so this is an estimate.
-	var oldFull int64
-	if existingSub.Price != nil {
-		oldFull = existingSub.Price.Amount
-	}
-	oldPeriodEnd := existingSub.CurrentPeriodEndsAt
-	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.RecurringCycleHours(), stripeNow)
 
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID

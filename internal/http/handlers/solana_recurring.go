@@ -367,6 +367,11 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 		return nil, http.StatusBadRequest, "tier change must stay within the same tier group"
 	}
+	// #820: same FX refusal as CheckoutService.TierChange — never prorate across
+	// a currency boundary.
+	if err := checkout.RequireSameCurrency(checkout.PriceAmountOf(oldPrice), checkout.PriceAmountOf(newPrice)); err != nil {
+		return nil, http.StatusBadRequest, err.Error()
+	}
 
 	// Direction: higher TierRank => upgrade (charge prorated now), lower =>
 	// downgrade (deferred, no charge) — same rule as CheckoutService.TierChange.
@@ -384,13 +389,16 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		// Model-B prorated first charge (new_full - old_unused) in micros, then
 		// micros -> base units at the token's CONFIGURED decimals (#817), $1 peg
 		// (depeg failsafe inside).
-		firstChargeMicros, _ := checkout.CalculateModelBUpgradeCharge(
-			oldPrice.Amount,
-			newPrice.Amount,
+		firstChargeMicros, _, err := checkout.CalculateModelBUpgradeCharge(
+			checkout.PriceAmountOf(oldPrice),
+			checkout.PriceAmountOf(newPrice),
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			nowOrDefault(r),
 		)
+		if err != nil {
+			return nil, http.StatusBadRequest, err.Error()
+		}
 		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol)
 		if err != nil {
 			status, msg := solanaClientError(err, http.StatusInternalServerError)

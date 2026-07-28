@@ -25,6 +25,9 @@ type GenerateFlexFormURLParams struct {
 	FlexID        string `json:"flex_id"`
 	FormName      string `json:"form_name"`
 	ReservationID string `json:"reservation_id"`
+	// Currency is the ISO-4217 alpha-3 currency of the PRICE being sold (e.g.
+	// "eur"). Required — it decides the `currencyCode` CCBill bills in (#819).
+	Currency string `json:"currency"`
 }
 
 // FlexFormResponse contains the hosted checkout URL for CCBill.
@@ -48,7 +51,6 @@ const (
 	sandboxFlexFormBase = "https://sandbox-api.ccbill.com/wap-frontflex/flexforms"
 	prodFlexFormBase    = "https://api.ccbill.com/wap-frontflex/flexforms"
 	defaultLanguage     = "English"
-	defaultCurrencyCode = "840" // USD
 )
 
 // NewClient creates a new CCBill client.
@@ -73,8 +75,12 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
 		return nil, err
 	}
+	currencyCode, err := CurrencyCode(params.Currency)
+	if err != nil {
+		return nil, err
+	}
 
-	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName)
+	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName, currencyCode)
 	q.Set("password", params.Password)
 	q.Set("customer_fname", params.CustomerFName)
 	q.Set("customer_lname", params.CustomerLName)
@@ -114,6 +120,8 @@ type GenerateUpgradeFlexFormURLParams struct {
 	// The new pricing tier to upgrade to
 	FlexID   string `json:"flex_id"`
 	FormName string `json:"form_name"`
+	// Currency is the ISO-4217 alpha-3 currency of the TARGET price (#819).
+	Currency string `json:"currency"`
 
 	// The existing CCBill subscription ID to upgrade
 	OriginalSubscriptionID string `json:"original_subscription_id"`
@@ -128,8 +136,12 @@ func (c *CCBillClient) GenerateUpgradeFlexFormURL(params *GenerateUpgradeFlexFor
 	if params.OriginalSubscriptionID == "" {
 		return nil, fmt.Errorf("original_subscription_id is required")
 	}
+	currencyCode, err := CurrencyCode(params.Currency)
+	if err != nil {
+		return nil, err
+	}
 
-	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName)
+	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName, currencyCode)
 	q.Set("originalSubscriptionId", params.OriginalSubscriptionID)
 
 	return c.flexFormResponse(params.FlexID, q), nil
@@ -148,13 +160,15 @@ func validateFlexFormIdentity(username, email, formName, flexID string) error {
 	return nil
 }
 
-func (c *CCBillClient) baseFlexFormQuery(username, email, formName string) url.Values {
+// baseFlexFormQuery takes the ISO-4217 NUMERIC currencyCode from CurrencyCode —
+// never a literal, so the billed currency is always the price's currency.
+func (c *CCBillClient) baseFlexFormQuery(username, email, formName, currencyCode string) url.Values {
 	q := url.Values{
 		"clientAccnum": {c.config.ClientAccNum},
 		"clientSubacc": {c.config.ClientSubAcc},
 		"formName":     {formName},
 		"language":     {defaultLanguage},
-		"currencyCode": {defaultCurrencyCode},
+		"currencyCode": {currencyCode},
 		"email":        {email},
 		"username":     {username},
 	}
