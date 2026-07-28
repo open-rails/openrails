@@ -16,7 +16,7 @@ type EmailContent struct {
 
 func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Welcome to %s! Your subscription is confirmed", premiumName),
@@ -57,7 +57,7 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 
 func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s subscription has been renewed", premiumName),
@@ -229,7 +229,7 @@ func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.
 }
 
 func RenderPaymentFailedEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkHTML := ""
 	linkText := ""

@@ -249,7 +249,7 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 			DetectedAt:            now,
 		})
 	}
-	remoteUnitAmountMicros := moneyutil.CentsToMicros(sp.UnitAmount)
+	remoteUnitAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sp.UnitAmount)))
 	if local.Amount != remoteUnitAmountMicros {
 		emit("unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteUnitAmountMicros, 10))
 	}
@@ -292,7 +292,7 @@ func mapNMIPlans(plans []nmi.V5Plan) []nmiPlan {
 		out = append(out, nmiPlan{
 			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
-			AmountCents: cents,
+			AmountCents: int64(cents),
 		})
 	}
 	return out
@@ -301,7 +301,7 @@ func mapNMIPlans(plans []nmi.V5Plan) []nmiPlan {
 // dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") into
 // integer cents via the exact-rational parser (MONEY-6). A blank or malformed
 // amount is an error, never a silent zero (FAB-6).
-func dollarStringToCents(dollars string) (int64, error) {
+func dollarStringToCents(dollars string) (moneyutil.Cents, error) {
 	return moneyutil.ParseDecimalToCents(dollars)
 }
 
@@ -350,7 +350,7 @@ func computeNMICatalogDrift(
 		if local == nil {
 			continue
 		}
-		remoteAmountMicros := moneyutil.CentsToMicros(plan.AmountCents)
+		remoteAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(plan.AmountCents)))
 		if local.Amount != remoteAmountMicros {
 			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteAmountMicros, 10), now))
 		}

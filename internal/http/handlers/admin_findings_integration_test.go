@@ -146,7 +146,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		fx.product, "findings-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 10000000, 'usd', 720, true, $3)`, fx.price, fx.product, mid)
+	      VALUES ($1, $2, 10000000, 'USD', 720, true, $3)`, fx.price, fx.product, mid)
 	custID, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid, Subject: nil})
 	require.NoError(t, err)
 	fx.customer = custID
@@ -242,7 +242,7 @@ func (fx *findingsFixture) seedSecondProduct() (productID, priceID uuid.UUID) {
 	fx.exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "findings-prod2-"+sfx, fx.merchant)
 	fx.exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	         VALUES ($1, $2, 10000000, 'usd', 8760, true, $3)`, priceID, productID, fx.merchant)
+	         VALUES ($1, $2, 10000000, 'USD', 8760, true, $3)`, priceID, productID, fx.merchant)
 	return productID, priceID
 }
 
@@ -251,7 +251,7 @@ func (fx *findingsFixture) seedCompletedPayment(txn string, subID *uuid.UUID) uu
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
 	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'usd', 'completed', $4, $5, $6)`,
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6)`,
 		payID, fx.price, txn, subID, fx.customer, fx.merchant)
 	return payID
 }

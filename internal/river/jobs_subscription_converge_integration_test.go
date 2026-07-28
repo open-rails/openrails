@@ -91,7 +91,7 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "burst-prod-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,'{}'::jsonb,$7,$8)`,
@@ -283,7 +283,7 @@ func seedConvergeE2ESubscription(t *testing.T, dbi *db.DB, baseCtx context.Conte
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			f.productID, "e2e-prod-"+suffix, f.merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			f.priceID, f.productID, f.merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,

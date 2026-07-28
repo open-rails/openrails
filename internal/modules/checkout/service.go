@@ -1769,7 +1769,7 @@ func (s *CheckoutService) processUpgrade(
 
 	// NMI charges in whole cents; prorationAmount is micros. Error (never round)
 	// on a sub-cent remainder — same policy as the one-time sale path.
-	prorationCents, err := moneyutil.MicrosToCentsExact(prorationAmount)
+	prorationCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(prorationAmount))
 	if err != nil {
 		err := fmt.Errorf("upgrade proration amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -1777,7 +1777,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 	// Same rule for the successor's recurring enrollment charge, converted here
 	// so BOTH money conversions fail before any provider write happens.
-	recurringCents, err := moneyutil.MicrosToCentsExact(newPrice.Amount)
+	recurringCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(newPrice.Amount))
 	if err != nil {
 		err := fmt.Errorf("upgrade recurring amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -2108,7 +2108,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Mark idempotency request as complete
-	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(prorationAmount))
+	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(moneyutil.Micros(prorationAmount)))
 	cachedResult, _ := json.Marshal(upgradeIdempotencyResult{
 		SubscriptionID:         newSubscriptionID.String(),
 		ProrationTransactionID: prorationTransactionID,
@@ -2350,7 +2350,7 @@ func CalculateModelBUpgradeCharge(
 	// floating-point drift), rounded UP to a whole cent (customer-favored) so
 	// the resulting charge is whole-cent for whole-cent prices.
 	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
-	oldUnused = moneyutil.MicrosToCentsCeil(oldUnused) * moneyutil.MicrosPerCent
+	oldUnused = int64(moneyutil.MicrosToCentsCeil(moneyutil.Micros(oldUnused))) * moneyutil.MicrosPerCent
 
 	firstChargeMicros = newFull - oldUnused
 	if firstChargeMicros < 0 {
@@ -2590,7 +2590,7 @@ func formatMinorAmount(micros int64, currency string) string {
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
 	}
-	amount := moneyutil.FormatMicrosDecimal(micros)
+	amount := moneyutil.FormatMicrosDecimal(moneyutil.Micros(micros))
 	if strings.HasPrefix(amount, "-") {
 		return "-" + symbol + strings.TrimPrefix(amount, "-")
 	}

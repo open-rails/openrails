@@ -43,7 +43,7 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7)`, subActive, merchantID, custActive, prod, price, start, end)
 		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
@@ -146,7 +146,7 @@ func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1o-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7)`, sub, merchantID, customer, prod, price, start, end)
 		// Pre-existing live entitlement that OVERLAPS the subscription window.
@@ -238,7 +238,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "flap-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		// ACTIVE auto-renew sub in a RUNNING period, with the #691 shape already
 		// projected: bounded per-period grant + ONE standing window.
@@ -353,7 +353,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			subProd, "wflap-sub-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			subPrice, subProd, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9)`,
@@ -367,10 +367,10 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		// feature; its stored expiration window sits inside the standing window.
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			oneOffProd, "wflap-oneoff-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`,
 			oneOffPrice, oneOffProd, merchantID)
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'usd','completed',$6,$7)`,
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7)`,
 			pay, merchantID, cust, oneOffPrice, "wflap-"+sfx, purchased,
 			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
 		return nil
@@ -450,7 +450,7 @@ func TestConverge_DeriveGrantMissing_CancelledSubNonOverlapped(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "nov-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8)`,
@@ -526,11 +526,11 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodAuto, "unk-auto-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			priceAuto, prodAuto, merchantID)
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodBounded, "unk-bnd-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,false,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,false,$3)`,
 			priceBounded, prodBounded, merchantID)
 		// AUTO-RENEW sub imported as unknown with a stale (past) stored period.
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
@@ -669,7 +669,7 @@ func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "cb-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		// Charged-back sub, legacy import shape: ended_at = expiration (future).
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
@@ -752,9 +752,9 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1w-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'usd','completed',$6,$7)`,
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7)`,
 			pay, merchantID, customer, price, "w-"+sfx, purchased,
 			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
 		return nil

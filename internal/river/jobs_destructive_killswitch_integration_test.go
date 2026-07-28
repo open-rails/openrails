@@ -42,10 +42,10 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 			}
 			exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				productID, "ks-prod-"+suffix, "ks-tier-"+suffix, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 				priceID, productID, merchantID)
 			exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,status,amount,currency,expires_at,merchant_id,customer_id)
-			      VALUES ($1,$2,'one_off','nmi','created',999,'usd',$3,$4,$5)`,
+			      VALUES ($1,$2,'one_off','nmi','created',999,'USD',$3,$4,$5)`,
 				sessionID, priceID, time.Now().Add(-time.Hour), merchantID, customer)
 			return nil
 		}))
@@ -111,10 +111,10 @@ func TestConvergeSweepHonorsReadonlyMode(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ro-prod-"+suffix, "ro-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,status,amount,currency,expires_at,merchant_id,customer_id)
-		      VALUES ($1,$2,'one_off','nmi','created',999,'usd',$3,$4,$5)`,
+		      VALUES ($1,$2,'one_off','nmi','created',999,'USD',$3,$4,$5)`,
 			sessionID, priceID, time.Now().Add(-time.Hour), merchantID, customer)
 		return nil
 	}))

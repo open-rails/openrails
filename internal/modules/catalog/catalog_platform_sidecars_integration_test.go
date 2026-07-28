@@ -80,7 +80,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
-			 VALUES ($1, $2, $3, 1250000, 'usd', 720, true)`,
+			 VALUES ($1, $2, $3, 1250000, 'USD', 720, true)`,
 			priceA, productA, tA.UUID(),
 		)
 		require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
-			 VALUES ($1, $2, $3, 1500000, 'usd', 720, true)`,
+			 VALUES ($1, $2, $3, 1500000, 'USD', 720, true)`,
 			priceB, productB, tB.UUID(),
 		)
 		require.NoError(t, err)

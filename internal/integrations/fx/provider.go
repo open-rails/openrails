@@ -7,19 +7,18 @@ import (
 	"math"
 	"math/big"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 func normalizeCurrency(currency string) string {
-	return strings.ToLower(strings.TrimSpace(currency))
+	return money.NormalizeCurrency(currency)
 }
 
 // Quote represents an FX rate quote from a provider.
 type Quote struct {
-	// FromCurrency is the source currency (e.g., "eur").
+	// FromCurrency is the source currency (e.g., "EUR").
 	FromCurrency string
 	// ToCurrency is the target currency.
 	ToCurrency string

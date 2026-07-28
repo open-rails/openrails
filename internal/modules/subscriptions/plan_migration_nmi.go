@@ -45,7 +45,7 @@ type NMIPusher interface {
 	// (converted to NMI's decimal form), PRESERVING the record's current
 	// plan_payments, and read-back-verifies the flip took. It never touches
 	// the schedule (day/month frequency), so the rebill date is unchanged.
-	PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros int64) error
+	PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros moneyutil.Micros) error
 }
 
 type nmiPlanPusher struct {
@@ -69,7 +69,7 @@ func (p *nmiPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) b
 	return err == nil && ok
 }
 
-func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros int64) error {
+func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros moneyutil.Micros) error {
 	client, _, ok, err := NMIClientForExistingSubscription(ctx, p.resolver, sub)
 	if err != nil {
 		return fmt.Errorf("nmi push: resolve client: %w", err)
@@ -140,7 +140,7 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 // nmiRemoteAmountCents parses the fetched record's amount with the same
 // precedence as the bulk NMI fetcher: subscription amount first, then the
 // embedded plan's plan_amount.
-func nmiRemoteAmountCents(sub nmi.V5Subscription) (int64, error) {
+func nmiRemoteAmountCents(sub nmi.V5Subscription) (moneyutil.Cents, error) {
 	if cents, err := moneyutil.ParseDecimalToCents(strings.TrimSpace(sub.Amount)); err == nil && cents > 0 {
 		return cents, nil
 	}

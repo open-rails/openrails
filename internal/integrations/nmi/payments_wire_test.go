@@ -112,7 +112,7 @@ func TestAddRecurringSubscription_WirePinsCentsAmount(t *testing.T) {
 // rather than silently rounding a charge down (the #818 under-charge).
 func TestSubCentMicrosNeverReachTheRecurringWire(t *testing.T) {
 	for _, micros := range []int64{1_005_000, 999_999, 12_345, -1} {
-		_, err := moneyutil.MicrosToCentsExact(micros)
+		_, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(micros))
 		require.Error(t, err, "%d micros must not be representable in whole cents", micros)
 	}
 	cents, err := moneyutil.MicrosToCentsExact(19_990_000)

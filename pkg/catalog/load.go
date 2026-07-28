@@ -49,17 +49,20 @@ func normalizeSlug(value string) string {
 	return strings.Trim(value, "-_")
 }
 
+// normalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
+// Uppercase is the internal canonical form and what the DB CHECK accepts;
+// lowercase belongs only on rail wires that demand it (Stripe).
 func normalizeCurrency(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return strings.ToUpper(strings.TrimSpace(value))
 }
 
 // stablecoinCurrencies are the currencies eligible for the Solana provider.
 // Solana settles on-chain in stablecoins pegged $1; a recurring fiat price is
 // only Solana-eligible if its currency is one of these.
 var stablecoinCurrencies = map[string]struct{}{
-	"usd":  {}, // priced in USD, settled in a $1-pegged stablecoin
-	"usdc": {},
-	"usdg": {},
+	"USD":  {}, // priced in USD, settled in a $1-pegged stablecoin
+	"USDC": {},
+	"USDG": {},
 }
 
 // Load reads, parses and validates a manifest from disk. Validation normalizes
@@ -323,9 +326,10 @@ func (m *Manifest) validateCreditBalances() (map[string]CreditBalance, error) {
 		if _, ok := out[b.Key]; ok {
 			return nil, fmt.Errorf("duplicate credit balance key %q", b.Key)
 		}
-		if unit := strings.ToLower(strings.TrimSpace(b.Unit)); !validCreditUnit(unit) {
+		if !validCreditUnit(b.Unit) {
 			return nil, fmt.Errorf("credit balance %q has invalid unit %q", b.Key, b.Unit)
 		}
+		b.Unit = normalizeCreditUnit(b.Unit)
 		if strings.TrimSpace(b.ExpiresDefault) != "" {
 			if _, err := ParseDurationSpec(b.ExpiresDefault); err != nil {
 				return nil, fmt.Errorf("credit balance %q expires_default: %w", b.Key, err)
@@ -358,9 +362,10 @@ func validateCredits(productKey string, credits []CreditGrant, balances map[stri
 		if strings.TrimSpace(credit.Unit) == "" {
 			credit.Unit = balance.Unit
 		}
-		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
+		if strings.TrimSpace(credit.Unit) != "" && !validCreditUnit(credit.Unit) {
 			return fmt.Errorf("product %q credit %q has invalid unit %q", productKey, credit.Key, credit.Unit)
 		}
+		credit.Unit = normalizeCreditUnit(credit.Unit)
 		if credit.Amount != nil && *credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productKey, credit.Key)
 		}
@@ -513,7 +518,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	for _, provider := range price.PSPs {
 		if provider == "solana" {
 			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
-				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (usd/usdc/usdg), got %q",
+				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (USD/USDC/USDG), got %q",
 					product.Key, PriceLabel(product.Key, *price), price.Currency)
 			}
 		}
@@ -703,8 +708,8 @@ func (m *Manifest) validateProductBenefitRefs(productKeys, usageLimitKeys map[st
 }
 
 func validLedgerCurrency(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "custom" {
+	value = normalizeCurrency(value)
+	if value == "CUSTOM" {
 		return true
 	}
 	if _, ok := stablecoinCurrencies[value]; ok {
@@ -714,11 +719,27 @@ func validLedgerCurrency(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if r < 'a' || r > 'z' {
+		if r < 'A' || r > 'Z' {
 			return false
 		}
 	}
 	return true
+}
+
+// normalizeCreditUnit canonicalises a credit-balance unit. An UNQUALIFIED unit
+// is a built-in currency and becomes UPPER case, because it can be written into
+// a ledger `currency` column (money.DepositCatalogCreditPurchase) where the
+// 0020 shape CHECK requires it. A QUALIFIED `slug/name` custom unit stays lower
+// — its slug half is a merchant slug.
+func normalizeCreditUnit(value string) string {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return ""
+	}
+	if strings.Contains(v, "/") {
+		return strings.ToLower(v)
+	}
+	return strings.ToUpper(v)
 }
 
 func validCreditUnit(value string) bool {
@@ -730,8 +751,8 @@ func validCreditUnit(value string) bool {
 }
 
 func validPriceCurrency(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	return value != "custom" && validLedgerCurrency(value)
+	value = normalizeCurrency(value)
+	return value != "CUSTOM" && validLedgerCurrency(value)
 }
 
 // priceTermsKey is the manifest identity key for a declared price — the same

@@ -49,7 +49,7 @@ func seedGuardCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int,
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id)
 			      VALUES ($1,$2,$2,jsonb_build_object('premium',null),$3)`, prod, key, merchantID)
 			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
-			      VALUES ($1,$2,5000000,'usd',720,true,$3)`, price, prod, merchantID)
+			      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
 			exec(`INSERT INTO openrails.subscriptions
 			        (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,
 			         started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot)

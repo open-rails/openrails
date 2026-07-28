@@ -175,7 +175,7 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, railSubID str
 		exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`, cust, mid.UUID(), subject)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1, $2, $2, '{}'::jsonb, $3)`,
 			prod, "pull-cc-"+railSubID, mid.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'usd', $3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'USD', $3)`,
 			price, prod, mid.UUID())
 		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, started_at, current_period_starts_at, current_period_ends_at, entitlements_spec_snapshot)
 		      VALUES ($1, $2, $3, $4, $5, 'active', 'ccbill', $6, $7, $7, $8, '{}'::jsonb)`,

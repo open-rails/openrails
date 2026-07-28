@@ -244,7 +244,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 		productName = "Premium content"
 	}
 
-	amountLine := moneyutil.FormatDisplay(data.AmountMicros, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.AmountMicros), data.Currency)
 
 	issuedAt := s.now().Format("Jan 2, 2006 15:04 MST")
 

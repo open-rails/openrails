@@ -165,7 +165,7 @@ func TestCalculateModelBUpgradeCharge(t *testing.T) {
 			}
 			// #671 invariant: whole-cent inputs => whole-cent first charge,
 			// exactly chargeable on cent-based rails.
-			if _, err := moneyutil.MicrosToCentsExact(first); err != nil {
+			if _, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(first)); err != nil {
 				t.Fatalf("first charge %d micros is not whole cents: %v", first, err)
 			}
 		})
@@ -188,7 +188,7 @@ func TestUpgradeWirePinning(t *testing.T) {
 	}
 
 	// The RunSale seam converts micros -> CENTS exactly (never raw micros).
-	cents, err := moneyutil.MicrosToCentsExact(firstMicros)
+	cents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(firstMicros))
 	if err != nil {
 		t.Fatalf("proration must be whole cents: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestUpgradeWirePinning(t *testing.T) {
 	// The recurring enrollment amount is CENTS (#818): create and upgrade paths
 	// share MicrosToCentsExact, so the same price yields the same wire value.
 	for micros, want := range map[int64]string{19_990_000: "19.99", 50_000_000: "50.00"} {
-		c, err := moneyutil.MicrosToCentsExact(micros)
+		c, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(micros))
 		if err != nil {
 			t.Fatalf("recurring cents for %d micros: %v", micros, err)
 		}
@@ -215,7 +215,7 @@ func TestUpgradeWirePinning(t *testing.T) {
 	// A price not representable in whole cents must ERROR at the sale seam,
 	// never round: 0 hours remaining => first charge = newFull = sub-cent.
 	subCent, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_001), timePtr(now), &cycle, now)
-	if _, err := moneyutil.MicrosToCentsExact(subCent); err == nil {
+	if _, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(subCent)); err == nil {
 		t.Fatalf("sub-cent proration must error, got cents for %d micros", subCent)
 	}
 }

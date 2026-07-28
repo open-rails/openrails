@@ -85,6 +85,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 
 		// --- Not amounts at all -------------------------------------------
 		"internal/modules/admission/spendgate/gate.go:toInt64": "decodes a Redis Lua reply — an allow flag and a window INDEX, never an amount",
+		"internal/modules/admission/admitter.go:Admit":         "math.Ceil over a retry-after DURATION in seconds (or#822), not over an amount",
 		"pkg/service/types.go:SolanaToken":                     "SolanaToken.Price is the token's USD RATE for display, not an amount",
 	}
 

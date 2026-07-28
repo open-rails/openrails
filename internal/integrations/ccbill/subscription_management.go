@@ -347,7 +347,7 @@ func (c *DataLinkClient) refundForm(action, subscriptionID, transactionID string
 		form.Set("transactionId", transactionID)
 	}
 	if amountCents > 0 {
-		form.Set("amount", moneyutil.FormatCentsDecimal(int64(amountCents)))
+		form.Set("amount", moneyutil.FormatCentsDecimal(amountCents))
 	}
 	return form
 }

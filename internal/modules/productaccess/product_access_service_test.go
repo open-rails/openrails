@@ -119,11 +119,11 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 	seedPool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 	custID := dbtest.EnsureCustomerIDPgx(ctx, t, seedPool, userID)
 	priceID := uuid.New()
-	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
+	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 		priceID, productID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
-	                             VALUES ($1,$2,'nmi',$3,999,999,'usd','completed',$4,$5,$6)`,
+	                             VALUES ($1,$2,'nmi',$3,999,999,'USD','completed',$4,$5,$6)`,
 		paymentID, priceID, "txn-"+paymentID.String(), now, dbtest.TestMerchantID.UUID(), custID)
 	require.NoError(t, err)
 

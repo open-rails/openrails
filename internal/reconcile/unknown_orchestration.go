@@ -296,7 +296,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		subID := sub.ID
 		// #684/#671: RemoteTransaction amounts are provider-wire CENTS; the
 		// payments ledger is MICROS. Convert at this boundary, never store raw.
-		amountMicros := moneyutil.CentsToMicros(t.AmountCents)
+		amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(t.AmountCents)))
 		params := gen.CreatePaymentIfNotExistsParams{
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,

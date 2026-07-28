@@ -157,7 +157,7 @@ func TestParseDecimalToCents(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
-		want    int64
+		want    moneyutil.Cents
 		wantErr bool
 	}{
 		{name: "whole dollars", raw: "10", want: 1000},

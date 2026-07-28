@@ -97,7 +97,7 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "solpull-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 5000000, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 5000000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at,
 	         current_period_ends_at, started_at, customer_id, merchant_id)

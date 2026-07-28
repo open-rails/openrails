@@ -69,7 +69,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		PriceID:        a.PriceID,
 		Rail:           string(a.Rail),
 		TransactionID:  a.TransactionID,
-		Amount:         moneyutil.CentsToMicros(a.AmountCents),
+		Amount:         int64(moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))),
 		Currency:       currency,
 		SubscriptionID: a.SubscriptionID,
 		Metadata:       metadataJSON(a.Metadata),
@@ -96,7 +96,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID)
 		return n > 0, err
 	}
-	amount := moneyutil.CentsToMicros(a.AmountCents)
+	amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents)))
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}

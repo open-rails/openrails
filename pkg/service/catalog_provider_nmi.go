@@ -88,7 +88,7 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
 		}
 		if detail.Found {
-			if in.UnitAmount > 0 && moneyutil.CentsToMicros(detail.AmountCents) != in.UnitAmount {
+			if in.UnitAmount > 0 && int64(moneyutil.CentsToMicros(moneyutil.Cents(detail.AmountCents))) != in.UnitAmount {
 				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d micros)", planID, detail.AmountCents, in.UnitAmount)
 			}
 			// day_frequency is only reported for day-based plans; validate it only
@@ -124,7 +124,7 @@ func (a *nmiAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCre
 	if in.UnitAmount <= 0 {
 		return fmt.Errorf("a positive unit_amount is required")
 	}
-	amountCents, err := moneyutil.MicrosToCentsExact(in.UnitAmount)
+	amountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(in.UnitAmount))
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	}
 	drift := []DriftField{}
 	if local != nil {
-		remoteAmountMicros := moneyutil.CentsToMicros(remoteAmountCents)
+		remoteAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(remoteAmountCents)))
 		if local.UnitAmount != remoteAmountMicros {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",

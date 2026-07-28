@@ -47,7 +47,7 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 		ins := func(id uuid.UUID, key, rail string, pmID *uuid.UUID, end time.Time) uuid.UUID {
 			prod, price := uuid.New(), uuid.New()
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, key+"-"+sfx, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at)
 			      VALUES ($1,$2,$3,$4,$5,'active',$6,$7,$8,$8,$9)`, id, merchantID, cust, prod, price, rail, pmID, start, end)
 			return price
@@ -61,7 +61,7 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 		// (lapsed) period — OpenRails billed it, so dunning may engage.
 		paidPrice := ins(subNMIPaid, "nvpd", "nmi", &pm, elapsed)
 		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,5000000,5000000,'usd','completed',$7)`,
+		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,5000000,5000000,'USD','completed',$7)`,
 			uuid.New(), merchantID, cust, paidPrice, subNMIPaid, "nvpd-"+sfx, start)
 		return nil
 	}))
@@ -128,7 +128,7 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "wmev-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','wm-cust','wm-vault','wm-tx')`, pm, merchantID, cust)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, sub, merchantID, cust, prod, price, pm, start, periodEnd)
@@ -180,12 +180,12 @@ func TestConverge_NeedsVerification_SkipsWhenRenewalPaymentPresent(t *testing.T)
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "nvr-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$6,$7)`, sub, merchantID, cust, prod, price, start, periodEnd)
 		// A renewal charge landed AFTER the period end → provider billed.
 		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'ccbill',$6,5000000,5000000,'usd','completed',$7)`, pay, merchantID, cust, price, sub, "r-"+sfx, periodEnd.Add(time.Hour))
+		      VALUES ($1,$2,$3,$4,$5,'ccbill',$6,5000000,5000000,'USD','completed',$7)`, pay, merchantID, cust, price, sub, "r-"+sfx, periodEnd.Add(time.Hour))
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -239,7 +239,7 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "nvres-"+sfx, merchantID)
 		require.NoError(t, err)
-		_, err = appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		_, err = appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		require.NoError(t, err)
 		return nil
 	}))

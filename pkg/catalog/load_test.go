@@ -388,7 +388,7 @@ products:
 	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
-	if got := p.Credits[0].Unit; got != "usd" {
+	if got := p.Credits[0].Unit; got != "USD" {
 		t.Fatalf("credit currency alias did not populate unit: %q", got)
 	}
 	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
@@ -410,7 +410,7 @@ products:
 		rc.Price.PerUnit.UnitAmount != 200_000 || rc.Price.PerUnit.DivideBy != 1_000_000 {
 		t.Fatalf("translated rate card price wrong: %+v", rc.Price)
 	}
-	if rc.Price.Currency != "usd" {
+	if rc.Price.Currency != "USD" {
 		t.Fatalf("translated rate card currency wrong: %q", rc.Price.Currency)
 	}
 }

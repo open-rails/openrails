@@ -118,10 +118,10 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	tenantID := dbtest.TestMerchantID.UUID()
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'USD', $3)`,
 		priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
-	      VALUES ($1, $2, 'nmi', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
+	      VALUES ($1, $2, 'nmi', $3, 1000, 1000, 'USD', 'completed', $4, $5)`,
 		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
 
 	reservation, err := payments.NewPaymentService(dbi).ReserveRefund(ctx, fx.paymentID,

@@ -49,7 +49,7 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ud-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 			      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$7,$8)`, id, merchantID, cust, prod, price, railSub, start, periodEnd)
 		}

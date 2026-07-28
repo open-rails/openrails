@@ -45,7 +45,7 @@ func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "breaker-prod-"+sfx, m.id)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, m.id)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, m.id)
 
 	now := time.Now().UTC()
 	for i := 0; i < n; i++ {

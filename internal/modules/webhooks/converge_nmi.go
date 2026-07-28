@@ -163,10 +163,10 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		if perr != nil {
 			return fmt.Errorf("nmi converge: unparseable fetched charge amount %q: %w", raw, perr)
 		}
-		if !nmiAmountMatchesExpected(cents, price.Amount) {
+		if !nmiAmountMatchesExpected(cents, moneyutil.Micros(price.Amount)) {
 			return fmt.Errorf("nmi converge: fetched charge amount %d cents does not match expected price %d micros", cents, price.Amount)
 		}
-		amountMicros = moneyutil.CentsToMicros(cents)
+		amountMicros = int64(moneyutil.CentsToMicros(cents))
 	}
 	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
 
@@ -238,7 +238,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 			amountMicros := int64(0)
 			if raw := strings.TrimSpace(probe.DeclineAmount); raw != "" {
 				if cents, perr := moneyutil.ParseDecimalToCents(raw); perr == nil {
-					amountMicros = moneyutil.CentsToMicros(cents)
+					amountMicros = int64(moneyutil.CentsToMicros(cents))
 				}
 			}
 			if amountMicros == 0 && sub.Price != nil {

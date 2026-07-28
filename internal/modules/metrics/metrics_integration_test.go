@@ -117,7 +117,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{priceB, 999_000_000, nil, false, productB, mB},
 	} {
 		exec(ctx, t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew)
-			VALUES ($1, $2, $3, 'usd', $4, $5, $6) ON CONFLICT DO NOTHING`,
+			VALUES ($1, $2, $3, 'USD', $4, $5, $6) ON CONFLICT DO NOTHING`,
 			p.id, p.product, p.amount, p.merchant, p.hours, p.renew)
 	}
 	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
@@ -165,7 +165,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		(id, merchant_id, customer_id, price_id, subscription_id, refunded_payment_id, rail, psp_id,
 		 transaction_id, amount, list_amount, currency, status, attempt_kind, failure_code, failure_reason, reversal_kind,
 		 card_brand, discount_code, purchased_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'usd',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'USD',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
 	txp := "mtx-" + suffix + "-"
 	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", nil, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
 	exec(ctx, t, pool, payCols, sale1, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s1", 10_000_000, 10_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 6, 2))
@@ -179,13 +179,13 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 
 	// --- credit lots (grants) + usage + ledger ------------------------------------
 	lot := `INSERT INTO openrails.grants (id, merchant_id, customer_id, kind, source_type, source_id, event, amount, currency, created_at, starts_at)
-		VALUES ($1, $2, $3, 'credit', 'purchase', $4, 'grant', $5, 'usd', $6, $6)`
+		VALUES ($1, $2, $3, 'credit', 'purchase', $4, 'grant', $5, 'USD', $6, $6)`
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot1", 20_000_000, d(t, 2026, 6, 3))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot2", 10_000_000, d(t, 2026, 6, 15))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[2], txp+"lot3", 30_000_000, d(t, 2026, 5, 20))
 
 	ue := `INSERT INTO openrails.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, occurred_at)
-		VALUES ($1, $2, $3, 'user:test', 'usd', $4, $5, $6, 'metrics-test', $7, $8)`
+		VALUES ($1, $2, $3, 'user:test', 'USD', $4, $5, $6, 'metrics-test', $7, $8)`
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 5_000_000, txp+"u1", d(t, 2026, 6, 5))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 3_000_000, txp+"u2", d(t, 2026, 6, 18))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[2], "img", "flux", 2_000_000, txp+"u3", d(t, 2026, 6, 10))
@@ -193,14 +193,14 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 
 	clearing, cb1acct, cb2acct, rev, arrears := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	acct := `INSERT INTO openrails.ledger_accounts (id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits)
-		VALUES ($1, $2, $3, $4, 'usd', $5)`
+		VALUES ($1, $2, $3, $4, 'USD', $5)`
 	exec(ctx, t, pool, acct, clearing, mA, nil, "processor_clearing", false)
 	exec(ctx, t, pool, acct, cb1acct, mA, c[1], "customer_balance", true)
 	exec(ctx, t, pool, acct, cb2acct, mA, c[2], "customer_balance", true)
 	exec(ctx, t, pool, acct, rev, mA, nil, "platform_revenue", false)
 	exec(ctx, t, pool, acct, arrears, mA, nil, "arrears_liability", false)
 	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'usd', $6, $7, $8)`
+		VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, $8)`
 	// deposits first so the customer-balance floor never trips.
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 20_000_000, "deposit", c[1], d(t, 2026, 6, 3))
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 10_000_000, "deposit", c[1], d(t, 2026, 6, 15))

@@ -509,7 +509,7 @@ func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMi
 // centRepresentable reports whether a micro-dollar amount lands on a whole
 // cent — NMI's amount granularity.
 func centRepresentable(amountMicros int64) bool {
-	_, err := moneyutil.MicrosToCentsExact(amountMicros)
+	_, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(amountMicros))
 	return err == nil
 }
 
@@ -546,7 +546,7 @@ func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRe
 	if deferredPushRequired(req.EffectiveAt, sub) {
 		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
-	if err := s.nmi.PushPlanAmount(ctx, sub, target.Amount); err != nil {
+	if err := s.nmi.PushPlanAmount(ctx, sub, moneyutil.Micros(target.Amount)); err != nil {
 		return err
 	}
 	return s.applyImmediately(ctx, sub, target, targetProduct, row)

@@ -102,7 +102,9 @@ func TestCCBillWebhookUnprovenLiveProbeFailsClosed(t *testing.T) {
 		apply func(*testing.T)
 	}{
 		{"probe proves nothing (RLS-silent empty read)", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, nil) }},
-		{"probe errors", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, errors.New("catalog unavailable")) }},
+		{"probe errors", func(t *testing.T) {
+			stubCCBillLiveProbe(t, merchants.LiveRailUnknown, errors.New("catalog unavailable"))
+		}},
 		{"probe errors but still claims absent", func(t *testing.T) {
 			stubCCBillLiveProbe(t, merchants.LiveRailAbsent, errors.New("catalog unavailable"))
 		}},

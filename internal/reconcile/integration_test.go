@@ -87,7 +87,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1, $2, 9990000, 'usd', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
+		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
@@ -370,7 +370,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, psp_links, merchant_id)
-		      VALUES ($1, $2, 14990000, 'usd', 720, true, jsonb_build_object('nmi', jsonb_build_object('rail', 'nmi', 'plan_id', $3::text)), $4)`,
+		      VALUES ($1, $2, 14990000, 'USD', 720, true, jsonb_build_object('nmi', jsonb_build_object('rail', 'nmi', 'plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
 		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id)
@@ -588,7 +588,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		// trg_prices_default_key trigger would derive the SAME "<product>-onetime"
 		// key for both and collide on uq_prices_merchant_key_current (#774) —
 		// supply distinct explicit keys, per insertPriceIfAbsent in tests/seed_data.go.
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, key, merchant_id) VALUES ($1,$2,9990000,'usd',$3,$4),($5,$2,4990000,'usd',$6,$4)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, key, merchant_id) VALUES ($1,$2,9990000,'USD',$3,$4),($5,$2,4990000,'USD',$6,$4)`,
 			priceID, productID, "sa-price-"+suffix+"-current", merchantID, schedPriceID, "sa-price-"+suffix+"-scheduled")
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,

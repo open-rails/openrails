@@ -54,7 +54,7 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
-    'currency', 'usd',
+    'currency', 'USD',
     'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)

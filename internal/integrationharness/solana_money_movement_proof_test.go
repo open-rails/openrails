@@ -310,7 +310,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	err = pool.QueryRow(ctx, `
 		INSERT INTO openrails.payments
 			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot)
-		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'usd', 'completed', $6::jsonb)
+		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb)
 		RETURNING id, entitlements_spec_snapshot
 	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
 		`{"entitlements":["`+entitlement+`"]}`).Scan(&paymentID, &snapshot)

@@ -124,6 +124,21 @@ type schemaIndex struct {
 	name    string
 	leading string
 	partial bool
+	unique  bool
+	// cols is the parsed column list, normalised. A COALESCE(x, ...) wrapper
+	// counts as its first argument, so 0017/0020's total-index technique is
+	// recognised as scoping by that column.
+	cols []string
+}
+
+// scopedBy reports whether the index constrains uniqueness within col.
+func (ix schemaIndex) scopedBy(col string) bool {
+	for _, c := range ix.cols {
+		if c == col {
+			return true
+		}
+	}
+	return false
 }
 
 // splitTopLevel splits a parenthesised list on commas at depth 0 and reports
@@ -184,13 +199,50 @@ func leadingColumn(colList string) string {
 	return ""
 }
 
-func parseIndex(name, colsAndTail string) schemaIndex {
-	_, tail := splitTopLevel(colsAndTail)
+func parseIndex(name, colsAndTail string, unique bool) schemaIndex {
+	cols, tail := splitTopLevel(colsAndTail)
+	names := make([]string, 0, len(cols))
+	for _, c := range cols {
+		if n := indexColumnName(c); n != "" {
+			names = append(names, n)
+		}
+	}
 	return schemaIndex{
 		name:    name,
 		leading: leadingColumn(colsAndTail),
 		partial: strings.Contains(strings.ToUpper(tail), "WHERE"),
+		unique:  unique,
+		cols:    names,
 	}
+}
+
+// isUniqueDecl: a PRIMARY KEY constrains uniqueness exactly as a UNIQUE index
+// does, so both count for the cross-merchant guard.
+func isUniqueDecl(decl string) bool {
+	u := strings.ToUpper(decl)
+	return strings.Contains(u, "UNIQUE") || strings.Contains(u, "PRIMARY KEY")
+}
+
+// indexColumnName extracts the column an index element is keyed on. A bare
+// identifier is itself; COALESCE(psp_id, '000…'::uuid) — the total-index
+// technique 0017/0020 use to keep a nullable dimension in a UNIQUE index —
+// resolves to its first argument.
+func indexColumnName(element string) string {
+	e := strings.TrimSpace(element)
+	if strings.HasPrefix(strings.ToUpper(e), "COALESCE(") {
+		inner := e[len("COALESCE("):]
+		if i := strings.IndexByte(inner, ','); i > 0 {
+			e = strings.TrimSpace(inner[:i])
+		}
+	}
+	f := strings.Fields(e)
+	if len(f) == 0 {
+		return ""
+	}
+	if name := f[0]; reBareIdent.MatchString(name) {
+		return name
+	}
+	return ""
 }
 
 // hasPlainMerchantIndex: at least one NON-partial index leads with merchant_id,
@@ -221,14 +273,14 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 			s.merchantScoped[m[1]] = true
 		}
 		for _, k := range reInlineKey.FindAllStringSubmatch(m[2], -1) {
-			s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(k[1], k[2]))
+			s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(k[1], k[2], isUniqueDecl(k[0])))
 		}
 	}
 	for _, m := range reCreateIndex.FindAllStringSubmatch(schema, -1) {
-		s.indexes[m[2]] = append(s.indexes[m[2]], parseIndex(m[1], m[3]))
+		s.indexes[m[2]] = append(s.indexes[m[2]], parseIndex(m[1], m[3], isUniqueDecl(m[0][:strings.Index(strings.ToUpper(m[0]), "INDEX")])))
 	}
 	for _, m := range reAlterKey.FindAllStringSubmatch(schema, -1) {
-		s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(m[2], m[3]))
+		s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(m[2], m[3], isUniqueDecl(m[0])))
 	}
 	// Renames before drops: 0003's psps hardcut renames indexes that a later
 	// migration drops by their NEW name.
@@ -551,5 +603,130 @@ func TestConsolidatedSchemaUsesMerchantPermissionGroup(t *testing.T) {
 		if strings.Contains(c, forbidden) {
 			t.Errorf("001 schema must not keep legacy owner artifact %q", forbidden)
 		}
+	}
+}
+
+// crossMerchantUniqueExemptions: unique indexes on a merchant-scoped table that
+// deliberately span merchants. Each needs a reason that survives review — a
+// cross-merchant unique is a cross-tenant existence oracle, because under RLS
+// the conflicting row is INVISIBLE and the collision surfaces only as an opaque
+// insert failure in the victim's tenant.
+var crossMerchantUniqueExemptions = map[string]string{
+	"merchants_pkey":                   "the tenant directory itself — its rows ARE the merchants",
+	"merchants_slug_key":               "slug is the global tenant address (ID-10)",
+	"uq_merchants_api_host_live":       "api_host routes unauthenticated webhooks; it must be globally unique (ID-10)",
+	"uq_merchants_permission_group_id": "org<->merchant is 1:1 across the whole install (GAP-9)",
+	"probe_verdicts_pkey":              "RLS-exempt: instance-level credential state",
+	"worker_health_pkey":               "RLS-exempt: per-worker-kind process health",
+	"destructive_action_switch_pkey":   "RLS-exempt: instance-level operator kill switch",
+	"schema_migrations_pkey":           "migration ledger",
+
+	// Keyed on a surrogate uuid that is ITSELF merchant-owned. The FK target
+	// row cannot be seen, let alone referenced, across a tenant boundary, so
+	// the unique cannot collide between merchants and is not an oracle.
+	"uq_grants_termination":                  "supersedes_id FKs a merchant-owned grant",
+	"uq_payment_settlement_events_payment":   "payment_id FKs a merchant-owned payment",
+	"uq_subscription_reprices_one_scheduled": "subscription_id FKs a merchant-owned subscription",
+
+	// Genuinely global identifiers, unique across the install by construction.
+	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",
+	"uq_psps_identity":                          "one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide",
+}
+
+// TestUniqueIndexesAreMerchantScoped is the GAP-10 / SEC-24 guard. A UNIQUE
+// index on a merchant-owned table must constrain uniqueness WITHIN a merchant.
+// A primary key on a surrogate uuid is fine (uuidv7 collisions are not a
+// tenancy question); anything else must carry merchant_id.
+//
+// checkout_sessions was the last violation: (rail, reference) and
+// (rail, transaction_id) let one merchant's session block another merchant's
+// insert and squat its provider reference. 0020 scopes both.
+func TestUniqueIndexesAreMerchantScoped(t *testing.T) {
+	s := deriveSchemaTables(t, loadAllSchema(t))
+
+	uniques := 0
+	for _, ixs := range s.indexes {
+		for _, ix := range ixs {
+			if ix.unique {
+				uniques++
+			}
+		}
+	}
+	// Vacuity guard: if uniqueness parsing breaks, every check below is a no-op.
+	if uniques < 80 {
+		t.Fatalf("parsed only %d unique indexes (< 80): uniqueness parsing is broken, the guard would pass vacuously", uniques)
+	}
+
+	var violations []string
+	for tbl, ixs := range s.indexes {
+		if !s.merchantScoped[tbl] {
+			continue
+		}
+		for _, ix := range ixs {
+			if !ix.unique || ix.scopedBy("merchant_id") {
+				continue
+			}
+			if _, ok := crossMerchantUniqueExemptions[ix.name]; ok {
+				continue
+			}
+			// A single-column unique on a surrogate id column is a primary key
+			// over a uuid — not a tenancy statement.
+			if len(ix.cols) == 1 && ix.cols[0] == "id" {
+				continue
+			}
+			violations = append(violations, tbl+"."+ix.name+" "+strings.Join(ix.cols, ","))
+		}
+	}
+	sort.Strings(violations)
+	for _, v := range violations {
+		t.Errorf("UNIQUE index %s is not scoped by merchant_id — under RLS the conflicting row is invisible, "+
+			"so one merchant can block another's insert and squat its provider reference (GAP-10 / SEC-24). "+
+			"Lead the index with merchant_id (COALESCE a nullable PSP dimension to the nil uuid, as 0017/0020 do), "+
+			"or add it to crossMerchantUniqueExemptions with a reason.", v)
+	}
+}
+
+// TestCurrencyColumnsCarryShapeCheck is the GAP-6 / or#832 guard. Every
+// currency column must carry the 0020 shape CHECK, so a new table cannot
+// re-open the drift that made a dev DB's payments.currency 100% lowercase.
+//
+// The CHECK constrains SHAPE (ISO-4217 alpha-3 upper, or a qualified
+// custom-credit unit slug/name); MEMBERSHIP stays in the Go registry, which is
+// where per-currency scale lives and where it can change without a migration.
+func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
+	schema := loadAllSchema(t)
+	s := deriveSchemaTables(t, schema)
+
+	reCurrencyCol := regexp.MustCompile(`(?m)^\s*currency\s+text`)
+
+	var withCurrency []string
+	for tbl, body := range s.blocks {
+		if reCurrencyCol.MatchString(body) {
+			withCurrency = append(withCurrency, tbl)
+		}
+	}
+	sort.Strings(withCurrency)
+	// Vacuity guard: CUR-1 counts 16+ currency columns.
+	if len(withCurrency) < 16 {
+		t.Fatalf("found only %d currency columns (< 16): column parsing is broken, the guard would pass vacuously",
+			len(withCurrency))
+	}
+
+	// 0020 adds the constraint in a DO loop over information_schema, so the
+	// coverage assertion is that the loop exists and is unconditional over
+	// every currency column — plus that nothing later drops one.
+	if !strings.Contains(schema, "_currency_shape") {
+		t.Fatal("no currency shape CHECK found in any migration (GAP-6): 0020 must add one per currency column")
+	}
+	reDropShape := regexp.MustCompile(`DROP CONSTRAINT (?:IF EXISTS )?([a-z0-9_]+_currency_shape)`)
+	for _, m := range reDropShape.FindAllStringSubmatch(schema, -1) {
+		t.Errorf("migration drops the currency shape CHECK %q — GAP-6 requires every currency column keep it", m[1])
+	}
+	// The loop must be driven by information_schema, not a hand-written list:
+	// a hand-written list is exactly how 0005's payment_settlement_events
+	// escaped the RLS guard (GAP-4).
+	if !strings.Contains(schema, "column_name = 'currency'") {
+		t.Error("the currency shape CHECK must be applied by iterating information_schema for column_name='currency', " +
+			"so a currency column added by a later migration is covered automatically (the lesson of GAP-4)")
 	}
 }

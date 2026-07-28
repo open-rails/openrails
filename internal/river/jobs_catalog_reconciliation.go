@@ -379,7 +379,7 @@ func mapNMIPlansJob(plans []nmi.V5Plan) []nmiPlanJob {
 		out = append(out, nmiPlanJob{
 			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
-			AmountCents: cents,
+			AmountCents: int64(cents),
 		})
 	}
 	return out
@@ -387,7 +387,7 @@ func mapNMIPlansJob(plans []nmi.V5Plan) []nmiPlanJob {
 
 // dollarStringToCentsJob parses an NMI dollar amount exactly (MONEY-6); a blank
 // or malformed value errors rather than becoming a silent zero (FAB-6).
-func dollarStringToCentsJob(dollars string) (int64, error) {
+func dollarStringToCentsJob(dollars string) (moneyutil.Cents, error) {
 	return moneyutil.ParseDecimalToCents(dollars)
 }
 
@@ -433,7 +433,7 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 		if local == nil {
 			continue
 		}
-		remoteAmountMicros := moneyutil.CentsToMicros(plan.AmountCents)
+		remoteAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(plan.AmountCents)))
 		if local.Amount != remoteAmountMicros {
 			events = append(events, nmiFieldDriftJob(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteAmountMicros, 10), now))
 		}

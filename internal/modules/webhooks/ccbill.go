@@ -120,11 +120,11 @@ func shouldIgnoreCCBillRenewalFailure(sub *models.Subscription, failureRenewalAt
 	return false, ""
 }
 
-func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (int64, error) {
+func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (moneyutil.Cents, error) {
 	return parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName, false)
 }
 
-func parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName string, allowZero bool) (int64, error) {
+func parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName string, allowZero bool) (moneyutil.Cents, error) {
 	amountCents, err := moneyutil.ParseDecimalToCents(rawAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse %s '%s': %w", parseFieldName, rawAmount, err)
@@ -137,17 +137,17 @@ func parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName string, 
 	return amountCents, nil
 }
 
-func ccbillInitialChargeAmount(price *models.Price) int64 {
+func ccbillInitialChargeAmount(price *models.Price) moneyutil.Micros {
 	if price == nil {
 		return 0
 	}
 	if initialAmount, _, ok := price.GetTrial(); ok {
-		return initialAmount
+		return moneyutil.Micros(initialAmount)
 	}
-	return price.Amount
+	return moneyutil.Micros(price.Amount)
 }
 
-func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, billedAmountCents, expectedAmountMicros int64, contextFields map[string]interface{}, logFields log.Fields) error {
+func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, billedAmountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros, contextFields map[string]interface{}, logFields log.Fields) error {
 	expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
 	if err != nil {
 		return err
@@ -620,7 +620,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		UserEmail:           emailPtr,
 		CurrentPeriodEndsAt: paidTermEnd,
 		TransactionID:       transactionID,
-		Amount:              moneyutil.CentsToMicros(billedAmountCents),
+		Amount:              int64(moneyutil.CentsToMicros(billedAmountCents)),
 		AmountProvided:      true,
 		Currency:            currencyValue,
 		PurchasedAt:         ccbillEventPurchasedAt(data.Timestamp),
@@ -944,7 +944,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			SubscriptionID: &subscription.ID,
 			Rail:           models.RailCCBill,
 			TransactionID:  transactionID,
-			Amount:         moneyutil.CentsToMicros(billedAmountCents),
+			Amount:         int64(moneyutil.CentsToMicros(billedAmountCents)),
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
 			AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
@@ -970,7 +970,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 		subscription.RailSubscriptionID = ccBillSubID
 
-		if err = subscription.Validate(billedAmountCents); err != nil {
+		if err = subscription.Validate(int64(billedAmountCents)); err != nil {
 			return fmt.Errorf("failed to validate subscription: %w", err)
 		}
 
@@ -1427,7 +1427,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		// If refund amount is significant relative to the subscription price, terminate
 		if sub.Price != nil && sub.Price.Amount > 0 {
 			// Use integer math: percentage = (refundCents * 100) / priceAmount
-			refundPercentage := (moneyutil.CentsToMicros(refundAmountCents) * 100) / sub.Price.Amount
+			refundPercentage := (int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))) * 100) / sub.Price.Amount
 			if refundPercentage >= 80 { // If refund is 80%+ of price, terminate
 				shouldTerminate = true
 			}
@@ -1478,7 +1478,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 						"refund_transaction_id": refundTransactionID,
 					}).Warn("No original payment found for CCBill refund ledger linkage")
 				} else {
-					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, moneyutil.CentsToMicros(refundAmountCents), payments.ReversalRefund); refundErr != nil {
+					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund); refundErr != nil {
 						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
 						if shouldTerminate {
 							refundLedgerErr = err
@@ -1650,11 +1650,11 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
 			} else {
-				amount := moneyutil.CentsToMicros(voidAmountCents)
+				amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(voidAmountCents)))
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
-				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalRefund); refundErr != nil {
+				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, int64(amount), payments.ReversalRefund); refundErr != nil {
 					return fmt.Errorf("record void reversal: %w", refundErr)
 				}
 			}
@@ -1768,7 +1768,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing CCBill chargeback reversal: %w", lookupErr)
 			} else {
-				amount := moneyutil.CentsToMicros(chargebackAmountCents)
+				amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(chargebackAmountCents)))
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
@@ -1945,7 +1945,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}); err != nil {
 		return err
 	}
-	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, prevSub.Price.Amount, map[string]interface{}{
+	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, moneyutil.Micros(prevSub.Price.Amount), map[string]interface{}{
 		"price_id":                     prevSub.Price.ID.String(),
 		"rail_subscription_id":         ccBillSubID,
 		"subscription_id":              prevSub.ID.String(),
@@ -1970,7 +1970,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		RailSubscriptionID:  ccBillSubID,
 		CurrentPeriodEndsAt: paidTermEnd,
 		TransactionID:       transactionID,
-		Amount:              moneyutil.CentsToMicros(billedAmountCents),
+		Amount:              int64(moneyutil.CentsToMicros(billedAmountCents)),
 		AmountProvided:      true,
 		Currency:            currencyValue,
 		PurchasedAt:         ccbillEventPurchasedAt(data.Timestamp),

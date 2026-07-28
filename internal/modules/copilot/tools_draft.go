@@ -66,7 +66,7 @@ func defaultEffectiveDate(direction string, now time.Time) time.Time {
 // phrasing exactly (independently implemented server-side; the console's own
 // TS copy renders the same words when a human edits the draft further).
 func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64, affected int, mode string, effectiveAt, now time.Time) string {
-	lead := fmt.Sprintf("New subscribers pay %s immediately.", moneyutil.FormatDisplay(newAmount, currency))
+	lead := fmt.Sprintf("New subscribers pay %s immediately.", moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
 	if affected == 0 {
 		return lead + " No existing subscribers are on a prior version of this price."
 	}
@@ -75,13 +75,13 @@ func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64,
 		subj += "s"
 	}
 	if mode == "grandfather" {
-		return fmt.Sprintf("%s %s keep %s forever (grandfathered).", lead, subj, moneyutil.FormatDisplay(currentAmount, currency))
+		return fmt.Sprintf("%s %s keep %s forever (grandfathered).", lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(currentAmount), currency))
 	}
 	if !effectiveAt.After(now) {
-		return fmt.Sprintf("%s %s move to %s at their next renewal. Notices go out on confirm.", lead, subj, moneyutil.FormatDisplay(newAmount, currency))
+		return fmt.Sprintf("%s %s move to %s at their next renewal. Notices go out on confirm.", lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
 	}
 	return fmt.Sprintf("%s %s keep %s until %s, then move to %s at their next renewal. Notices go out on confirm.",
-		lead, subj, moneyutil.FormatDisplay(currentAmount, currency), effectiveAt.Format("Jan 2, 2006"), moneyutil.FormatDisplay(newAmount, currency))
+		lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(currentAmount), currency), effectiveAt.Format("Jan 2, 2006"), moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
 }
 
 // crossConstraintRefusal mirrors subscriptions.validateRepriceConstraints'
@@ -326,7 +326,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 	}
 
 	reviewText := fmt.Sprintf("New tier %q on %s: %s / %s. No existing subscribers are affected until you create it.",
-		key, product.DisplayName, moneyutil.FormatDisplay(args.UnitAmount, currency), interval)
+		key, product.DisplayName, moneyutil.FormatDisplay(moneyutil.Micros(args.UnitAmount), currency), interval)
 
 	draft := &CatalogDiffDraft{
 		DraftID: uuid.NewString(), DraftedBy: DraftedBy,

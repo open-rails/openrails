@@ -200,8 +200,8 @@ type adminRefundPrepared struct {
 // refundAmountCents converts an admin refund request amount (micros) to the
 // provider cents amount. Refunds must be exact: a sub-cent remainder is an
 // error, never rounded.
-func refundAmountCents(amountMicros int64) (int64, error) {
-	cents, err := moneyutil.MicrosToCentsExact(amountMicros)
+func refundAmountCents(amountMicros int64) (moneyutil.Cents, error) {
+	cents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(amountMicros))
 	if err != nil {
 		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
 	}

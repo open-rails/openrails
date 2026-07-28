@@ -48,7 +48,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			prod, "imp-"+sfx, merchantID)
 		require.NoError(t, e)
 		_, e = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'usd',720,true,$3)`,
+			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		require.NoError(t, e)
 		return nil

@@ -47,7 +47,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-			 VALUES ($1, $2, 999, 'usd', 720, true, $3)`,
+			 VALUES ($1, $2, 999, 'USD', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 

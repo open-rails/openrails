@@ -88,7 +88,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "refresh-prod-"+uuid.NewString(), "refresh-tier-"+uuid.NewString(), merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, merchantID)
+		      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
@@ -97,7 +97,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID)
 		exec(`INSERT INTO openrails.payments
 		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id)
-		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'usd', 'completed', $3, $4, $5, $6)`,
+		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'USD', 'completed', $3, $4, $5, $6)`,
 			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID)
 		return nil
 	}))

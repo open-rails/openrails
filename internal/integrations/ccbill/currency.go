@@ -15,13 +15,15 @@ import (
 // reports back to the price's currency). One table means a currency we can bill
 // is always a currency the webhook can match, so no charge can land and then be
 // rejected as a mismatch (#819).
+// Keys are the CANONICAL internal (upper-case) currency code, so a value read
+// off a webhook lands in the DB already in the form the currency CHECK accepts.
 var flexFormCurrencyCodes = map[string]string{
-	"aud": "036",
-	"cad": "124",
-	"eur": "978",
-	"gbp": "826",
-	"jpy": "392",
-	"usd": "840",
+	"AUD": "036",
+	"CAD": "124",
+	"EUR": "978",
+	"GBP": "826",
+	"JPY": "392",
+	"USD": "840",
 }
 
 // UnsupportedCurrencyError reports a price CCBill cannot bill. It is returned
@@ -42,7 +44,7 @@ func (e *UnsupportedCurrencyError) Error() string {
 // FlexForm expects. There is no default: an empty or unbillable currency is an
 // error, never a silent USD.
 func CurrencyCode(currency string) (string, error) {
-	code, ok := flexFormCurrencyCodes[strings.ToLower(strings.TrimSpace(currency))]
+	code, ok := flexFormCurrencyCodes[strings.ToUpper(strings.TrimSpace(currency))]
 	if !ok {
 		return "", &UnsupportedCurrencyError{Currency: currency}
 	}

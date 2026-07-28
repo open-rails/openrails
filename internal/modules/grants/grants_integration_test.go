@@ -191,7 +191,7 @@ func TestGrants_RevokeAsOfOwnershipRevokedAt(t *testing.T) {
 // A credit grant materializes as a #512 ledger deposit; idempotent.
 func TestGrants_CreditDepositSeam(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	amount := int64(5000)
 	g, err := l.Grant(ctx, grants.GrantInput{
 		Customer: customer, Product: &product, Kind: grants.Credit, Source: grants.Purchase, SourceID: "pay_" + short(),

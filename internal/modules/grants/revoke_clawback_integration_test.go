@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 // decision 4.)
 func TestGrants_RevokeClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -62,7 +63,7 @@ func TestGrants_RevokeClawback(t *testing.T) {
 // and conservation — no value was destroyed.
 func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -98,7 +99,7 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 // (idx_ledger_transfers_lot_once) backstops the same invariant in the DB.
 func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})

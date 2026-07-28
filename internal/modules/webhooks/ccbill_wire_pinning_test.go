@@ -22,7 +22,7 @@ func TestParseCCBillAmountCents_WirePin(t *testing.T) {
 
 	cases := []struct {
 		raw  string
-		want int64 // cents, literal
+		want    moneyutil.Cents // cents, literal
 	}{
 		{"19.99", 1999},
 		{"0.01", 1},
@@ -65,7 +65,7 @@ func TestCCBillBilledAmountToStoredMicros_WirePin(t *testing.T) {
 
 	cases := []struct {
 		raw        string
-		wantMicros int64 // literal
+		wantMicros moneyutil.Micros // literal
 	}{
 		{"19.99", 19_990_000},
 		{"0.01", 10_000},
@@ -90,9 +90,9 @@ func TestValidateCCBillBilledAmount_TwoPercentThreshold_WirePin(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	const expectedMicros = int64(19_990_000) // $19.99 catalog price
+	const expectedMicros = moneyutil.Micros(19_990_000) // $19.99 catalog price
 
-	parse := func(t *testing.T, raw string) int64 {
+	parse := func(t *testing.T, raw string) moneyutil.Cents {
 		t.Helper()
 		cents, err := parseCCBillAmountCents(raw, "billedAmount", "billedAmount", false)
 		require.NoError(t, err)
@@ -111,8 +111,8 @@ func TestValidateCCBillBilledAmount_TwoPercentThreshold_WirePin(t *testing.T) {
 		var billingErr *BillingError
 		require.True(t, errors.As(err, &billingErr), raw)
 		require.Equal(t, ErrorTypeAmount, billingErr.Type)
-		require.Equal(t, int64(1999), billingErr.Context["expected_amount_cents"])
-		require.Equal(t, int64(39), billingErr.Context["tolerance_cents"])
+		require.Equal(t, moneyutil.Cents(1999), billingErr.Context["expected_amount_cents"])
+		require.Equal(t, moneyutil.Cents(39), billingErr.Context["tolerance_cents"])
 	}
 
 	// A 10,000×-style unit mixup (micros where cents belong) is FAR outside 2%.
