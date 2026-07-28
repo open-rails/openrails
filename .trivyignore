@@ -1,0 +1,8 @@
+# CVE ignores require a dated justification and an owner to re-check.
+# 2026-07-28: brace-expansion DoS — fix (5.0.8) is published WITHOUT provenance
+# attestation while earlier versions had it; the pnpm supply-chain trust policy
+# (deliberately) refuses the downgrade. Console BUILD-TIME devDependency, not
+# runtime; re-bump when upstream attests. Owner: openrails tracker #853.
+CVE-2026-14257
+# 2026-07-28: fast-uri — same provenance-downgrade refusal, same disposition.
+CVE-2026-16221
