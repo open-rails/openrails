@@ -77,6 +77,36 @@ func (c ChargeEvidence) dunningExhausted() bool {
 	return c.DunningMaxAttempts > 0 && c.RetryAttempts >= c.DunningMaxAttempts
 }
 
+// certaintyLeg names the #664 certainty leg this evidence carries, or "".
+// These are the ONLY first-party justifications for a terminal cancel (#821).
+func (c ChargeEvidence) certaintyLeg() string {
+	switch {
+	case c.NonRetryableDecline:
+		return CertaintyNonRetryableDecline
+	case c.dunningExhausted():
+		return CertaintyDunningExhausted
+	default:
+		return ""
+	}
+}
+
+// The certainty legs that may justify TransitionCancel (#821). A terminal
+// cancel — and the irreversible provider-side delete it queues — is only ever
+// reached through one of these.
+const (
+	// CertaintyProviderConfirmedDead: the provider itself says the schedule is
+	// gone (roster cancelled/expired, or absent from a PROVEN-exhaustive
+	// roster). Mirroring provider truth, not our inference.
+	CertaintyProviderConfirmedDead = "provider_confirmed_dead"
+	// CertaintyNonRetryableDecline: a recorded decline whose rail code means
+	// the billing authorization is withdrawn / the account cannot be charged
+	// again. Retryable and unrecognized codes never qualify.
+	CertaintyNonRetryableDecline = "non_retryable_decline"
+	// CertaintyDunningExhausted: real recorded dunning attempts reached the
+	// policy max. Never "grace elapsed", never "the date is old".
+	CertaintyDunningExhausted = "dunning_exhausted"
+)
+
 // EvidenceBundle unifies what the planes produce (#665): provider snapshots
 // (pull / probe / webhook fetch — coverage-absence proof rides in
 // Snapshot.Coverage), first-party charge evidence, and watermark freshness.
@@ -158,6 +188,10 @@ type Decision struct {
 	// one (Stripe cus_*; NMI reports the per-card vault id — #682, so only
 	// Stripe materializes rail_customer_accounts).
 	RemoteCustomerID string
+	// Certainty (#821) names the leg that justified TransitionCancel — one of
+	// the Certainty* constants. A TransitionCancel with an EMPTY Certainty is
+	// structurally impossible: Decide downgrades it to TransitionParkUnknown.
+	Certainty string
 	// Reason is a short cause slug for finding evidence / logs.
 	Reason string
 }
@@ -200,7 +234,7 @@ func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 	if ev.Snapshot != nil && sub.RailSubscriptionID != "" {
 		d := decideFromSnapshot(sub.RailSubscriptionID, periodEnd, ev.Snapshot, now, dunningWindow)
 		if d.Kind != TransitionNone {
-			return d
+			return gateCancelCertainty(d, ev)
 		}
 		carried = d
 	}
@@ -214,7 +248,39 @@ func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 	if d.Reason == "" {
 		d.Reason = carried.Reason
 	}
-	return d
+	return gateCancelCertainty(d, ev)
+}
+
+// gateCancelCertainty is the #821 chokepoint: NO plane may reach
+// TransitionCancel — and the irreversible provider-side delete it queues —
+// without a named certainty leg. Certainty is either the provider's own word
+// (RemoteGone: the roster says dead, or the row is absent from a PROVEN
+// exhaustive roster) or first-party proof (a non-retryable decline, or dunning
+// genuinely exhausted). A date comparison is not evidence: NMI rebills
+// forever, so a lapsed next_billing_date is the NORMAL state of every dunning
+// customer, and an absence of data is not a death certificate. Without
+// certainty the row PARKS as `unknown` — access intact — and a targeted
+// per-subscription probe resolves it.
+func gateCancelCertainty(d Decision, ev EvidenceBundle) Decision {
+	if d.Kind != TransitionCancel {
+		return d
+	}
+	switch {
+	case d.Certainty != "":
+	case d.RemoteGone:
+		d.Certainty = CertaintyProviderConfirmedDead
+	default:
+		d.Certainty = ev.Charge.certaintyLeg()
+	}
+	if d.Certainty != "" {
+		return d
+	}
+	return Decision{
+		Kind:             TransitionParkUnknown,
+		Backfill:         d.Backfill,
+		RemoteCustomerID: d.RemoteCustomerID,
+		Reason:           d.Reason + "_no_certainty",
+	}
 }
 
 // decideFromSnapshot is the provider-truth law (#632/#633 resolution core,
@@ -301,17 +367,28 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 		remoteGone = snap.Coverage.SubscriptionsExhaustive
 	}
 
-	// 3) A failed/declined renewal: past_due if still recoverable, else terminal.
+	// 3) A failed/declined renewal: past_due if still recoverable, else terminal
+	//    — but ONLY when the decline itself is certainty (#821). A soft decline
+	//    (NSF, do-not-honor, comms) beyond the window is a customer still in
+	//    dunning on a schedule the rail keeps retrying, not a dead one; it falls
+	//    through gateCancelCertainty and parks.
 	if declineTxn != nil {
 		if now.Sub(periodEnd) <= dunningWindow {
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "declined_renewal_within_window"})
 		}
-		return with(Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "declined_renewal_beyond_window"})
+		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "declined_renewal_beyond_window"}
+		if IsNonRetryableDecline(string(snap.Provider), declineTxn.DeclineCode) {
+			d.Certainty = CertaintyNonRetryableDecline
+		}
+		return with(d)
 	}
-	// 4) The roster says the renewal stalled/failed (NMI next-charge wedged in the
-	//    past, Stripe past_due/unpaid) — same window split. The remote record
-	//    still exists and may keep retrying, so a terminal cancel queues the
-	//    deferred delete (#679: RemoteGone=false by construction here).
+	// 4) The roster says the renewal stalled/failed (NMI next-charge wedged in
+	//    the past, Stripe past_due/unpaid) — recoverable inside the window.
+	//    BEYOND the window there is still NO evidence of death: the remote
+	//    record exists and NMI rebills forever, so a lapsed next_billing_date is
+	//    the normal state of every dunning customer on an imported book (#821).
+	//    Emit the cancel-shaped decision and let gateCancelCertainty decide: it
+	//    survives only on a first-party certainty leg, otherwise it parks.
 	if remoteSub != nil && remoteSub.Status == SubscriptionStatusPastDue {
 		if now.Sub(periodEnd) <= dunningWindow {
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "roster_past_due_within_window"})
@@ -361,8 +438,8 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 			// #664 certainty legs. No sweep plane produces them today
 			// (FailMembership owns the inline decision), so convergence still
 			// only ever parks — structurally.
-			if ev.Charge.NonRetryableDecline || ev.Charge.dunningExhausted() {
-				return Decision{Kind: TransitionCancel, Reason: "dunning_exhausted_certainty"}
+			if leg := ev.Charge.certaintyLeg(); leg != "" {
+				return Decision{Kind: TransitionCancel, Certainty: leg, Reason: "dunning_exhausted_certainty"}
 			}
 			return Decision{Kind: TransitionParkUnknown, Reason: "dunning_stalled_past_grace"}
 		}

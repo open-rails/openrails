@@ -396,3 +396,49 @@ func TestCardLast4(t *testing.T) {
 	require.Equal(t, "", cardLast4(""))
 	require.Equal(t, "", cardLast4("xxxx"))
 }
+
+// #842: SubscriptionsExhaustive is an ABSENCE PROOF — it authorizes cancelling
+// every local subscription missing from the roster. A 200 with zero rows is
+// indistinguishable from a complete roster of a gateway that is not ours (a
+// misdeclared account_id, a credential rotated onto a sibling sub-account, an
+// incident returning an empty first page with has_more=false). It must never
+// be stamped exhaustive.
+func TestNMIFetcher_EmptyRosterIsNotExhaustive(t *testing.T) {
+	t.Parallel()
+
+	newFetcher := func(t *testing.T, subsJSON string) *NMIFetcher {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				require.NoError(t, r.ParseForm())
+				_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+				return
+			}
+			switch r.URL.Path {
+			case "/subscriptions":
+				_, _ = w.Write([]byte(subsJSON))
+			case "/customers":
+				_, _ = w.Write([]byte(`{"customers":[],"next_cursor":null,"has_more":false}`))
+			default:
+				t.Fatalf("unexpected v5 GET %q", r.URL.Path)
+			}
+		}))
+		t.Cleanup(server.Close)
+		client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+		require.NoError(t, err)
+		client.QueryURL = server.URL
+		client.V5BaseURL = server.URL
+		return NewNMIFetcher(client)
+	}
+
+	empty, err := newFetcher(t, `{"subscriptions":[],"next_cursor":null,"has_more":false}`).
+		Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.Empty(t, empty.Subscriptions)
+	require.False(t, empty.Coverage.SubscriptionsExhaustive,
+		"an empty roster was stamped exhaustive — it would cancel the merchant's entire book")
+
+	full, err := newFetcher(t, `{"subscriptions":[{"object":"subscription","id":"s1","next_billing_date":"2999-01-01"}],"next_cursor":null,"has_more":false}`).
+		Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.True(t, full.Coverage.SubscriptionsExhaustive, "a non-empty completed roster still proves absence")
+}

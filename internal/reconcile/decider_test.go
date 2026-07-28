@@ -21,6 +21,13 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 	decline := func(at time.Time) RemoteTransaction {
 		return RemoteTransaction{TransactionID: "txd-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeDecline, Success: false, OccurredAt: at}
 	}
+	// #821: a decline whose rail code withdraws the recurring authorization —
+	// the ONE decline shape that is certainty.
+	hardDecline := func(at time.Time) RemoteTransaction {
+		t := decline(at)
+		t.DeclineCode = "261" // declined_stop_all_recurring_payments
+		return t
+	}
 	roster := func(status SubscriptionStatus, next *time.Time) RemoteSubscription {
 		return RemoteSubscription{RailSubscriptionID: railSub, Status: status, NextBillingAt: next}
 	}
@@ -33,6 +40,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 		wantNewEnd     *time.Time
 		wantBackfill   int
 		wantRemoteGone bool
+		wantCertainty  string
 	}{
 		{
 			name:     "nil snapshot → none (stay unknown)",
@@ -76,11 +84,14 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			wantKind: TransitionPastDue,
 		},
 		{
-			name: "roster past_due, stale decline-less lapse beyond window → cancel, remote NOT gone",
-			snap: &RemoteSnapshot{Subscriptions: []RemoteSubscription{roster(SubscriptionStatusPastDue, nil)}},
-			// The record still exists at the provider — the apply path queues the
-			// deferred delete (#679).
-			wantKind:       TransitionCancel,
+			// #821: THE go-live blocker. The only input here is a stale
+			// next_billing_date — no decline, no exhausted dunning, and the
+			// record is still on the provider's roster. NMI rebills forever, so
+			// this is what every dunning customer on an imported book looks
+			// like. It must PARK, never cancel and never queue the NMI delete.
+			name:           "roster past_due, stale decline-less lapse beyond window → park unknown (no certainty)",
+			snap:           &RemoteSnapshot{Subscriptions: []RemoteSubscription{roster(SubscriptionStatusPastDue, nil)}},
+			wantKind:       TransitionParkUnknown,
 			wantRemoteGone: false,
 		},
 		{
@@ -90,14 +101,24 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			wantBackfill: 1,
 		},
 		{
-			name:         "declined renewal older than dunning window → cancel, remote NOT gone (#679)",
-			snap:         &RemoteSnapshot{Transactions: []RemoteTransaction{decline(periodEnd.Add(time.Hour))}},
-			wantKind:     TransitionCancel,
-			wantBackfill: 1,
-			// periodEnd is 10d ago; the shrunk window makes the lapse "too old".
-			// No roster entry + non-exhaustive pull: the remote sub may still
-			// exist and retry — the apply path must queue the deferred delete.
+			// #821: a SOFT decline beyond the window is a customer mid-dunning
+			// on a schedule the rail keeps retrying, not a dead one. Park.
+			name:           "soft declined renewal older than dunning window → park unknown (no certainty)",
+			snap:           &RemoteSnapshot{Transactions: []RemoteTransaction{decline(periodEnd.Add(time.Hour))}},
+			wantKind:       TransitionParkUnknown,
+			wantBackfill:   1,
 			wantRemoteGone: false,
+		},
+		{
+			// The certainty leg, wired: NMI 261 withdraws the recurring
+			// authorization outright. The remote record may still exist, so the
+			// apply path queues the deferred delete (#679).
+			name:           "NON-RETRYABLE declined renewal older than dunning window → cancel, remote NOT gone (#679)",
+			snap:           &RemoteSnapshot{Provider: ProviderNMI, Transactions: []RemoteTransaction{hardDecline(periodEnd.Add(time.Hour))}},
+			wantKind:       TransitionCancel,
+			wantBackfill:   1,
+			wantRemoteGone: false,
+			wantCertainty:  CertaintyNonRetryableDecline,
 		},
 		{
 			name:           "stale decline + roster cancelled → cancel, remote gone",
@@ -170,6 +191,18 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			}
 			if d.RemoteGone != c.wantRemoteGone {
 				t.Fatalf("remoteGone = %v, want %v", d.RemoteGone, c.wantRemoteGone)
+			}
+			// #821: a TransitionCancel without a named certainty leg is
+			// structurally impossible.
+			wantCertainty := c.wantCertainty
+			if wantCertainty == "" && c.wantKind == TransitionCancel {
+				wantCertainty = CertaintyProviderConfirmedDead
+			}
+			if d.Kind != TransitionCancel {
+				wantCertainty = ""
+			}
+			if d.Certainty != wantCertainty {
+				t.Fatalf("certainty = %q, want %q", d.Certainty, wantCertainty)
 			}
 			if d.Kind == TransitionPastDue {
 				want := periodEnd.Add(PeriodGrace)
