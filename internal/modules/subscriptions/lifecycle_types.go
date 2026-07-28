@@ -115,7 +115,7 @@ type FailMembershipParams struct {
 	// HardDecline, when true, forces immediate cancellation with no further retry
 	// scheduling regardless of dunning mode. Set by dunning when the rail
 	// returns a permanent decline (stolen card, do-not-honor, account closed,
-	// expired card, pickup card). See ClassifyNMIDecline.
+	// expired card, pickup card). See collection.ClassifyNMIDecline.
 	HardDecline bool
 	// RecordFailedAttempt writes a status='failed' payments row for this decline
 	// in the same tx (#733: attempt_kind=renewal, failure_code verbatim +

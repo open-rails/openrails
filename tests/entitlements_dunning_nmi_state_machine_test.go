@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -122,7 +123,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// First retry attempt: fail via mock. #691: no grace machinery exists —
 	// access rides the untouched standing window through the failed retry.
 	mock.ShouldFail = true
-	clock.Advance(subscriptions.DunningNextRetryIn(30*24, 1))
+	clock.Advance(collection.NextRetryIn(30*24, 1))
 
 	worker := &riverjobs.DunningWorker{
 		DB:                 rt.DB,
@@ -149,7 +150,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// Second retry attempt: succeed via mock — recovery records the renewal;
 	// the standing window needs no extension.
 	mock.ShouldFail = false
-	clock.Advance(subscriptions.DunningNextRetryIn(30*24, 2))
+	clock.Advance(collection.NextRetryIn(30*24, 2))
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 
 	for _, entName := range []string{"premium", "extra"} {
@@ -230,7 +231,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	// Drive retries until the subscription is cancelled (monthly schedule,
 	// #359: 5 failures total, progressive gaps of at most 4d). Advancing by
 	// the largest gap each pass guarantees the next retry is due.
-	maxDunningFailures := subscriptions.DunningMaxFailures(30 * 24)
+	maxDunningFailures := collection.MaxFailures(30 * 24)
 	for i := 0; i < maxDunningFailures+1; i++ {
 		clock.Advance(4 * 24 * time.Hour)
 		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
