@@ -90,6 +90,7 @@ GET /v1/merchant/webhooks
 GET /v1/merchant/worker-health
 GET /v1/platform/merchants
 GET /v1/platform/merchants/{id}
+GET /v1/platform/worker-health
 GET /v1/prices
 GET /v1/products
 GET /v1/solana/config

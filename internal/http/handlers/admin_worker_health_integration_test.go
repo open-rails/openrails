@@ -72,7 +72,35 @@ func TestGetAdminWorkerHealthReturnsRows(t *testing.T) {
 
 	failing := items[byKind[kinds[1]]]
 	require.Nil(t, failing.LastSuccessAt)
-	require.NotNil(t, failing.LastError)
-	require.Equal(t, "boom", *failing.LastError)
 	require.EqualValues(t, 7, failing.ConsecutiveFailures)
+	// #SEC-22: the merchant tier keeps the failure SIGNAL but not the text.
+	require.Nil(t, failing.LastError, "merchant tier must not expose another merchant's error text")
+	require.NotContains(t, recorder.Body.String(), "boom")
+	require.NotContains(t, recorder.Body.String(), "last_error\":")
+}
+
+// #SEC-22: the same list on the PLATFORM tier keeps the verbatim text — the
+// operator diagnostic the merchant tier gave up.
+func TestGetPlatformWorkerHealthIncludesErrorText(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	ctx := context.Background()
+
+	kind := "test.platform_wh_failing"
+	t.Cleanup(func() {
+		_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind = $1`, kind)
+	})
+	_, err := dbi.Qx(ctx).Exec(ctx,
+		`INSERT INTO openrails.worker_health (worker_kind, last_error_at, last_error, consecutive_failures)
+		 VALUES ($1, now(), 'merchant acme-slug subscription 0f0f: PSP 579145 declined', 3)`, kind)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	req := httprequest.NewHTTP(recorder,
+		httptest.NewRequest(http.MethodGet, "/worker-health", nil),
+		&app.Runtime{DB: dbi})
+	GetPlatformWorkerHealth(req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "acme-slug")
 }

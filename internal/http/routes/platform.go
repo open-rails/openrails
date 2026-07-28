@@ -39,6 +39,12 @@ func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOpti
 	del := opts.platformPermissionMW(controlplane.PermRootMerchantsDelete)
 	restore := opts.platformPermissionMW(controlplane.PermRootMerchantsRestore)
 
+	// #SEC-22: cross-merchant worker health (last_error is another merchant's
+	// verbatim job error) lives on the platform tier; the merchant tier keeps
+	// the same list with the error TEXT withheld.
+	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetPlatformWorkerHealth),
+		opts.platformPermissionMW(controlplane.PermRootWorkerHealthRead))
+
 	merchants := rr.Group("/merchants")
 	merchants.Handle(http.MethodGet, "", h(httphandlers.PlatformListMerchants), read)
 	merchants.Handle(http.MethodGet, "/:id", h(httphandlers.PlatformGetMerchant), read)

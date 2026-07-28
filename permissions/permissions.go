@@ -68,6 +68,9 @@ const (
 	RootMerchantsRead    = "root:merchants:read"
 	RootMerchantsDelete  = "root:merchants:delete"
 	RootMerchantsRestore = "root:merchants:restore"
+	// RootWorkerHealthRead gates the cross-merchant worker-health view, whose
+	// last_error text is another merchant's verbatim job error (#SEC-22).
+	RootWorkerHealthRead = "root:worker-health:read"
 )
 
 // Customer (buyer/treasury) permissions.

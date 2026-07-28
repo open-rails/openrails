@@ -174,6 +174,7 @@ const (
 	PermRootMerchantsRead    = permissions.RootMerchantsRead
 	PermRootMerchantsDelete  = permissions.RootMerchantsDelete
 	PermRootMerchantsRestore = permissions.RootMerchantsRestore
+	PermRootWorkerHealthRead = permissions.RootWorkerHealthRead
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
 	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Coarse: one
