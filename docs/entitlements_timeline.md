@@ -62,30 +62,19 @@ pass repairs any drift between the two.
 
 `source_type` + `source_id` on each window: `subscription` (paid access from a subscription),
 `one_off` (a one-time purchase), `admin` (admin-granted; source is the grant itself), and
-`grace` (below).
+`grace` (historical — see below).
 
-## Grace
+## Standing access — auto-renew subscriptions have no end date
 
-Grace is the primitive for **bounded, revocable generosity**: paid windows stay truthful
-(`end_at` = period end), and any access beyond what was paid is a separate `grace` window
-appended to the timeline (`source_id` = subscription id). Grace ends the moment truth
-arrives — resolution revokes active grace and soft-deletes scheduled grace — and with no
-resolution it lapses by its own `end_at`: fail-closed eventually. Half-open ranges mean a
-grace window starting exactly at the paid end never overlaps it. Producers:
-
-- **Renewal grace (NMI-backed + Stripe, #368).** Activation and every renewal pre-append a
-  trailing grace window `[period_end, period_end + slack)`; slack = half the billing cycle
-  capped at 48h (12h for daily; not configurable — see `GraceSlack`). Pre-appended so a lost
-  webhook or provider day-boundary billing never gates a paying user. Renewal success revokes
-  the old grace and appends the next paid + grace pair; terminal failure revokes it with the
-  cancellation; a **deliberate cancel deletes the scheduled grace at cancel time** (access
-  ends at the period end the user expects). Months-stale period ends get no resurrection
-  grace — the push is skipped once `period_end + slack` is already past.
-- **CCBill retry grace.** The paid window still ends at the paid term; if CCBill reports the
-  next retry after it (`nextRetryDate`), grace windows extend up to that retry. CCBill's own
-  retry cadence drives its grace — it does not get the pre-appended renewal grace.
-- **NMI/Solana dunning grace.** When the dunning retry schedule extends past the paid term
-  end, the failure path models that access as grace up to the next retry.
+An auto-renew subscription's entitlement window is **standing**: open-ended, closed only
+by a proven event (a confirmed cancellation, a terminal decline, exhausted dunning — never
+by the clock alone). A lost webhook, a provider billing on its own day boundary, or a dead
+webhook pipe therefore cannot gate a paying user: access simply continues while
+reconciliation converges the subscription against provider truth. This replaced the older
+appended-grace-window mechanism (#368, deleted by #691) — `grace` remains in the source
+vocabulary for historical rows and as a pacing marker in convergence, but no code appends
+grace windows today. Deliberate cancellation still ends access at the period end the user
+expects.
 
 Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day (`23:59:59Z`) to
 avoid access gaps from ambiguity.
