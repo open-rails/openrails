@@ -83,7 +83,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:           productID,
 		Archived:            false,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -93,7 +93,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		Archived:            false,
 		AccessDurationHours: &billingDays32,
@@ -262,7 +262,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived: false, AccessDurationHours: &billingHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})

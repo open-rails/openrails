@@ -172,7 +172,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 		Email:    "alice@example.com",
 		FormName: "premium",
 		FlexID:   "flex-123",
-		Currency: "usd",
+		Currency: "USD",
 	})
 	require.NoError(t, err)
 	parsed, err := url.Parse(resp.RedirectURL)
@@ -225,7 +225,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 		Username: "alice",
 	}, &models.Price{
 		ID:       uuid.New(),
-		Currency: "usd",
+		Currency: "USD",
 		PSPLinks: map[string]map[string]string{
 			"ccbill": {
 				models.RailKeyRail:           "ccbill",

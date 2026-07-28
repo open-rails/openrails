@@ -105,7 +105,7 @@ func (f *noticeWindowFixture) publish(amount int64) {
 				Key:         f.productKey,
 				DisplayName: "Notice Window Product",
 				Prices: []catalog.Price{{
-					UnitAmount: amount, Currency: "usd", Duration: "30d", AutoRenew: true,
+					UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 				}},
 			}},
 		},

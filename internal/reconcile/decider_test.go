@@ -16,7 +16,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 	railSub := "rsub-1"
 
 	sale := func(success bool, at time.Time) RemoteTransaction {
-		return RemoteTransaction{TransactionID: "tx-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeSale, Success: success, AmountCents: 5000, Currency: "usd", OccurredAt: at}
+		return RemoteTransaction{TransactionID: "tx-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeSale, Success: success, AmountCents: 5000, Currency: "USD", OccurredAt: at}
 	}
 	decline := func(at time.Time) RemoteTransaction {
 		return RemoteTransaction{TransactionID: "txd-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeDecline, Success: false, OccurredAt: at}

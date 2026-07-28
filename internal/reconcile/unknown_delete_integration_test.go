@@ -81,7 +81,7 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 			{RailSubscriptionID: rsGone, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, DeclineCode: "261", AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, DeclineCode: "261", AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
 	fetchers := map[Provider]RailFetcher{

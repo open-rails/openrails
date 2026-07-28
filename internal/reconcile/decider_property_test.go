@@ -201,7 +201,7 @@ func TestDecide_PlaneOrderingCannotChangeOutcomes(t *testing.T) {
 	withTxn := func(s *RemoteSnapshot, txnType TransactionType, success bool, at time.Time) *RemoteSnapshot {
 		s.Transactions = append(s.Transactions, RemoteTransaction{
 			TransactionID: "tx-prop", SubscriptionID: rs, Type: txnType, Success: success,
-			AmountCents: 999, Currency: "usd", OccurredAt: at,
+			AmountCents: 999, Currency: "USD", OccurredAt: at,
 		})
 		return s
 	}

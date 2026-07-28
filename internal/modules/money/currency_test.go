@@ -20,7 +20,7 @@ func TestNativeToRailMinor(t *testing.T) {
 		{name: "usd exact cents", currency: "USD", amount: 19_990_000, want: 1999},
 		// Ceil: never under-charge — 1 micro over a cent rounds up.
 		{name: "usd sub-cent ceils", currency: "USD", amount: 19_990_001, want: 2000},
-		{name: "usd one micro is one cent", currency: "usd", amount: 1, want: 1},
+		{name: "usd one micro is one cent", currency: "USD", amount: 1, want: 1},
 		{name: "usd zero", currency: "USD", amount: 0, want: 0},
 		{name: "usd negative clamps", currency: "USD", amount: -5, want: 0},
 		// EUR mirrors USD (6 -> 2).
@@ -29,7 +29,7 @@ func TestNativeToRailMinor(t *testing.T) {
 		// ¥500 = 5_000_000 internal units -> 500 yen (NOT 50_000, NOT 5).
 		{name: "jpy whole yen", currency: "JPY", amount: 5_000_000, want: 500},
 		{name: "jpy sub-yen ceils", currency: "JPY", amount: 5_000_001, want: 501},
-		{name: "jpy one internal unit is one yen", currency: "jpy", amount: 1, want: 1},
+		{name: "jpy one internal unit is one yen", currency: "JPY", amount: 1, want: 1},
 		// Unknown currency: error, never a guessed scale.
 		{name: "unknown currency errors", currency: "XXX", amount: 100, wantErr: true},
 		{name: "blank currency errors", currency: "", amount: 100, wantErr: true},

@@ -231,7 +231,7 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 			PriceID:     uuid.NewString(),
 			SessionID:   uuid.NewString(),
 			Amount:      1000000,
-			Currency:    "usd",
+			Currency:    "USD",
 			Token:       "USDC",
 			TokenMint:   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 			TokenAmount: 1000000,

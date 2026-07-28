@@ -106,8 +106,8 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 			{RailSubscriptionID: goneB.railSub, Status: reconcile.SubscriptionStatusCancelled},
 		},
 		Transactions: []reconcile.RemoteTransaction{
-			{TransactionID: "il-tx-a-" + sfx, SubscriptionID: renewA.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
-			{TransactionID: "il-tx-b-" + sfx, SubscriptionID: renewB.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "il-tx-a-" + sfx, SubscriptionID: renewA.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "il-tx-b-" + sfx, SubscriptionID: renewB.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
 	fetchers := map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: &cannedFetcher{snap: snap}}

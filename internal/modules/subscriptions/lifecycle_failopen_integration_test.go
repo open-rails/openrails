@@ -65,7 +65,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 9990000, Currency: "usd",
+		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD",
 		Archived: false, AccessDurationHours: &billingHours, AutoRenew: autoRenew, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)

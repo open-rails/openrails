@@ -188,8 +188,13 @@ func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, 
 	return billingErr
 }
 
+// requireCCBillCurrency is the CCBill currency INGESTION boundary: whatever it
+// returns is written to a payments row, so it must return the canonical UPPER
+// form (CUR-6). CCBill sends the ISO-4217 NUMERIC code, which maps back through
+// the same table the outbound FlexForm picks from; an alpha code arrives
+// upper-cased rather than verbatim.
 func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, error) {
-	normalized := strings.ToLower(currencyCode.Trimmed())
+	normalized := strings.ToUpper(currencyCode.Trimmed())
 	if normalized == "" {
 		return "", newBillingError(
 			ErrorTypeValidation,
@@ -202,15 +207,15 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 	// #819: same table the outbound FlexForm picks currencyCode from, read in
 	// reverse — every currency we can bill maps back, so a real charge can never
 	// be rejected here as a "mismatch" against the price it was billed for.
-	if currency, ok := ccbill.CurrencyFromCode(normalized); ok {
+	if currency, ok := ccbill.CurrencyFromCode(currencyCode.Trimmed()); ok {
 		return currency, nil
 	}
 	return normalized, nil
 }
 
 func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {
-	actual := strings.ToLower(strings.TrimSpace(actualCurrency))
-	expected := strings.ToLower(strings.TrimSpace(expectedCurrency))
+	actual := money.NormalizeCurrency(actualCurrency)
+	expected := money.NormalizeCurrency(expectedCurrency)
 	if expected == "" || actual == expected {
 		return nil
 	}

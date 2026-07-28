@@ -119,7 +119,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 
 	priceID := uuid.New()
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -153,7 +153,7 @@ func TestNMIAdapter_ProviderMetadataIsResolvedPSPKey(t *testing.T) {
 	a := &nmiAdapter{svc: svc, testEndpointURL: server.URL}
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+		PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -164,7 +164,7 @@ func TestNMIAdapter_ProviderMetadataIsResolvedPSPKey(t *testing.T) {
 
 	ids, err = a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "pro-usd-9990000-30"},
-		autoCreateContext{ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
 	a := &nmiAdapter{svc: svc, testEndpointURL: srv.URL}
 
 	if _, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000,
+		PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000,
 		BillingCycleDays: intPtr(30), TargetAccountID: "100002",
 	}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -233,7 +233,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -264,7 +264,7 @@ func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{ProductKey: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductKey: "premium", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("valid link should attach cleanly, got %v", err)
 	}
@@ -301,7 +301,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 
 	ids, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
-		autoCreateContext{ProductKey: "premium", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{ProductKey: "premium", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
 		t.Fatalf("missing plan should be created, got %v", err)
 	}

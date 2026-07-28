@@ -88,7 +88,7 @@ func TestStripeCollectInvoice_RejectsUnderpaidInvoice(t *testing.T) {
 		CustomerID:      "cus_1",
 		PaymentMethodID: "pm_1",
 		AmountCents:     1999,
-		Currency:        "usd",
+		Currency:        "USD",
 		IdempotencyKey:  "idem-1",
 	})
 	require.ErrorContains(t, err, "paid only 1998 of 1999")

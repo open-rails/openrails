@@ -28,7 +28,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     1000,
-		Currency:   "eur",
+		Currency:   "EUR",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -54,7 +54,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     0,
-		Currency:   "usd",
+		Currency:   "USD",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -82,7 +82,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     1000,
-		Currency:   "usd",
+		Currency:   "USD",
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",
@@ -117,7 +117,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 			PriceID:    uuid.New(),
 			Amount:     1000,
-			Currency:   "usd",
+			Currency:   "USD",
 			Reference:  &ref,
 			RailState: map[string]any{
 				"token_symbol": "USDC",
@@ -141,7 +141,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 			PriceID:    uuid.New(),
 			Amount:     1000,
-			Currency:   "usd",
+			Currency:   "USD",
 			RailState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -264,7 +264,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 		CustomerID: tenantSubjectID,
 		PriceID:    priceID,
 		Amount:     10000,
-		Currency:   "usd",
+		Currency:   "USD",
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",
@@ -285,7 +285,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	require.Equal(t, devnetUSDCMint, req.TokenMint)
 	require.Equal(t, testRecipientWallet, req.Recipient)
 	require.Equal(t, int64(10000), req.Amount)
-	require.Equal(t, "usd", req.Currency)
+	require.Equal(t, "USD", req.Currency)
 
 	session.RailState["token_amount"] = uint64(1_000_000)
 	req, err = solanaBuildRequestFromSession(session, "payer_wallet", "USDC")

@@ -111,8 +111,8 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 			RawStatus:          "canceled",
 		}},
 		Transactions: []reconcile.RemoteTransaction{
-			{TransactionID: "ch_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 999, Currency: "usd", OccurredAt: now.Add(-48 * time.Hour)},
-			{TransactionID: "re_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeRefund, Success: true, AmountCents: 999, Currency: "usd", OccurredAt: now.Add(-24 * time.Hour), Raw: rawProviderRefreshJSON(map[string]any{"charge": "ch_original"})},
+			{TransactionID: "ch_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: now.Add(-48 * time.Hour)},
+			{TransactionID: "re_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeRefund, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: now.Add(-24 * time.Hour), Raw: rawProviderRefreshJSON(map[string]any{"charge": "ch_original"})},
 		},
 		Capabilities: reconcile.Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Chargebacks: true},
 		Coverage: reconcile.SnapshotCoverage{

@@ -399,7 +399,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 				NextBillingAt:      &periodEnd,
 				LastBilledAt:       &lastBilled,
 				AmountCents:        1499,
-				Currency:           "usd",
+				Currency:           "USD",
 			},
 			{
 				// No vault/email match locally, no plan link: unresolvable.

@@ -80,7 +80,7 @@ func TestUpgradeFlexFormCarriesTheTargetPriceCurrency(t *testing.T) {
 		Email:                  "alice@example.com",
 		FormName:               "premium",
 		FlexID:                 "flex-123",
-		Currency:               "eur",
+		Currency:               "EUR",
 		OriginalSubscriptionID: "sub-1",
 	})
 	require.NoError(t, err)

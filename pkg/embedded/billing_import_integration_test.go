@@ -137,11 +137,11 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		},
 		Transactions: []DeclaredTransaction{
 			// Runway's opening charge: cents → micros pin (2300 → 23_000_000).
-			{RailSubscriptionID: "sub-runway-" + sfx, TransactionID: "tx-open-" + sfx, Success: true, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-10 * day)},
+			{RailSubscriptionID: "sub-runway-" + sfx, TransactionID: "tx-open-" + sfx, Success: true, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-10 * day)},
 			// Dunning's failed renewal, within the window.
-			{RailSubscriptionID: "sub-dunning-" + sfx, TransactionID: "tx-decl-" + sfx, Type: "decline", Success: false, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-4 * day)},
+			{RailSubscriptionID: "sub-dunning-" + sfx, TransactionID: "tx-decl-" + sfx, Type: "decline", Success: false, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-4 * day)},
 			// Chargeback's reversal.
-			{RailSubscriptionID: "sub-cb-" + sfx, TransactionID: "tx-cb-" + sfx, Type: "chargeback", Success: false, AmountCents: 2300, Currency: "usd", OccurredAt: chargebackAt},
+			{RailSubscriptionID: "sub-cb-" + sfx, TransactionID: "tx-cb-" + sfx, Type: "chargeback", Success: false, AmountCents: 2300, Currency: "USD", OccurredAt: chargebackAt},
 		},
 	}
 

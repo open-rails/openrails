@@ -42,8 +42,8 @@ func TestValidateCCBillCurrencyMatches(t *testing.T) {
 	var billingErr *BillingError
 	require.True(t, errors.As(err, &billingErr))
 	require.Equal(t, ErrorTypeValidation, billingErr.Type)
-	require.Equal(t, "eur", billingErr.Context["billed_currency"])
-	require.Equal(t, "usd", billingErr.Context["expected_currency"])
+	require.Equal(t, "EUR", billingErr.Context["billed_currency"])
+	require.Equal(t, "USD", billingErr.Context["expected_currency"])
 	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
 }
 

@@ -124,16 +124,16 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 
 	manifest := catalog.Manifest{
 		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "usd"}},
+		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "USD"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
-			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "usd", Amount: solanaPtrI64(50_000)}},
+			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "USD", Amount: solanaPtrI64(50_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "30d",
 				AutoRenew:  true,
 				PSPs:       []string{"solana"}, // priced for the Solana rail
@@ -269,7 +269,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
-		Currency:   "usd",
+		Currency:   "USD",
 		Amount:     50_000,
 		Source:     "solana-money-movement",
 		SourceID:   &depositSourceID,
@@ -282,7 +282,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 2_500,
 		RequestID:       requestID,
 		Source:          "solana-money-movement",

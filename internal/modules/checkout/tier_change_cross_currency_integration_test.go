@@ -53,8 +53,8 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	}
 
 	// Same tier group, different currencies: €20.00/mo basic, $25.00/mo pro.
-	basicProd, basicPrice := seed("basic", 1, 20_000_000, "eur")
-	proProd, proPrice := seed("pro", 2, 25_000_000, "usd")
+	basicProd, basicPrice := seed("basic", 1, 20_000_000, "EUR")
+	proProd, proPrice := seed("pro", 2, 25_000_000, "USD")
 
 	// Subscriber sits 2 days into a 30-day cycle on the EUR plan.
 	subID := uuid.New()

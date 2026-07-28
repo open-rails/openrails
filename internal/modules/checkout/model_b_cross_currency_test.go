@@ -32,22 +32,22 @@ func TestModelBUpgradeRefusesCrossCurrency(t *testing.T) {
 	}{
 		{
 			name: "eur to usd undercharges",
-			old:  PriceAmount{Micros: 20_000_000, Currency: "eur"},
-			new:  PriceAmount{Micros: 25_000_000, Currency: "usd"},
+			old:  PriceAmount{Micros: 20_000_000, Currency: "EUR"},
+			new:  PriceAmount{Micros: 25_000_000, Currency: "USD"},
 		},
 		{
 			name: "usd to eur overcharges",
-			old:  PriceAmount{Micros: 25_000_000, Currency: "usd"},
-			new:  PriceAmount{Micros: 20_000_000, Currency: "eur"},
+			old:  PriceAmount{Micros: 25_000_000, Currency: "USD"},
+			new:  PriceAmount{Micros: 20_000_000, Currency: "EUR"},
 		},
 		{
 			name: "missing old currency is never defaulted",
 			old:  PriceAmount{Micros: 20_000_000, Currency: ""},
-			new:  PriceAmount{Micros: 25_000_000, Currency: "usd"},
+			new:  PriceAmount{Micros: 25_000_000, Currency: "USD"},
 		},
 		{
 			name: "missing new currency is never defaulted",
-			old:  PriceAmount{Micros: 20_000_000, Currency: "usd"},
+			old:  PriceAmount{Micros: 20_000_000, Currency: "USD"},
 			new:  PriceAmount{Micros: 25_000_000, Currency: "  "},
 		},
 	} {

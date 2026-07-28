@@ -99,7 +99,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 					Key:         productKey,
 					DisplayName: "Wizard Increase Product",
 					Prices: []catalog.Price{{
-						UnitAmount: amount, Currency: "usd", Duration: "30d", AutoRenew: true,
+						UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 					}},
 				}},
 			},
@@ -258,7 +258,7 @@ func TestStandaloneMerchantRepriceWizardDecreaseHTTP(t *testing.T) {
 					Key:         productKey,
 					DisplayName: "Wizard Decrease Product",
 					Prices: []catalog.Price{{
-						UnitAmount: amount, Currency: "usd", Duration: "30d", AutoRenew: true,
+						UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 					}},
 				}},
 			},

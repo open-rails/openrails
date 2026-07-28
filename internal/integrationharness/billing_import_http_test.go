@@ -76,7 +76,7 @@ func TestBillingImportHTTP(t *testing.T) {
 		},
 		Transactions: []billingimport.DeclaredTransaction{
 			// cents → micros pin at the wire: 2300 amount_cents → 23_000_000.
-			{RailSubscriptionID: subActive, TransactionID: "tx-" + sfx, Success: true, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-10 * day)},
+			{RailSubscriptionID: subActive, TransactionID: "tx-" + sfx, Success: true, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-10 * day)},
 		},
 	}
 	sourceIDs := []string{"runway-" + sfx, "usercancel-" + sfx}

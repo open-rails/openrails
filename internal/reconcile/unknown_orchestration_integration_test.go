@@ -111,7 +111,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			{RailSubscriptionID: rsCancel, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 			{TransactionID: "tx-decline-" + sfx, SubscriptionID: rsDecline, Type: TransactionTypeDecline, Success: false, OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}

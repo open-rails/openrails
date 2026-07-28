@@ -156,7 +156,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		ProductID:           productID,
 		Archived:            false,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,

@@ -1376,7 +1376,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		ID:        uuid.New(),
 		ProductID: uuid.New(),
 		Amount:    999,
-		Currency:  "usd",
+		Currency:  "USD",
 		PSPLinks: map[string]map[string]string{
 			// The provider-link key is the merchant's ACCOUNT key with the
 			// rail recorded inside the entry.
@@ -1403,7 +1403,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 				NextBillingAt:      &end,
 				LastBilledAt:       &lastBilled,
 				AmountCents:        999,
-				Currency:           "usd",
+				Currency:           "USD",
 			},
 		},
 		Transactions: []RemoteTransaction{

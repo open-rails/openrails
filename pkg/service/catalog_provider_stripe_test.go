@@ -107,7 +107,7 @@ func TestStripeAdapter_AutoCreate_SubCentMicrosErrorNeverRounds(t *testing.T) {
 		ProductID:        uuid.New(),
 		Product:          &models.Product{Key: "pro", DisplayName: "Pro"},
 		ProductKey:       "pro",
-		Currency:         "usd",
+		Currency:         "USD",
 		UnitAmount:       19_995_000, // 1999.5 cents: not representable
 		BillingCycleDays: intPtr(30),
 	})

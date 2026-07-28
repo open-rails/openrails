@@ -16,7 +16,7 @@ func TestGenerateFlexFormURLIncludesReservationID(t *testing.T) {
 		Email:         "user@example.com",
 		FormName:      "form-name",
 		FlexID:        "flex-123",
-		Currency:      "usd",
+		Currency:      "USD",
 		ReservationID: "cs_11111111-1111-1111-1111-111111111111",
 	})
 

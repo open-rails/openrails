@@ -36,7 +36,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              23_000_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
 		PSPLinks: map[string]map[string]string{
@@ -441,7 +441,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	product := &models.Product{ID: productID, Key: "premium"}
 	mkPrice := func(pda string, archived bool) *models.Price {
 		return &models.Price{
-			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
+			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "USD",
 			AccessDurationHours: &cycleHours, AutoRenew: true, Archived: archived,
 			PSPLinks: map[string]map[string]string{
 				string(models.RailSolana): {models.RailKeyRail: string(models.RailSolana), "plan_pda": pda},

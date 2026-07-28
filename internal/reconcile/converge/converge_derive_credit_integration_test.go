@@ -4,6 +4,7 @@ package converge
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -23,7 +24,7 @@ func TestConverge_DeriveGrantEffectExcess_CreditClawback(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	cur := "TC" + uuid.NewString()[:6]
+	cur := "TC" + strings.ToUpper(uuid.NewString()[:6])
 	e := NewConvergeEngine(appDB)
 	var customer, grantID uuid.UUID
 
@@ -77,7 +78,7 @@ func TestConverge_OverlappingRuns_SingleClawback(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	cur := "TC" + uuid.NewString()[:6]
+	cur := "TC" + strings.ToUpper(uuid.NewString()[:6])
 	e := NewConvergeEngine(appDB)
 	var customer, grantID uuid.UUID
 

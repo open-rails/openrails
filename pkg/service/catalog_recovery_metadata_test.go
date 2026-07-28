@@ -10,19 +10,19 @@ func TestProductBenefitFingerprintStableAndSensitive(t *testing.T) {
 	product := &models.Product{
 		EntitlementsSpec: map[string]*int{"pro": nil, "export": nil},
 		CreditsSpec: models.CreditsSpec{
-			"monthly": {Unit: "usd", Amount: 10_000_000, Cadence: models.CreditGrantCadencePerRenewal},
+			"monthly": {Unit: "USD", Amount: 10_000_000, Cadence: models.CreditGrantCadencePerRenewal},
 		},
 	}
 	same := &models.Product{
 		EntitlementsSpec: map[string]*int{"export": nil, "pro": nil},
 		CreditsSpec: models.CreditsSpec{
-			"monthly": {Unit: "usd", Amount: 10_000_000, Cadence: models.CreditGrantCadencePerRenewal},
+			"monthly": {Unit: "USD", Amount: 10_000_000, Cadence: models.CreditGrantCadencePerRenewal},
 		},
 	}
 	changed := &models.Product{
 		EntitlementsSpec: map[string]*int{"export": nil, "pro": nil},
 		CreditsSpec: models.CreditsSpec{
-			"monthly": {Unit: "usd", Amount: 20_000_000, Cadence: models.CreditGrantCadencePerRenewal},
+			"monthly": {Unit: "USD", Amount: 20_000_000, Cadence: models.CreditGrantCadencePerRenewal},
 		},
 	}
 

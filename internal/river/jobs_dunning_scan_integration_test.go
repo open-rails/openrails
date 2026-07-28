@@ -82,7 +82,7 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	require.NoError(t, err)
 	billingHours := int32(720)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
@@ -161,7 +161,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	require.NoError(t, err)
 	billingHours := int32(720) // 30-day cycle: monthly dunning tier
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})

@@ -10,7 +10,7 @@ import (
 func intPtr(v int) *int { return &v }
 
 // usd tags a micro amount with its currency for the Model-B helper (#820).
-func usd(micros int64) PriceAmount { return PriceAmount{Micros: micros, Currency: "usd"} }
+func usd(micros int64) PriceAmount { return PriceAmount{Micros: micros, Currency: "USD"} }
 
 // TestCalculateModelBUpgradeCharge pins the live card-billing math for #268.
 // Model B: first_charge = new_full - old_unused, where
