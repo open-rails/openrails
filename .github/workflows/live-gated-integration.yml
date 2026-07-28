@@ -42,18 +42,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: NMI sandbox live tests
         env:
           NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
@@ -79,18 +70,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Live rail invoice collection tests
         env:
           OPENRAILS_LIVE_RAIL_TESTS: "1"
@@ -126,6 +108,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Compile stripe_integration tag
@@ -150,6 +133,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Start dev Vault (KV-v2 + Transit)

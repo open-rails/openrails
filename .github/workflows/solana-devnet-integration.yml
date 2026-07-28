@@ -46,18 +46,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Devnet USDC service-layer test
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
@@ -86,18 +77,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Devnet multi-rebill test (multi-hour)
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}

@@ -1,0 +1,124 @@
+name: Validate Code (full)
+
+# FULL pipeline (#855): the complete suite, no path filtering, no scoping.
+# Runs on master pushes, nightly, and on demand — never on PRs or ordinary
+# branch pushes (PRs get the fast path-filtered pipeline in ci.yaml). Job ids
+# carry a -full suffix so branch-protection required checks (which must point
+# at ci.yaml's PR-scoped jobs) never reference these.
+on:
+  push:
+    branches: [ master ]
+  schedule:
+    # 05:00 UTC nightly.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-full-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
+      # ~/.cache/go-build. Never add an explicit actions/cache step for those
+      # paths: restoring over a populated dir fails with "tar: File exists".
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download modules
+        run: go mod download
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Vet (integration tag)
+        run: go vet -tags integration ./...
+      - name: Test
+        run: go test -race ./...
+
+  sqlc-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: openrails_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin_password
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+      - name: sqlc generate + vet + diff + audit
+        env:
+          POSTGRES_HOST_PORT: "5434"
+        run: task sqlc-check
+
+  console-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/admin/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/admin/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build console (pnpm install + tsc + vite)
+        run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+      - name: Lint console
+        run: pnpm run lint
+        working-directory: web/admin
+      - name: Tagged Go build embeds the dist
+        run: go vet -tags console_assets ./...
+
+  integration-full:
+    runs-on: ubuntu-latest
+    # ENFORCING (#694): the suite runs green. The serial run is ~20-25 min (go
+    # test itself is capped at 25m inside the script); the job timeout adds
+    # headroom for image pulls + module download.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download modules
+        run: go mod download
+      # Integration tests share one compose-backed Postgres/Garnet stack and
+      # run serially. The script expands ./... to only the packages carrying
+      # the `integration` build tag (#790). Testcontainers remain capped
+      # fallbacks for direct package runs, not the normal CI path.
+      - name: Integration test (complete suite)
+        run: bash scripts/test_integration.sh ./...

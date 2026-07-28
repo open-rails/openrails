@@ -1,54 +1,111 @@
 name: Security Scan
 
+# #855 triggers: PRs to master (fast, path-filtered), master pushes, nightly,
+# manual. Never ordinary branch pushes.
 on:
-  push:
-    branches: [ master ]
   pull_request:
     branches: [ master ]
+  push:
+    branches: [ master ]
+  schedule:
+    # 05:00 UTC nightly.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: security-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  # PR diff classification. Go scanners' steps no-op on docs-only PRs, but the
+  # jobs themselves always run and report status (required-check safe). On
+  # non-PR events everything runs unconditionally.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+    steps:
+      - name: Classify changed files
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')"
+          go=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/*|*.md|.trivyignore|LICENSE*|.gitignore|web/admin/*) ;;
+              *) go=true ;;
+            esac
+          done <<< "$files"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "go=$go"
+
   # gosec: Go SAST - source code security scanning. Fails the build on HIGH+
   # findings; MEDIUM findings are surfaced as a non-blocking warning step.
   gosec:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
+      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
+      # ~/.cache/go-build; never add an explicit actions/cache step for those
+      # paths ("tar: File exists" collision).
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
+        if: needs.changes.outputs.go == 'true'
         run: go mod download
       - name: Install gosec
+        if: needs.changes.outputs.go == 'true'
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - name: Run gosec (fail on HIGH+)
+        if: needs.changes.outputs.go == 'true'
         run: gosec -severity high -confidence medium -exclude-dir=.agents ./...
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
   govulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
+        if: needs.changes.outputs.go == 'true'
         run: go mod download
       - name: Install govulncheck
+        if: needs.changes.outputs.go == 'true'
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
+        if: needs.changes.outputs.go == 'true'
         run: govulncheck ./...
 
   # Trivy: additional SCA + filesystem vulnerability/secret scanning. Fails on
-  # HIGH/CRITICAL findings.
+  # HIGH/CRITICAL findings. Cheap — always runs, no path gating.
   trivy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy filesystem scan

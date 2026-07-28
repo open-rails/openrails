@@ -1,14 +1,19 @@
 name: Validate Code
 
+# FAST pipeline (#855): PRs targeting master ONLY. Ordinary branch pushes run
+# nothing by design — open a PR. Master pushes, nightly, and manual runs go
+# through ci-full.yaml (complete integration suite).
 on:
-  push:
-    branches: [ master ]
   pull_request:
     branches: [ master ]
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
 
 # Run the JavaScript-based actions (checkout, setup-go) on Node.js 24. Those
 # actions still declare the Node 20 runtime, which GitHub deprecates on
@@ -17,39 +22,89 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Classifies the PR diff. Downstream jobs ALWAYS run (so branch-protection
+  # required checks always report a status) but their steps no-op when the
+  # diff doesn't touch their area. Never use `on.pull_request.paths` here — a
+  # workflow-level path skip reports NO status and a required check would
+  # block the PR forever.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+      console: ${{ steps.classify.outputs.console }}
+      broad: ${{ steps.classify.outputs.broad }}
+      files: ${{ steps.classify.outputs.files }}
+    steps:
+      - name: Classify changed files
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')"
+          go=false; console=false; broad=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              # Docs and metadata: affect no job.
+              docs/*|*.md|.trivyignore|LICENSE*|.gitignore) ;;
+              # Toolchain / module surface: everything, incl. full integration.
+              go.mod|go.sum|Taskfile.yaml|sqlc.yaml|docker-compose*|Dockerfile*) go=true; broad=true ;;
+              # Shared surfaces with unbounded blast radius: run everything.
+              migrations/*|internal/db/*|internal/dbtest/*|internal/integrationharness/*|internal/shared/*|config/*|scripts/*|.github/*) go=true; console=true; broad=true ;;
+              # Admin console SPA: console job only.
+              web/admin/*) console=true ;;
+              *) go=true ;;
+            esac
+          done <<< "$files"
+          {
+            echo "go=$go"
+            echo "console=$console"
+            echo "broad=$broad"
+            echo 'files<<CHANGED_FILES_EOF'
+            echo "$files"
+            echo 'CHANGED_FILES_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "go=$go console=$console broad=$broad"
+
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
+      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
+      # ~/.cache/go-build. Never add an explicit actions/cache step for those
+      # paths: restoring over a populated dir fails with "tar: File exists".
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
+        if: needs.changes.outputs.go == 'true'
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Vet
+        if: needs.changes.outputs.go == 'true'
         run: go vet ./...
       - name: Build
+        if: needs.changes.outputs.go == 'true'
         run: go build ./...
       - name: Vet (integration tag)
         # Compile guard for integration-tagged packages: dep bumps (authkit
         # v0.78.0, v0.80.0) broke them silently twice because default builds
         # never compile these files.
+        if: needs.changes.outputs.go == 'true'
         run: go vet -tags integration ./...
       - name: Test
+        if: needs.changes.outputs.go == 'true'
         run: go test -race ./...
 
   sqlc:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: changes
     services:
       postgres:
         image: postgres:18-alpine
@@ -66,10 +121,14 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Install Task
+        if: needs.changes.outputs.go == 'true'
         run: go install github.com/go-task/task/v3/cmd/task@latest
       # task sqlc-check builds a throwaway vet DB from migrations/ via
       # scripts/sqlc-vet-db.sh (defaults target the service container above),
@@ -78,54 +137,98 @@ jobs:
       # audit (or#838): EXPLAIN GENERIC_PLAN of every query as openrails_app
       # under RLS, plus the raw-SQL and migration lock-safety lints.
       - name: sqlc generate + vet + diff + audit
+        if: needs.changes.outputs.go == 'true'
         env:
           POSTGRES_HOST_PORT: "5434"
         run: task sqlc-check
 
   # Admin console SPA (#754: dist is NOT committed, so nothing else compiles
   # web/admin) — lint + typecheck+build the frontend, then prove the tagged Go
-  # binary embeds the produced dist.
+  # binary embeds the produced dist. Steps run only when web/admin/** (or a
+  # shared surface) changed.
   console:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.console == 'true'
       - uses: pnpm/action-setup@v4
+        if: needs.changes.outputs.console == 'true'
         with:
           package_json_file: web/admin/package.json
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.console == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/admin/pnpm-lock.yaml
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.console == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Build console (pnpm install + tsc + vite)
+        if: needs.changes.outputs.console == 'true'
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
       - name: Lint console
+        if: needs.changes.outputs.console == 'true'
         run: pnpm run lint
         working-directory: web/admin
       - name: Tagged Go build embeds the dist
+        if: needs.changes.outputs.console == 'true'
         run: go vet -tags console_assets ./...
 
+  # PR tier (#855): integration tests SCOPED to the tagged packages the diff
+  # touches, under a 15m go-test budget. Cross-package fallout is deliberately
+  # deferred to integration-full (master push + nightly, complete suite).
+  # Broad/shared-surface diffs (go.mod, migrations/, internal/db/, scripts/,
+  # ...) still run the full tagged suite here.
   integration:
     runs-on: ubuntu-latest
-    # ENFORCING (#694): the suite runs green and now gates merges. The serial
-    # run is ~20-25 min (go test itself is capped at 25m inside the script);
-    # the job timeout adds headroom for image pulls + module download.
-    timeout-minutes: 40
+    timeout-minutes: 35
+    needs: changes
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
       - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
+        if: needs.changes.outputs.go == 'true'
         run: go mod download
       # Integration tests share one compose-backed Postgres/Garnet stack and
-      # run serially. The script expands ./... to only the packages carrying
-      # the `integration` build tag (#790) so the serial run doesn't repeat
-      # the build job's unit tests. Testcontainers remain capped fallbacks
-      # for direct package runs, not the normal CI path.
-      - name: Integration test
-        run: bash scripts/test_integration.sh ./...
+      # run serially. scripts/test_integration.sh expands ./... to only the
+      # packages carrying the `integration` build tag (#790); explicit package
+      # args pass through, which is what the scoped tier uses.
+      - name: Integration test (scoped)
+        if: needs.changes.outputs.go == 'true'
+        env:
+          CHANGED_FILES: ${{ needs.changes.outputs.files }}
+          BROAD: ${{ needs.changes.outputs.broad }}
+        run: |
+          if [ "$BROAD" = "true" ]; then
+            echo "shared surface changed — running the full tagged suite"
+            exec bash scripts/test_integration.sh ./...
+          fi
+          mapfile -t tagged < <(grep -rl --include='*.go' -E '^//go:build (.*[^a-zA-Z0-9_])?integration([^a-zA-Z0-9_].*)?$' . | xargs -n1 dirname | sed 's|^\./||' | sort -u)
+          declare -A want=()
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            d="$(dirname "$f")"
+            for t in "${tagged[@]}"; do
+              case "$d" in
+                "$t"|"$t"/*) want["$t"]=1 ;;
+              esac
+            done
+          done <<< "$CHANGED_FILES"
+          if [ "${#want[@]}" -eq 0 ]; then
+            echo "no integration-tagged package touched — nothing to run at PR tier (full suite runs on master push + nightly)"
+            exit 0
+          fi
+          pkgs=()
+          for t in "${!want[@]}"; do pkgs+=("./$t"); done
+          echo "scoped integration run: ${pkgs[*]}"
+          OPENRAILS_INTEGRATION_TIMEOUT=15m bash scripts/test_integration.sh "${pkgs[@]}"
