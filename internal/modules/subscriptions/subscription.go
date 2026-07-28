@@ -67,8 +67,10 @@ const (
 	RailCCBill = "ccbill"
 	RailStripe = "stripe"
 
-	CurrencyUSD = "usd"
-	CurrencyEUR = "eur"
+	// Uppercase is the canonical internal form (CUR-6) and what the
+	// DB CHECK accepts. Lowercase belongs only on a rail wire.
+	CurrencyUSD = "USD"
+	CurrencyEUR = "EUR"
 
 	BillingCycleMonthly = 30
 
@@ -282,11 +284,6 @@ func (s *SubscriptionService) GetSubscriptionsWithDetailsForUser(ctx context.Con
 // GetActiveSubscriptionsByUserID retrieves only active subscriptions for a user
 func (s *SubscriptionService) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
 	return s.subscriptionRepo.GetActiveSubscriptionsByUserID(ctx, userID)
-}
-
-// GetSubscriptionsByRailAndUserID retrieves subscriptions filtered by rail
-func (s *SubscriptionService) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
-	return s.subscriptionRepo.GetSubscriptionsByRailAndUserID(ctx, userID, rail)
 }
 
 // GetActiveSubscription retrieves the active subscription for a user

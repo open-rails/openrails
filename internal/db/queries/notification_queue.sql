@@ -16,35 +16,6 @@ SELECT * FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1
 ORDER BY nq.created_at DESC;
 
--- name: ListUnseenNotificationsByCustomer :many
-SELECT * FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1 AND nq.seen = false
-ORDER BY nq.created_at DESC;
-
--- name: ListNotificationsByEventType :many
-SELECT * FROM openrails.notification_queue nq
-WHERE nq.event_type = $1
-ORDER BY nq.created_at DESC;
-
--- name: CountNotificationsByCustomerEventSince :one
-SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1
-  AND nq.event_type = $2
-  AND nq.created_at >= $3;
-
--- name: ListCustomersWithPendingDigest :many
-SELECT DISTINCT nq.customer_id::text FROM openrails.notification_queue nq
-WHERE nq.event_type = $1
-  AND nq.created_at >= $2;
-
--- name: ListPendingDigestForCustomer :many
-SELECT * FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1
-  AND nq.event_type = $2
-  AND nq.created_at >= $3
-ORDER BY nq.created_at DESC
-LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
-
 -- name: MarkNotificationSeen :execrows
 UPDATE openrails.notification_queue SET seen = true WHERE id = $1;
 

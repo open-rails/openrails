@@ -224,22 +224,6 @@ func (r *PaymentRepo) GetByTransactionID(ctx context.Context, rail models.Rail, 
 	return models.PaymentFromGen(row)
 }
 
-func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByPriceID(ctx, priceID)
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentsFromGen(rows)
-}
-
-func (r *PaymentRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByRail(ctx, string(rail))
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentsFromGen(rows)
-}
-
 func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	rows, err := r.db.Gen(ctx).DeletePayment(ctx, id)
 	if err != nil {
@@ -563,53 +547,12 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	return nil
 }
 
-func (r *PaymentRepo) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerRail(ctx, gen.GetLatestPaymentByCustomerRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentFromGen(row)
-}
-
-func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetLatestPaymentBySubscriptionID(ctx, &subscriptionID)
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentFromGen(row)
-}
-
 func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, &subscriptionID)
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
-}
-
-func (r *PaymentRepo) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
-	if userID == "" {
-		return 0, 0, fmt.Errorf("user_id is required")
-	}
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return 0, 0, err
-	}
-	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectRail(ctx, gen.CountPaymentOutcomesBySubjectRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return 0, 0, err
-	}
-	return int(row.Successful), int(row.Failed), nil
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {

@@ -75,14 +75,6 @@ func (s *PaymentService) GetByTransactionID(ctx context.Context, rail models.Rai
 	return s.repo.GetByTransactionID(ctx, rail, transactionID)
 }
 
-func (s *PaymentService) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	return s.repo.GetByPriceID(ctx, priceID)
-}
-
-func (s *PaymentService) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
-	return s.repo.GetByRail(ctx, rail)
-}
-
 func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
 	return errors.New("payments are immutable; updates are not supported")
 }
@@ -323,20 +315,8 @@ func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryO
 	return s.repo.GetPayments(ctx, repoOpts)
 }
 
-func (s *PaymentService) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
-	return s.repo.GetLatestByUserAndRail(ctx, userID, rail)
-}
-
-func (s *PaymentService) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	return s.repo.GetLatestBySubscriptionID(ctx, subscriptionID)
-}
-
 func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	return s.repo.GetLatestChargeBySubscriptionID(ctx, subscriptionID)
-}
-
-func (s *PaymentService) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
-	return s.repo.CountByUserAndRail(ctx, userID, rail)
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {

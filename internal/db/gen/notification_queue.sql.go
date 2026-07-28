@@ -12,26 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countNotificationsByCustomerEventSince = `-- name: CountNotificationsByCustomerEventSince :one
-SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1
-  AND nq.event_type = $2
-  AND nq.created_at >= $3
-`
-
-type CountNotificationsByCustomerEventSinceParams struct {
-	CustomerID uuid.UUID
-	EventType  string
-	CreatedAt  time.Time
-}
-
-func (q *Queries) CountNotificationsByCustomerEventSince(ctx context.Context, arg CountNotificationsByCustomerEventSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNotificationsByCustomerEventSince, arg.CustomerID, arg.EventType, arg.CreatedAt)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countNotificationsFiltered = `-- name: CountNotificationsFiltered :one
 SELECT count(*) FROM openrails.notification_queue nq
 WHERE ($1::uuid IS NULL OR nq.customer_id = $1::uuid)
@@ -168,37 +148,6 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Openra
 	return i, err
 }
 
-const listCustomersWithPendingDigest = `-- name: ListCustomersWithPendingDigest :many
-SELECT DISTINCT nq.customer_id::text FROM openrails.notification_queue nq
-WHERE nq.event_type = $1
-  AND nq.created_at >= $2
-`
-
-type ListCustomersWithPendingDigestParams struct {
-	EventType string
-	CreatedAt time.Time
-}
-
-func (q *Queries) ListCustomersWithPendingDigest(ctx context.Context, arg ListCustomersWithPendingDigestParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listCustomersWithPendingDigest, arg.EventType, arg.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var nq_customer_id string
-		if err := rows.Scan(&nq_customer_id); err != nil {
-			return nil, err
-		}
-		items = append(items, nq_customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
 SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.customer_id = $1
@@ -207,41 +156,6 @@ ORDER BY nq.created_at DESC
 
 func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listNotificationsByCustomer, customerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsNotificationQueue
-	for rows.Next() {
-		var i OpenrailsNotificationQueue
-		if err := rows.Scan(
-			&i.ID,
-			&i.EventType,
-			&i.Data,
-			&i.Seen,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.EmailedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listNotificationsByEventType = `-- name: ListNotificationsByEventType :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
-WHERE nq.event_type = $1
-ORDER BY nq.created_at DESC
-`
-
-func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType string) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listNotificationsByEventType, eventType)
 	if err != nil {
 		return nil, err
 	}
@@ -292,56 +206,6 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 		arg.EventType,
 		arg.Seen,
 		arg.PageOffset,
-		arg.PageLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsNotificationQueue
-	for rows.Next() {
-		var i OpenrailsNotificationQueue
-		if err := rows.Scan(
-			&i.ID,
-			&i.EventType,
-			&i.Data,
-			&i.Seen,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.EmailedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPendingDigestForCustomer = `-- name: ListPendingDigestForCustomer :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1
-  AND nq.event_type = $2
-  AND nq.created_at >= $3
-ORDER BY nq.created_at DESC
-LIMIT NULLIF($4::int, 0)
-`
-
-type ListPendingDigestForCustomerParams struct {
-	CustomerID uuid.UUID
-	EventType  string
-	CreatedAt  time.Time
-	PageLimit  int32
-}
-
-func (q *Queries) ListPendingDigestForCustomer(ctx context.Context, arg ListPendingDigestForCustomerParams) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listPendingDigestForCustomer,
-		arg.CustomerID,
-		arg.EventType,
-		arg.CreatedAt,
 		arg.PageLimit,
 	)
 	if err != nil {
@@ -440,41 +304,6 @@ type ListUndeliveredNotificationsParams struct {
 // #789: undelivered rows for the notification email sweep (emailed_at NULL).
 func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listUndeliveredNotifications, arg.MerchantID, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsNotificationQueue
-	for rows.Next() {
-		var i OpenrailsNotificationQueue
-		if err := rows.Scan(
-			&i.ID,
-			&i.EventType,
-			&i.Data,
-			&i.Seen,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.EmailedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUnseenNotificationsByCustomer = `-- name: ListUnseenNotificationsByCustomer :many
-SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
-WHERE nq.customer_id = $1 AND nq.seen = false
-ORDER BY nq.created_at DESC
-`
-
-func (q *Queries) ListUnseenNotificationsByCustomer(ctx context.Context, customerID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listUnseenNotificationsByCustomer, customerID)
 	if err != nil {
 		return nil, err
 	}
