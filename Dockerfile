@@ -7,7 +7,9 @@ RUN npm install -g --ignore-scripts pnpm@11.0.0
 COPY web/admin/package.json web/admin/pnpm-lock.yaml web/admin/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY web/admin/ ./
-RUN pnpm run build --outDir /out --emptyOutDir
+# verify-deps-before-run crashes pnpm 11.0.0 ("currentPnpmfiles is not iterable")
+# and is redundant here: install just ran --frozen-lockfile in this same stage.
+RUN pnpm --config.verify-deps-before-run=false run build --outDir /out --emptyOutDir
 
 
 # Stage 2: build

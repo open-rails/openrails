@@ -61,7 +61,8 @@ tasks:
   docker-down:
     desc: Stop local docker compose stack
     cmds:
-      - docker compose -f docker-compose.yaml down
+      # --profile all: without it, profiled services (openrails) are left running.
+      - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down
 
   docker-logs:
     desc: Tail openrails logs from docker compose stack
