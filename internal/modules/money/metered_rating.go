@@ -114,7 +114,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Pool().Query(ctx, `
+		rows, qerr := s.db.Qx(ctx).Query(ctx, `
 SELECT rc.id,
        rc.meter_key,
        rc.customer_id IS NOT NULL AS payer_scoped,
@@ -209,7 +209,7 @@ func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uu
 	}
 	out := map[string]int64{}
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Pool().Query(ctx, `
+		rows, qerr := s.db.Qx(ctx).Query(ctx, `
 SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
        COALESCE(SUM(
            CASE WHEN $9 = 'count' THEN 1
@@ -272,7 +272,7 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 
 	total := int64(0)
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Pool().Query(ctx, `
+		rows, qerr := s.db.Qx(ctx).Query(ctx, `
 SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
        COALESCE(NULLIF(ue.metadata ->> $9, ''), NULLIF(ue.dimensions ->> $9, ''), '') AS resource_id,
        COALESCE(SUM(

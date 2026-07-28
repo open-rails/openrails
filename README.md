@@ -31,6 +31,170 @@ Customer Side (your users):
 
 ---
 
+### Features
+
+- **Checkout sessions** — one unified session model across every rail: provider-hosted
+  redirect (Stripe, CCBill), tokenized-vault card entry (NMI Collect.js), and Solana Pay.
+- **Catalog as source of truth** — declare your products, prices, rate cards, and tiers
+  once; OpenRails pushes them to providers (find-or-create) and watches for drift.
+- **Entitlements & product ownership** — your webserver asks one question ("does user X
+  have Y right now?") against your own database, never a provider API.
+- **Tiered plans with proration** — users upgrade/downgrade between tiers; preview the
+  proration before committing.
+- **Dunning: capture lost revenue** — failed rebills are retried on a schedule derived
+  from the billing cycle, with a staleness window that guarantees a months-old failure is
+  cancelled, never surprise-charged.
+- **Payment-lifecycle emails, handled** — "your payment failed", "your card expires
+  soon", renewal and cancellation notices: templated, deduplicated (a resolved failure
+  supersedes the stale notice instead of double-sending), and branded per merchant. You
+  don't build the awkward-conversation system; we are the awkward-conversation system.
+- **Higher approval rates, measurably** — network tokens, automatic account-updater
+  refresh of expired/reissued cards before rebills, and correct stored-credential
+  (MIT/CIT) framing on every recurring charge. Then prove the uplift in your own
+  dashboard: approval rate is sliceable by token type, rail, and decline reason.
+- **Metered billing & spend control** — pre-authorize with holds (admit → capture/release),
+  per-user budgets, spend caps, trust levels, prepaid credits or arrears invoicing.
+- **Solana, for real** — one-off USDC payments *and* on-chain recurring subscriptions via
+  the official delegation program, devnet-tested like any other sandbox.
+- **Browser-direct self-service** — end-users hit `/v1/me/*` (balance, invoices,
+  subscriptions, payment methods, cancellation) straight from your frontend; no proxy
+  routes to write or maintain.
+- **Batch import of legacy data** — bring existing subscribers, payments, and vault
+  references in from a previous billing system and let reconciliation converge them.
+- **Metric alerts to your endpoints** — define alerts on any billing metric (approval
+  rate drops, chargeback spikes, revenue anomalies) and receive them on outbound
+  webhook sinks you configure.
+- **Team & scoped API keys** — invite your staff with role-scoped permissions;
+  machine access through API keys that carry explicit grants and can never cross
+  merchants.
+- **Merchant console** — an optional admin UI for your team: customers, subscriptions,
+  refunds, catalog, API keys, and a metrics dashboard you can customize with your own
+  key-metric widgets (plus an optional LLM analytics copilot).
+
+---
+
+### Who Uses OpenRails
+
+Archetypes — the site you're building, and what OpenRails does for it:
+
+- **Building an OnlyFans, Fansly, or Pornhub Premium** — recurring memberships on
+  processors that will actually board adult content (NMI ISOs like MobiusPay/PaymentCloud,
+  CCBill). You get duplicate-subscription prevention, dunning that chases failed rebills,
+  and entitlements that survive lost webhooks — the subscription-lifecycle plumbing every
+  paysite rebuilds badly.
+- **Building a Patreon or Substack** — creator/membership tiers with upgrades,
+  downgrades, and proration. Your app asks "is this person a patron at tier 2 right now?"
+  against its own database, not a provider API.
+- **Building a Gumroad, itch.io, or Teachable** — videos, courses, games, downloads sold
+  individually. Every purchase is a permanent ownership record (entitlement) your server
+  queries forever; one checkout model whether the buyer pays by card or USDC.
+- **Building a Linear, Notion, or Figma** — classic SaaS seat billing: define the tier
+  list once, customers self-serve upgrades with proration previews, Stripe rail today
+  with an exit ramp built in.
+- **Building an OpenAI-platform or Replicate** — the credits console: users pre-pay a
+  balance (or run arrears with monthly invoices), you draw it down per request. The
+  admission API pre-authorizes with holds so a runaway job stops *before* the balance
+  goes negative — a real ledger, not a usage counter bolted to Stripe.
+- **Building a Midjourney or Cursor** — subscription + metered hybrid: a base plan plus
+  GPU/LLM usage, per-user and even per-agent spend budgets with trust levels. Built for
+  AI products where the marginal cost of a request is real money.
+- **Building a Helius-style paid service for crypto users** — your customers live
+  on-chain; take USDC straight to a wallet you control, including recurring on-chain
+  subscriptions. No processor exists in the loop to drop you.
+- **Running an Aylo-style network of sites** — several brands, one self-hosted billing
+  deployment, each site an isolated merchant with its own rails on shared
+  infrastructure, isolation enforced by the database.
+- **Anyone who watched the 2021 OnlyFans near-ban** — if you're in a category processors
+  purge (content, crypto, CBD, gaming), the question isn't *if* you get a termination
+  email, it's *when*. Integrate rail-agnostic now and that email becomes a config change
+  — swap to a high-risk gateway over a weekend, keep your subscribers, keep your
+  entitlements, lose nothing.
+
+---
+
+### Failed Payments Are a Revenue Line
+
+Industry numbers: 5–14% of subscription payments fail, involuntary churn is 20–40% of all
+churn (ProfitWell), and good recovery tooling wins back 30–60% of failed payments. For a
+site doing $100K/mo, that's roughly $2–5K/mo of revenue that leaks or doesn't, depending
+entirely on plumbing. Merchants pay $79–500/mo for standalone dunning tools — or 10–25%
+of recovered revenue to success-fee vendors — to capture it.
+
+OpenRails ships the whole recovery stack built in:
+
+- **Fewer failures in the first place** — network tokens, account-updater card refresh
+  before rebills, and correct MIT/CIT stored-credential framing lift issuer approval
+  rates on the charges that matter most: the renewals.
+- **Smart retries on the failures that remain** — hard declines (stolen card,
+  do-not-honor) go terminal immediately instead of burning retries; soft declines get a
+  cycle-derived schedule, and a months-stale failure is cancelled, never surprise-charged.
+- **The customer conversation, handled** — templated, deduplicated payment-failure and
+  card-expiry emails that supersede themselves when the problem resolves.
+- **Proof it's working** — approval rate by rail, token type, and decline reason on your
+  dashboard, with alerts to your endpoints when it drops.
+
+---
+
+### Technical Guarantees
+
+The engineering underneath, and the invariants it enforces — this is what you'd otherwise
+build yourself, badly, under deadline:
+
+- **The Convergence Engine.** Billing systems rot by drifting from provider truth: a lost
+  webhook here, a manual refund there. OpenRails treats the provider as the source of
+  truth for money state and *continuously* re-converges against it — inline after every
+  mutation, on a background sweep, and via watermarked provider reads. Every divergence
+  becomes a classified finding on one of four planes (provider-observed truth, derived
+  effects, lifecycle clocks, internal consistency); safe repairs apply automatically,
+  judgment calls queue for a human and never auto-fire.
+- **Rebilling, both ways.** Leave recurring billing to the provider's native engine
+  (NMI/CCBill/Stripe plans — OpenRails observes and converges), or let OpenRails drive
+  the renewal itself: engine-initiated stored-credential charges where *we* decide the
+  amount and timing (scheduled reprices, vaulted-card rails), and the on-chain crank for
+  Solana. Same subscription model either way.
+- **Double-entry money, twice over.** Every money movement is a balanced double-entry
+  ledger transaction — value is never created or destroyed, only moved. A separate grant
+  ledger tracks credit lots (who was granted what, from which source), and the
+  Convergence Engine cross-checks the two continuously: duplicates, broken source
+  references, and unbalanced effects surface as findings instead of festering.
+- **Audited entitlements.** No entitlement exists without provenance: every access window
+  records its source event, grant, and lifecycle (granted → revoked, with reason), so
+  "why does this user have premium?" is a query, not an investigation. Excess grants
+  (e.g. access surviving a refund) are detected and flagged automatically.
+- **Effectively-once provider writes.** Every outbound mutation is a durable intent
+  before it's an HTTP call: idempotency-keyed, origin-tagged, account-fingerprinted, and
+  drained by an executor that resolves ambiguous outcomes by *reading* the provider
+  before any retry. A charge is never blind-retried; a credential swap can never fire a
+  stale queue against the wrong account.
+- **Sandbox that can't lie.** `test_mode=sandbox` doesn't trust configuration — it
+  proves it: live Stripe keys refuse to boot, and every NMI account is probed with a
+  card only a simulator would approve. No real money can move in a sandbox boot, in any
+  environment.
+- **Your users never pay for our malfunction.** Access is closed by *evidence* — a
+  confirmed cancellation, a terminal decline, exhausted dunning — never by the clock
+  alone. A lost webhook, a dead pipe, or stale data parks the subscription for
+  verification with access intact. Terminal cancellation is the last resort, not the
+  default.
+- **Database-enforced merchant isolation.** Multi-merchant isolation isn't application
+  code you have to trust — it's Postgres row-level security on an unprivileged role,
+  with every merchant-scoped table behind a policy. A query without merchant context
+  returns nothing, by construction.
+- **Time is injected, and the build enforces it.** Every billing decision runs on an
+  injectable clock, guarded by a lint that fails the build on naked `time.Now()` in
+  business logic. That's why a year of renewals, dunning, and expiry can be
+  fast-forwarded in an integration test — the billing engine is deterministic under
+  time travel.
+- **One client, structurally incapable of drift.** Embedded and standalone modes share
+  one client implementation over one handler surface — the in-process transport
+  dispatches into the same routes HTTP does. Parity between modes isn't tested into
+  existence; there's nothing to diverge.
+- **Work scales with activity, not accounts.** No routine job ever sweeps
+  everything-on-file: due work is indexed, provider reads are watermarked, and
+  per-merchant jobs fan out only for merchants with something to do. Ten thousand idle
+  merchants cost roughly nothing.
+
+---
+
 ### Manifesto
 
 OpenRails ultimate goal is to break the parasitic monopoly Visa + MasterCard currently hold upon American's financial lives. This pain is especially acute for 'high risk' businesses (crypto, porn, gambling, CBD, etc.) who are banned from most payment providers. OpenRails makes it much easier to integrate with 'high risk payment gateways', which have really shitty APIs usually, and lack all of the dev-ex nicities you get with Stripe.
@@ -191,7 +355,9 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout flows (redirect, tokenized-vault, Solana), payment methods, tokens, and error handling.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses delegated tokens.
+- [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 - [HTTP API reference](docs/api/endpoints.md) — every route, grouped by caller class.
+- [Example: gated premium page](examples/gated-premium-page/) — a runnable standalone demo: public page, entitlement-gated `/premium`, delegated tokens, NMI tokenized-vault checkout.
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 

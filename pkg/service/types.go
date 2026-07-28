@@ -139,7 +139,7 @@ type CheckoutPayment struct {
 // CheckoutSession represents a checkout session.
 type CheckoutSession struct {
 	ID             string
-	Status         string // "open", "complete", "expired"
+	Status         string // "created", "requires_action", "succeeded", "failed", "expired"
 	Mode           string // "subscription", "one_off"
 	PriceID        string
 	Amount         int64

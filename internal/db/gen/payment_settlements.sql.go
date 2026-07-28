@@ -12,24 +12,53 @@ import (
 	"github.com/google/uuid"
 )
 
-const acknowledgePaymentSettlement = `-- name: AcknowledgePaymentSettlement :exec
+const acknowledgePaymentSettlement = `-- name: AcknowledgePaymentSettlement :execrows
 UPDATE openrails.payment_settlement_events
    SET delivered_at = COALESCE(delivered_at, now())
- WHERE id = $1
+ WHERE merchant_id = $1
+   AND id = $2
 `
 
-func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, acknowledgePaymentSettlement, id)
-	return err
+type AcknowledgePaymentSettlementParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg AcknowledgePaymentSettlementParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acknowledgePaymentSettlement, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
+DELETE FROM openrails.payment_settlement_events
+ WHERE delivered_at IS NOT NULL
+   AND delivered_at < $1::timestamptz
+`
+
+func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listPendingPaymentSettlements = `-- name: ListPendingPaymentSettlements :many
 SELECT id, merchant_id, payment_id, amount, currency, settled_at
   FROM openrails.payment_settlement_events
- WHERE delivered_at IS NULL
+ WHERE merchant_id = $1
+   AND delivered_at IS NULL
  ORDER BY id
- LIMIT $1
+ LIMIT $2
 `
+
+type ListPendingPaymentSettlementsParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int64
+}
 
 type ListPendingPaymentSettlementsRow struct {
 	ID         uuid.UUID
@@ -40,8 +69,8 @@ type ListPendingPaymentSettlementsRow struct {
 	SettledAt  time.Time
 }
 
-func (q *Queries) ListPendingPaymentSettlements(ctx context.Context, limit int64) ([]ListPendingPaymentSettlementsRow, error) {
-	rows, err := q.db.Query(ctx, listPendingPaymentSettlements, limit)
+func (q *Queries) ListPendingPaymentSettlements(ctx context.Context, arg ListPendingPaymentSettlementsParams) ([]ListPendingPaymentSettlementsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingPaymentSettlements, arg.MerchantID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

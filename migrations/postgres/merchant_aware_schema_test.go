@@ -2,81 +2,50 @@ package postgresmigrations
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
-// Merchant-owned tables that the consolidated schema must scope by merchant_id
-// (issue #223). Kept in sync with the merchant_isolation policies in 001.
-// Updated after squashing 001..068 (rail_* renames per #683; catalog/metering
-// sidecars, webhook_events, customer_minimum_spend, metered_rating_watermarks
-// added along the chain).
-var merchantOwnedTables = []string{
-	"customers",
-	"merchant_deks",
-	"merchant_secrets",
-	"merchant_exports",
-	"products",
-	"prices",
-	"payment_methods",
-	"subscriptions",
-	"payments",
-	"checkout_sessions",
-	"solana_subscriptions",
-	"entitlements",
-	"invoices",
-	"invoice_items",
-	"invoice_payments",
-	"notification_queue",
-	"rail_customer_accounts",
-	"rail_mutation_logs",
-	"grants",
-	"ledger_accounts",
-	"ledger_transfers",
-	"rail_merchant_accounts",
-	"rail_intents",
-	"rail_refresh_watermarks",
-	"reconciliation_state",
-	// #472: money ledger replaced the credit_* tables. money_balances dropped (#491).
-	"invoker_spend_limits",
-	"payer_spend_limits",
-	"tier_schedules",
-	"merchant_configurations",
-	"usage_events",
-	"catalog_drift_events",
-	"reconciliation_runs",
-	"reconciliation_findings",
-	"money_settings",
-	"custom_credit_types",
-	// #594/#599/#638/#639/#640 catalog + metering sidecars
-	"catalog_usage_limits",
-	"product_usage_limit_bindings",
-	"catalog_meters",
-	"product_includes",
-	"product_usage_limits",
-	"catalog_rate_cards",
-	"catalog_credit_balances",
-	"catalog_credit_purchase_prices",
-	"customer_minimum_spend",
-	"metered_rating_watermarks",
-	// #678 webhook dedup truth
-	"webhook_events",
-	// added by 0002-0014, folded into the 0001 baseline (2026-07-07 squash)
-	"imported_dunning_history",
-	"subscription_status_transitions",
-	"admission_denials_hourly",
-	"dashboard_configs",
-	"alert_rules",
-	"merchant_webhooks",
-	"merchant_notifications",
-	"price_key_movements",
-	"reprice_batches",
-	"subscription_reprices",
-	"finding_digest_state",
-	"webhook_health",
-	"webhook_health_daily",
+// RLS guard (SEC-16). The rule: every openrails table is merchant-scoped with a
+// merchant_isolation policy, or it is an explicitly classified global table.
+//
+// The table list is DERIVED from every migration's SQL, not hand-maintained —
+// the previous hardcoded list only covered 0001, so a merchant-scoped table
+// added in a later migration escaped enforcement silently (0005's
+// payment_settlement_events shipped with merchant_id and no RLS; nothing
+// failed). Exemptions are declared IN the schema as a
+// `COMMENT ON TABLE ... 'RLS-exempt by design: ...'` marker, and the exempt set
+// is additionally asserted by name below so widening it requires review here.
+var rlsExemptTables = []string{
+	"merchants",      // the tenant directory itself — the scope, not a scoped row
+	"probe_verdicts", // instance-level credential state
+	"worker_health",  // per-worker-kind process health
 }
 
+// minMerchantScopedTables guards against a vacuous pass: if the SQL parsing
+// below ever breaks, the derived set collapses and every loop becomes a no-op.
+const minMerchantScopedTables = 60
+
+// rlsExemptMarker is the machine-checkable classification a table COMMENT must
+// carry to opt out of merchant isolation.
+const rlsExemptMarker = "RLS-exempt by design:"
+
+var (
+	reCreateTable   = regexp.MustCompile(`(?s)CREATE TABLE (?:IF NOT EXISTS )?openrails\.([a-z0-9_]+) \((.*?)\n\);`)
+	reMerchantIDCol = regexp.MustCompile(`(?m)^\s*merchant_id\s+uuid`)
+	reAddMerchantID = regexp.MustCompile(`(?s)ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+)[^;]*?ADD COLUMN\s+merchant_id\s+uuid`)
+	reDropTable     = regexp.MustCompile(`DROP TABLE (?:IF EXISTS )?openrails\.([a-z0-9_]+)`)
+	reRenameTable   = regexp.MustCompile(`ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+) RENAME TO ([a-z0-9_]+)`)
+	reEnableRLS     = regexp.MustCompile(`ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+) ENABLE ROW LEVEL SECURITY`)
+	reForceRLS      = regexp.MustCompile(`ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+) FORCE ROW LEVEL SECURITY`)
+	rePolicy        = regexp.MustCompile(`CREATE POLICY merchant_isolation ON openrails\.([a-z0-9_]+)`)
+	reDropPolicy    = regexp.MustCompile(`DROP POLICY (?:IF EXISTS )?merchant_isolation ON openrails\.([a-z0-9_]+)`)
+	reExemptComment = regexp.MustCompile(`(?s)COMMENT ON TABLE openrails\.([a-z0-9_]+) IS '((?:[^']|'')*)'`)
+)
+
+// loadSchema001 reads the consolidated baseline alone (invariants that are
+// specifically about the baseline's shape).
 func loadSchema001(t *testing.T) string {
 	t.Helper()
 	b, err := FS.ReadFile("0001_schema.up.sql")
@@ -84,6 +53,137 @@ func loadSchema001(t *testing.T) string {
 		t.Fatalf("read 0001_schema.up.sql: %v", err)
 	}
 	return string(b)
+}
+
+// loadAllSchema concatenates every up migration in apply order — the schema as
+// deployed, which is what the RLS guard must reason about.
+func loadAllSchema(t *testing.T) string {
+	t.Helper()
+	entries, err := FS.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".up.sql") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names) // zero-padded prefixes => lexical order == apply order
+	if len(names) == 0 {
+		t.Fatal("no *.up.sql migrations found")
+	}
+	var b strings.Builder
+	for _, n := range names {
+		c, err := FS.ReadFile(n)
+		if err != nil {
+			t.Fatalf("read %s: %v", n, err)
+		}
+		b.Write(c)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// schemaTables is the derived table inventory of the deployed schema, keyed by
+// each table's FINAL name (renames are folded in — RLS state travels with a
+// RENAME, so the sets must too).
+type schemaTables struct {
+	blocks          map[string]string // live openrails tables -> CREATE TABLE body
+	merchantScoped  map[string]bool   // carry a merchant_id column
+	enable          map[string]bool   // ENABLE ROW LEVEL SECURITY
+	force           map[string]bool   // FORCE ROW LEVEL SECURITY
+	policy          map[string]bool   // merchant_isolation policy
+	rlsExemptMarked map[string]bool   // classified RLS-exempt by a table COMMENT
+}
+
+func deriveSchemaTables(t *testing.T, schema string) schemaTables {
+	t.Helper()
+	s := schemaTables{
+		blocks:          map[string]string{},
+		merchantScoped:  map[string]bool{},
+		enable:          map[string]bool{},
+		force:           map[string]bool{},
+		policy:          map[string]bool{},
+		rlsExemptMarked: map[string]bool{},
+	}
+	for _, m := range reCreateTable.FindAllStringSubmatch(schema, -1) {
+		s.blocks[m[1]] = m[2]
+		if reMerchantIDCol.MatchString(m[2]) {
+			s.merchantScoped[m[1]] = true
+		}
+	}
+	for _, m := range reAddMerchantID.FindAllStringSubmatch(schema, -1) {
+		s.merchantScoped[m[1]] = true
+	}
+	for _, m := range reDropTable.FindAllStringSubmatch(schema, -1) {
+		delete(s.blocks, m[1])
+		delete(s.merchantScoped, m[1])
+	}
+	for _, m := range reEnableRLS.FindAllStringSubmatch(schema, -1) {
+		s.enable[m[1]] = true
+	}
+	for _, m := range reForceRLS.FindAllStringSubmatch(schema, -1) {
+		s.force[m[1]] = true
+	}
+	for _, m := range rePolicy.FindAllStringSubmatch(schema, -1) {
+		s.policy[m[1]] = true
+	}
+	for _, m := range reDropPolicy.FindAllStringSubmatch(schema, -1) {
+		delete(s.policy, m[1])
+	}
+	for _, m := range reExemptComment.FindAllStringSubmatch(schema, -1) {
+		if strings.Contains(m[2], rlsExemptMarker) {
+			s.rlsExemptMarked[m[1]] = true
+		}
+	}
+	for _, m := range reRenameTable.FindAllStringSubmatch(schema, -1) {
+		s.rename(m[1], m[2])
+	}
+	return s
+}
+
+// rename folds old into new across every set: Postgres carries RLS state,
+// policies and comments through an ALTER TABLE ... RENAME TO.
+func (s schemaTables) rename(old, next string) {
+	if body, ok := s.blocks[old]; ok {
+		s.blocks[next] = body
+		delete(s.blocks, old)
+	}
+	for _, m := range []map[string]bool{s.merchantScoped, s.enable, s.force, s.policy, s.rlsExemptMarked} {
+		if m[old] {
+			m[next] = true
+			delete(m, old)
+		}
+	}
+}
+
+// missingRLS lists the RLS pieces tbl lacks.
+func (s schemaTables) missingRLS(tbl string) []string {
+	var missing []string
+	if !s.enable[tbl] {
+		missing = append(missing, "ENABLE ROW LEVEL SECURITY")
+	}
+	if !s.force[tbl] {
+		missing = append(missing, "FORCE ROW LEVEL SECURITY")
+	}
+	if !s.policy[tbl] {
+		missing = append(missing, "CREATE POLICY merchant_isolation")
+	}
+	return missing
+}
+
+// merchantOwnedTables returns the merchant-scoped tables the deployed schema
+// declares (sorted). Other schema tests consume it instead of a static list.
+func merchantOwnedTables(t *testing.T) []string {
+	t.Helper()
+	s := deriveSchemaTables(t, loadAllSchema(t))
+	out := make([]string, 0, len(s.merchantScoped))
+	for tbl := range s.merchantScoped {
+		out = append(out, tbl)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // #336: there is no default merchant. The consolidated schema creates the
@@ -100,40 +200,91 @@ func TestConsolidatedSchemaHasNoDefaultMerchant(t *testing.T) {
 	}
 }
 
-func TestConsolidatedSchemaMerchantIDColumns(t *testing.T) {
-	c := loadSchema001(t)
+func TestSchemaMerchantIDColumns(t *testing.T) {
+	c := loadAllSchema(t)
 
 	if strings.Contains(c, "WHERE merchant_id IS NULL") {
-		t.Error("consolidated schema must not contain merchant_id backfill logic")
+		t.Error("schema must not contain merchant_id backfill logic")
 	}
 	if strings.Contains(c, "merchant_id uuid NOT NULL DEFAULT") {
-		t.Error("consolidated schema must not default merchant_id")
+		t.Error("schema must not default merchant_id")
 	}
 	if strings.Contains(c, "current_setting('app.merchant_id'::text, true), ''::text))::uuid,") {
-		t.Error("consolidated schema must not default merchant_id from app.merchant_id")
+		t.Error("schema must not default merchant_id from app.merchant_id")
 	}
-	for _, tbl := range merchantOwnedTables {
-		wantTable := "CREATE TABLE openrails." + tbl
-		if !strings.Contains(c, wantTable) {
-			t.Errorf("001 schema missing merchant-owned table %q", tbl)
+	for tbl, body := range deriveSchemaTables(t, c).blocks {
+		if reMerchantIDCol.MatchString(body) && !strings.Contains(body, "merchant_id uuid NOT NULL") {
+			t.Errorf("merchant-owned table %q must declare merchant_id uuid NOT NULL", tbl)
 		}
-		if !strings.Contains(tableBlock(t, c, tbl), "merchant_id uuid NOT NULL") {
-			t.Errorf("001 schema merchant-owned table %q must declare merchant_id uuid NOT NULL", tbl)
+	}
+}
+
+// TestEveryMerchantIDTableRequiresRLS is the guard: derived from ALL migrations,
+// so a merchant-scoped table added in any future migration must ship RLS.
+func TestEveryMerchantIDTableRequiresRLS(t *testing.T) {
+	c := loadAllSchema(t)
+	s := deriveSchemaTables(t, c)
+
+	if len(s.merchantScoped) < minMerchantScopedTables {
+		t.Fatalf("derived only %d merchant-scoped tables (< %d): schema parsing is broken, the guard would pass vacuously",
+			len(s.merchantScoped), minMerchantScopedTables)
+	}
+	// Sentinels from migrations beyond the baseline: proves later migrations are
+	// actually being read.
+	for _, tbl := range []string{"payments", "customer_invoice_profiles", "payment_settlement_events"} {
+		if !s.merchantScoped[tbl] {
+			t.Fatalf("expected %q in the derived merchant-scoped set", tbl)
 		}
-		if !strings.Contains(c, "ALTER TABLE ONLY openrails."+tbl+" FORCE ROW LEVEL SECURITY") {
-			t.Errorf("001 schema missing FORCE ROW LEVEL SECURITY for %q", tbl)
+	}
+
+	for tbl := range s.merchantScoped {
+		if s.rlsExemptMarked[tbl] {
+			continue
 		}
-		if !strings.Contains(c, "ALTER TABLE openrails."+tbl+" ENABLE ROW LEVEL SECURITY") {
-			t.Errorf("001 schema missing ENABLE ROW LEVEL SECURITY for %q", tbl)
+		if missing := s.missingRLS(tbl); len(missing) > 0 {
+			t.Errorf("merchant-scoped table %q missing %v — every merchant_id table needs the standard "+
+				"merchant_isolation RLS, or an explicit '%s ...' table COMMENT", tbl, missing, rlsExemptMarker)
 		}
-		if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails."+tbl) {
-			t.Errorf("001 schema missing merchant_isolation policy for %q", tbl)
+	}
+}
+
+// TestRLSExemptionsAreClassifiedAndReviewed: every table without a
+// merchant_isolation policy must declare itself RLS-exempt in a table COMMENT,
+// and the exempt set must be exactly the reviewed list — a new global table
+// fails here until it is added deliberately.
+func TestRLSExemptionsAreClassifiedAndReviewed(t *testing.T) {
+	s := deriveSchemaTables(t, loadAllSchema(t))
+
+	var unpoliced []string
+	for tbl := range s.blocks {
+		if !s.policy[tbl] {
+			unpoliced = append(unpoliced, tbl)
+		}
+	}
+	sort.Strings(unpoliced)
+
+	want := append([]string{}, rlsExemptTables...)
+	sort.Strings(want)
+	if strings.Join(unpoliced, ",") != strings.Join(want, ",") {
+		t.Errorf("tables without a merchant_isolation policy = %v, reviewed exemption list = %v; "+
+			"a merchant-scoped table needs RLS, a global one needs adding here plus an '%s ...' table COMMENT",
+			unpoliced, want, rlsExemptMarker)
+	}
+	for _, tbl := range rlsExemptTables {
+		if _, ok := s.blocks[tbl]; !ok {
+			t.Errorf("exempt table %q does not exist in the schema", tbl)
+		}
+		if !s.rlsExemptMarked[tbl] {
+			t.Errorf("exempt table %q lacks a COMMENT ON TABLE ... '%s ...' marker", tbl, rlsExemptMarker)
+		}
+		if s.merchantScoped[tbl] {
+			t.Errorf("exempt table %q carries merchant_id: it is tenant data and must be RLS-protected", tbl)
 		}
 	}
 }
 
 func TestConsolidatedSchemaClassifiesGlobalTables(t *testing.T) {
-	c := loadSchema001(t)
+	c := loadAllSchema(t)
 	for _, want := range []string{
 		"COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory",
 		"GLOBAL (control-plane) table",
@@ -141,7 +292,7 @@ func TestConsolidatedSchemaClassifiesGlobalTables(t *testing.T) {
 		"RLS-exempt by design: instance-level credential state, not tenant data",
 	} {
 		if !strings.Contains(c, want) {
-			t.Errorf("001 schema missing global/control-plane table classification %q", want)
+			t.Errorf("schema missing global/control-plane table classification %q", want)
 		}
 	}
 }
@@ -157,55 +308,6 @@ func TestConsolidatedSchemaHasNoMerchantSettingsTable(t *testing.T) {
 	if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails.merchant_configurations") {
 		t.Error("merchant_configurations must remain RLS protected")
 	}
-}
-
-func TestEveryMerchantIDTableRequiresRLS(t *testing.T) {
-	c := loadSchema001(t)
-	covered := make(map[string]bool, len(merchantOwnedTables))
-	for _, tbl := range merchantOwnedTables {
-		covered[tbl] = true
-	}
-	for tbl, body := range createTableBlocks(c) {
-		if !strings.Contains(body, "merchant_id") {
-			continue
-		}
-		if !covered[tbl] {
-			t.Errorf("table %q has merchant_id but is not listed in merchantOwnedTables", tbl)
-			continue
-		}
-		for _, want := range []string{
-			"ALTER TABLE ONLY openrails." + tbl + " FORCE ROW LEVEL SECURITY",
-			"ALTER TABLE openrails." + tbl + " ENABLE ROW LEVEL SECURITY",
-			"CREATE POLICY merchant_isolation ON openrails." + tbl,
-		} {
-			if !strings.Contains(c, want) {
-				t.Errorf("merchant_id table %q missing %q", tbl, want)
-			}
-		}
-	}
-	for _, tbl := range merchantOwnedTables {
-		if _, ok := createTableBlocks(c)[tbl]; !ok {
-			t.Errorf("merchantOwnedTables includes missing table %q", tbl)
-		}
-	}
-}
-
-func createTableBlocks(schema string) map[string]string {
-	re := regexp.MustCompile(`(?s)CREATE TABLE openrails\.([a-z0-9_]+) \((.*?)\n\);`)
-	out := map[string]string{}
-	for _, m := range re.FindAllStringSubmatch(schema, -1) {
-		out[m[1]] = m[2]
-	}
-	return out
-}
-
-func tableBlock(t *testing.T, schema, table string) string {
-	t.Helper()
-	block, ok := createTableBlocks(schema)[table]
-	if !ok {
-		t.Fatalf("missing CREATE TABLE block for %s", table)
-	}
-	return block
 }
 
 func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {

@@ -24,17 +24,22 @@ func TestConsolidatedSchemaEnablesRLSAndAppRole(t *testing.T) {
 	}
 }
 
-func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
-	c := loadSchema001(t)
-	tables := append([]string{}, merchantOwnedTables...)
-	tables = append(tables,
+// Named sentinels on top of the derived guard in merchant_aware_schema_test.go:
+// these tables must always be merchant-isolated, whatever the derivation says.
+func TestSchemaCoversTenantOwnedRLSTables(t *testing.T) {
+	s := deriveSchemaTables(t, loadAllSchema(t))
+	for _, tbl := range []string{
 		"usage_events",
 		"invoices",
 		"payer_spend_limits",
-	)
-	for _, tbl := range tables {
-		if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails."+tbl) {
-			t.Errorf("001 schema missing RLS policy for %q", tbl)
+		"payments",
+		"customers",
+		"merchant_secrets",
+		"payment_settlement_events",
+		"psps", // renamed from rail_merchant_accounts in 0003: RLS state follows the rename
+	} {
+		if missing := s.missingRLS(tbl); len(missing) > 0 {
+			t.Errorf("schema missing RLS %v for %q", missing, tbl)
 		}
 	}
 }
