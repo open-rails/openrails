@@ -155,7 +155,7 @@ func (s *MoneyService) loadCatalogCreditPurchase(ctx context.Context, productKey
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	var row catalogCreditPurchaseRow
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Pool().Query(ctx, `
+		rows, err := s.db.Qx(ctx).Query(ctx, `
 SELECT p.key, cpp.credit_key, cb.unit, cpp.currency, cb.expires_hours, cpp.input_min, cpp.input_max, cpp.price
 FROM openrails.catalog_credit_purchase_prices cpp
 JOIN openrails.products p
@@ -218,7 +218,8 @@ func (s *MoneyService) qualifyCatalogCreditUnit(ctx context.Context, unit string
 			return "", err
 		}
 		var slug string
-		if err := s.db.Pool().QueryRow(ctx, `SELECT slug FROM openrails.merchants WHERE id = $1`, tid.UUID()).Scan(&slug); err != nil {
+		// merchants is a global (no-RLS) table, but Qx applies the #471 schema rewrite.
+		if err := s.db.Qx(ctx).QueryRow(ctx, `SELECT slug FROM openrails.merchants WHERE id = $1`, tid.UUID()).Scan(&slug); err != nil {
 			return "", err
 		}
 		unit = slug + "/" + unit

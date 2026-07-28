@@ -32,6 +32,11 @@ type CleanupConfig struct {
 	// (openrails.webhook_events, #678) are kept. Default: 90 days — the same
 	// window as the Redis completed-key cache TTL.
 	WebhookEventRetention time.Duration
+
+	// PaymentSettlementAckedRetention is how long acknowledged (delivered)
+	// payment settlement events (#827) are kept. Default: 30 days. Pending
+	// (unacked) events are never pruned.
+	PaymentSettlementAckedRetention time.Duration
 }
 
 // DefaultCleanupConfig is the ONE defaults path (#711): worker registration
@@ -42,11 +47,13 @@ func DefaultCleanupConfig() CleanupConfig {
 		NotificationSeenRetention:   90 * 24 * time.Hour,
 		NotificationUnseenRetention: 180 * 24 * time.Hour,
 		WebhookEventRetention:       webhooks.WebhookIdempotencyTTL,
+
+		PaymentSettlementAckedRetention: 30 * 24 * time.Hour,
 	}
 }
 
 func (c CleanupConfig) validate() error {
-	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 {
+	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 || c.PaymentSettlementAckedRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
 	return nil
@@ -71,6 +78,7 @@ type CleanupResult struct {
 	NotificationsSeen       int64
 	NotificationsAll        int64
 	WebhookEvents           int64
+	PaymentSettlements      int64
 }
 
 func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[CleanupExpiredDataArgs]) error {
@@ -119,11 +127,19 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
+	// 4. Retention for acked payment settlement events (#827)
+	result.PaymentSettlements, err = w.cleanupPaymentSettlements(ctx, now, config.PaymentSettlementAckedRetention)
+	if err != nil {
+		logger.WithError(err).Error("Failed to cleanup acked payment settlements")
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+
 	logger.WithFields(log.Fields{
 		"checkout_sessions_expired": result.CheckoutSessionsExpired,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,
+		"payment_settlements":       result.PaymentSettlements,
 	}).Info("Cleanup completed")
 
 	if cleanupErr != nil {
@@ -184,6 +200,31 @@ func (w CleanupExpiredDataWorker) cleanupWebhookEvents(ctx context.Context, now 
 			return err
 		}); err != nil {
 			sweepErr = errors.Join(sweepErr, fmt.Errorf("delete webhook events for merchant %s: %w", mid, err))
+		}
+	}
+	return total, sweepErr
+}
+
+// cleanupPaymentSettlements deletes acknowledged (delivered) settlement events
+// older than the retention window (#827). RLS-scoped, so per merchant under
+// MerchantTx like cleanupWebhookEvents. Pending events are never touched.
+func (w CleanupExpiredDataWorker) cleanupPaymentSettlements(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
+	cutoff := now.Add(-retention)
+
+	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup payment settlements: list merchants: %w", err)
+	}
+	var total int64
+	var sweepErr error
+	for _, mid := range merchantIDs {
+		mctx := merchant.WithID(ctx, merchant.ID(mid))
+		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
+			n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, cutoff)
+			total += n
+			return err
+		}); err != nil {
+			sweepErr = errors.Join(sweepErr, fmt.Errorf("delete payment settlements for merchant %s: %w", mid, err))
 		}
 	}
 	return total, sweepErr
