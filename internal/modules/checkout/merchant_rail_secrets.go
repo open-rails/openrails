@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -172,7 +173,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 		scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
 		switch {
 		case err != nil:
-			log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
 		case len(scopes) == 1:
 			adopt(scopes[0])
 		case len(scopes) > 1:
@@ -192,7 +193,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
 		scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
 		} else if found {
 			adopt(scope)
 		}
