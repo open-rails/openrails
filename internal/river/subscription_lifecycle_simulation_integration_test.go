@@ -42,7 +42,7 @@ import (
 // tick calls the workers' entry points directly.
 //
 // Doctrine asserted throughout (derived from the code, not invented):
-//   - subscriptions.DunningWindow / DunningMaxFailures / DunningRetryOffsets
+//   - collection.Window / MaxFailures / RetryOffsets
 //     (internal/modules/subscriptions/dunning.go): a >=28-day ("monthly")
 //     billing cycle retries at +2d/+5d/+9d/+13d after the first failure (5
 //     failures total) and stays recoverable for a 14-day window.
@@ -84,7 +84,7 @@ func TestSubscriptionLifecycleSimulation(t *testing.T) {
 
 const (
 	// simCycleHours is the "monthly" tier (>=28d): retry offsets +2/+5/+9/+13d,
-	// dunning window 14d, max 5 failures (subscriptions.Dunning* in dunning.go).
+	// dunning window 14d, max 5 failures (collection.RetryOffsets/Window/MaxFailures).
 	simCycleHours = 30 * 24
 )
 
@@ -529,7 +529,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 
 // testExhaustedDunning: every scheduled retry is declined (soft — never a
 // hard/non-retryable decline) until the monthly schedule's 5-failure budget
-// (subscriptions.DunningMaxFailures) is exhausted. Only then — certainty, not
+// (collection.MaxFailures) is exhausted. Only then — certainty, not
 // a guess — does the subscription terminally cancel and lose its
 // entitlement. No credit is ever granted for the un-renewed cycle.
 func testExhaustedDunning(t *testing.T, ctx context.Context, dbi *db.DB) {
@@ -546,7 +546,7 @@ func testExhaustedDunning(t *testing.T, ctx context.Context, dbi *db.DB) {
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 	convergeToFixpoint(t, ctx, rig.engine, scope)
 
-	// 5 soft declines: subscriptions.DunningMaxFailures(720h) == 5 (offsets
+	// 5 soft declines: collection.MaxFailures(720h) == 5 (offsets
 	// +2/+5/+9/+13d plus the initial failure). Never approved — exhaustion is
 	// the point.
 	stub.enqueue(nmiSoftDeclined, nmiSoftDeclined, nmiSoftDeclined, nmiSoftDeclined, nmiSoftDeclined)

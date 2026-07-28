@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -346,7 +347,7 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
-	maxFailures := DunningMaxFailures(30 * 24) // monthly schedule: 5 recorded failures
+	maxFailures := collection.MaxFailures(30 * 24) // monthly schedule: 5 recorded failures
 	for i := 1; i < maxFailures; i++ {
 		require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
 			Rail:           models.RailNMI,

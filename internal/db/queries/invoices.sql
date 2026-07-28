@@ -339,6 +339,41 @@ WHERE merchant_id = $1
   AND amount_due > 0
   AND last_collection_failure_code = 'collection_attempt_in_progress';
 
+-- name: ListUnknownOutcomeInvoices :many
+-- #828: invoices parked collection_outcome_unknown, due for the verifier's
+-- provider read. Indexed by activity, not by records on file.
+SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
+       i.collection_failure_count, i.collection_failed_at
+FROM openrails.invoices i
+WHERE i.merchant_id = $1
+  AND i.last_collection_failure_code = 'collection_outcome_unknown'
+  AND i.updated_at <= sqlc.arg(resolvable_before)::timestamptz
+ORDER BY i.updated_at ASC
+LIMIT sqlc.arg(batch)::bigint;
+
+-- name: GetLatestAttemptedInvoicePayment :one
+-- #828: the in-flight claimed attempt an unknown outcome hangs off.
+SELECT * FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = $3
+  AND status = 'attempted'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: ResolveInvoiceCollectionUnknown :execrows
+-- #828: an unknown outcome was RESOLVED (verifier provider read, or admin
+-- unpark): clear the park so the schedule resumes. Status stays past_due.
+UPDATE openrails.invoices
+SET last_collection_failure_code = NULL,
+    last_collection_failure_message = NULL,
+    next_collection_attempt_at = sqlc.narg(next_attempt_at)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = sqlc.arg(invoice_id)
+  AND last_collection_failure_code = 'collection_outcome_unknown';
+
 -- name: ReleaseInvoiceCollectionRetry :execrows
 UPDATE openrails.invoices
 SET status = sqlc.arg(status)::text,

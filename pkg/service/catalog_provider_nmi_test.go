@@ -135,6 +135,44 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	}
 }
 
+// TestNMIAdapter_ProviderMetadataIsResolvedPSPKey proves #845: link metadata
+// records the merchant's OWN PSP key, not a hardcoded "mobius".
+func TestNMIAdapter_ProviderMetadataIsResolvedPSPKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(nmiPlanQueryJSON("pro-usd-9990000-30", "Pro", "9.99", "30")))
+	}))
+	t.Cleanup(server.Close)
+	svc := &Service{rt: &app.Runtime{
+		Config: &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull},
+		RailConfigs: railresolve.FixedSet{"acme": {
+			Rail:      models.RailNMI,
+			AccountID: "200001",
+			NMI:       &config.NMIRailConfig{SecurityKey: "acme-key"},
+		}},
+	}}
+	a := &nmiAdapter{svc: svc, testEndpointURL: server.URL}
+
+	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
+		PriceID: uuid.New(), ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ids[models.RailKeyProvider] != "acme" {
+		t.Fatalf("AutoCreate provider must be the resolved PSP key: %v", ids)
+	}
+
+	ids, err = a.Attach(context.Background(),
+		map[string]string{models.RailKeyPlanID: "pro-usd-9990000-30"},
+		autoCreateContext{ProductKey: "pro", Currency: "usd", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ids[models.RailKeyProvider] != "acme" {
+		t.Fatalf("Attach default provider must be the resolved PSP key: %v", ids)
+	}
+}
+
 // TestMobiusAdapter_AutoCreateTargetsSecondaryAccount proves #641 catalog
 // secondary-sync routing: with a TargetAccountID set, AutoCreate uses THAT
 // account's NMI client (not the primary alias), so a catalog push reaches the

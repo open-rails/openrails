@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,7 @@ import (
 // the network pull (the fakeCranker returns a chosen outcome — success, a real
 // on-chain error string, or an RPC error). The classifier
 // (recurring.ClassifyCrankError) and the scheduling/dunning logic
-// (subscriptions.DunningRetryOffsets, #359 cadence-relative) under test are the
+// (collection.RetryOffsets, #359 cadence-relative) under test are the
 // REAL production code paths. The fakeLifecycle models exactly what the real
 // SubscriptionLifecycleService does on FailMembership: escalate RetryAttempts
 // and cancel at the schedule's max failures.
@@ -109,7 +110,7 @@ func (l *fakeLifecycle) FailMembership(_ context.Context, p *subscriptions.FailM
 	l.failures++
 	l.lastFail = p
 	// Mirror the production lifecycle: cancel once RetryAttempts reaches the cap.
-	if l.failures >= subscriptions.DunningMaxFailures(smCycleHours) {
+	if l.failures >= collection.MaxFailures(smCycleHours) {
 		l.cancelled = true
 	}
 	return nil
@@ -241,7 +242,7 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 	// SPL token InsufficientFunds -> recoverable per the real classifier.
 	insufficient := errors.New(`Transaction failed: custom program error: 0x1 {"InstructionError":[0,{"Custom":1}]}`)
 
-	maxFailures := subscriptions.DunningMaxFailures(smCycleHours)
+	maxFailures := collection.MaxFailures(smCycleHours)
 	for attempt := 1; attempt <= maxFailures; attempt++ {
 		now := h.w.now()
 		h.crank.err = insufficient
@@ -253,7 +254,7 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 		// rescheduled by the schedule's gap for this failure count, not by one
 		// period. The terminal failure has no gap: the crank then advances one
 		// period so the cancelled record doesn't hot-loop.
-		gap := subscriptions.DunningNextRetryIn(smCycleHours, attempt)
+		gap := collection.NextRetryIn(smCycleHours, attempt)
 		if gap == 0 {
 			gap = time.Duration(smPeriodHours) * time.Hour
 		}

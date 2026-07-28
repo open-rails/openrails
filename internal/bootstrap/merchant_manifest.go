@@ -1506,12 +1506,10 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		return "", fmt.Errorf("merchant bootstrap: control plane core unavailable")
 	}
 
-	// Ensure the root group + containment exist before creating typed groups.
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return "", fmt.Errorf("merchant bootstrap: ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return "", fmt.Errorf("merchant bootstrap: seed containment: %w", err)
+	// Ensure the root group + containment exist before creating typed groups
+	// (concurrent-boot tolerant, #844).
+	if err := controlplane.EnsureRootContainment(ctx, core); err != nil {
+		return "", fmt.Errorf("merchant bootstrap: %w", err)
 	}
 
 	// Idempotently create the merchant permission-group (resolve, else create).
@@ -1523,7 +1521,14 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 			ParentPersona: authcore.RootPersona,
 		})
 		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
+			// #844: concurrent first-create loser — re-read and adopt the
+			// winner's group (the Reconcile path holds an advisory lock, but
+			// ProvisionMerchant callers do not).
+			id, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+			if rerr != nil {
+				return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
+			}
+			groupID = id
 		}
 	} else if err != nil {
 		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)

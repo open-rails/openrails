@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -359,7 +360,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}
 			// plan.retryAttempts was loaded BEFORE the FailMembership above
 			// recorded this failure, so the schedule gap is looked up at +1.
-			gap := subscriptions.DunningNextRetryIn(plan.cycleHours, plan.retryAttempts+1)
+			gap := collection.NextRetryIn(plan.cycleHours, plan.retryAttempts+1)
 			if gap <= 0 {
 				// That failure was terminal under the schedule (FailMembership
 				// cancelled the membership); advance one period so this record
@@ -478,7 +479,7 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 		fingerprint:     fingerprint,
 		fiatAmount:      price.Amount,
 		currency:        price.Currency,
-		cycleHours:      subscriptions.BillingCycleHoursOf(price),
+		cycleHours:      collection.BillingCycleHoursOf(price),
 		retryAttempts:   retryAttempts,
 	}, nil
 }

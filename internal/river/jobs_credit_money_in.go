@@ -184,8 +184,11 @@ type InvoiceWorker struct {
 	DB      *db.DB
 	Money   *money.MoneyService
 	Charger money.Charger
-	Config  *config.Config
-	Clock   clockwork.Clock
+	// Verifier resolves collection_outcome_unknown invoices by provider READ
+	// before each collection pass (#828). nil skips resolution (the park holds).
+	Verifier money.CollectionVerifier
+	Config   *config.Config
+	Clock    clockwork.Clock
 }
 
 func (InvoiceWorker) Kind() string { return KindInvoice }
@@ -242,6 +245,20 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 			return err
 		} else if n > 0 {
 			logger.WithField("invoices", n).Info("invoices marked past_due")
+		}
+		// #828: resolve parked collection_outcome_unknown invoices by provider
+		// READ before charging. Runs under every mode (verification is read-only
+		// plus local repair, same posture as the intent verifier); a failure must
+		// not block the rest of the pass.
+		if w.Verifier != nil {
+			if stats, err := w.Money.ResolveUnknownInvoiceCollections(ctx, w.Verifier); err != nil {
+				logger.WithError(err).Warn("invoice unknown-outcome resolution failed; parked invoices retry next pass")
+			} else if stats.Examined > 0 {
+				logger.WithFields(log.Fields{
+					"examined": stats.Examined, "settled": stats.Settled,
+					"released": stats.Released, "skipped": stats.Skipped,
+				}).Info("invoice unknown-outcome resolution pass complete")
+			}
 		}
 		if w.Config != nil && w.Config.IsLimitedMode() {
 			logger.Warn("limited mode: skipping invoice collection charges (#345)")

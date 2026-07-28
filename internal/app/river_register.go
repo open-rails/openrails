@@ -225,11 +225,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.InvoiceWorker{
-		DB:      r.DB,
-		Money:   r.MoneyService,
-		Charger: r.MoneyCharger,
-		Config:  r.Config,
-		Clock:   clock,
+		DB:       r.DB,
+		Money:    r.MoneyService,
+		Charger:  r.MoneyCharger,
+		Verifier: r.CollectionResolver,
+		Config:   r.Config,
+		Clock:    clock,
 	}); err != nil {
 		return fmt.Errorf("add invoice worker: %w", err)
 	}

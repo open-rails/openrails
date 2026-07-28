@@ -7,6 +7,8 @@ package webhookauth
 
 import (
 	"context"
+	"net"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -43,20 +45,26 @@ func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProb
 	if !iputil.IPInAnyCIDR(clientIP, cfg.CCBillWebhookIPAllowlist) {
 		return false
 	}
+	// Log only the parsed form: validates the header-derived value (no log
+	// injection) and never echoes raw request bytes.
+	logIP := "invalid"
+	if ip := net.ParseIP(strings.TrimSpace(clientIP)); ip != nil {
+		logIP = ip.String()
+	}
 	if probe == nil {
-		log.WithField("client_ip", clientIP).Warn("ccbill webhook: declared allowlist entry refused - no live-psp probe available")
+		log.WithField("client_ip", logIP).Warn("ccbill webhook: declared allowlist entry refused - no live-psp probe available")
 		return false
 	}
 	presence, err := probe(ctx)
 	if err != nil {
-		log.WithError(err).WithField("client_ip", clientIP).Warn("ccbill webhook: live-psp probe failed; refusing declared allowlist entry")
+		log.WithError(err).WithField("client_ip", logIP).Warn("ccbill webhook: live-psp probe failed; refusing declared allowlist entry")
 		return false
 	}
 	if presence != merchants.LiveRailAbsent {
-		log.WithFields(log.Fields{"client_ip": clientIP, "live_psps": presence.String()}).
+		log.WithFields(log.Fields{"client_ip": logIP, "live_psps": presence.String()}).
 			Warn("ccbill webhook: declared allowlist entry refused - live ccbill psp exists or could not be ruled out")
 		return false
 	}
-	log.WithField("client_ip", clientIP).Debug("ccbill webhook: declared allowlist entry accepted - sandbox posture, no live ccbill psp")
+	log.WithField("client_ip", logIP).Debug("ccbill webhook: declared allowlist entry accepted - sandbox posture, no live ccbill psp")
 	return true
 }

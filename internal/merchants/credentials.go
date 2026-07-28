@@ -336,6 +336,51 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	return scope.exported(), true, nil
 }
 
+// ActivePSPScopesForRail lists every non-archived provider account declared on
+// rail/environment, newest first. Checkout uses it to accept a bare rail-kind
+// selector only when it is unambiguous (#848).
+func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, rail, environment string) ([]PSPScope, error) {
+	if s == nil || s.pool == nil || id.IsZero() {
+		return nil, nil
+	}
+	rail = normalizeProviderSecretType(rail)
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return nil, fmt.Errorf("provider account environment must be live or test")
+	}
+	var out []PSPScope
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
+				  FROM openrails.psps
+				 WHERE merchant_id = $1::uuid
+				   AND rail = lower($2)
+				   AND environment = $3
+				   AND archived = false
+				 ORDER BY created_at DESC, id DESC
+			`, id.String(), rail, environment)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		out = out[:0]
+		for rows.Next() {
+			var scope pspSecretScope
+			var evidence []byte
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
+				return err
+			}
+			scope.settings = pspSettings(evidence)
+			out = append(out, scope.exported())
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list provider accounts %s/%s: %w", rail, environment, err)
+	}
+	return out, nil
+}
+
 // pspSecretScopeByAccountID resolves the secret scope for a specific
 // account by its account_id (#641). Archived accounts remain addressable for
 // inbound webhooks and existing provider-bound obligations.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -105,10 +106,30 @@ var knownRails = map[string]struct{}{
 	string(models.RailSolana): {},
 }
 
+// AmbiguousRailError reports a bare rail-kind selector that matched more than
+// one armed PSP: the wire must name the PSP key (#848).
+type AmbiguousRailError struct {
+	Rail string
+	Keys []string
+}
+
+func (e *AmbiguousRailError) Error() string {
+	return fmt.Sprintf("ambiguous rail %q: multiple armed PSPs (%s); pass the PSP key", e.Rail, strings.Join(e.Keys, ", "))
+}
+
+// UnknownRailError reports a wire selector that is neither a declared PSP key
+// nor a rail kind.
+type UnknownRailError struct{ Selector string }
+
+func (e *UnknownRailError) Error() string {
+	return fmt.Sprintf("unknown payment provider %q: not a declared PSP key or a rail (nmi, ccbill, stripe, solana)", e.Selector)
+}
+
 // resolveRailTarget resolves a requested checkout provider name. The name is
-// either a declared account key ("mobius"), or a rail name — reserved gateways
-// (stripe/ccbill/solana) are their own account names, and a bare rail resolves
-// to its active armed account. Unknown names fail loudly.
+// either a declared PSP key ("mobius"), or a rail kind — reserved gateways
+// (stripe/ccbill/solana) are their own PSP names, and a bare rail kind resolves
+// to its armed PSP only when that is unambiguous (exactly one armed account).
+// Unknown names and ambiguous rail kinds fail loudly.
 func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested string) (railTarget, error) {
 	name := strings.ToLower(strings.TrimSpace(requested))
 	if name == "" {
@@ -116,7 +137,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	}
 	_, isRail := knownRails[name]
 
-	// Declared account key wins (a rail-named account resolves identically).
+	// Declared PSP key wins (a rail-named account resolves identically).
 	if keys, ok := s.ProviderSecrets.(merchants.PSPKeyResolver); ok {
 		if tid, err := merchant.Require(ctx); err == nil {
 			scope, found, err := keys.PSPScopeByKey(ctx, tid, name, s.pspEnvironment())
@@ -130,27 +151,71 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	}
 
 	if !isRail {
-		return railTarget{}, fmt.Errorf("unknown payment provider %q: not a declared account key or a rail (nmi, ccbill, stripe, solana)", name)
+		return railTarget{}, &UnknownRailError{Selector: name}
 	}
 
-	// Bare rail: arming picks the provider. The active account's key becomes
-	// the provider so plan links resolve; an unwired resolver leaves the rail
-	// name (single-account deployments declare links under it).
+	// Bare rail kind: arming picks the PSP, and only an unambiguous match may.
+	// The armed account's key becomes the PSP so plan links resolve; an unwired
+	// resolver leaves the rail name (single-account deployments declare links
+	// under it).
 	target := railTarget{PSP: name, Rail: name}
-	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
-		if tid, err := merchant.Require(ctx); err == nil {
-			scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
-			if err != nil {
-				log.WithContext(ctx).WithError(err).WithField("rail", name).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
-			} else if found {
-				target.Scope = &scope
-				if key := strings.ToLower(strings.TrimSpace(scope.Key)); key != "" {
-					target.PSP = key
+	adopt := func(scope merchants.PSPScope) {
+		target.Scope = &scope
+		if key := strings.ToLower(strings.TrimSpace(scope.Key)); key != "" {
+			target.PSP = key
+		}
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return target, nil
+	}
+	if lister, ok := s.ProviderSecrets.(merchants.PSPRailScopesResolver); ok {
+		scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
+		switch {
+		case err != nil:
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+		case len(scopes) == 1:
+			adopt(scopes[0])
+		case len(scopes) > 1:
+			keys := make([]string, 0, len(scopes))
+			for _, scope := range scopes {
+				key := strings.ToLower(strings.TrimSpace(scope.Key))
+				if key == "" {
+					key = scope.AccountID
 				}
+				keys = append(keys, key)
 			}
+			return railTarget{}, &AmbiguousRailError{Rail: name, Keys: keys}
+		}
+		return target, nil
+	}
+	// Legacy resolvers without the list capability: single-account semantics.
+	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
+		scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
+		if err != nil {
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+		} else if found {
+			adopt(scope)
 		}
 	}
 	return target, nil
+}
+
+// CheckoutRailUsable reports whether a wire payment.rail selector (a PSP key,
+// or an unambiguous rail kind) lands on an armed PSP for the ctx merchant.
+// nil means usable; the error carries the reject reason. Fail closed.
+func (s *CheckoutService) CheckoutRailUsable(ctx context.Context, selector string) error {
+	if s == nil {
+		return errors.New("unsupported rail")
+	}
+	target, err := s.resolveRailTarget(ctx, selector)
+	if err != nil {
+		return err
+	}
+	if target.Scope == nil {
+		return errors.New("unsupported rail")
+	}
+	return nil
 }
 
 // ResolvePSPID resolves the provider account for new work on

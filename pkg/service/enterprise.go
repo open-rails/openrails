@@ -286,6 +286,50 @@ func (s *Service) ChargeOutstanding(ctx context.Context, minThreshold int64) (in
 	return n, err
 }
 
+// InvoiceUnknownResolutionDTO mirrors one #828 unknown-outcome resolver pass.
+type InvoiceUnknownResolutionDTO struct {
+	Examined int `json:"examined"`
+	Settled  int `json:"settled"`
+	Released int `json:"released"`
+	Skipped  int `json:"skipped"`
+}
+
+// ResolveUnknownInvoiceCollections resolves invoices parked
+// collection_outcome_unknown by provider READ through the runtime collection
+// plane (#828). The scheduled invoice worker runs this automatically; the
+// service surface exists for on-demand operator runs.
+func (s *Service) ResolveUnknownInvoiceCollections(ctx context.Context) (InvoiceUnknownResolutionDTO, error) {
+	if s == nil || s.rt == nil {
+		return InvoiceUnknownResolutionDTO{}, fmt.Errorf("service not initialized")
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return InvoiceUnknownResolutionDTO{}, err
+	}
+	if rt.CollectionResolver == nil {
+		return InvoiceUnknownResolutionDTO{}, fmt.Errorf("collection plane not configured")
+	}
+	var stats money.InvoiceUnknownResolution
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		stats, e = s.moneyService().ResolveUnknownInvoiceCollections(ctx, rt.CollectionResolver)
+		return e
+	})
+	return InvoiceUnknownResolutionDTO(stats), err
+}
+
+// UnparkInvoiceCollection is the ADMIN escape hatch for unknown-outcome
+// residue the verifier cannot classify (#828): it clears the park by operator
+// judgment so the collection schedule resumes. If the in-doubt charge DID
+// settle at the provider, unparking can lead to a second charge — confirm
+// provider-side first.
+func (s *Service) UnparkInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	return s.moneyService().UnparkInvoiceCollection(ctx, payer, invoiceID)
+}
+
 // RecordOutOfBandInvoicePayment applies a manual remittance (wire/check) to a
 // send_invoice (or any open) receivable. reference dedups replays.
 func (s *Service) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, amount int64, reference string) (*InvoiceDTO, error) {

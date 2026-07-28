@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
@@ -98,8 +99,8 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(userID)
 
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour)       // within the derived monthly dunning window (#359)
-	retryAttempts := subscriptions.DunningMaxFailures(30*24) - 1 // the next failure is the 5th = terminal
+	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour) // within the derived monthly dunning window (#359)
+	retryAttempts := collection.MaxFailures(30*24) - 1     // the next failure is the 5th = terminal
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:              userID,
@@ -162,7 +163,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 
 	userID := uuid.New().String()
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	retryAttempts := subscriptions.DunningMaxFailures(30*24) - 1
+	retryAttempts := collection.MaxFailures(30*24) - 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,
@@ -211,7 +212,7 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 
 	userID := uuid.New().String()
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	retryAttempts := subscriptions.DunningMaxFailures(30*24) - 1
+	retryAttempts := collection.MaxFailures(30*24) - 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,

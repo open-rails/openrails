@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -86,8 +85,8 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	if !checkoutRailConfigured(r, req.Payment.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "unsupported rail")
+	if err := checkoutRailUsable(r, req.Payment.Rail); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	req.IdempotencyKey = middleware.IdempotencyKeyFromRequest(r.Request)
@@ -125,27 +124,23 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
-// checkoutRailConfigured reports whether rail is usable for this request's
-// checkout: ANY rail with an active armed psps row for the
-// request merchant + environment (#775/#788 — the ONE resolution seam; how
-// the account was armed, manifest or API, is invisible here). Fail closed on
-// resolution errors.
-func checkoutRailConfigured(r *httprequest.Request, rail string) bool {
-	if r == nil || r.State == nil {
-		return false
+// checkoutRailUsable pre-gates the wire payment.rail selector: a PSP key, or a
+// rail kind resolving to exactly one armed PSP, must land on an armed account
+// for the request merchant + environment (#848; #775/#788 — the ONE resolution
+// seam via checkout's resolveRailTarget; how the account was armed, manifest
+// or API, is invisible here). nil = usable; the error is the 400 message.
+// Fail closed on missing wiring/merchant and on resolution errors.
+func checkoutRailUsable(r *httprequest.Request, rail string) error {
+	unsupported := errors.New("unsupported rail")
+	if r == nil || r.State == nil || r.State.CheckoutService == nil {
+		return unsupported
 	}
-	if r.State.Merchants == nil {
-		return false
+	if _, ok := merchant.FromContext(r.Request.Context()); !ok {
+		return unsupported
 	}
-	mid, ok := merchant.FromContext(r.Request.Context())
-	if !ok {
-		return false
-	}
-	// Environment follows deployment posture (#681): test rows under test_mode.
-	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
-	_, ok, err := r.State.Merchants.ActivePSPScope(r.Request.Context(), mid, rail, env)
-	return err == nil && ok
+	return r.State.CheckoutService.CheckoutRailUsable(r.Request.Context(), rail)
 }
+
 func GetCheckoutSession(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
