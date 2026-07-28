@@ -214,6 +214,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 	if token == "" {
 		return nil, ErrDelegatedInvalid
 	}
+	c.refreshIssuerRegistryIfStale()
 
 	cl, principal, err := c.delegatedVerifier.VerifyDelegatedAccess(token)
 	if err != nil {

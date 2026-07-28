@@ -4,11 +4,37 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// DefaultIssuerRegistryTTL bounds how stale the delegated verifier's in-memory
+// issuer registry may be against OUT-OF-BAND store writes (#852: the CLI
+// `push-merchant-config` runs in a separate process, so no in-process reload
+// sees its UpsertRemoteApplication). The verifier already lazy-loads brand-new
+// issuers on first miss; this TTL additionally converges the cases a miss never
+// triggers — rotated static keys / changed jwks_uri on an already-loaded
+// issuer, and disable/revocation eviction. Refresh is activity-driven: a
+// verification older than the TTL kicks ONE async re-sync; an idle server does
+// no periodic work.
+const DefaultIssuerRegistryTTL = time.Minute
+
+// issuerRegistryRefreshTimeout caps one background re-sync (DB list + per-new-issuer
+// JWKS fetches).
+const issuerRegistryRefreshTimeout = 30 * time.Second
+
+// issuerRegistryRefresh is the activity-driven TTL state for the delegated
+// verifier's issuer registry. Zero value is ready to use.
+type issuerRegistryRefresh struct {
+	lastLoad atomic.Int64 // unix nanos of the last successful registry load
+	ttl      atomic.Int64 // nanos; <=0 => DefaultIssuerRegistryTTL
+	busy     atomic.Bool  // single-flights the background re-sync
+}
 
 // ErrDelegatedIssuerUnknown indicates a presented token's validated `iss` is not
 // a registered AuthKit remote_application mapped via permission-group ownership to an
@@ -25,7 +51,11 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
 	}
-	return c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences)
+	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences); err != nil {
+		return err
+	}
+	c.issuerRefresh.lastLoad.Store(time.Now().UnixNano())
+	return nil
 }
 
 // ReloadRemoteApplications re-syncs the verifier's in-memory issuer registry with
@@ -34,6 +64,49 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 // this is for deterministic reloads — e.g. after an inbound registration).
 func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 	return c.loadRemoteApplications(ctx)
+}
+
+// SetIssuerRegistryTTL overrides DefaultIssuerRegistryTTL (tests; <=0 restores
+// the default).
+func (c *ControlPlane) SetIssuerRegistryTTL(d time.Duration) {
+	if c == nil {
+		return
+	}
+	c.issuerRefresh.ttl.Store(int64(d))
+}
+
+// refreshIssuerRegistryIfStale kicks ONE async registry re-sync when the last
+// successful load is older than the TTL (#852). Called from the delegated-
+// verifier consumption points, so refresh work scales with verification
+// traffic, never with wall clock. The current request still verifies against
+// the existing registry (brand-new issuers are covered immediately by the
+// verifier's own lazy-load-on-miss); convergence for updates/revocations is
+// bounded by TTL + one reload.
+func (c *ControlPlane) refreshIssuerRegistryIfStale() {
+	if c == nil || c.delegatedVerifier == nil {
+		return
+	}
+	ttl := time.Duration(c.issuerRefresh.ttl.Load())
+	if ttl <= 0 {
+		ttl = DefaultIssuerRegistryTTL
+	}
+	if time.Since(time.Unix(0, c.issuerRefresh.lastLoad.Load())) < ttl {
+		return
+	}
+	if !c.issuerRefresh.busy.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer c.issuerRefresh.busy.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), issuerRegistryRefreshTimeout)
+		defer cancel()
+		// A failure leaves lastLoad unstamped so the next verification retries;
+		// verification meanwhile continues on the stale registry (fail-open on
+		// refresh, fail-closed per token as before).
+		if err := c.loadRemoteApplications(ctx); err != nil {
+			log.WithError(err).Warn("controlplane: issuer-registry TTL refresh failed")
+		}
+	}()
 }
 
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may

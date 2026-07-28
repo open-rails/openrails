@@ -54,6 +54,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 	if token == "" {
 		return nil, ErrDelegatedInvalid
 	}
+	c.refreshIssuerRegistryIfStale()
 
 	// Verify signature/issuer/audience/expiry. Verify() handles the
 	// remote-application-access+jwt profile and resolves STORED authority from the

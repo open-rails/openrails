@@ -61,6 +61,10 @@ type ControlPlane struct {
 	// access tokens. They are the control plane's accepted (expected) audiences, so
 	// every minted token is accepted by delegatedVerifier (and the /v1/me gate).
 	delegatedAudiences []string
+
+	// issuerRefresh drives the activity-based TTL re-sync of delegatedVerifier's
+	// issuer registry against out-of-band store writes (#852, issuer_registry.go).
+	issuerRefresh issuerRegistryRefresh
 }
 
 type options struct {
