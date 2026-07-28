@@ -45,6 +45,7 @@ GET /v1/me/transactions
 GET /v1/me/usage
 GET /v1/merchant/alerts/rules
 GET /v1/merchant/alerts/templates
+GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
@@ -176,6 +177,7 @@ PUT /v1/customers/{customer_id}/spend-delegations:upsert
 PUT /v1/me/payment-methods/{id}
 PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method
+PUT /v1/merchant/api-host
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}/spend-delegations
 PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert
