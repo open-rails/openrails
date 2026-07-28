@@ -76,15 +76,30 @@ func TestCalculateTokenQuote_ZeroAmount(t *testing.T) {
 	require.Equal(t, "0.000000", quote.Amount)
 }
 
-func TestCalculateTokenQuote_EmptyCurrencyDefaultsToUSD(t *testing.T) {
+// #830: an absent currency is refused, never defaulted to "usd".
+func TestCalculateTokenQuote_EmptyCurrencyIsRefused(t *testing.T) {
 	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
 
-	quote, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 10_000_000, "", nil, fakeTokenPriceProvider{"USDC": 1.0})
-	require.NoError(t, err)
-	require.Equal(t, "usd", quote.FXCurrency)
+	for _, currency := range []string{"", "   "} {
+		_, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 10_000_000, currency, nil, fakeTokenPriceProvider{"USDC": 1.0})
+		require.ErrorContains(t, err, "requires a currency")
+	}
+}
+
+// An unregistered code must not reach the FX provider or the persisted quote.
+func TestCalculateTokenQuote_UnregisteredCurrencyIsRefused(t *testing.T) {
+	tokenCfg := config.TokenConfig{
+		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		Decimals: 6,
+	}
+	mockFX := fx.NewMockProvider(map[string]float64{"xyz": 1.0})
+
+	_, err := CalculateTokenQuote(context.Background(), "USDC", tokenCfg, 10_000_000, "xyz", mockFX, fakeTokenPriceProvider{"USDC": 1.0})
+	require.ErrorContains(t, err, "unknown currency")
+	require.Zero(t, mockFX.CallCount)
 }
 
 func TestCalculateTokenQuote_MissingMint(t *testing.T) {

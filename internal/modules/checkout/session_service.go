@@ -1371,8 +1371,11 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 			lifecycle.productName = s.productDisplayName(ctx, newPrice.ProductID)
 		}
 	}
+	// #830: the session's currency denominates the on-chain charge. If the price
+	// lookup failed or the price carries no currency we do not know what to
+	// charge in — fail the request instead of defaulting to "usd".
 	if strings.TrimSpace(sessionCurrency) == "" {
-		sessionCurrency = "usd"
+		return nil, fmt.Errorf("%w: could not resolve the price currency for this subscription", ErrCheckoutSessionValidation)
 	}
 
 	now := s.now()

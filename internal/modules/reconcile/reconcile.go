@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -567,9 +568,17 @@ func ensureChargePayment(
 		return false, nil
 	}
 
+	// #830: a payments row must carry the currency the provider reported. A
+	// charge with none is unusable data, not a "usd" charge — skip + warn so the
+	// row appears on a later backfill once Stripe reports it, rather than
+	// minting a mis-denominated row now.
 	currency := strings.TrimSpace(charge.Currency)
 	if currency == "" {
-		currency = "usd"
+		log.WithContext(ctx).WithFields(log.Fields{
+			"stripe_charge_id": strings.TrimSpace(charge.ID),
+			"transaction_id":   txnID,
+		}).Warn("stripe backfill: charge carries no currency; skipping payment row")
+		return false, nil
 	}
 
 	now := paymentService.Clock().Now()

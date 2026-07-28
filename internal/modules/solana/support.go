@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/internal/modules/money"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -247,9 +248,16 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 		return nil, err
 	}
 
+	// #830: never invent a currency. The FX leg and the resulting on-chain charge
+	// both key off it, so an absent code is a caller bug — not a "usd" default.
+	// Validated against the money registry so an unregistered code cannot reach
+	// the FX provider or the persisted quote.
 	currency = strings.ToLower(strings.TrimSpace(currency))
 	if currency == "" {
-		currency = "usd"
+		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
+	}
+	if err := money.ValidateCurrency(currency); err != nil {
+		return nil, err
 	}
 	if amountMicros <= 0 {
 		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, tokenCfg.Decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil
