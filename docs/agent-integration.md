@@ -84,11 +84,13 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 |---|---|
 | Full embedded guide | [embedded-integration.md](embedded-integration.md) |
 | Full standalone guide | [standalone-integration.md](standalone-integration.md) |
+| Runnable standalone example (entitlement gate + NMI checkout) | [../examples/gated-premium-page/](../examples/gated-premium-page/) |
 | Browser/UI work | [frontend-integration.md](frontend-integration.md) |
 | Why the auth model is shaped this way | [auth.md](auth.md) |
 | Per-rail credentials/webhooks/sandbox | [rails/nmi.md](rails/nmi.md), [rails/stripe.md](rails/stripe.md), [rails/ccbill.md](rails/ccbill.md), [rails/solana.md](rails/solana.md) |
 | Catalog authoring (products/prices/entitlements) | [merchant-guide.md](merchant-guide.md) |
 | Every HTTP route | [api/endpoints.md](api/endpoints.md) |
+| Migrating an existing subscriber base in | [batch-import.md](batch-import.md) |
 | Admin console on/off + usage | [admin-console.md](admin-console.md) |
 | Day-2 ops, safety levers, cutover | [operator-guide.md](operator-guide.md), [operations.md](operations.md) |
 | Vocabulary | [glossary.md](glossary.md) |

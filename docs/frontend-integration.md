@@ -28,8 +28,11 @@ credentials.
 **Standalone**: your session token never leaves your trust domain
 ([docs/auth.md](auth.md)). Instead, your backend exposes a token-exchange endpoint that
 swaps a logged-in session for a delegated JWT (`aud: ["openrails"]`,
-`delegated_sub: <your user id>`, TTL of minutes). The browser caches it and sends it as
-`Authorization: Bearer <token>` to OpenRails:
+`delegated_sub: <your user id>`, TTL of minutes; the JOSE header MUST carry
+`typ: "delegated-access+jwt"` and a `kid` resolving in your registered JWKS — a token
+without that `typ` is rejected). The browser caches it and sends it as
+`Authorization: Bearer <token>` to OpenRails. A complete minting recipe is in
+[../examples/gated-premium-page/](../examples/gated-premium-page/):
 
 ```ts
 const OPENRAILS = "https://openrails.example";
