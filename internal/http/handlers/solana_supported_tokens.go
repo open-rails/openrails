@@ -8,7 +8,6 @@ import (
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
-	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -418,7 +417,7 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSy
 	}
 
 	return &TokenQuote{
-		Amount:        fmt.Sprintf("%.6f", quote.Decimal),
+		Amount:        quote.Amount, // rendered from Units (integer), display only
 		Units:         quote.Units,
 		TokenPriceUSD: quote.TokenPriceUSD,
 		FXRate:        quote.FXRate,
@@ -437,11 +436,8 @@ func calculateBalanceForToken(tokenSymbol string, tokenCfg config.TokenConfig, m
 		units = balances[mint]
 	}
 
-	scale := math.Pow10(tokenCfg.Decimals)
-	amount := float64(units) / scale
-
 	return &TokenBalance{
-		Amount:     fmt.Sprintf("%.6f", amount),
+		Amount:     solanamodule.FormatBaseUnits(units, tokenCfg.Decimals), // display only
 		Units:      units,
 		Sufficient: false,
 	}

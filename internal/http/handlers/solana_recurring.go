@@ -382,7 +382,8 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 
 	if isUpgrade {
 		// Model-B prorated first charge (new_full - old_unused) in micros, then
-		// micros -> stablecoin base units at the $1 peg (depeg failsafe inside).
+		// micros -> base units at the token's CONFIGURED decimals (#817), $1 peg
+		// (depeg failsafe inside).
 		firstChargeMicros, _ := checkout.CalculateModelBUpgradeCharge(
 			oldPrice.Amount,
 			newPrice.Amount,
@@ -390,9 +391,16 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 			newPrice.RecurringCycleHours(),
 			nowOrDefault(r),
 		)
-		firstChargeBaseUnits := solanamodule.FiatMicrosToStablecoinBaseUnits(
-			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, r.State.SolanaPriceProvider,
+		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err.Error()
+		}
+		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
+			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err.Error()
+		}
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the
 		// new on-chain subscription, so charge the smallest unit (a fraction of a

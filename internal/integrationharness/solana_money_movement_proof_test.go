@@ -185,7 +185,8 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	reference, err := solanaint.GenerateReference()
 	require.NoError(t, err, "generate Solana Pay reference id")
 
-	tokenUnits := solanamod.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(priceMicros), "USDC", nil)
+	tokenUnits, err := solanamod.FiatMicrosToStablecoinBaseUnits(ctx, moneyutil.Micros(priceMicros), "USDC", 6, nil)
+	require.NoError(t, err)
 	require.Equal(t, uint64(19_990_000), tokenUnits, "$19.99 in micro-USD at the $1 USDC peg = 19.99 USDC base units")
 
 	rpcClient := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Network: "devnet"})

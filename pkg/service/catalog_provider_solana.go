@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -99,11 +101,17 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		return nil, fmt.Errorf("solana create-mode requires a merchant-scoped context")
 	}
 	if in.UnitAmount <= 0 {
-		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (stablecoin base units)")
+		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (micros)")
 	}
 
 	symbol := strings.ToUpper(strings.TrimSpace(in.Currency))
-	mint, _, err := plan.ResolveMint(symbol)
+	mint, decimals, err := plan.ResolveMint(symbol)
+	if err != nil {
+		return nil, err
+	}
+	// #817: the price is MICROS; the plan amount is token BASE UNITS at the
+	// token's configured decimals — shipping micros verbatim only worked at 6.
+	amountBaseUnits, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +128,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		MerchantID:        tid,
 		PlanID:            planID,
 		TokenSymbol:       symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
-		AmountBaseUnits:   uint64(in.UnitAmount),
+		AmountBaseUnits:   amountBaseUnits,
 		PeriodHours:       periodHours,
 		BillingCycleHours: *in.AccessDurationHours,
 		EndTs:             0, // perpetual; OpenRails models open-ended subscriptions
@@ -208,21 +216,31 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	if err != nil {
 		return nil, fmt.Errorf("decode solana plan account %q: %w", pda, err)
 	}
-	if in.UnitAmount > 0 && acct.Amount != uint64(in.UnitAmount) {
-		return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d)", pda, acct.Amount, in.UnitAmount)
-	}
 	if in.AccessDurationHours != nil && *in.AccessDurationHours > 0 {
 		wantPeriod := uint64(*in.AccessDurationHours)
 		if acct.PeriodHours != wantPeriod {
 			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
 		}
 	}
-	// Mint + merchant validation requires the plan service (mint allowlist +
-	// merchant merchant resolution); skip gracefully when it is unconfigured.
+	// Amount + mint + merchant validation requires the plan service (token
+	// decimals, mint allowlist, merchant resolution); skip gracefully when it is
+	// unconfigured — the price is in MICROS and only the token's decimals turn
+	// that into the plan's base units (#817).
 	if plan, ok := a.planService(); ok {
 		if symbol := strings.ToUpper(strings.TrimSpace(in.Currency)); symbol != "" {
-			if mint, _, err := plan.ResolveMint(symbol); err == nil && !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
-				return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
+			if mint, decimals, err := plan.ResolveMint(symbol); err == nil {
+				if !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
+					return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
+				}
+				if in.UnitAmount > 0 {
+					want, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
+					if err != nil {
+						return nil, err
+					}
+					if acct.Amount != want {
+						return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d micros = %d base units)", pda, acct.Amount, in.UnitAmount, want)
+					}
+				}
 			}
 		}
 		if tid, ok := merchant.FromContext(ctx); ok {

@@ -186,8 +186,8 @@ func settingTokens(raw any) (map[string]TokenConfig, error) {
 		if strings.TrimSpace(token.Mint) == "" {
 			return nil, fmt.Errorf("solana settings: tokens.%s requires mint", symbol)
 		}
-		if token.Decimals < 0 {
-			return nil, fmt.Errorf("solana settings: tokens.%s decimals must be >= 0", symbol)
+		if err := ValidateTokenDecimals(symbol, token.Decimals); err != nil {
+			return nil, fmt.Errorf("solana settings: tokens.%s: %w", symbol, err)
 		}
 		out[symbol] = token
 	}

@@ -35,8 +35,8 @@ func NormalizeForNetwork(network string, tokens map[string]config.TokenConfig) m
 			log.Warnf("⚠️  solana token %s has no mint configured; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
 			continue
 		}
-		if token.Decimals < 0 {
-			log.Warnf("⚠️  solana token %s has invalid decimals (%d); payments in %s unavailable", normalizedSymbol, token.Decimals, normalizedSymbol)
+		if err := config.ValidateTokenDecimals(normalizedSymbol, token.Decimals); err != nil {
+			log.Warnf("⚠️  %v; payments in %s unavailable", err, normalizedSymbol)
 			continue
 		}
 		if strings.TrimSpace(token.Name) == "" {

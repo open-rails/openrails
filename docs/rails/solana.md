@@ -41,6 +41,8 @@ psps:
         rpc_provider: helius     # helius | public; empty defaults to helius
         rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
         tokens:                  # accepted tokens: SYMBOL -> { name, mint, decimals }
+                                 # decimals is REQUIRED (the mint's base-unit precision);
+                                 # it scales every charge, so omitting it is rejected.
           SOL:  { name: Solana,   mint: So11111111111111111111111111111111111111112, decimals: 9 }
           USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
       secrets:

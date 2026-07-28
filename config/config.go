@@ -955,7 +955,25 @@ type AuthConfig struct {
 type TokenConfig struct {
 	Mint     string `json:"mint"`     // Token mint address accepted on the configured Solana network.
 	Name     string `json:"name"`     // Token name.
-	Decimals int    `json:"decimals"` // Token decimal places.
+	Decimals int    `json:"decimals"` // Token base-unit precision; REQUIRED (see ValidateTokenDecimals).
+}
+
+// Token base-unit precision bounds. SPL mints top out at 9 in practice; the
+// slack guards the 10^n rescale against absurd configuration.
+const (
+	MinTokenDecimals = 1
+	MaxTokenDecimals = 18
+)
+
+// ValidateTokenDecimals rejects an unusable base-unit precision. Zero is
+// rejected on purpose (#817): an OMITTED `decimals` decodes as 0, and treating
+// that as whole-token precision silently misprices every charge by 10^6.
+func ValidateTokenDecimals(symbol string, decimals int) error {
+	if decimals < MinTokenDecimals || decimals > MaxTokenDecimals {
+		return fmt.Errorf("solana token %s: decimals must be %d..%d (got %d) — declare it in the merchant's solana tokens config",
+			symbol, MinTokenDecimals, MaxTokenDecimals, decimals)
+	}
+	return nil
 }
 
 // RateLimitsConfig is a map of endpoint identifier -> rate limit config
