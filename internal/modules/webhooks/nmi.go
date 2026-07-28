@@ -169,7 +169,7 @@ func nmiAmountMatchesExpected(amountCents, expectedAmountMicros int64) bool {
 	if err != nil {
 		return false
 	}
-	tolerance := int64(float64(expectedAmountCents) * 0.02)
+	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only (#818)
 	return amountCents >= expectedAmountCents-tolerance && amountCents <= expectedAmountCents+tolerance
 }
 
@@ -896,7 +896,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	if refundAmountCents < 0 {
 		refundAmountCents = -refundAmountCents
 	}
-	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 
 	if _, err := s.normalizedRail(); err != nil {
 		return err
@@ -998,9 +997,9 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	if shouldTerminate && subscription != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":  subscription.ID,
-			"refund_amount":    refundAmount,
-			"subscription_fee": moneyutil.MicrosToMajorUnits(subscription.Price.Amount), // #671 1f: micros, not cents
+			"subscription_id":         subscription.ID,
+			"refund_amount_cents":     refundAmountCents,
+			"subscription_fee_micros": subscription.Price.Amount,
 		}).Warn("Terminating subscription due to significant refund (>=80%)")
 
 		// Use lifecycle service to cancel membership with immediate revocation
@@ -1028,7 +1027,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"transaction_id":          txnID,
-		"refund_amount":           refundAmount,
+		"refund_amount_cents":     refundAmountCents,
 		"subscription_terminated": shouldTerminate,
 	}).Info("NMI refund processed")
 

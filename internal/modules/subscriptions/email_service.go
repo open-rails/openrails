@@ -41,8 +41,11 @@ type EmailService struct {
 
 // OneOffPurchaseEmailData contains data for one-off purchase receipts
 type OneOffPurchaseEmailData struct {
-	UserEmail     string
-	Amount        int64 // Amount in cents (smallest currency unit)
+	UserEmail string
+	// AmountMicros is the purchase amount in MICROS — the system-wide money
+	// unit and what FormatDisplay renders (#818: the field was documented cents
+	// but rendered as micros, a latent 10,000x).
+	AmountMicros  int64
 	Currency      string
 	ProductName   string
 	PaymentMethod string
@@ -241,7 +244,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 		productName = "Premium content"
 	}
 
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(data.AmountMicros, data.Currency)
 
 	issuedAt := s.now().Format("Jan 2, 2006 15:04 MST")
 

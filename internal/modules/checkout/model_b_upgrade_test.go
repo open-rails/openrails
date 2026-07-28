@@ -194,13 +194,16 @@ func TestUpgradeWirePinning(t *testing.T) {
 		t.Fatalf("NMI sale wire amount: expected %q, got %q", "31.33", wire)
 	}
 
-	// Recurring amount is DOLLARS: create ($19.99 sub) and upgrade paths share
-	// moneyutil.MicrosToMajorUnits, so the same price yields the same wire value.
-	if dollars := moneyutil.MicrosToMajorUnits(19_990_000); dollars != 19.99 {
-		t.Fatalf("recurring dollars: expected 19.99, got %v", dollars)
-	}
-	if dollars := moneyutil.MicrosToMajorUnits(50_000_000); dollars != 50.0 {
-		t.Fatalf("recurring dollars: expected 50, got %v", dollars)
+	// The recurring enrollment amount is CENTS (#818): create and upgrade paths
+	// share MicrosToCentsExact, so the same price yields the same wire value.
+	for micros, want := range map[int64]string{19_990_000: "19.99", 50_000_000: "50.00"} {
+		c, err := moneyutil.MicrosToCentsExact(micros)
+		if err != nil {
+			t.Fatalf("recurring cents for %d micros: %v", micros, err)
+		}
+		if wire := moneyutil.FormatCentsDecimal(c); wire != want {
+			t.Fatalf("recurring wire amount: expected %q, got %q", want, wire)
+		}
 	}
 
 	// A price not representable in whole cents must ERROR at the sale seam,

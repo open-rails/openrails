@@ -160,6 +160,15 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		}
 	}
 
+	// NMI charges whole cents; the payload carries micros. Error (never round)
+	// on a sub-cent remainder — same policy as the one-time sale path. Terminal,
+	// not parked: no retry can make an unrepresentable price representable, and
+	// nothing was sent, so the checkout fails clean instead of under-charging.
+	amountCents, err := moneyutil.MicrosToCentsExact(p.AmountMicros)
+	if err != nil {
+		return intents.Terminal("subscription amount must be representable in whole cents: " + err.Error())
+	}
+
 	// #297: subscription enrollment is the cardholder-initiated RECURRING
 	// credential-on-file charge — the sequence's initial CIT when the
 	// instrument has no recurring anchor, a reuse when it does (a second
@@ -181,7 +190,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		},
 		PlanID:           p.PlanID,
 		CustomerVaultID:  p.CustomerVaultID,
-		Amount:           moneyutil.MajorUnits(moneyutil.MicrosToMajorUnits(p.AmountMicros)),
+		Amount:           moneyutil.Cents(amountCents),
 		Currency:         p.Currency,
 		Email:            p.Email,
 		OrderID:          orderID,

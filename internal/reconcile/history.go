@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -29,8 +28,10 @@ type HistoryEvent struct {
 	RailSubscriptionID string
 	RailTransactionID  string
 	Status             string
-	Amount             *float64
-	OccurredAt         time.Time
+	// AmountMicros is the raw row amount in micros; nil when the row has none.
+	// Display/forensics only — format at the edge, never compute on it.
+	AmountMicros *int64
+	OccurredAt   time.Time
 }
 
 // HistoryEventSource supplies the history evidence for the dunning forensics.
@@ -111,8 +112,8 @@ func (s *PGHistorySource) ListEvents(ctx context.Context, railNames []string, si
 			ev.RailTransactionID = *r.RailTransactionID
 		}
 		if r.AmountMicros != nil {
-			amount := moneyutil.MicrosToMajorUnits(*r.AmountMicros)
-			ev.Amount = &amount
+			micros := *r.AmountMicros
+			ev.AmountMicros = &micros
 		}
 		out = append(out, ev)
 	}

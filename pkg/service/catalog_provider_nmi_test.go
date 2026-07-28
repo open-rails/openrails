@@ -92,16 +92,18 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/plans":
 			addCalled = true
+			// plan_amount is pinned as the exact wire TEXT (json.Number), not a
+			// float64 — a float decode hides sub-cent rounding (#818).
 			var req struct {
-				PlanAmount   float64 `json:"plan_amount"`
-				DayFrequency int     `json:"day_frequency"`
+				PlanAmount   json.Number `json:"plan_amount"`
+				DayFrequency int         `json:"day_frequency"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			if req.DayFrequency != 30 {
 				t.Errorf("day_frequency: got %d want 30", req.DayFrequency)
 			}
-			if req.PlanAmount != 9.99 {
-				t.Errorf("plan_amount: got %v want 9.99", req.PlanAmount)
+			if req.PlanAmount.String() != "9.99" {
+				t.Errorf("plan_amount: got %q want %q", req.PlanAmount.String(), "9.99")
 			}
 			_, _ = w.Write([]byte(`{"object":"plan","id":"x"}`))
 		case r.Method == http.MethodGet:
