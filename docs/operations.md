@@ -7,16 +7,12 @@ orientation layer over this manual.
 
 ## The ownership model
 
-Three facts decide every consistency mechanism in the system:
-
-1. **OpenRails owns the catalog** (products + prices). Providers hold copies.
-2. **The provider owns money state** (is a subscription alive, what was
-   charged). OpenRails holds copies.
-3. **OpenRails owns entitlements — but they are derived**, deterministically,
-   from catalog + money state + admin grants.
-
-So there are exactly four ways the system diverges, each with its own
-mechanism:
+Three facts decide every consistency mechanism: **OpenRails owns the
+catalog** (products + prices; providers hold copies); **the provider owns
+money state** (is a subscription alive, what was charged; OpenRails holds
+copies); **OpenRails owns entitlements — but they are derived**,
+deterministically, from catalog + money state + admin grants. So there are
+exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
@@ -53,10 +49,8 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 
-The `push-*` commands push declared file state into AuthKit root authority,
-OpenRails-owned merchant state, the merchant secret backend, or provider
-catalog surfaces. `pull-provider` moves the opposite direction and never
-mutates a payment rail.
+The `push-*` commands push declared file state outward; `pull-provider` moves
+the opposite direction and never mutates a payment rail.
 
 ### Merchant secrets
 
@@ -130,13 +124,11 @@ additionally send `Idempotency-Key`. Every attempt/outcome is appended to
 `openrails.rail_mutation_logs`.
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
-deliver webhooks at-least-once and retry failed deliveries from their end; our
-handlers are idempotent for exactly that reason. **There is deliberately no
-local inbound queue**: it would share fate with the database it protects. The
-backstop for an outage long enough to exhaust the provider's webhook retries
-is Provider Refresh's watermarked event backfill (and, for investigation,
-`pull-provider`): provider state is read directly and the missed event
-materializes as local convergence.
+deliver webhooks at-least-once and retry from their end; our handlers are
+idempotent for exactly that reason. **There is deliberately no local inbound
+queue** — it would share fate with the database it protects. The backstop for
+an outage that exhausts the provider's webhook retries is Provider Refresh's
+watermarked event backfill (and, for investigation, `pull-provider`).
 
 ### Inspecting the ledger
 
@@ -206,13 +198,12 @@ openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json
 ```
 
 A bare `pull-provider` pulls provider truth, diffs, logs what it WOULD
-change, and persists nothing. `--insert` imports provider-observed records
-missing locally; `--overwrite` updates existing local mirror rows from
-provider truth; `--prune` deletes eligible local subscriptions/payments
-attributed to the pulled PSP that are absent from the provider source.
-`--rail` is repeatable (default: every configured rail); `--merchant` is
-required; `--manifest` arms mode-1 credentials from a merchant manifest.
-After a mutating pull the engine runs a one-shot `Converge(merchant)`.
+change, and persists nothing; the mutation flags follow the standard contract
+(`--prune` deletes eligible local subscriptions/payments attributed to the
+pulled PSP that are absent from the provider source). `--rail` is repeatable
+(default: every configured rail); `--merchant` is required; `--manifest` arms
+mode-1 credentials from a merchant manifest. After a mutating pull the engine
+runs a one-shot `Converge(merchant)`.
 
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows
@@ -325,16 +316,14 @@ clear):
 
 An unknown cycle (one-time price in a `past_due` state that shouldn't exist)
 falls back to the monthly schedule defensively, logged. **Hard declines**
-(stolen/lost card, do-not-honor, expired card, "stop recurring" codes, etc.)
-are terminal immediately regardless of schedule — retrying cannot succeed and
+(stolen/lost card, do-not-honor, expired card, "stop recurring" codes) are
+terminal immediately regardless of schedule — retrying cannot succeed and
 risks card-network flags; soft declines (insufficient funds, comms errors,
-merchant-config errors) follow the schedule.
-
-The staleness window ("never charge a months-old failure") derives from the
-same schedule — last offset + 24h slack — so it cannot be misconfigured.
-Anything older is cancelled + downgraded WITHOUT a charge. Terminal failure =
-cancel + revoke entitlements + rail-side delete via the intent ledger's
-deferred-delete mechanism.
+merchant-config errors) follow the schedule. The staleness window ("never
+charge a months-old failure") derives from the same schedule — last offset +
+24h slack — so it cannot be misconfigured; anything older is cancelled +
+downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
++ rail-side delete via the intent ledger's deferred-delete mechanism.
 
 (Stripe-billed subscriptions use Stripe's own dunning; this section governs
 NMI-backed manual dunning. Ours is sparser than Stripe's 8-retry default
@@ -442,7 +431,6 @@ in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
-| Real money can move | yes | yes | no (writes blocked) |
 | User checkout / charge | yes | yes | no — fails loudly (`ErrProviderReadOnly`) |
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
@@ -526,7 +514,7 @@ engine-wide policy**, not a per-merchant setting.
 - **Reserved names**: `pkg/merchant.ReservedHostedSlugs` is the advisory list
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
-  this — slug MECHANISM vs slug RESERVATION — the host does.
+  it — the host does.
 - **Webhook surfaces**: three shapes, all verifying with the resolved
   merchant/account's own signing secret. Canonical provider-only:
   `/v1/webhooks/:provider` (NMI/CCBill — payloads carry account identity) and
