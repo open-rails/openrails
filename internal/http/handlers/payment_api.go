@@ -25,7 +25,6 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
-		Livemode:         false,
 		Metadata:         map[string]string{},
 		Created:          api.ToUnix(p.CreatedAt),
 		Updated:          api.ToUnix(p.UpdatedAt),
@@ -80,7 +79,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.CustomerID.String()), Subscription: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, Created: api.ToUnix(p.CreatedAt)}
+	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.CustomerID.String()), Subscription: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, Created: api.ToUnix(p.CreatedAt)}
 	if refunds != nil {
 		if refundObjects == nil {
 			refundObjects = []api.PaymentObject{}
@@ -193,5 +192,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		}
 		sort.Strings(providers)
 	}
-	return api.PriceObject{ID: api.FormatPriceID(p.ID), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	return api.PriceObject{ID: api.FormatPriceID(p.ID), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
 }

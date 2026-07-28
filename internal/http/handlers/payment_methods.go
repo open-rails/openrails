@@ -23,9 +23,8 @@ import (
 )
 
 type listPaymentMethodsQuery struct {
-	Limit           int  `form:"limit"`
-	Offset          int  `form:"offset"`
-	IncludeInactive bool `form:"include_inactive"`
+	Limit  int `form:"limit"`
+	Offset int `form:"offset"`
 }
 
 type paymentMethodURI struct {
@@ -154,7 +153,6 @@ type paymentMethodResponse struct {
 	BillingDetails *paymentMethodBillingDetails `json:"billing_details,omitempty"`
 	Card           *paymentMethodCardDetails    `json:"card,omitempty"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
-	Livemode       bool                         `json:"livemode"`
 	Created        int64                        `json:"created"`
 	Health         *paymentMethodHealth         `json:"health,omitempty"`
 	Subscriptions  []subscriptionSummary        `json:"subscriptions,omitempty"`

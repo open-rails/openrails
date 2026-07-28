@@ -199,6 +199,9 @@ type Decision struct {
 	Allowed        bool
 	BlockedBalance bool    // true when affordability (balance/credit line) was the binding gate
 	BlockedWindow  *Window // the window that blocked, if any
+	// RetryAfter is the time until BlockedWindow's next fixed boundary — the
+	// earliest moment the same request could succeed. Zero unless a window blocked.
+	RetryAfter time.Duration
 }
 
 // AdmitInput is one admission request.
@@ -257,8 +260,10 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 	case blocked == -1:
 		dec.BlockedBalance = true
 	case blocked >= 1 && int(blocked) <= len(wins):
-		w := wins[blocked-1].Window
+		rw := wins[blocked-1]
+		w := rw.Window
 		dec.BlockedWindow = &w
+		dec.RetryAfter = untilBoundary(now, fixedOffsetMs(rw.identity(base), rw.durationMillis()), rw.durationMillis())
 	}
 	if dec.Allowed {
 		// Record the request→payer pointer so capture/release resolve coords from
@@ -375,4 +380,15 @@ func toInt64(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+// untilBoundary is the time from now to the next boundary of a fixed window with
+// phase offsetMs and period durMs (boundaries at offset + k*dur).
+func untilBoundary(now time.Time, offsetMs, durMs int64) time.Duration {
+	if durMs <= 0 {
+		return 0
+	}
+	nowMs := now.UnixMilli()
+	bucket := (nowMs - offsetMs) / durMs
+	return time.Duration(offsetMs+(bucket+1)*durMs-nowMs) * time.Millisecond
 }

@@ -62,8 +62,8 @@ route's own dedup guards, never a replacement for them.
 | GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
-| GET | `/v1/products` | optional | List products with embedded active prices. Query: `active`, `limit` (1-100, default 20), `offset` |
-| GET | `/v1/prices` | optional | List prices. Query: `active`, `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
+| GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
 | GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
 
@@ -156,7 +156,7 @@ on-chain prepare/confirm routes above.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset`, `include_inactive` |
+| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
 | POST | `/v1/me/payment-methods` | Create + activate a vault record. Body: `payment_token` (Collect.js) + billing details |
 | PUT | `/v1/me/payment-methods/{id}` | Replace the stored vault card (`payment_token` + optional billing fields) |
 | DELETE | `/v1/me/payment-methods/{id}` | Soft-delete the method |
@@ -209,7 +209,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
 | GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
-| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ type, balance, held_balance }`. Query: `customer_id`, `type` (default `api_credits`) |
+| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)` |
 | POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }` (≤ hold) |
 | POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |

@@ -79,13 +79,12 @@ const (
 // ProviderState is the uniform per-provider response surface. Replaces the
 // pre-#208 stripe-specific StripeRailState.
 type ProviderState struct {
-	Status       ProviderStatus    `json:"status"`
-	IDs          map[string]string `json:"ids,omitempty"`
-	LookupKey    string            `json:"lookup_key,omitempty"`
-	LastSyncedAt *time.Time        `json:"last_synced_at,omitempty"`
-	SyncStatus   SyncStatus        `json:"sync_status,omitempty"`
-	Drift        []DriftField      `json:"drift,omitempty"`
-	Message      string            `json:"message,omitempty"`
+	Status     ProviderStatus    `json:"status"`
+	IDs        map[string]string `json:"ids,omitempty"`
+	LookupKey  string            `json:"lookup_key,omitempty"`
+	SyncStatus SyncStatus        `json:"sync_status,omitempty"`
+	Drift      []DriftField      `json:"drift,omitempty"`
+	Message    string            `json:"message,omitempty"`
 }
 
 // DriftField describes a single divergent field discovered by verify/reconcile.

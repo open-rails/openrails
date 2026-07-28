@@ -25,9 +25,11 @@ type customerSpendDelegationsDocument struct {
 }
 
 type customerSpendDelegation struct {
-	Scope      string                      `json:"scope"`
-	ScopeKey   string                      `json:"scope_key"`
-	RoleID     string                      `json:"role_id,omitempty"`
+	Scope    string `json:"scope"`
+	ScopeKey string `json:"scope_key"`
+	RoleID   string `json:"role_id,omitempty"`
+	// CustomerID is request-only: supplying it is rejected (the payer comes from
+	// the path scope). Never emitted.
 	CustomerID string                      `json:"customer_id,omitempty"`
 	Windows    []models.BudgetWindowPolicy `json:"windows"`
 }

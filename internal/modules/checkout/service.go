@@ -47,7 +47,6 @@ import (
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
 type TierChangeResponse struct {
 	Object         string                         `json:"object"`                    // "tier_change"
-	ID             string                         `json:"id,omitempty"`              // Operation ID for tracking
 	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade

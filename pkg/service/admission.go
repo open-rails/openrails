@@ -46,32 +46,11 @@ type AdmitResult struct {
 	Allowed             bool       `json:"allowed"`
 	Currency            string     `json:"currency,omitempty"`
 	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
-	PolicyCurrency      string     `json:"policy_currency,omitempty"`
-	PolicyAmount        int64      `json:"policy_amount,omitempty"`
 	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
 	BlockedBy           string     `json:"blocked_by,omitempty"`
 	DenyCode            string     `json:"deny_code,omitempty"`
 	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
-	// Budget (#304): the rolling money-budget reservation + per-window state.
-	BudgetReservationID string                 `json:"budget_reservation_id,omitempty"`
-	BudgetWindows       []AdmitBudgetWindowDTO `json:"budget_windows,omitempty"`
-}
-
-// AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
-// host's /status dashboard.
-type AdmitBudgetWindowDTO struct {
-	Key               string `json:"key"`
-	Currency          string `json:"currency"`
-	Limit             int64  `json:"limit"`
-	Used              int64  `json:"used"`
-	Reserved          int64  `json:"reserved"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-	// ResetAt is the exact window boundary (#337 fixed windows) — displayable
-	// as "your next reset is 4:30pm". Zero when the engine predates state.
-	ResetAt time.Time `json:"reset_at,omitzero"`
-	Allowed bool      `json:"allowed"`
 }
 
 // Admit runs service admission: the delegated wasted-spend cutoff + the single
@@ -153,6 +132,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		StartCapacityAmount: startCapacity(dec.AvailableAmount, dec.HeldAmount),
 		BlockedBy:           dec.BlockedBy,
 		DenyCode:            dec.DenyCode,
+		RetryAfterSeconds:   dec.RetryAfterSeconds,
 	}
 	if dec.Allowed && in.EstimatedAmount > 0 {
 		res.HoldExpiresAt = &exp

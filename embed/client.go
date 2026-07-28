@@ -142,20 +142,6 @@ func parseCustomer(raw, invalidMsg string) (identity.CustomerID, error) {
 	return identity.CustomerID(id), nil
 }
 
-func budgetWindowFromDTO(w billingservice.AdmitBudgetWindowDTO) openrails.BudgetWindow {
-	return openrails.BudgetWindow{
-		Key:               w.Key,
-		Currency:          w.Currency,
-		Limit:             w.Limit,
-		Used:              w.Used,
-		Reserved:          w.Reserved,
-		Remaining:         w.Remaining,
-		ResetAfterSeconds: w.ResetAfterSeconds,
-		ResetAt:           w.ResetAt,
-		Allowed:           w.Allowed,
-	}
-}
-
 // --- embedded-only surface ---------------------------------------------------
 
 // Admit carries the single-admit semantics of the retired handlers.ServiceAdmit
@@ -217,17 +203,11 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 		Allowed:             res.Allowed,
 		Currency:            res.Currency,
 		EstimatedAmount:     res.EstimatedAmount,
-		PolicyCurrency:      res.PolicyCurrency,
-		PolicyAmount:        res.PolicyAmount,
 		StartCapacityAmount: res.StartCapacityAmount,
 		BlockedBy:           res.BlockedBy,
 		DenyCode:            res.DenyCode,
 		RetryAfterSeconds:   res.RetryAfterSeconds,
 		HoldExpiresAt:       res.HoldExpiresAt,
-		BudgetReservationID: res.BudgetReservationID,
-	}
-	for _, w := range res.BudgetWindows {
-		out.BudgetWindows = append(out.BudgetWindows, budgetWindowFromDTO(w))
 	}
 	return out
 }

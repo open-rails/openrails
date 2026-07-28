@@ -16,12 +16,10 @@ type catalogPaginationParams struct {
 
 type getProductsQuery struct {
 	catalogPaginationParams
-	Active *bool `form:"active"`
 }
 
 type getPricesQuery struct {
 	catalogPaginationParams
-	Active   *bool  `form:"active"`
 	Currency string `form:"currency"`
 	Product  string `form:"product"`
 	Type     string `form:"type"`

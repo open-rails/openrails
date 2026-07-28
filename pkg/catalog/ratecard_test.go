@@ -46,7 +46,7 @@ products:
               cells:
                 s-1vcpu-1gb: {unit_amount: 8_930, maximum_amount: 6_000_000}
       - meter: public-egress
-        allowance: {accrue_from: droplet-runtime, pool: customer, cap: 28d}
+        allowance: {accrue_from: droplet-runtime, cap: 28d}
         price:
           model: per_unit
           currency: usd
@@ -174,7 +174,7 @@ products:
     display_name: P
     rate_cards:
       - meter: egress
-        allowance: {accrue_from: ghost-meter, pool: customer}
+        allowance: {accrue_from: ghost-meter}
         price: {model: per_unit, currency: usd, per_unit: {unit_amount: 1}}
 `
 	_, err := Load(writeManifest(t, body))

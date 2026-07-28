@@ -10,16 +10,13 @@ import (
 // ID prefixes for different resource types (Stripe-like pattern).
 // These prefixes only appear in the API layer - database stores plain UUIDs.
 const (
-	PrefixProduct          = "prod_"
-	PrefixPrice            = "price_"
-	PrefixSubscription     = "sub_"
-	PrefixPayment          = "pay_"
-	PrefixPaymentMethod    = "pm_"
-	PrefixInvoice          = "inv_"
-	PrefixCheckoutSession  = "cs_"
-	PrefixUser             = "usr_"
-	PrefixEvent            = "evt_"
-	PrefixEntitlementGrant = "ag_"
+	PrefixProduct         = "prod_"
+	PrefixPrice           = "price_"
+	PrefixSubscription    = "sub_"
+	PrefixPayment         = "pay_"
+	PrefixPaymentMethod   = "pm_"
+	PrefixCheckoutSession = "cs_"
+	PrefixUser            = "usr_"
 )
 
 // FormatProductID formats a UUID as a product ID (prod_xxx)
@@ -47,11 +44,6 @@ func FormatPaymentMethodID(id uuid.UUID) string {
 	return PrefixPaymentMethod + id.String()
 }
 
-// FormatInvoiceID formats a UUID as an invoice ID (inv_xxx)
-func FormatInvoiceID(id uuid.UUID) string {
-	return PrefixInvoice + id.String()
-}
-
 // FormatCheckoutSessionID formats a UUID as a checkout session ID (cs_xxx)
 func FormatCheckoutSessionID(id uuid.UUID) string {
 	return PrefixCheckoutSession + id.String()
@@ -61,16 +53,6 @@ func FormatCheckoutSessionID(id uuid.UUID) string {
 // Note: User IDs may not be UUIDs, so this accepts a string
 func FormatUserID(id string) string {
 	return PrefixUser + id
-}
-
-// FormatEventID formats a UUID as an event ID (evt_xxx)
-func FormatEventID(id uuid.UUID) string {
-	return PrefixEvent + id.String()
-}
-
-// FormatEntitlementGrantID formats a UUID as an admin grant ID (ag_xxx)
-func FormatEntitlementGrantID(id uuid.UUID) string {
-	return PrefixEntitlementGrant + id.String()
 }
 
 // ParseProductID parses a prefixed product ID and returns the UUID
@@ -98,27 +80,9 @@ func ParsePaymentMethodID(id string) (uuid.UUID, error) {
 	return parseID(id, PrefixPaymentMethod, "payment_method")
 }
 
-// ParseInvoiceID parses a prefixed invoice ID and returns the UUID
-func ParseInvoiceID(id string) (uuid.UUID, error) {
-	return parseID(id, PrefixInvoice, "invoice")
-}
-
 // ParseCheckoutSessionID parses a prefixed checkout session ID and returns the UUID
 func ParseCheckoutSessionID(id string) (uuid.UUID, error) {
 	return parseID(id, PrefixCheckoutSession, "checkout_session")
-}
-
-// ParseUserID parses a prefixed user ID and returns the raw ID string
-func ParseUserID(id string) (string, error) {
-	if !strings.HasPrefix(id, PrefixUser) {
-		return "", fmt.Errorf("invalid user ID: expected prefix '%s'", PrefixUser)
-	}
-	return strings.TrimPrefix(id, PrefixUser), nil
-}
-
-// ParseEventID parses a prefixed event ID and returns the UUID
-func ParseEventID(id string) (uuid.UUID, error) {
-	return parseID(id, PrefixEvent, "event")
 }
 
 // parseID is a helper that parses a prefixed ID string into a UUID

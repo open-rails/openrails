@@ -15,9 +15,9 @@
 package admission
 
 import (
-	"time"
-
 	"context"
+	"math"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -108,6 +108,9 @@ type AdmitDecision struct {
 	// total in-flight reservation after this admit. StartCapacity = Available − Held.
 	AvailableAmount int64
 	HeldAmount      int64
+	// RetryAfterSeconds is when the blocking budget window next resets (0 unless
+	// a window was the binding gate). Hosts stamp it as the 429 Retry-After.
+	RetryAfterSeconds int64
 }
 
 // Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
@@ -210,7 +213,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: code, AvailableAmount: available}, nil
 	default: // window blocked
 		a.recordDenial(ctx, merchantID, req.CustomerID, DenyBudgetExceeded)
-		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available}, nil
+		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available,
+			RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
 	}
 }
 
