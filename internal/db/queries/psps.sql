@@ -83,3 +83,18 @@ SELECT count(*)::bigint FROM openrails.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live');
+
+-- #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
+-- account_id) natural key, for webhook routing and the uniqueness preflight —
+-- both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
+-- above carries no merchant predicate, so under the RLS-enforcing app role it
+-- can only ever return no rows; the SECURITY DEFINER directory function
+-- (migration 0016) is the sanctioned way to make that read, and it RAISES
+-- rather than returning empty if its definer cannot bypass RLS.
+-- name: ResolvePSPOwnerByRailIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_identity(
+    lower(sqlc.arg(rail)::text),
+    COALESCE(sqlc.narg(environment)::text, 'live'),
+    sqlc.arg(account_id)::text
+);

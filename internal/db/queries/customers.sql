@@ -78,3 +78,16 @@ ON CONFLICT (id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
 RETURNING id;
+
+-- #824: the hosted portal's "which merchants am I a customer of" directory
+-- (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+-- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+-- name: ListMerchantsForCustomerSubject :many
+SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND m.status = 'active'
+  AND m.id IN (
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject(sqlc.arg(subject)::text)
+  )
+ORDER BY m.slug;

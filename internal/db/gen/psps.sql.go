@@ -241,6 +241,49 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 	return items, nil
 }
 
+const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_identity(
+    lower($1::text),
+    COALESCE($2::text, 'live'),
+    $3::text
+)
+`
+
+type ResolvePSPOwnerByRailIdentityParams struct {
+	Rail        string
+	Environment *string
+	AccountID   string
+}
+
+type ResolvePSPOwnerByRailIdentityRow struct {
+	ID          *uuid.UUID
+	MerchantID  *uuid.UUID
+	Rail        *string
+	Environment *string
+	AccountID   *string
+}
+
+// #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
+// account_id) natural key, for webhook routing and the uniqueness preflight —
+// both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
+// above carries no merchant predicate, so under the RLS-enforcing app role it
+// can only ever return no rows; the SECURITY DEFINER directory function
+// (migration 0016) is the sanctioned way to make that read, and it RAISES
+// rather than returning empty if its definer cannot bypass RLS.
+func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg ResolvePSPOwnerByRailIdentityParams) (ResolvePSPOwnerByRailIdentityRow, error) {
+	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
+	var i ResolvePSPOwnerByRailIdentityRow
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+	)
+	return i, err
+}
+
 const upsertPSP = `-- name: UpsertPSP :one
 
 INSERT INTO openrails.psps (

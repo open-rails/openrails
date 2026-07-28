@@ -78,7 +78,9 @@ const cancelSubscriptionReprice = `-- name: CancelSubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
-WHERE id = $1 AND status = 'scheduled'
+WHERE id = $1
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18
+  AND status = 'scheduled'
 `
 
 func (q *Queries) CancelSubscriptionReprice(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -258,9 +260,13 @@ func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, subscr
 }
 
 const getSubscriptionRepriceByID = `-- name: GetSubscriptionRepriceByID :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices WHERE id = $1
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id()
 `
 
+// SEC-18: merchant-admin by-id surface (GET/DELETE /v1/merchant/reprices/:id).
+// Same reasoning as the reconciliation findings: RLS must not be the only
+// control, so the request's merchant scope is also stated in the query.
 func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionRepriceByID, id)
 	var i OpenrailsSubscriptionReprice

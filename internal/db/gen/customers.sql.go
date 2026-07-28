@@ -83,6 +83,45 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
+const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
+SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND m.status = 'active'
+  AND m.id IN (
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject($1::text)
+  )
+ORDER BY m.slug
+`
+
+type ListMerchantsForCustomerSubjectRow struct {
+	Slug        string
+	DisplayName string
+}
+
+// #824: the hosted portal's "which merchants am I a customer of" directory
+// (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+// customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject string) ([]ListMerchantsForCustomerSubjectRow, error) {
+	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMerchantsForCustomerSubjectRow
+	for rows.Next() {
+		var i ListMerchantsForCustomerSubjectRow
+		if err := rows.Scan(&i.Slug, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCustomerForMerchant = `-- name: LockCustomerForMerchant :one
 SELECT id FROM openrails.customers
 WHERE id = $1 AND merchant_id = $2

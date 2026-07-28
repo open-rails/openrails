@@ -139,8 +139,17 @@ ON CONFLICT (merchant_id) DO UPDATE SET
     last_digested_at = EXCLUDED.last_digested_at,
     updated_at = now();
 
+-- SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+-- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
+-- below EXECUTES cancel/refund/revoke/grant against whatever the finding
+-- names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
+-- deployment connected as a superuser/BYPASSRLS role let merchant A's owner
+-- address merchant B's finding. openrails.current_merchant_id() is the same
+-- expression the merchant_isolation policy uses, so under the enforcing role
+-- behaviour is unchanged; under a bypassing one the scope still holds.
 -- name: GetReconciliationFinding :one
-SELECT * FROM openrails.reconciliation_findings WHERE id = $1;
+SELECT * FROM openrails.reconciliation_findings
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
 
 -- name: ListReconciliationFindings :many
 SELECT * FROM openrails.reconciliation_findings
@@ -281,7 +290,9 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- Ignore: permanent silence for the subject (the upsert keeps ignored
 -- identities ignored across re-runs — same semantics the breaker's dismiss
@@ -295,7 +306,9 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- Partial failure: append the execution error to operator_notes; the finding
 -- STAYS OPEN (never half-marked fixed).
@@ -306,7 +319,9 @@ SET operator_notes = CASE
         ELSE operator_notes || E'\n' || sqlc.arg(note)::text
     END,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- ============================================================================
 -- Local-state reads for the diff engine

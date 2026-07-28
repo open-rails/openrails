@@ -45,7 +45,9 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $3 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $3
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AdminIgnoreReconciliationFindingParams struct {
@@ -164,7 +166,9 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $4 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $4
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AdminResolveReconciliationFindingParams struct {
@@ -198,7 +202,9 @@ SET operator_notes = CASE
         ELSE operator_notes || E'\n' || $1::text
     END,
     updated_at = now()
-WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $2
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AppendReconciliationFindingNotesParams struct {
@@ -563,9 +569,18 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id()
 `
 
+// SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+// merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
+// below EXECUTES cancel/refund/revoke/grant against whatever the finding
+// names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
+// deployment connected as a superuser/BYPASSRLS role let merchant A's owner
+// address merchant B's finding. openrails.current_merchant_id() is the same
+// expression the merchant_isolation policy uses, so under the enforcing role
+// behaviour is unchanged; under a bypassing one the scope still holds.
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, getReconciliationFinding, id)
 	var i OpenrailsReconciliationFinding

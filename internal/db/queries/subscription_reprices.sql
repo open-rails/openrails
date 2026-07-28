@@ -24,8 +24,12 @@ INSERT INTO openrails.subscription_reprices (
 )
 RETURNING *;
 
+-- SEC-18: merchant-admin by-id surface (GET/DELETE /v1/merchant/reprices/:id).
+-- Same reasoning as the reconciliation findings: RLS must not be the only
+-- control, so the request's merchant scope is also stated in the query.
 -- name: GetSubscriptionRepriceByID :one
-SELECT * FROM openrails.subscription_reprices WHERE id = $1;
+SELECT * FROM openrails.subscription_reprices
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
 
 -- The subscription's current scheduled reprice, if any (at most one by
 -- uq_subscription_reprices_one_scheduled) — used both to refuse a second
@@ -48,7 +52,9 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
-WHERE id = sqlc.arg(id) AND status = 'scheduled';
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18
+  AND status = 'scheduled';
 
 -- name: ApplySubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET
