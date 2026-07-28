@@ -40,7 +40,7 @@ millicents. Cents and decimal major units exist only at rail boundaries.
 | # | Invariant | Enforced at | Str | Audit |
 |---|---|---|---|---|
 | MONEY-1 | Internal money is micros (1 major unit = 1 000 000). | `internal/shared/moneyutil/moneyutil.go:9-13` | C + T | `grep -rn "MicrosPerMajorUnit\|MicrosPerCent" --include=*.go` |
-| MONEY-2 | `Micros` and `Cents` are distinct defined types, so mixing them where both are used is a compile error. | `moneyutil.go:18,22` | **C** | `go build ./...` — but this is not a check: it passes identically whether the types exist or not |
+| MONEY-2 | `Micros` and `Cents` are distinct defined types, and **the unit converters take and return them**, so handing cents to a micros parameter is a compile error at the one place a value changes unit. | `moneyutil.go:18,22`; converters `:44-72` | **S** at the converters, **C** elsewhere | `go build ./...`; `moneyutil_test.go` pins the typed signatures so a silent revert to `int64` fails. Coverage limits: §10 GAP-12 |
 | MONEY-3 | **Currency and crypto amounts are integers only.** No float may represent, convert, round, or compare an amount. A *rate* may be a float; arithmetic that produces or compares an *amount* may not. | `internal/shared/moneyutil/float_guard_test.go` (AST, allow-list keyed by declaration) | **T** over the listed packages, **C** elsewhere | `go test ./internal/shared/moneyutil -run TestNoFloatsInMoneyPackages` — see §10 GAP-13 for the packages it does not cover |
 | MONEY-4 | Micros→cents is exact-or-error on the exact path; the ceil path never under-charges. | `moneyutil.go:60-72` | APP | `moneyutil_test.go` |
 | MONEY-5 | The single internal→rail converter is `NativeToRailMinor`; it errors on an unregistered currency and rounds **up**. Callers must not guess a scale. | `internal/modules/money/currency.go:66-87` | **C** — see §10 GAP-14 | 2 non-test callers vs 16 sites calling `moneyutil.MicrosToCents*` directly, which hardcodes ÷10 000 |
@@ -61,8 +61,9 @@ substitute a default currency because one was not supplied.
 | CUR-2 | The one nullable currency is conditionally required: `grants.kind='credit' ⇒ amount AND currency NOT NULL`. | `0001_schema.up.sql:1304` | **DB** | `\d openrails.grants` |
 | CUR-3 | **FX is forbidden inside the ledger.** A transfer whose account currency differs from the transfer currency raises. | trigger `0001_schema.up.sql:151-153`, wired `:1717` | **DB** | attempt a cross-currency transfer in psql → must raise |
 | CUR-4 | FX is not merely forbidden but absent — the `fx_liquidity` account type has no non-declaration call site. | `0001_schema.up.sql:1617`; `money/ledger/ledger.go:39` | **C** | `grep -rn "FXLiquidity" --include=*.go \| grep -v _test` → the declaration only, zero call sites. True by habit, not structure: `ledger.FXLiquidity` is an ordinary exported const and passing it to `ensureAccount` compiles |
-| CUR-5 | Currency codes come from a Go registry with per-currency internal and rail decimals. There is deliberately no DB CHECK. | `internal/modules/money/currency.go:11-13,26-30` | APP | see §10 GAP-6 |
-| CUR-6 | Currency is case-normalized on read. | `currency.go:34-43` | APP | — |
+| CUR-5 | Currency **membership** comes from a Go registry with per-currency internal and rail decimals; the DB does not encode membership (it would need a migration per currency). | `internal/modules/money/currency.go:11-13,26-30` | APP | `money.ValidateCurrency` |
+| CUR-5b | Currency **shape and case** are Postgres-enforced on all 16 currency columns: upper-case `[A-Z0-9]{3,12}`, or a qualified `slug/name` custom-credit unit. | `0020_currency_case_and_session_merchant_scope.up.sql`; constraint `<table>_currency_shape` | **DB** + **T** | `SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_currency_shape';` → 16; `go test ./migrations/postgres -run TestCurrencyColumnsCarryShapeCheck` |
+| CUR-6 | **UPPER case is the canonical internal form**, enforced at the DB (CUR-5b) rather than at a write boundary — the write boundary is not one place. Lowercase survives ONLY where a rail wire demands it, at two sites that say so: Stripe's API and the FX endpoint. | `currency.go:34-43`; `pkg/catalog/load.go` `normalizeCurrency`; wire exceptions `catalog/stripe_catalog.go`, `fx/exchange_api.go` `fetchRate` | APP + **DB** | `SELECT DISTINCT currency FROM openrails.payments;` → all upper |
 | CUR-7 | Billing surfaces reject a qualified custom-credit unit — external currency only. | `RequireBillingCurrency`, `currency.go:103-108` | APP | `grep -rn "RequireBillingCurrency"` |
 | CUR-8 | Service entry points require a non-**empty** currency. Note the guard checks emptiness only — it does not consult the registry, so `"XYZ"` passes. | `pkg/service/currency.go:10-19` | APP (trivial) | `grep -rn "requireCurrency(" pkg/service` enumerates callers; it is blind to the entry point that forgot to call it |
 | CUR-9 | **A missing provider currency is never fabricated.** A decline carries no currency of its own and must not borrow one. | `internal/reconcile/unknown_orchestration.go:281-295` | **VIOLATED** | the cited site borrows the subscription's currency, and three more paths substitute a default — §10 GAP-16 |
@@ -134,6 +135,7 @@ All outbound provider mutations post a durable intent first, then execute.
 | ID-8 | Grant termination happens once; `event='grant' ⟺ supersedes_id IS NULL`. | `:1355,:1306` | **DB** |
 | ID-9 | Invoice period, invoice-item source, usage-event, and finding identities are unique per merchant. | `:1552,:1598,:2915,:2617` | **DB** |
 | ID-10 | Merchant slug unique; `api_host` unique among live merchants. | `:272,:276` | **DB** |
+| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`.** A cross-merchant unique is an existence oracle: under RLS the conflicting row is invisible, so the victim sees only an opaque insert failure. The exceptions are enumerated by name with reasons. | `0020_…up.sql`; guard `merchant_aware_schema_test.go` `TestUniqueIndexesAreMerchantScoped` | **DB** + **T** |
 
 ## 7. Fail-closed posture
 
@@ -181,7 +183,7 @@ defaults are fine; invented **data** defaults are not.
 | FAB-3 | Absent provider dates and tokens return `ok=false`, never a fabricated instant. | `ccbill/subscription_management.go:140,362`; `reconcile/unknown_probe.go:100,201` |
 | FAB-4 | A Solana subscribe/cancel is not classified as a sale — that would fabricate payment. | `reconcile/solana.go:27` |
 | FAB-5 | Missing PSP posture surfaces as posture, not as a fabricated empty. | `reconcile/merchant_wiring.go:183` |
-| FAB-6 | A parse failure must not silently become a zero amount. | see §10 GAP-2 |
+| FAB-6 | A parse failure must not silently become a zero amount. | Catalog drift's NMI plan amounts were the last `return 0` on parse failure (a zero amount raises drift against every local price); both copies now use the exact parser and SKIP the plan with a warning. `pkg/service/catalog_drift.go`, `river/jobs_catalog_reconciliation.go` |
 
 ## 9. Destructive and irreversible actions
 
@@ -198,29 +200,37 @@ stored card; the customer must re-enter it.
 
 ## 10. Known gaps — rules we hold but do not enforce
 
-Every one of these is a rule the codebase intends. None currently fails when broken.
-Tracker issues in `~/open-rails-tracker/openrails/`.
+Every one of these is a rule the codebase intends. Rows are retained after closure as a
+log, so read the **Tracked** column before trusting the Gap column: only rows without a
+**FIXED** / **CLOSED** / **PARTIALLY CLOSED** marker are still unenforced. A row marked
+**STRENGTHENED** or **PARTIALLY CLOSED** names the residual explicitly — that residual is the
+live gap, not the original text. Tracker issues in `~/open-rails-tracker/openrails/`.
+
+Still open as of 2026-07-28: GAP-13 (float-guard package holes), GAP-14 (the internal→rail
+converter is bypassed), GAP-15 (untested live Solana amount formatter), GAP-16 (CUR-9
+violated at its own cited site), GAP-17 (RLS-blind workers), GAP-18 (fail-open `GateExecution`
+default). GAP-11 and GAP-12 are open only in their named residuals.
 
 | # | Gap | Evidence | Tracked |
 |---|---|---|---|
-| GAP-1 | **Integers-only for money is convention only.** `MajorUnits` is a `float64` money type reaching the live NMI wire; Solana base units round-trip through float and overcharge 1.19% of whole-cent amounts; FX multiplies an amount by a float; a refund amount arrives as a JSON float. | `moneyutil.go:27`; `nmi/subscriptions.go:113`; `solana/support.go:63,122`; `fx/provider.go:79`; `admin_findings_actions.go:355-361` | **FIXED** #818 — `MajorUnits` deleted, Solana integer rescale, integer tolerances. Residual: the CI lint forbidding float in money packages. |
+| GAP-1 | **Integers-only for money is convention only.** `MajorUnits` is a `float64` money type reaching the live NMI wire; Solana base units round-trip through float and overcharge 1.19% of whole-cent amounts; FX multiplies an amount by a float; a refund amount arrives as a JSON float. | `moneyutil.go:27`; `nmi/subscriptions.go:113`; `solana/support.go:63,122`; `fx/provider.go:79`; `admin_findings_actions.go:355-361` | **CLOSED** #818 + the guard. `MajorUnits` deleted, Solana integer rescale, integer tolerances — and now `TestNoFloatsInMoneyPackages` (AST, per-declaration allow-list) fails CI on a new float. Turning it on found five MORE live violations #818 had not reached: `fx.ConvertAmount` float-multiplied an amount then `math.Ceil`'d it; `intents.nmiAmountToCents` `ParseFloat`'d a refund amount that is compared for EQUALITY to decide whether a provider refund is ours; catalog drift `ParseFloat`'d NMI plan amounts and returned 0 on failure; the Solana token base-unit amount round-tripped through JSONB as a JSON number; and `webhooks.Stringish` decoded bare JSON numbers through `float64`, mangling any NMI id past 2^53. All five fixed. Residual: GAP-13's package holes. |
 | GAP-2 | **Currency is silently defaulted in two paths** — both substitute a lowercase, unregistered `"usd"` when the provider gave none, one while minting a `payments` row. Violates CUR-9 and FAB-6. | `solana/support.go:116-119`; `modules/reconcile/reconcile.go:570-573` | **FIXED** #830 — three fallback sites removed (one more than filed); a missing provider currency now errors or parks. |
 | GAP-3 | **Terminal cancel + NMI vault delete fire on a stale date.** Past-due is inferred from `next_billing_date < today` with no decline evidence; beyond 14 days that becomes an irreversible provider delete. The decider's own comment admits the remote may still be retrying. | `reconcile/nmi.go:181-186`; `decider.go:315-319`; `lifecycle_service.go:1533-1540` | **FIXED** #821/#834/#835/#837/#841/#842 — measured: empty roster went 40 cancellations → 0. |
 | GAP-4 | **RLS coverage is not checked beyond migration 0001.** `payment_settlement_events` (0005) carries `merchant_id` and full CRUD grants with no RLS. The guard test reads only `0001` from a hardcoded list. | `0005_payment_settlements.up.sql:1-19`; `merchant_aware_schema_test.go:14-77` | **FIXED** SEC-16 — guard now derives its table list from ALL migrations; 5 tables had partial-only merchant_id indexes (or#846). |
 | GAP-5 | **Duplicate payments and subscriptions are representable.** The uniques are partial and disjoint on `rail_merchant_account_id IS NULL`, so the same `(merchant, rail, transaction_id)` can exist twice — once legacy, once account-attributed. | `0001_schema.up.sql:1119` vs `:1121`; `:1010` vs `:1012` | **FIXED** #831, then CORRECTED by #17 — 0012 over-tightened to (merchant, rail, id), forbidding two PSPs issuing the same provider id; 0017 restores per-PSP scope via COALESCE. |
-| GAP-6 | **Currency codes in the DB are unvalidated.** Deliberately app-only across 16 columns; the ledger trigger checks equality, not validity. Nothing stops an import or GAP-2 persisting an unregistered code. | `money/currency.go:11-13` | #832 |
+| GAP-6 | **Currency codes in the DB are unvalidated.** Deliberately app-only across 16 columns; the ledger trigger checks equality, not validity. Nothing stops an import or GAP-2 persisting an unregistered code. | `money/currency.go:11-13` | **FIXED** or#832 — migration 0020 adds a `*_currency_shape` CHECK to all 16 currency columns, applied by iterating `information_schema` (not a hand-written list — the lesson of GAP-4) and guarded by `TestCurrencyColumnsCarryShapeCheck`. It pins CASE and rough shape, not membership; membership stays in the Go registry. Measured cause of the drift: `pkg/catalog`'s loader lower-cased on the way in. See CUR-6. |
 | GAP-7 | **`transfer_type` has no CHECK.** `account_type` does. A typo in a new transfer type silently bypasses the lot-once uniqueness index. | `0001_schema.up.sql:1663` vs `:1617` | **FIXED** #832 — CHECK + typed Go constants pinned to each other; the live vocabulary was 7 values, not 5, and `credit_reinstate` existed only as a bare literal. |
 | GAP-8 | **Ledger conservation is never computed.** `sum(balances) = 0` per `(merchant, currency)` is structural, but nothing checks it, and the account counters are a maintained projection that can drift from `ledger_transfers` if the trigger is ever bypassed (superuser, restore, `COPY`). | trigger `:164-169`; no diagnostic found | **FIXED** #833 — `CheckConservation` + `CheckCounterDrift` + `openrails ledger-audit`; a trigger-bypass drift test proves it catches real drift. |
 | GAP-9 | **org ↔ merchant 1:1 is not enforced.** The decision was a unique `owner_org_id`; the shipped column is `permission_group_id` with a **non-unique** index, so two merchants can claim one group and merchant-from-group resolution is ambiguous. | `0001_schema.up.sql:274` | **FIXED** #843 — `uq_merchants_permission_group_id`, partial on live merchants. |
-| GAP-10 | **Three unique indexes lack `merchant_id`** — `checkout_sessions` on `(rail, reference)` and `(rail, transaction_id)`, **plus `uq_catalog_drift_open`**, whose key is `(rail, kind, resource_type, COALESCE(ids,''))` with no merchant column and no merchant-owned FK, so one merchant's open drift event blocks another's. One merchant can block another's insert. (Every other unique lacking `merchant_id` is either a pkey, scoped by a merchant-owned FK, or a deliberate global natural key — `uq_psps_identity`, `solana_subscriptions.subscription_pda`.) Confirmed 2026-07-28 by `TestGAP10_UniqueIndexesAreMerchantScoped` as `openrails_app`. | `0001_schema.up.sql:1181,1183`; `uq_catalog_drift_open` | SEC-24 |
-| GAP-11 | **The provider-write guard is textual.** A wrapper, method value, or renamed import reaches the same wire call invisibly, and an allow-listed file is trusted wholesale. Record its strength honestly as weak-T, not S. | `enforcement_guard_test.go:15-24` | — |
+| GAP-10 | **Three unique indexes lack `merchant_id`** — `checkout_sessions` on `(rail, reference)` and `(rail, transaction_id)`, plus `uq_catalog_drift_open`. Under RLS the conflicting row is invisible, so one merchant blocks another's insert: a cross-tenant existence oracle and a claim-squat. | `0001_schema.up.sql:1181,1183`; `uq_catalog_drift_open` | **FIXED** SEC-24 — migration 0020 scopes all three by `merchant_id` (and by PSP, via 0017's COALESCE-the-nullable technique so one TOTAL index keeps per-PSP scope). Made permanent by `TestUniqueIndexesAreMerchantScoped`, which derives the unique-index inventory from every migration and fails on a new cross-merchant unique; the five legitimate exceptions are exempted BY NAME with reasons. |
+| GAP-11 | **The provider-write guard is textual.** A wrapper, method value, or renamed import reaches the same wire call invisibly, and an allow-listed file is trusted wholesale. | `enforcement_guard_test.go:15-24` | **STRENGTHENED, not closed.** Now AST-based with the allow-list keyed by `file:FUNCTION`, so method values, interface dispatch, renamed imports and a second call inside an allow-listed file are all visible. A second guard, `TestProviderWriteSurfaceIsClassified`, inventories the client's exported surface and fails until every method is classified read or write — which closed the real hole: six writes (`AddRecurringPlan`, `EditRecurringPlan`, `CreateCustomerVault`, `UpdateCustomerVault`, `UpdateRecurringSubscription`, `Void`) were never in the old token list, so their call sites were unguarded. **Residual: strength is T, not S.** Go has no friend visibility; making bypass a COMPILE error needs the write client moved under `internal/intents/internal/…`, which the legitimate reactive callers make a large refactor. Not attempted. |
 | GAP-13 | **The float guard's package list has holes, and two live violations sit in them.** `TestNoFloatsInMoneyPackages` is a real AST check, but its `guarded` list omits `internal/http/handlers/`, `internal/reconcile/` (it guards the *different* `internal/modules/reconcile/`), `internal/integrations/pyth/` and `internal/river/`. A refund amount is read as a JSON `float64` and truncated (`admin_findings_actions.go:355-361` — the very site GAP-1 marked FIXED), and an on-chain token amount round-trips through `float64` (`reconcile/local.go:425-431`). | those two files | or#863 |
 | GAP-14 | **The "single internal→rail converter" is bypassed by 16 of 18 call sites.** `money.NativeToRailMinor` is the only converter that consults the currency registry; it has 2 non-test callers. Sixteen sites call `moneyutil.MicrosToCents*` directly, hardcoding ÷10 000. For JPY (`Decimals: 4, MinorDecimals: 0`) every one is wrong by 10⁴. Raw `/100`/`*100` also survive at three NMI edges. MONEY-1's "all internal amounts are micros" is likewise false for JPY. | `checkout/*`, `subscriptions/*`, `webhooks/*`, `pkg/service/*`, `handlers/admin_payments.go` | or#863 |
 | GAP-15 | **Solana's live Pay-URL amount formatter has no test.** `solana/pay.go:607 formatTokenAmount` reaches the wire; the *tested* formatter is a near-duplicate, `solana/support.go:166 FormatBaseUnits`. Two divergent formatters, only the untested one live. CCBill's outbound refund pin encodes an admitted dollars-vs-cents guess. | `solana/pay.go:308-311,607` | or#863 |
 | GAP-16 | **CUR-9 is violated by its own cited enforcement site**, which borrows the subscription's currency for a decline that carried none — and says so in a comment. Three further paths substitute `DefaultCurrency`, two of them immediately before charging a card. | `reconcile/unknown_orchestration.go:281-285`; `money/nmi_collection.go:51-53`; `money/vaultedcard_collection.go:43-45`; `handlers/admin_users.go:112-114` | or#864 |
 | GAP-17 | **The RLS-blind-worker class is not fully closed.** Fixed 2026-07-28: the #732 rate ceiling and both armed-merchant scans now go through migration 0021's definer readers, and the settlement feed runs under `MerchantTx`. Still inert: the #816 re-driver (`reprice_repo.go:189`), fleet analytics/timeseries, and — worst — the whole background intent-executor plane, which claims zero intents so the #836 kill switch and #679 volume breaker never execute (or#862). | `db_pgx.go:66-86` | or#861, or#862 |
 | GAP-18 | **`GateExecution` returns "not blocked" on a nil `ModeView`,** disabling `readonly`, `limited` and the origin check in one line. Not live today (`Runner.Config` is always set), but it is a fail-*open* default in a fail-closed gate. | `intents/gate.go:35` | or#865 |
-| GAP-12 | **`Micros` is opt-in.** DB columns are bare `bigint` and most Go structs use `int64`; the unit is carried by column comments. The type only bites where someone chose it. | `moneyutil.go:18` vs `ledger/ledger.go:118` | #818 |
+| GAP-12 | **`Micros` is opt-in.** DB columns are bare `bigint` and most Go structs use `int64`; the unit is carried by column comments. The type only bites where someone chose it. | `moneyutil.go:18` vs `ledger/ledger.go:118` | **PARTIALLY CLOSED** #818 — scoped to the highest-value boundary: the unit CONVERTERS. `CentsToMicros` / `MicrosToCentsCeil` / `MicrosToCentsExact` are the only places a value changes unit and were `int64 -> int64`; they are typed now, as are `ParseDecimalToCents` and the `Format*` helpers, and the type propagated outward on its own into the NMI plan pusher, the CCBill amount-tolerance comparison, the chargeback matcher and the admin refund path. **Deliberately left:** DB columns stay bare `bigint`; most struct fields stay `int64`; `money.NativeToRailMinor` keeps an `int64` input because its argument is internal units at the CURRENCY's registered scale (JPY is 10⁴), which is not always micros — typing it `Micros` would be a lie, and GAP-14 is the real fix for that half. |
 
 ### Audit bundle
 
@@ -247,9 +257,16 @@ Read-only checks that should pass at any time:
 SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname='openrails' AND c.relkind='r' AND NOT c.relrowsecurity;
 
--- GAP-10: unique indexes not scoped by merchant
+-- ID-11 (was GAP-10): unique indexes not scoped by merchant.
+-- Expect ONLY *_pkey rows plus the five named exceptions in
+-- crossMerchantUniqueExemptions. This one is NOT RLS-blind — pg_indexes is catalog.
 SELECT indexdef FROM pg_indexes WHERE schemaname='openrails'
    AND indexdef LIKE '%UNIQUE%' AND indexdef NOT LIKE '%merchant_id%';
+
+-- CUR-5b: every currency column carries the shape CHECK (expect 16).
+SELECT count(*) FROM pg_constraint
+ WHERE contype='c' AND conname LIKE '%\_currency\_shape' ESCAPE '\'
+   AND connamespace='openrails'::regnamespace;
 
 -- GAP-8: ledger conservation per (merchant, currency)
 -- ⚠ RLS-BLIND as openrails_app: returns nothing regardless of state. Run per
@@ -257,7 +274,8 @@ SELECT indexdef FROM pg_indexes WHERE schemaname='openrails'
 SELECT merchant_id, currency, sum(credits_posted - debits_posted) FROM openrails.ledger_accounts
  GROUP BY 1,2 HAVING sum(credits_posted - debits_posted) <> 0;
 
--- GAP-2/GAP-6: unregistered or lowercase currency codes
+-- GAP-2/GAP-6: lowercase currency codes. Now impossible to insert (CUR-5b), so
+-- this is a post-migration audit of legacy rows rather than a live guard.
 -- ⚠ RLS-BLIND as openrails_app (see above).
 SELECT DISTINCT currency FROM openrails.payments;
 
@@ -275,10 +293,13 @@ Test gates:
 
 ```
 go test -tags integration ./internal/invariantaudit                   # TEN-1/2/3/9, LED-2/3/5/6/7, MONEY-8, CUR-1/3, GAP-7/9/10 — as openrails_app
-go test ./migrations/postgres                                         # TEN-4, TEN-12, MONEY-9
-go test ./internal/intents  -run TestProviderWritesStayBehindIntents  # IDEM-7
+go test ./migrations/postgres                                         # TEN-4, TEN-12, MONEY-9, ID-11, CUR-5b
+go test ./internal/intents  -run TestProviderWrite                    # IDEM-7 (both halves: surface + call sites)
 go test ./internal/shared/moneyutil -run TestNoFloatsInMoneyPackages  # MONEY-3
 go test ./internal/merchants -run TestNoAdHocSecretPathConstruction   # secret-path builder
+go test ./internal/merchants -run TestSecretNameRejectsTraversal      # SEC-24 item 6
+go test ./internal/merchants -run TestEncryptedSecretStore_CiphertextIsBoundToItsRow  # SEC-24 item 1 (AAD binding)
+go test ./internal/http/handlers -run TestStripeRelatedObjectURLIsAlwaysAPath         # SEC-24 item 5
 go test .                   -run 'TestRootPackageStaysLight|TestModuleIsGinFree'
 ```
 
