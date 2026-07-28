@@ -116,7 +116,7 @@ func TestFindingsGaugesFreeloaderDetectorEndToEnd(t *testing.T) {
 	fx.sweep()
 	after := fx.gauges()
 	assert.Zero(t, after.Gauges.Freeloaders, "gauge back to zero after the approved fix")
-	row, err := gen.New(fx.dbi.Pool()).GetReconciliationFinding(fx.ctx, uuid.MustParse(item.ID))
+	row, err := fx.dbi.Gen(fx.ctx).GetReconciliationFinding(fx.ctx, uuid.MustParse(item.ID))
 	require.NoError(t, err)
 	assert.Equal(t, "fixed", row.Status, "sweep did not reopen the confirmed fix")
 }
@@ -212,7 +212,7 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	fx.sweep()
 	after := fx.gauges()
 	assert.Zero(t, after.Gauges.DuplicateCoverage, "gauge back to zero after the refund")
-	row, err := gen.New(fx.dbi.Pool()).GetReconciliationFinding(fx.ctx, uuid.MustParse(item.ID))
+	row, err := fx.dbi.Gen(fx.ctx).GetReconciliationFinding(fx.ctx, uuid.MustParse(item.ID))
 	require.NoError(t, err)
 	assert.Equal(t, "fixed", row.Status)
 }

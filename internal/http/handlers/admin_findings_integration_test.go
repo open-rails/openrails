@@ -133,6 +133,16 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		require.NoError(t, err)
 	}
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "findings-"+sfx)
+	// SEC-18: pin the request's merchant-scoped connection, exactly as
+	// MerchantDBConnMW does for /v1/merchant/findings/*. The by-id findings
+	// queries now carry `merchant_id = openrails.current_merchant_id()`, so a
+	// handler-level fixture that skips the middleware is no longer a faithful
+	// stand-in for the route.
+	pinned, release, err := dbi.WithMerchantConn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(release)
+	ctx = pinned
+	fx.ctx = ctx
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		fx.product, "findings-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
@@ -330,7 +340,9 @@ func (fx *findingsFixture) list(query string) findingsListBody {
 
 func (fx *findingsFixture) findingRow(id uuid.UUID) gen.OpenrailsReconciliationFinding {
 	fx.t.Helper()
-	row, err := gen.New(fx.dbi.Pool()).GetReconciliationFinding(fx.ctx, id)
+	// Gen(ctx) rides the fixture's pinned merchant connection; the raw pool
+	// carries no app.merchant_id, and the by-id read is merchant-scoped (SEC-18).
+	row, err := fx.dbi.Gen(fx.ctx).GetReconciliationFinding(fx.ctx, id)
 	require.NoError(fx.t, err)
 	return row
 }

@@ -24,12 +24,15 @@ INSERT INTO openrails.subscription_reprices (
 )
 RETURNING *;
 
--- SEC-18: merchant-admin by-id surface (GET/DELETE /v1/merchant/reprices/:id).
--- Same reasoning as the reconciliation findings: RLS must not be the only
--- control, so the request's merchant scope is also stated in the query.
+-- SEC-18 NOTE: this by-id surface still has NO application-level merchant
+-- predicate; RLS is its only control. A GUC-derived predicate (the fix used for
+-- the reconciliation findings) is wrong HERE because RepriceRepo is shared with
+-- the plan-migration batch/re-driver paths, which do not consistently pin a
+-- merchant connection — it would trade a hardening for an availability bug of
+-- exactly the #824 shape. The honest fix is threading merchant.ID through the
+-- repo, same as the by-customer admin surface. Tracked in SEC-18.
 -- name: GetSubscriptionRepriceByID :one
-SELECT * FROM openrails.subscription_reprices
-WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
+SELECT * FROM openrails.subscription_reprices WHERE id = $1;
 
 -- The subscription's current scheduled reprice, if any (at most one by
 -- uq_subscription_reprices_one_scheduled) — used both to refuse a second
@@ -52,9 +55,7 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
-WHERE id = sqlc.arg(id)
-  AND merchant_id = openrails.current_merchant_id() -- SEC-18
-  AND status = 'scheduled';
+WHERE id = sqlc.arg(id) AND status = 'scheduled';
 
 -- name: ApplySubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET

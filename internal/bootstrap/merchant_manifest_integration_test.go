@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -125,6 +126,14 @@ DROP POLICY IF EXISTS merchant_isolation ON openrails.psps;
 CREATE POLICY merchant_isolation ON openrails.psps
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+-- #824: migration 0016's directory function + index target customers; this
+-- harness replays that migration verbatim, so the table must exist.
+CREATE TABLE IF NOT EXISTS openrails.customers (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id uuid NOT NULL,
+    subject text
+);
 
 CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
     rail text NOT NULL,
@@ -314,7 +323,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := cozyArtMerchantManifest()
@@ -526,7 +535,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	vault := newMerchantManifestVault(t)
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Vault: &config.VaultConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Vault: &config.VaultConfig{
 		Enabled:    true,
 		Address:    vault.Address,
 		AuthMethod: "token",
@@ -582,7 +591,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 
@@ -788,13 +797,29 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	}
 	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
+
+	// #824: the PSP-ownership preflight goes through the SECURITY DEFINER
+	// directory function, so this hand-written schema replays the REAL text of
+	// migration 0016 rather than hand-copying (and eventually drifting from) it.
+	_, err = pool.Exec(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
+		END IF;
+	END $$;`)
+	require.NoError(t, err)
+	directoryDDL, err := postgresmigrations.FS.ReadFile("0016_cross_merchant_directory.up.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(directoryDDL))
+	require.NoError(t, err)
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723
 // merchant_source=api): they assert persistent-backend side effects (seed-once,
 // merchant_secrets rows, Vault KV) that mode 1 deliberately does not produce.
+// SEC-18: Env is declared, never inferred — an empty Env is no longer
+// development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{MerchantSource: config.MerchantSourceAPI}
+	return &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI}
 }
 
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
