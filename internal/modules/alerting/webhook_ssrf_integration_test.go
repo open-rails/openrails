@@ -71,8 +71,10 @@ func TestWebhookDeliveryDoesNotFollowRedirectIntoLinkLocal(t *testing.T) {
 
 	require.Len(t, results, 1)
 	require.False(t, results[0].OK)
-	// Blind to the tenant: no status, no dial error, no address.
-	require.Equal(t, "delivery failed: the destination could not be reached", results[0].Detail)
+	// Blind to the tenant: the fixed policy message, never the dial error, the
+	// status, or the address that was refused.
+	require.Equal(t, "destination address is not publicly routable", results[0].Detail)
 	require.NotContains(t, results[0].Detail, "169.254")
+	require.NotContains(t, results[0].Detail, "dial")
 	require.Positive(t, atomic.LoadInt32(&hits), "the origin was contacted; the redirect target was not")
 }
