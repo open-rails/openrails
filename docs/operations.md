@@ -494,6 +494,96 @@ never back-billed: dunning past the staleness window cancels instead of
 charging, and a Solana subscription that skipped whole periods gets exactly
 one pull anchored at the pull moment.
 
+## The destructive-action kill switch (#836) and first-enforce gate (#835)
+
+`provider_write_mode` is a boot setting: changing it needs a deploy. The kill
+switch is the runtime brake — a single DB row, read at the top of every
+destructive plane (converge sweep, provider refresh, intent executor), so one
+`UPDATE` halts every node at its next gate check.
+
+**It ships OFF.** A fresh deployment converges nothing destructive — no local
+cancellation, no entitlement revocation, no provider delete — until an operator
+arms it. That is deliberate: the first pass against an imported legacy book is
+exactly when a bad roster does the most damage.
+
+### Stop everything, now
+
+```sql
+UPDATE openrails.destructive_action_switch SET enabled = false,
+       updated_by = 'you', reason = 'incident: mass cancellation observed';
+```
+
+No restart, no deploy, no scaling workers to zero. In-flight destructive intents
+**park** (they are not failed), so flipping it back resumes them where they
+stopped.
+
+### Confirm it stopped
+
+```sql
+-- 1. the switch itself
+SELECT enabled, updated_by, reason, updated_at FROM openrails.destructive_action_switch;
+
+-- 2. nothing has been cancelled since the flip
+SELECT count(*) FROM openrails.subscriptions
+ WHERE cancelled_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+
+-- 3. no entitlement has been revoked since the flip
+SELECT count(*) FROM openrails.entitlements
+ WHERE revoked_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+
+-- 4. destructive provider intents are parked, not executing
+SELECT status, count(*) FROM openrails.rail_intents
+ WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
+```
+
+Worker logs name the gate explicitly: `destructive actions gated — instance kill
+switch is OFF`.
+
+### Arming a merchant (the #835 first-enforce gate)
+
+A merchant with no `openrails.merchant_destructive_policy` row — or one with
+`enforce_armed_at IS NULL` — pulls in **advisory** mode: findings are persisted,
+nothing is mutated, no source domain is proven, and `first_pull_completed_at` is
+stamped so you know the survey is ready.
+
+```sql
+-- what did the first pull find?
+SELECT finding_type, status, count(*) FROM openrails.reconciliation_findings
+ WHERE merchant_id = :merchant GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- happy with it? arm the merchant for enforcing pulls
+INSERT INTO openrails.merchant_destructive_policy
+       (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
+VALUES (:merchant, true, now(), 'you', 'reviewed first-pull findings')
+ON CONFLICT (merchant_id) DO UPDATE
+   SET enforce_armed_at = now(), destructive_actions_enabled = true;
+
+-- and the instance switch (once, per deployment)
+UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'you';
+```
+
+Both halves must be on: the instance switch gates the fleet, the merchant row
+gates one merchant. Disabling either stops that merchant.
+
+### Cancellation caps (#837)
+
+Independently of the switch, one pass may cancel at most
+`min(25, max(3, 5% of the merchant's live linked book))` subscriptions. Over
+that, **none** are applied, the merchant's pass halts, and a
+`pull.cancellation.capped` finding lands in the review queue. It is all-or-
+nothing on purpose: a pass that wants to cancel 850 customers is not a pass that
+should cancel the first 25 of them.
+
+```sql
+SELECT subject_key, recommended_action, updated_at
+  FROM openrails.reconciliation_findings
+ WHERE finding_type = 'pull.cancellation.capped' AND status = 'requires_review';
+```
+
+Investigate the roster before clearing it. The usual causes are a misdeclared
+`psps.account_id`, a credential rotated onto a sibling sub-account, or a
+provider incident returning a short page — never 850 customers all leaving.
+
 ## Per-merchant API hosts (#734) + browser CORS (#765)
 
 Public multi-merchant deployments (one engine serving several merchants) give
