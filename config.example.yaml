@@ -5,7 +5,7 @@
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
 
-env: development
+env: development # REQUIRED (SEC-18); no default — an undeclared environment refuses to boot, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one
 provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest
 

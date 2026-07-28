@@ -16,7 +16,17 @@ Postgres specifics worth knowing:
 
 - RLS is enforced for the unprivileged `openrails_app` role (`NOLOGIN NOBYPASSRLS`,
   created by the baseline migration); every merchant-scoped table has a
-  `merchant_isolation` policy keyed on the `app.merchant_id` GUC.
+  `merchant_isolation` policy keyed on the `app.merchant_id` GUC. Run MIGRATIONS
+  as a superuser and the SERVER as `openrails_app`: outside development the
+  server refuses to boot on a role that bypasses RLS, and the cross-merchant
+  directory functions (webhook routing by provider account, the hosted portal's
+  merchant list) are `SECURITY DEFINER` — they need an owner that can read
+  across merchants, and they raise rather than return an empty result if it
+  cannot.
+- `ENV` is REQUIRED and has no default. It decides whether merchant secrets may
+  be stored plaintext and whether the DB role must enforce RLS, so an
+  undeclared environment refuses to boot instead of quietly meaning
+  "development".
 - Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
   migrations (`migrations/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
