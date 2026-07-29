@@ -152,10 +152,10 @@ func (suite *TestContainerSuite) boot() {
 		// delegated_sub.
 		integrationharness.WithAuthenticator(&suiteDelegatedUserAuthenticator{suite: suite}),
 	}
-	// Super DSN: the legacy tests/ fixtures and direct service calls predate
-	// merchant-pinned contexts; RLS enforcement is covered by the harness's
-	// StartStandalone consumers (cross-merchant isolation + rls suites).
-	suite.surface = suite.harness.StartStandaloneSuper("usd", opts...)
+	// The server connects as openrails_app: RLS enforces on every route this
+	// suite drives, exactly as in production (or#867). Fixtures that write
+	// merchant-owned rows go through suite.MerchantPool (pinned), not suite.Pool.
+	suite.surface = suite.harness.StartStandalone("usd", opts...)
 	suite.App = suite.surface.App()
 	suite.Server = suite.surface.Server()
 	suite.Pool = suite.harness.Pool()
