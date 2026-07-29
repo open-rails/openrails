@@ -66,9 +66,11 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// RLS-enforcing harness: every row here is the test merchant's own; the
+	// merchants row itself is control plane.
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
-	dbtest.EnsureTestMerchant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID := uuid.New(), uuid.New()
@@ -111,15 +113,19 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
-	rows, err := subscriptions.NewSubscriptionRepo(dbi).ListDueDunningSubscriptions(ctx, []string{string(models.RailNMI)}, time.Now().UTC())
-	require.NoError(t, err)
-
 	got := map[uuid.UUID]bool{}
-	for _, s := range rows {
-		if _, mine := seeded[s.ID]; mine {
-			got[s.ID] = true
+	require.NoError(t, dbi.RunInMerchantConn(ctx, func(mctx context.Context) error {
+		rows, qerr := subscriptions.NewSubscriptionRepo(dbi).ListDueDunningSubscriptions(mctx, []string{string(models.RailNMI)}, time.Now().UTC())
+		if qerr != nil {
+			return qerr
 		}
-	}
+		for _, s := range rows {
+			if _, mine := seeded[s.ID]; mine {
+				got[s.ID] = true
+			}
+		}
+		return nil
+	}))
 	assert.Equal(t, map[uuid.UUID]bool{due: true}, got,
 		"exactly the due past_due NMI row is in the work list (no future retries, other statuses, other rails, or retry-less rows)")
 
@@ -145,9 +151,11 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// RLS-enforcing harness: every row here is the test merchant's own; the
+	// merchants row itself is control plane.
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
-	dbtest.EnsureTestMerchant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
@@ -245,9 +253,15 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
 	// --- Sub A: openrails-driven pm with missing vault refs -> park (#840) ---
-	sub, err := subSvc.GetByID(ctx, subID)
-	require.NoError(t, err)
-	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, moneySvc, false)
+	var outcome dunningOutcome
+	require.NoError(t, dbi.RunInMerchantConn(ctx, func(mctx context.Context) error {
+		sub, gerr := subSvc.GetByID(mctx, subID)
+		if gerr != nil {
+			return gerr
+		}
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, false)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)
 	assert.Zero(t, nmiMutations.Load(), "nothing chargeable exists; no provider mutation may be sent")
 
@@ -272,9 +286,14 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	assert.Nil(t, nextRetryAt, "a parked row leaves the dunning queue")
 
 	// --- Sub B: pm-less = provider-auto-billed (#635) -> untouched ---
-	autoSub, err := subSvc.GetByID(ctx, autoBilledSubID)
-	require.NoError(t, err)
-	outcome = worker.processSubscription(ctx, autoSub, lifecycle, priceSvc, moneySvc, false)
+	require.NoError(t, dbi.RunInMerchantConn(ctx, func(mctx context.Context) error {
+		autoSub, gerr := subSvc.GetByID(mctx, autoBilledSubID)
+		if gerr != nil {
+			return gerr
+		}
+		outcome = worker.processSubscription(mctx, autoSub, lifecycle, priceSvc, moneySvc, false)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)
 	assert.Zero(t, nmiMutations.Load(), "provider-auto-billed sub must never be charged by us")
 
