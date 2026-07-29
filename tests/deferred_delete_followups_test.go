@@ -261,11 +261,16 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 }
 
-// TestDunningWorkerWindowExpirySchedulesDeferredDelete closes the #344 tail:
-// the dunning worker's terminal cancellations route the rail-side
-// delete through the shared deferred scheduler (no inline delete), so window
-// expiry persists the durable marker and schedules exactly one delete.
-func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
+// TestDunningWorkerStalenessSchedulesNoDelete is the #839 inversion of the old
+// window-expiry test. Staleness used to be a terminal cancellation that queued
+// the rail-side delete through the shared deferred scheduler; it is now a PARK.
+// A 60-day-stale row is exactly the legacy-import shape the old code destroyed
+// on sight, with no charge and no provider evidence — the clock is not a death
+// certificate. The #344 routing (terminal cancels go through the deferred
+// scheduler, never an inline delete) is still pinned, by the sibling
+// TestFailMembershipDunningExhaustionSchedulesNMIDelete, on real exhausted
+// dunning where a terminal outcome is actually earned.
+func TestDunningWorkerStalenessSchedulesNoDelete(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
@@ -302,16 +307,15 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	updated := suite.GetSubscription(sub.ID)
-	require.Equal(t, models.StatusCancelled, updated.Status)
-	require.NotNil(t, updated.DeletionScheduledAt, "terminal window-expiry cancel must persist the deferred-delete marker")
+	require.Equal(t, models.StatusUnknown, updated.Status,
+		"a stale rebill parks for provider verification; it is never cancelled on a date comparison (#839)")
+	require.Nil(t, updated.CancelledAt, "cancellation is a last resort and nothing here justified it")
+	require.Nil(t, updated.DeletionScheduledAt, "no deferred-delete marker may be persisted for a merely stale row")
 
-	var scheduledForSub []scheduledDelete
 	for _, scheduled := range recorder.scheduled {
-		if scheduled.SubscriptionID == sub.ID {
-			scheduledForSub = append(scheduledForSub, scheduled)
-		}
+		require.NotEqual(t, sub.ID, scheduled.SubscriptionID,
+			"an NMI vault delete is irreversible; staleness alone must never queue one")
 	}
-	require.Len(t, scheduledForSub, 1, "exactly one deferred delete scheduled for this subscription (no inline delete)")
 }
 
 // TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes covers the

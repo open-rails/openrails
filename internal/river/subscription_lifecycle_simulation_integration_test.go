@@ -63,6 +63,20 @@ func TestSubscriptionLifecycleSimulation(t *testing.T) {
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	mctx := dbtest.WithTestMerchant(ctx)
+	// #836/#839: terminal collection outcomes are gated on the destructive kill
+	// switch, which ships OFF — a fresh deployment cancels nothing until an
+	// operator arms it. This simulation asserts what a live, REVIEWED deployment
+	// does, so it puts itself in that state.
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		dbtest.ArmDestructiveActions(sctx, t, dbi.Qx(sctx), dbtest.TestMerchantID.UUID())
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+			dbtest.DisarmDestructiveActions(sctx, t, dbi.Qx(sctx))
+			return nil
+		})
+	})
 
 	t.Run("happy_renewals", func(t *testing.T) {
 		testHappyRenewals(t, mctx, dbi)
