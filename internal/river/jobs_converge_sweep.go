@@ -79,7 +79,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	// openrails.merchants is the policy-free directory, so the base pool
 	// genuinely answers this; the per-merchant work below runs inside
 	// RunInMerchantConn. Not a privilege — there is no privileged pool (or#868).
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("converge sweep: list merchants: %w", err)
 	}

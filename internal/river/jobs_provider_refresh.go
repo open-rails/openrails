@@ -131,7 +131,7 @@ func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]u
 	if w.ListMerchants != nil {
 		return w.ListMerchants(ctx)
 	}
-	return w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	return w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 }
 
 // merchantHasRailAccounts: cheap accounts-exist predicate. psps

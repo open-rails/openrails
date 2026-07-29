@@ -50,7 +50,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 	// RLS-exempt tables), so this read genuinely works on the base pool. It is
 	// NOT a privileged read — no such thing exists — and every merchant-owned
 	// query below runs inside RunInMerchantConn (or#868).
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("notification email sweep: list merchants: %w", err)
 	}

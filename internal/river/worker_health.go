@@ -204,7 +204,7 @@ func (w *WorkerHealthCheckWorker) Work(ctx context.Context, _ *river.Job[WorkerH
 		return fmt.Errorf("worker health check: DB is required")
 	}
 	now := w.now()
-	q := w.DB.Gen(ctx)
+	q := w.DB.GenDirectory()
 
 	// Seed a row per registered kind so "expected N runs, got 0" is a visible
 	// row, not an absence. Idempotent; refreshes the declared cadence.
@@ -308,7 +308,7 @@ func workerAlertDue(row gen.OpenrailsWorkerHealth, now time.Time, reAlertEvery t
 // alert fans out to every active merchant (embedded deployments have exactly
 // one) — a wedged worker stalls billing for all of them.
 func (w *WorkerHealthCheckWorker) raiseAlert(ctx context.Context, row gen.OpenrailsWorkerHealth, reason string, now time.Time) error {
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list merchants: %w", err)
 	}

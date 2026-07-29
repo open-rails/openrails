@@ -58,6 +58,19 @@ type CatalogReconciliationPullWorker struct {
 
 func (CatalogReconciliationPullWorker) Kind() string { return KindCatalogReconciliationPull }
 
+// catalogReconcileMerchantBatch caps one pass's fan-out; the work queue is the
+// armed-PSP set, so a pass scales with merchants on a reconcilable rail.
+const catalogReconcileMerchantBatch = 1000
+
+// Work fans the pull-and-diff pass out over the merchants armed on a
+// reconcilable rail, one merchant scope each (or#877, found by FC-16).
+//
+// It used to run ONE pass on the bare job context: ProductService/PriceService
+// GetAll read s.db.Gen(ctx) with no merchant, so under openrails_app the local
+// catalog came back EMPTY and every provider product/price was diffed against
+// nothing. Alert-only or not, "no drift" was never an answer this worker had
+// actually computed — and the NMI leg silently skipped itself entirely, because
+// merchant.Require(ctx) could not succeed on a bare context.
 func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Job[CatalogReconciliationPullArgs]) error {
 	if w.DB == nil {
 		return fmt.Errorf("catalog reconciliation: db not configured")
@@ -65,7 +78,33 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	if w.Config == nil {
 		return fmt.Errorf("catalog reconciliation: config not configured")
 	}
+	_ = job
 
+	merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
+		Rails:         []string{string(models.RailStripe), string(models.RailNMI)},
+		MerchantLimit: catalogReconcileMerchantBatch,
+	})
+	if err != nil {
+		return fmt.Errorf("catalog reconciliation: list armed merchants: %w", err)
+	}
+	for _, mid := range merchantIDs {
+		if mid == nil {
+			continue
+		}
+		merchantID := merchant.ID(*mid)
+		if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error {
+			return w.reconcileMerchant(mctx)
+		}); err != nil {
+			// One merchant's provider outage must not abort the rest of the pass.
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
+				Error("CatalogReconciliation: merchant pass failed; continuing")
+		}
+	}
+	return nil
+}
+
+// reconcileMerchant runs one merchant's pull-and-diff, already inside its scope.
+func (w CatalogReconciliationPullWorker) reconcileMerchant(ctx context.Context) error {
 	productSvc := catalog.NewProductService(w.DB)
 	priceSvc := catalog.NewPriceService(w.DB)
 	productRows, err := productSvc.GetAll(ctx)

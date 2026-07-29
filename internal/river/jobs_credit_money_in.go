@@ -28,7 +28,7 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 		logger.Debug("db not configured; skipping")
 		return nil
 	}
-	merchantIDs, err := dbi.Gen(ctx).ListActiveMerchantIDs(ctx)
+	merchantIDs, err := dbi.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list merchants: %w", err)
 	}
