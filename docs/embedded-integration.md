@@ -70,7 +70,19 @@ to boot unless you declare posture explicitly (#745):
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
-| `DB` | yes | Schema defaults to `openrails`. |
+| `DB` | yes | Schema defaults to `openrails`. The **pool you inject must connect as a non-superuser, `NOBYPASSRLS` role** — see below. |
+
+**The injected pool's role must enforce RLS, in every environment including your
+own local development** (or#782). `embedded.New` refuses to boot on a superuser
+or `BYPASSRLS` role. This is not pedantry: OpenRails' merchant isolation is
+`FORCE ROW LEVEL SECURITY` keyed on the `app.merchant_id` GUC, so under a
+privileged role the policies are skipped entirely — and worse, a query that
+forgets its merchant scope returns rows instead of the empty result the policy
+would give it, which is how a whole class of "the worker ran and did nothing"
+bugs stays invisible until production. Run your migrations as the owner, then
+hand OpenRails a pool on `openrails_app` (created `NOLOGIN NOBYPASSRLS` by the
+baseline migration — attach a login credential out of band) or an equivalent
+unprivileged role of your own with the same grants.
 
 Under `TestMode = sandbox` every rail routes to its test environment and live
 credentials refuse to boot — no real money can move. NMI accounts get an arm-time

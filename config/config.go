@@ -1842,8 +1842,12 @@ func GetDefaultBillingConfig() *Config {
 			Host:     "localhost",
 			Port:     "5434",
 			Database: "openrails_db",
-			Username: "admin",
-			Password: "admin_password",
+			// The unprivileged NOBYPASSRLS role, matching docker-compose
+			// (or#782). The default must NOT be the superuser: boot refuses a
+			// BYPASSRLS role in every environment, and a superuser default
+			// would only teach developers to reach for one.
+			Username: "openrails_app",
+			Password: "openrails_app_password",
 			SSLMode:  "disable",
 			Schema:   DefaultSchema,
 		},
