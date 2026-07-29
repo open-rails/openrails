@@ -23,6 +23,9 @@ type fakePlanReader struct {
 	mintDecimals uint8
 	// mintMissing makes the mint read return an empty account (fail closed).
 	mintMissing bool
+	// mintZeroDecimals serves a mint that genuinely reports 0 decimals (the
+	// unpayable case), distinct from the zero-value default below.
+	mintZeroDecimals bool
 }
 
 func (r fakePlanReader) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
@@ -31,7 +34,7 @@ func (r fakePlanReader) GetAccountData(_ context.Context, addr solanago.PublicKe
 			return nil, nil
 		}
 		d := r.mintDecimals
-		if d == 0 {
+		if d == 0 && !r.mintZeroDecimals {
 			d = 6 // devnet/mainnet USDC
 		}
 		return buildMintBlob(d), nil
@@ -130,6 +133,7 @@ func TestPublishPlanIdempotentRepublish(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: amount,
+		AmountDecimals:  6,
 		PeriodHours:     periodHours,
 	})
 	if err != nil {
@@ -166,6 +170,7 @@ func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 	})
 	if err == nil {
@@ -194,6 +199,7 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 	})
 	if err != nil {
