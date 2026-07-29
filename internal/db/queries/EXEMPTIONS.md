@@ -120,6 +120,14 @@ dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
 
+Two more sit in the GUC group: `internal/db/merchant_scope.go` reads
+`app.merchant_id` via `current_setting` (`AssertMerchantScope` checks the LIVE
+session, which is the whole point — a context value would prove nothing), and
+`internal/integrationharness/harness.go` sets it via `set_config`. Neither is a
+query. `internal/modules/money/ledger/diagnostics.go` is the dynamic case: the
+conservation and counter-drift statements take an optional merchant filter, so
+the predicate is composed rather than fixed.
+
 **DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
 Nothing about them requires raw SQL.
 
