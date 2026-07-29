@@ -353,7 +353,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	pmID := uuid.New()
-	vaultID := "mat-vault-" + suffix
+	railCustomerRef := "mat-vault-" + suffix
 	planID := "mat-plan-" + suffix
 	entName := "premium-mat-" + suffix
 
@@ -374,7 +374,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
 		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id)
-		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestMerchantID.UUID())
+		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, railCustomerRef, suffix, dbtest.TestMerchantID.UUID())
 		return nil
 	}))
 	subjectID := subjectIDHolder
@@ -393,7 +393,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			{
 				RailSubscriptionID: resolvablePSID,
 				Status:             SubscriptionStatusActive,
-				CustomerID:         vaultID,
+				CustomerID:         railCustomerRef,
 				Email:              "mat-" + suffix + "@example.com",
 				PlanID:             planID,
 				NextBillingAt:      &periodEnd,
@@ -413,7 +413,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			{
 				TransactionID: txnID, Type: TransactionTypeSale, Success: true,
 				AmountCents: 1499, Currency: "USD", OccurredAt: lastBilled,
-				Raw: rawJSON(map[string]any{"customer_vault_id": vaultID}),
+				Raw: rawJSON(map[string]any{"customer_vault_id": railCustomerRef}),
 			},
 		},
 	}

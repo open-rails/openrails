@@ -148,10 +148,10 @@ func TestStripeFetcher_Fetch(t *testing.T) {
 	require.Equal(t, "canceled", cancelled.RawStatus)
 
 	// Vault: only the sub with an expanded default_payment_method.
-	require.Len(t, snap.VaultEntries, 1)
-	require.Equal(t, "cus_A", snap.VaultEntries[0].CustomerVaultID)
-	require.Equal(t, "4242", snap.VaultEntries[0].CardLast4)
-	require.Equal(t, "0730", snap.VaultEntries[0].CardExpiry)
+	require.Len(t, snap.PaymentMethods, 1)
+	require.Equal(t, "cus_A", snap.PaymentMethods[0].RailCustomerRef)
+	require.Equal(t, "4242", snap.PaymentMethods[0].CardLast4)
+	require.Equal(t, "0730", snap.PaymentMethods[0].CardExpiry)
 
 	// Transactions: sale, decline, refund, chargeback.
 	require.Len(t, snap.Transactions, 4)

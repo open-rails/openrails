@@ -97,8 +97,8 @@ func mutationRecordsForFinding(provider Provider, findingID uuid.UUID, f *Findin
 			}
 		}
 		out = add(out, "payments", op, rowID, a.RecordRefund.TransactionID, key, 1)
-	case a.AdoptVault != nil:
-		out = add(out, "payment_methods", "update", a.AdoptVault.PaymentMethodID.String(), "", "vault_adopted", 1)
+	case a.AdoptPaymentMethod != nil:
+		out = add(out, "payment_methods", "update", a.AdoptPaymentMethod.PaymentMethodID.String(), "", "vault_adopted", 1)
 	case a.Materialize != nil:
 		rowID := ""
 		if phase == "applied" {

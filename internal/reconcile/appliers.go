@@ -23,7 +23,7 @@ import (
 type LocalWriter interface {
 	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
 	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
-	AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error)
+	AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error)
 	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
@@ -133,7 +133,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	return n > 0, nil
 }
 
-func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error) {
+func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
 	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{
 		LastFour:   a.LastFour,
 		ExpiryDate: a.ExpiryDate,

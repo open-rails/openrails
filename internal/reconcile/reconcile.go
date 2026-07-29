@@ -131,10 +131,10 @@ type RemoteTransaction struct {
 	Raw         json.RawMessage `json:"raw,omitempty"`
 }
 
-// RemoteVaultEntry is one stored payment method as the rail declares it.
-type RemoteVaultEntry struct {
-	// CustomerVaultID is the rail vault/customer identifier.
-	CustomerVaultID string `json:"customer_vault_id"`
+// RemotePaymentMethod is one stored payment method as the rail declares it.
+type RemotePaymentMethod struct {
+	// RailCustomerRef is the rail vault/customer identifier.
+	RailCustomerRef string `json:"customer_vault_id"`
 	// CardLast4 / CardExpiry (MMYY) are populated when the provider exposes
 	// masked card data.
 	CardLast4  string          `json:"card_last4,omitempty"`
@@ -145,14 +145,14 @@ type RemoteVaultEntry struct {
 
 // RemoteSnapshot is the normalized result of one fetch against one provider.
 type RemoteSnapshot struct {
-	Provider      Provider             `json:"provider"`
-	PspID         string               `json:"psp_id,omitempty"`
-	FetchedAt     time.Time            `json:"fetched_at"`
-	Subscriptions []RemoteSubscription `json:"subscriptions"`
-	Transactions  []RemoteTransaction  `json:"transactions"`
-	VaultEntries  []RemoteVaultEntry   `json:"vault_entries"`
-	Capabilities  Capabilities         `json:"capabilities"`
-	Coverage      SnapshotCoverage     `json:"coverage"`
+	Provider       Provider              `json:"provider"`
+	PspID          string                `json:"psp_id,omitempty"`
+	FetchedAt      time.Time             `json:"fetched_at"`
+	Subscriptions  []RemoteSubscription  `json:"subscriptions"`
+	Transactions   []RemoteTransaction   `json:"transactions"`
+	PaymentMethods []RemotePaymentMethod `json:"vault_entries"`
+	Capabilities   Capabilities          `json:"capabilities"`
+	Coverage       SnapshotCoverage      `json:"coverage"`
 }
 
 // SnapshotCoverage says which provider domains were exhaustively covered by a

@@ -14,23 +14,23 @@ import (
 
 // localIndex precomputes the lookups the diff checks share.
 type localIndex struct {
-	byPSID    map[string]*LocalSubscription
-	byID      map[uuid.UUID]*LocalSubscription
-	byEmail   map[string][]*LocalSubscription
-	bySubject map[uuid.UUID][]*LocalSubscription
-	pmByVault map[string]*LocalPaymentMethod
-	pmByID    map[uuid.UUID]*LocalPaymentMethod
-	prices    []LocalPrice
+	byPSID              map[string]*LocalSubscription
+	byID                map[uuid.UUID]*LocalSubscription
+	byEmail             map[string][]*LocalSubscription
+	bySubject           map[uuid.UUID][]*LocalSubscription
+	pmByRailCustomerRef map[string]*LocalPaymentMethod
+	pmByID              map[uuid.UUID]*LocalPaymentMethod
+	prices              []LocalPrice
 }
 
 func buildLocalIndex(local *LocalState) *localIndex {
 	idx := &localIndex{
-		byPSID:    map[string]*LocalSubscription{},
-		byID:      map[uuid.UUID]*LocalSubscription{},
-		byEmail:   map[string][]*LocalSubscription{},
-		bySubject: map[uuid.UUID][]*LocalSubscription{},
-		pmByVault: map[string]*LocalPaymentMethod{},
-		pmByID:    map[uuid.UUID]*LocalPaymentMethod{},
+		byPSID:              map[string]*LocalSubscription{},
+		byID:                map[uuid.UUID]*LocalSubscription{},
+		byEmail:             map[string][]*LocalSubscription{},
+		bySubject:           map[uuid.UUID][]*LocalSubscription{},
+		pmByRailCustomerRef: map[string]*LocalPaymentMethod{},
+		pmByID:              map[uuid.UUID]*LocalPaymentMethod{},
 	}
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
@@ -49,7 +49,7 @@ func buildLocalIndex(local *LocalState) *localIndex {
 	}
 	for i := range local.PaymentMethods {
 		pm := &local.PaymentMethods[i]
-		idx.pmByVault[pm.VaultID] = pm
+		idx.pmByRailCustomerRef[pm.RailCustomerRef] = pm
 		idx.pmByID[pm.ID] = pm
 	}
 	idx.prices = local.Prices
@@ -98,10 +98,10 @@ func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLin
 
 // remoteIndex precomputes snapshot lookups.
 type remoteIndex struct {
-	subByPSID     map[string]*RemoteSubscription
-	subsByCust    map[string][]*RemoteSubscription
-	vaultByID     map[string]*RemoteVaultEntry
-	liveSubByPSID map[string]bool
+	subByPSID               map[string]*RemoteSubscription
+	subsByCust              map[string][]*RemoteSubscription
+	remoteByRailCustomerRef map[string]*RemotePaymentMethod
+	liveSubByPSID           map[string]bool
 }
 
 func remoteLive(status SubscriptionStatus) bool {
@@ -114,10 +114,10 @@ func remoteLive(status SubscriptionStatus) bool {
 
 func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 	idx := &remoteIndex{
-		subByPSID:     map[string]*RemoteSubscription{},
-		subsByCust:    map[string][]*RemoteSubscription{},
-		vaultByID:     map[string]*RemoteVaultEntry{},
-		liveSubByPSID: map[string]bool{},
+		subByPSID:               map[string]*RemoteSubscription{},
+		subsByCust:              map[string][]*RemoteSubscription{},
+		remoteByRailCustomerRef: map[string]*RemotePaymentMethod{},
+		liveSubByPSID:           map[string]bool{},
 	}
 	for i := range snap.Subscriptions {
 		r := &snap.Subscriptions[i]
@@ -137,10 +137,10 @@ func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 	for psid, r := range idx.subByPSID {
 		idx.liveSubByPSID[psid] = remoteLive(r.Status)
 	}
-	for i := range snap.VaultEntries {
-		v := &snap.VaultEntries[i]
-		if v.CustomerVaultID != "" {
-			idx.vaultByID[v.CustomerVaultID] = v
+	for i := range snap.PaymentMethods {
+		v := &snap.PaymentMethods[i]
+		if v.RailCustomerRef != "" {
+			idx.remoteByRailCustomerRef[v.RailCustomerRef] = v
 		}
 	}
 	return idx
@@ -218,11 +218,11 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 
 	// 3. Vault/customer id -> local payment method -> that subject's
 	// subscriptions; unique match only.
-	for _, vaultID := range []string{bc.CustomerVaultID, bc.Customer} {
-		if vaultID == "" {
+	for _, railCustomerRef := range []string{bc.CustomerVaultID, bc.Customer} {
+		if railCustomerRef == "" {
 			continue
 		}
-		if pm, ok := c.local.pmByVault[vaultID]; ok {
+		if pm, ok := c.local.pmByRailCustomerRef[railCustomerRef]; ok {
 			subs := c.local.bySubject[pm.CustomerID]
 			if s, ok := uniqueSub(subs); ok {
 				return s, "vault_id", false
@@ -235,7 +235,7 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 		// subscription id matches locally (Stripe charges: customer ->
 		// subscription roster -> local).
 		var candidates []*LocalSubscription
-		for _, r := range c.remote.subsByCust[vaultID] {
+		for _, r := range c.remote.subsByCust[railCustomerRef] {
 			if s, ok := c.local.byPSID[r.RailSubscriptionID]; ok {
 				candidates = append(candidates, s)
 			}
@@ -402,7 +402,7 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		findings = append(findings, diffTransactions(provider, snap, idx, corr, paymentsByTxnID, now)...)
 	}
 	if caps.Vault {
-		findings = append(findings, diffVault(provider, local, ridx, traits)...)
+		findings = append(findings, diffPaymentMethods(provider, local, ridx, traits)...)
 	}
 
 	sort.SliceStable(findings, func(i, j int) bool {
@@ -607,7 +607,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 func resolvePS1Identity(r *RemoteSubscription, idx *localIndex) (uuid.UUID, string, string) {
 	subjects := map[uuid.UUID]string{} // subject -> how it matched (vault wins)
 	if r.CustomerID != "" {
-		if pm, ok := idx.pmByVault[r.CustomerID]; ok {
+		if pm, ok := idx.pmByRailCustomerRef[r.CustomerID]; ok {
 			subjects[pm.CustomerID] = "vault_id"
 		}
 	}
@@ -704,7 +704,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time) *App
 	state := SubscriptionState{
 		Status:             s.Status,
 		Rail:               s.Rail,
-		Vaulted:            s.PaymentMethodID != nil,
+		HasPaymentMethod:   s.PaymentMethodID != nil,
 		RailSubscriptionID: s.RailSubscriptionID,
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
@@ -1243,29 +1243,29 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}, true
 }
 
-// diffVault covers PS-7.
-func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits providerTraits) []Finding {
+// diffPaymentMethods covers PS-7.
+func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex, traits providerTraits) []Finding {
 	var findings []Finding
 	for i := range local.PaymentMethods {
 		pm := &local.PaymentMethods[i]
-		if pm.VaultID == "" {
+		if pm.RailCustomerRef == "" {
 			continue
 		}
-		remote, ok := ridx.vaultByID[pm.VaultID]
+		remote, ok := ridx.remoteByRailCustomerRef[pm.RailCustomerRef]
 		if !ok {
-			if !traits.vaultExhaustive {
+			if !traits.paymentMethodsExhaustive {
 				continue // partial vault listing: absence proves nothing
 			}
 			findings = append(findings, Finding{
 				Provider:   provider,
-				Type:       FindingVaultMismatch,
-				SubjectKey: pm.VaultID,
+				Type:       FindingPaymentMethodMismatch,
+				SubjectKey: pm.RailCustomerRef,
 				Severity:   SeverityMedium,
 				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
 					"payment_method_id": pm.ID.String(),
 					"customer_id":       pm.CustomerID.String(),
-					"vault_id":          pm.VaultID,
+					"vault_id":          pm.RailCustomerRef,
 					"last_four":         pm.LastFour,
 					"expiry_date":       pm.ExpiryDate,
 				},
@@ -1285,14 +1285,14 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 		}
 		findings = append(findings, Finding{
 			Provider:   provider,
-			Type:       FindingVaultMismatch,
-			SubjectKey: pm.VaultID,
+			Type:       FindingPaymentMethodMismatch,
+			SubjectKey: pm.RailCustomerRef,
 			Severity:   SeverityMedium,
 			Status:     FindingStatusReconcileRequired,
 			LocalEvidence: map[string]any{
 				"payment_method_id": pm.ID.String(),
 				"customer_id":       pm.CustomerID.String(),
-				"vault_id":          pm.VaultID,
+				"vault_id":          pm.RailCustomerRef,
 				"last_four":         pm.LastFour,
 				"expiry_date":       pm.ExpiryDate,
 			},
@@ -1302,7 +1302,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 				"email":       remote.Email,
 			},
 			RecommendedAction: "stored card metadata disagrees with the rail vault (likely an account-updater change); enforce adopts the rail record",
-			Apply: &ApplyAction{AdoptVault: &AdoptVaultAction{
+			Apply: &ApplyAction{AdoptPaymentMethod: &AdoptPaymentMethodAction{
 				PaymentMethodID: pm.ID,
 				LastFour:        remoteLast4,
 				ExpiryDate:      remote.CardExpiry,

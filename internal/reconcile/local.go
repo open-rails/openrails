@@ -88,13 +88,13 @@ type LocalPayment struct {
 // LocalPaymentMethod is the slice of openrails.payment_methods the diff engine
 // consumes.
 type LocalPaymentMethod struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Rail       string
-	VaultID    string
-	LastFour   string
-	CardType   string
-	ExpiryDate string
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Rail            string
+	RailCustomerRef string
+	LastFour        string
+	CardType        string
+	ExpiryDate      string
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
@@ -229,10 +229,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	}
 	for _, row := range pms {
 		pm := LocalPaymentMethod{
-			ID:         row.ID,
-			CustomerID: row.CustomerID,
-			Rail:       row.Rail,
-			VaultID:    row.VaultID,
+			ID:              row.ID,
+			CustomerID:      row.CustomerID,
+			Rail:            row.Rail,
+			RailCustomerRef: row.VaultID,
 		}
 		if row.LastFour != nil {
 			pm.LastFour = *row.LastFour

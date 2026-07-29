@@ -86,7 +86,7 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		sub, vault := normalizeStripeSubscription(env)
 		snap.Subscriptions = append(snap.Subscriptions, sub)
 		if vault != nil {
-			snap.VaultEntries = append(snap.VaultEntries, *vault)
+			snap.PaymentMethods = append(snap.PaymentMethods, *vault)
 		}
 	}
 
@@ -306,7 +306,7 @@ func normalizeStripeStatus(s string) SubscriptionStatus {
 	}
 }
 
-func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *RemoteVaultEntry) {
+func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *RemotePaymentMethod) {
 	var s stripeSubscriptionJSON
 	_ = json.Unmarshal(obj, &s)
 
@@ -342,12 +342,12 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 		sub.NextBillingAt = &t
 	}
 
-	var vault *RemoteVaultEntry
+	var vault *RemotePaymentMethod
 	if len(s.DefaultPaymentMethod) > 0 && string(s.DefaultPaymentMethod) != "null" {
 		var pm stripePaymentMethodJSON
 		if err := json.Unmarshal(s.DefaultPaymentMethod, &pm); err == nil && pm.ID != "" {
-			entry := RemoteVaultEntry{
-				CustomerVaultID: s.Customer,
+			entry := RemotePaymentMethod{
+				RailCustomerRef: s.Customer,
 				CardLast4:       pm.Card.Last4,
 				Raw:             s.DefaultPaymentMethod,
 			}

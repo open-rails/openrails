@@ -28,7 +28,7 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 
 	pm := uuid.New()
-	subCCBill, subNMIVaultless, subNMIVaulted, subStripe, subCurrent := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	subCCBill, subNMIWithoutPaymentMethod, subNMIWithPaymentMethod, subStripe, subCurrent := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	subNMIPaid := uuid.New()
 	var cust uuid.UUID
 	elapsed := time.Now().UTC().Add(-100 * 24 * time.Hour) // long past grace
@@ -52,12 +52,12 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 			      VALUES ($1,$2,$3,$4,$5,'active',$6,$7,$8,$8,$9)`, id, merchantID, cust, prod, price, rail, pmID, start, end)
 			return price
 		}
-		ins(subCCBill, "nvcc", "ccbill", nil, elapsed)    // auto-billed -> unknown
-		ins(subNMIVaultless, "nvnv", "nmi", nil, elapsed) // vault-less -> unknown
-		ins(subNMIVaulted, "nvnp", "nmi", &pm, elapsed)   // vaulted, NO evidence (#664 imported shape) -> unknown
-		ins(subStripe, "nvst", "stripe", nil, elapsed)    // provider-billed stripe, silent -> unknown
-		ins(subCurrent, "nvcu", "ccbill", nil, current)   // current -> untouched
-		// Vaulted NMI WITH evidence: a completed payment OPENED the current
+		ins(subCCBill, "nvcc", "ccbill", nil, elapsed)               // auto-billed -> unknown
+		ins(subNMIWithoutPaymentMethod, "nvnv", "nmi", nil, elapsed) // vault-less -> unknown
+		ins(subNMIWithPaymentMethod, "nvnp", "nmi", &pm, elapsed)    // vaulted, NO evidence (#664 imported shape) -> unknown
+		ins(subStripe, "nvst", "stripe", nil, elapsed)               // provider-billed stripe, silent -> unknown
+		ins(subCurrent, "nvcu", "ccbill", nil, current)              // current -> untouched
+		// HasPaymentMethod NMI WITH evidence: a completed payment OPENED the current
 		// (lapsed) period — OpenRails billed it, so dunning may engage.
 		paidPrice := ins(subNMIPaid, "nvpd", "nmi", &pm, elapsed)
 		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at)
@@ -86,8 +86,8 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 			return s
 		}
 		require.Equal(t, "unknown", status(subCCBill), "ccbill auto-billed lapsed -> unknown")
-		require.Equal(t, "unknown", status(subNMIVaultless), "vault-less nmi lapsed -> unknown")
-		require.Equal(t, "unknown", status(subNMIVaulted), "#664: vaulted nmi WITHOUT evidence (imported shape) -> unknown, never dunned/cancelled")
+		require.Equal(t, "unknown", status(subNMIWithoutPaymentMethod), "vault-less nmi lapsed -> unknown")
+		require.Equal(t, "unknown", status(subNMIWithPaymentMethod), "#664: vaulted nmi WITHOUT evidence (imported shape) -> unknown, never dunned/cancelled")
 		require.Equal(t, "unknown", status(subStripe), "silent lapsed stripe (provider-billed) -> unknown")
 		require.Equal(t, "past_due", status(subNMIPaid), "vaulted nmi WITH payment evidence -> past_due (dunning may engage)")
 		require.Equal(t, "active", status(subCurrent), "current sub untouched")

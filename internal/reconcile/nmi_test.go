@@ -197,9 +197,9 @@ func TestNMIFetcher_Fetch(t *testing.T) {
 	require.Equal(t, int64(500), refund.AmountCents)
 
 	// Vault entries (v5 customer roster).
-	require.Len(t, snap.VaultEntries, 1)
-	vault := snap.VaultEntries[0]
-	require.Equal(t, "2144883496", vault.CustomerVaultID)
+	require.Len(t, snap.PaymentMethods, 1)
+	vault := snap.PaymentMethods[0]
+	require.Equal(t, "2144883496", vault.RailCustomerRef)
 	require.Equal(t, "1111", vault.CardLast4)
 	require.Equal(t, "1128", vault.CardExpiry)
 	require.Equal(t, "ripix@example.com", vault.Email)
@@ -321,7 +321,7 @@ func TestNMIFetcher_PaginatesV5Rosters(t *testing.T) {
 	snap, err := NewNMIFetcher(client).Fetch(context.Background(), FetchParams{})
 	require.NoError(t, err)
 	require.Len(t, snap.Subscriptions, 2)
-	require.Len(t, snap.VaultEntries, 2)
+	require.Len(t, snap.PaymentMethods, 2)
 	require.Equal(t, []string{"", "42"}, subCursors)
 	require.Equal(t, []string{"", "7"}, custCursors)
 }

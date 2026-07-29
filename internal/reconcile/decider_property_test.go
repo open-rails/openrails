@@ -35,7 +35,7 @@ type modelSub struct {
 
 func (m modelSub) state() SubscriptionState {
 	return SubscriptionState{
-		Status: m.status, Rail: m.rail, Vaulted: m.vaulted,
+		Status: m.status, Rail: m.rail, HasPaymentMethod: m.vaulted,
 		RailSubscriptionID: m.railSubID, PeriodEnd: m.periodEnd,
 		GraceEndsAt: m.graceEndsAt, NextRetryScheduled: m.nextRetryScheduled,
 	}
@@ -207,7 +207,7 @@ func TestDecide_PlaneOrderingCannotChangeOutcomes(t *testing.T) {
 	}
 
 	activeLapsed := modelSub{status: "active", rail: "nmi", vaulted: true, railSubID: rs, periodStart: &start, periodEnd: &lapsed}
-	activeLapsedVaultless := modelSub{status: "active", rail: "nmi", vaulted: false, railSubID: rs, periodStart: &start, periodEnd: &lapsed}
+	activeLapsedNoPaymentMethod := modelSub{status: "active", rail: "nmi", vaulted: false, railSubID: rs, periodStart: &start, periodEnd: &lapsed}
 	pastDueStalled := modelSub{status: "past_due", rail: "nmi", vaulted: true, railSubID: rs, periodStart: &start, periodEnd: &lapsed, graceEndsAt: &graceGone}
 	unknownParked := modelSub{status: "unknown", rail: "nmi", vaulted: true, railSubID: rs, periodStart: &start, periodEnd: &lapsed}
 
@@ -239,7 +239,7 @@ func TestDecide_PlaneOrderingCannotChangeOutcomes(t *testing.T) {
 				Snapshot: withTxn(roster(SubscriptionStatusPastDue, nil, true), TransactionTypeDecline, false, lapsed.Add(time.Hour)),
 				Charge:   ChargeEvidence{PaymentOpenedCurrentPeriod: true},
 			}},
-		{"snapshot: roster dead + vault-less local (rail heuristic irrelevant)", activeLapsedVaultless,
+		{"snapshot: roster dead + vault-less local (rail heuristic irrelevant)", activeLapsedNoPaymentMethod,
 			EvidenceBundle{Snapshot: roster(SubscriptionStatusExpired, nil, true)}},
 		{"stalled past_due, no evidence", pastDueStalled, EvidenceBundle{}},
 		{"stalled past_due + snapshot renewal charge", pastDueStalled,
@@ -319,7 +319,7 @@ func TestDecide_EvidencelessBundleCanOnlyPark(t *testing.T) {
 					for _, grace := range times {
 						for _, retry := range []bool{true, false} {
 							sub := SubscriptionState{
-								Status: status, Rail: rail, Vaulted: vaulted,
+								Status: status, Rail: rail, HasPaymentMethod: vaulted,
 								RailSubscriptionID: "rs", PeriodEnd: pe,
 								GraceEndsAt: grace, NextRetryScheduled: retry,
 							}

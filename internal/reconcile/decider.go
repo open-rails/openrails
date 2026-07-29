@@ -46,7 +46,7 @@ const DefaultDunningWindow = 14 * 24 * time.Hour
 type SubscriptionState struct {
 	Status             string // openrails.subscription_status
 	Rail               string
-	Vaulted            bool // payment_method_id IS NOT NULL
+	HasPaymentMethod   bool // payment_method_id IS NOT NULL
 	RailSubscriptionID string
 	PeriodEnd          *time.Time // current_period_ends_at
 	GraceEndsAt        *time.Time
@@ -361,7 +361,7 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "declined_renewal_within_window"})
 		}
 		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "declined_renewal_beyond_window"}
-		if collection.IsNonRetryableDecline(string(snap.Provider), declineTxn.DeclineCode) {
+		if collection.ClassifyDecline(string(snap.Provider), declineTxn.DeclineCode) == collection.DeclineNonRecoverable {
 			d.Certainty = collection.CertaintyNonRetryableDecline
 		}
 		return with(d)
@@ -402,7 +402,7 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 		// Rail heuristics survive only as a negative signal (#664): ccbill /
 		// vault-less nmi / stripe / solana are provider-auto-billed, never ours
 		// to charge. The positive "ours" signal is evidence, never rail.
-		oursToBill := sub.Rail == string(models.RailNMI) && sub.Vaulted
+		oursToBill := sub.Rail == string(models.RailNMI) && sub.HasPaymentMethod
 		ownership := ev.Charge.PaymentOpenedCurrentPeriod || ev.WatermarkNewerThanPeriodEnd
 		if oursToBill && ownership {
 			return Decision{Kind: TransitionPastDue, GraceEndsAt: sub.PeriodEnd.Add(PeriodGrace), Reason: "period_overdue_ownership_evidence"}

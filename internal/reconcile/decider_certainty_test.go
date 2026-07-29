@@ -31,7 +31,7 @@ func TestDecide_StaleRosterDateNeverCancels(t *testing.T) {
 
 		for _, status := range []string{"active", "past_due", "unknown"} {
 			d := Decide(SubscriptionState{
-				Status: status, Rail: "nmi", Vaulted: true,
+				Status: status, Rail: "nmi", HasPaymentMethod: true,
 				RailSubscriptionID: railSub, PeriodEnd: &periodEnd,
 			}, EvidenceBundle{Snapshot: snap}, now, 0)
 
@@ -56,7 +56,7 @@ func TestDecide_StaleRosterDateCancelsOnCertainty(t *testing.T) {
 		Provider:      ProviderNMI,
 		Subscriptions: []RemoteSubscription{{RailSubscriptionID: railSub, Status: SubscriptionStatusPastDue, NextBillingAt: &periodEnd}},
 	}
-	state := SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, RailSubscriptionID: railSub, PeriodEnd: &periodEnd}
+	state := SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: railSub, PeriodEnd: &periodEnd}
 
 	cases := map[string]struct {
 		charge    ChargeEvidence

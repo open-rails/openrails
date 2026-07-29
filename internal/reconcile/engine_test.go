@@ -419,7 +419,7 @@ func (w *fakeWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bo
 	return true, nil
 }
 
-func (w *fakeWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error) {
+func (w *fakeWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
 	w.calls["adopt_vault"]++
 	w.local.mu.Lock()
 	defer w.local.mu.Unlock()
@@ -974,7 +974,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		sub := liveLocalSub(ProviderNMI, "nmi-sub-7")
 		pm := LocalPaymentMethod{
 			ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi",
-			VaultID: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
+			RailCustomerRef: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
 		}
 		local.state.Subscriptions = []LocalSubscription{sub}
 		local.state.PaymentMethods = []LocalPaymentMethod{pm}
@@ -984,18 +984,18 @@ func TestDiffTaxonomy(t *testing.T) {
 			Subscriptions: []RemoteSubscription{
 				{RailSubscriptionID: "nmi-sub-7", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
-			VaultEntries: []RemoteVaultEntry{
-				{CustomerVaultID: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
+			PaymentMethods: []RemotePaymentMethod{
+				{RailCustomerRef: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
 		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
-		ps7 := findByType(res.Findings, FindingVaultMismatch)
+		ps7 := findByType(res.Findings, FindingPaymentMethodMismatch)
 		require.Len(t, ps7, 1)
 		assert.Equal(t, "vault-7", ps7[0].SubjectKey)
 		assert.Equal(t, 1, writer.calls["adopt_vault"])
-		rec := store.record(ProviderNMI, FindingVaultMismatch, "vault-7")
+		rec := store.record(ProviderNMI, FindingPaymentMethodMismatch, "vault-7")
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 		st, _ := local.Load(ctx, ProviderNMI, nil)
 		assert.Equal(t, "2222", st.PaymentMethods[0].LastFour)
@@ -1218,7 +1218,7 @@ func TestCapabilityGating(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}
 	sub := liveLocalSub(ProviderNMI, "nmi-gate")
-	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
+	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", RailCustomerRef: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
 	local.state.Subscriptions = []LocalSubscription{sub}
 	local.state.PaymentMethods = []LocalPaymentMethod{pm}
 	subID := sub.ID
@@ -1237,7 +1237,7 @@ func TestCapabilityGating(t *testing.T) {
 			{TransactionID: "cb-1", Type: TransactionTypeChargeback, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"order_id": sub.ID.String()})},
 			{TransactionID: "rf-1", Type: TransactionTypeRefund, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"order_id": sub.ID.String()})},
 		},
-		VaultEntries: []RemoteVaultEntry{{CustomerVaultID: "vault-gate", CardLast4: "9999", CardExpiry: "1299"}},
+		PaymentMethods: []RemotePaymentMethod{{RailCustomerRef: "vault-gate", CardLast4: "9999", CardExpiry: "1299"}},
 	}
 	eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
@@ -1245,7 +1245,7 @@ func TestCapabilityGating(t *testing.T) {
 
 	assert.Empty(t, findByType(res.Findings, FindingChargebackActiveSub), "PS-6 must be capability-gated")
 	assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded), "PS-5 must be capability-gated")
-	assert.Empty(t, findByType(res.Findings, FindingVaultMismatch), "PS-7 must be capability-gated")
+	assert.Empty(t, findByType(res.Findings, FindingPaymentMethodMismatch), "PS-7 must be capability-gated")
 }
 
 func TestEnforceIsIdempotent(t *testing.T) {
@@ -1386,7 +1386,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 	local.state.Prices = []LocalPrice{price}
 	local.state.PaymentMethods = []LocalPaymentMethod{{
 		ID: uuid.New(), CustomerID: subjectID, Rail: "nmi",
-		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
+		RailCustomerRef: "vault-77", LastFour: "1111", ExpiryDate: "1029",
 	}}
 	end := testNow.Add(20 * 24 * time.Hour)
 	lastBilled := testNow.Add(-10 * 24 * time.Hour)
@@ -1413,8 +1413,8 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 				Raw: rawJSON(map[string]any{"customer_vault_id": "vault-77"}),
 			},
 		},
-		VaultEntries: []RemoteVaultEntry{
-			{CustomerVaultID: "vault-77", CardLast4: "1111", CardExpiry: "1029"},
+		PaymentMethods: []RemotePaymentMethod{
+			{RailCustomerRef: "vault-77", CardLast4: "1111", CardExpiry: "1029"},
 		},
 	}
 	return local, snap, price
