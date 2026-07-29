@@ -52,9 +52,6 @@ func TestParseSolanaAccountSettings(t *testing.T) {
 		_, err = ParseSolanaAccountSettings(map[string]any{"tokens": map[string]any{"USDC": map[string]any{"name": "No Mint"}}})
 		require.ErrorContains(t, err, "requires mint")
 
-		_, err = ParseSolanaAccountSettings(map[string]any{"tokens": map[string]any{"USDC": map[string]any{"mint": "m", "decimals": 1.5}}})
-		require.ErrorContains(t, err, "must be an integer")
-
 		_, err = ParseSolanaAccountSettings(map[string]any{"tokens": map[string]any{"USDC": map[string]any{"mint": "m", "decimls": 6}}})
 		require.ErrorContains(t, err, "unknown field")
 	})

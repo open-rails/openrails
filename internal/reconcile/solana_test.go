@@ -39,9 +39,35 @@ type fakeSolanaRPC struct {
 }
 
 func (f *fakeSolanaRPC) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	// #817: mint reads resolve base-unit precision from the chain and are memoized
+	// per fetcher. They are served here without touching accountDataCalls, which
+	// tracks the SUBSCRIPTION/plan account reads the lane assertions care about.
+	if blob, ok := fakeMintAccounts[address.String()]; ok {
+		return blob, nil
+	}
 	f.accountDataCalls++
 	return f.accounts[address.String()], nil
 }
+
+// fakeMintAccounts serves synthetic, initialized SPL mint accounts for the
+// registry stablecoins the reconcile tests normalize against.
+var fakeMintAccounts = func() map[string][]byte {
+	mint6 := make([]byte, solanaint.MintAccountSize)
+	mint6[44] = 6
+	mint6[45] = 1
+	out := map[string][]byte{}
+	for _, m := range []string{
+		"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+		"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+		"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", // PYUSD
+		"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",  // USD1
+		"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH", // USDG
+		"HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr", // EURC
+	} {
+		out[m] = mint6
+	}
+	return out
+}()
 
 func (f *fakeSolanaRPC) GetSignaturesForAddressPage(ctx context.Context, address, before string, limit int) ([]solanaint.SignatureInfo, error) {
 	f.pageCalls++

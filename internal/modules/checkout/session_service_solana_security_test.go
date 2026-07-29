@@ -9,11 +9,30 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
+
+	solanago "github.com/gagliardetto/solana-go"
 )
+
+// fakeMintReader serves a synthetic, initialized 6-decimal SPL mint for any
+// address. Decimals come from the chain now (#817), so a checkout test must arm
+// a reader or every solana quote fails closed before it computes anything.
+type fakeMintReader struct{}
+
+func (fakeMintReader) GetAccountData(context.Context, solanago.PublicKey) ([]byte, error) {
+	blob := make([]byte, solanaint.MintAccountSize)
+	blob[44] = 6
+	blob[45] = 1
+	return blob, nil
+}
+
+func testSolanaMintDecimals() solanamodule.MintDecimalsSource {
+	return solanamodule.NewMintDecimals(fakeMintReader{})
+}
 
 func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *testing.T) {
 	t.Parallel()
@@ -21,6 +40,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -47,6 +67,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -73,6 +94,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -104,6 +126,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -313,7 +336,7 @@ func testSolanaCheckoutRails() railresolve.FixedSet {
 				Network: "devnet",
 				Tokens: map[string]config.TokenConfig{
 					"USDC": {
-						Mint:     devnetUSDCMint,
+						Mint: devnetUSDCMint,
 					},
 				},
 			},
