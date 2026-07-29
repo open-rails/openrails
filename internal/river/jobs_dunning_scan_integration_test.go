@@ -240,7 +240,9 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
+	// or#865: the worker's self-assembled intent Runner parks every intent when
+	// no mode is stated — this fixture drives real rebills, so it says "full".
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

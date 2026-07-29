@@ -197,6 +197,8 @@ func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewVaultedCardSaleIntentHandler(svc)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	svc.Intents = runner
 	return &vaultedCardFixture{db: dbi, runner: runner, bt: bt, svc: svc, userID: userID, priceID: priceID, ctx: ctx}

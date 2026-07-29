@@ -340,6 +340,10 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 	worker := &DunningWorker{
 		DB: dbi, Clock: clock,
 		NMIResolver: fakeDunningNMIResolver{client: client},
+		// or#865: the worker's self-assembled intent Runner parks every intent
+		// when no mode is stated — the simulation renews and dunns for real, so
+		// it says "full".
+		Config: fullModeConfig(),
 	}
 
 	engine := converge.NewConvergeEngine(dbi)

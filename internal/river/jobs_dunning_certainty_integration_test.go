@@ -167,7 +167,10 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		intents.NewNMIDeleteScheduler(dbi, nil, intents.OriginSystem, "dunning terminal cancellation"))
 	f.moneySvc = money.NewMoneyService(dbi, nil)
 	f.subSvc = subscriptions.NewSubscriptionService(dbi, f.priceSvc, productSvc, nil, nil, nil)
-	f.worker = &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
+	// or#865: the worker's self-assembled intent Runner parks every intent when
+	// no mode is stated — these tests assert on charges that actually fire and
+	// on terminal outcomes, so the mode has to be "full".
+	f.worker = &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
 	return f
 }
 

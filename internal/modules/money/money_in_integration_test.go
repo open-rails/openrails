@@ -244,6 +244,8 @@ func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, resolver
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, resolver, nil)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),

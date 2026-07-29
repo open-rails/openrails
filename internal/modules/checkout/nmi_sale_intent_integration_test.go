@@ -176,6 +176,8 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewNMISaleIntentHandler(saleService)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	return &saleIntentFixture{
 		db: dbi, runner: runner, gateway: gateway,

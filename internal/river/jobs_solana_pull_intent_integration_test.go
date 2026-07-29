@@ -141,7 +141,8 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	}
 	chain := &fakeChain{}
 	handler := NewSolanaPullIntentHandler(core, intents.NewStore(dbi), chain)
-	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler)}
+	// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler), Config: fullModeConfig()}
 	return &solanaPullFixture{db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain, row: row, ctx: ctx}
 }
 
