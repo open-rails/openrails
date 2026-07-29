@@ -293,7 +293,7 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 		}
 	}
 
-	amountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(p.AmountMicros))
+	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {
 		return intents.Terminal("sale amount must be representable in whole cents: " + err.Error())
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -266,7 +267,7 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 		}
 		window.Currency = money.NormalizeCurrency(window.Currency)
 		if window.Currency != "" {
-			if err := money.ValidateCurrency(window.Currency); err != nil {
+			if err := moneyutil.ValidateCurrency(window.Currency); err != nil {
 				return InvokerSpendLimit{}, fmt.Errorf("windows[%d].currency invalid: %w", i, err)
 			}
 		}

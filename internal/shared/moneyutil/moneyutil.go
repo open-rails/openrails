@@ -23,16 +23,6 @@ type Cents int64
 
 // ParseDecimalToCents is the provider-decimal-string -> minor-unit boundary
 // (MONEY-6): exact rational, half-away-from-zero, int64-overflow error.
-// NormalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
-// It lives here, in the leaf, rather than in the registry package, because it
-// is a pure string operation with no registry dependency — and because the
-// repo-level write chokepoints that must call it (payments, prices) cannot
-// import internal/modules/money without an import cycle. ONE definition:
-// money.NormalizeCurrency delegates here.
-func NormalizeCurrency(code string) string {
-	return strings.ToUpper(strings.TrimSpace(code))
-}
-
 func ParseDecimalToCents(value string) (Cents, error) {
 	v, err := parseDecimalScaled(value, CentsPerMajorUnit)
 	return Cents(v), err
@@ -53,39 +43,29 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 	return roundHalfAwayFromZero(scaled)
 }
 
-// GAP-12. The three functions below are the ONLY places in the codebase where
-// a money value changes unit, and they used to be int64 -> int64: the type
-// system said nothing at the exact point where saying the wrong thing costs
-// 10 000x. They are typed now, so handing cents to a micros parameter (or the
-// reverse) is a compile error rather than a mischarge.
+// GAP-12 / or#863. Unit changes are typed, so handing cents to a micros
+// parameter (or the reverse) is a compile error rather than a mischarge.
+//
+// The internal->rail direction lives in currency.go and is currency-aware
+// (NativeToRailMinor / NativeToRailMinorExact). The currency-BLIND
+// MicrosToCentsCeil/MicrosToCentsExact that 16 provider boundaries used to
+// call are DELETED, not deprecated: an exported converter that cannot see the
+// currency is a converter that cannot refuse an amount whose currency nobody
+// established, and it is not reintroducible if it does not exist.
 //
 // Deliberately NOT converted (see docs/invariants.md GAP-12): DB columns are
 // still bare bigint, most struct fields are still int64, and
-// money.NativeToRailMinor still takes int64 because its input is "internal
-// units at the CURRENCY's registered scale" (JPY is 10^4), which is not always
-// micros — typing it Micros would be a lie.
+// NativeToRailMinor still takes int64 because its input is "internal units at
+// the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —
+// typing it Micros would be a lie.
 
-// CentsToMicros widens a rail minor amount into internal micros.
+// CentsToMicros widens a rail minor amount into internal micros. Valid for
+// every registered currency only because every registered currency has the
+// same 10^4 native shift — TestRegistryNativeShiftIsUniform pins that, and
+// FAILS the moment a currency is registered that breaks it. Currency-aware
+// callers should prefer RailMinorToNative.
 func CentsToMicros(cents Cents) Micros {
 	return Micros(int64(cents) * MicrosPerCent)
-}
-
-// MicrosToCentsCeil narrows micros to whole cents, rounding UP so a charge
-// never under-covers the internal amount.
-func MicrosToCentsCeil(micros Micros) Cents {
-	if micros <= 0 {
-		return 0
-	}
-	return Cents((int64(micros) + MicrosPerCent - 1) / MicrosPerCent)
-}
-
-// MicrosToCentsExact narrows micros to whole cents or errors — the exact path
-// refuses to silently drop a sub-cent remainder.
-func MicrosToCentsExact(micros Micros) (Cents, error) {
-	if int64(micros)%MicrosPerCent != 0 {
-		return 0, fmt.Errorf("amount %d micros is not representable in whole cents", int64(micros))
-	}
-	return Cents(int64(micros) / MicrosPerCent), nil
 }
 
 func FormatMicrosDecimal(micros Micros) string {

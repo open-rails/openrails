@@ -94,7 +94,7 @@ func TestRefundAmountCents(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cents, err := refundAmountCents(tt.micros)
+			cents, err := refundAmountCents("USD", tt.micros)
 			if tt.wantErr {
 				require.Error(t, err)
 				return

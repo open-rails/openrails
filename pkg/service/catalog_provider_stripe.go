@@ -257,7 +257,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		}
 	}
 	if stripePriceID == "" {
-		unitAmountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(in.UnitAmount))
+		unitAmountCents, err := moneyutil.NativeToRailMinorExact(in.Currency, in.UnitAmount)
 		if err != nil {
 			return nil, err
 		}

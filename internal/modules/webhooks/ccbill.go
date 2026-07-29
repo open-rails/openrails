@@ -147,8 +147,8 @@ func ccbillInitialChargeAmount(price *models.Price) moneyutil.Micros {
 	return moneyutil.Micros(price.Amount)
 }
 
-func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, billedAmountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros, contextFields map[string]interface{}, logFields log.Fields) error {
-	expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, currency string, billedAmountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros, contextFields map[string]interface{}, logFields log.Fields) error {
+	expectedAmountCents, err := moneyutil.NativeToRailMinorExact(currency, int64(expectedAmountMicros))
 	if err != nil {
 		return err
 	}
@@ -568,7 +568,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		return err
 	}
 	// Validate amount against expected cents from catalog price.
-	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, expectedAmountMicros, map[string]interface{}{
+	if err := validateCCBillBilledAmount(ctx, s, price.Currency, billedAmountCents, expectedAmountMicros, map[string]interface{}{
 		"price_id":                           price.ID.String(),
 		"ccbill_price_id":                    priceLookupID,
 		"recurring_billing_option_id":        data.SubscriptionTypeID,
@@ -898,7 +898,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+		expectedAmountCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, int64(expectedAmountMicros))
 		if err != nil {
 			return err
 		}
@@ -1950,7 +1950,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}); err != nil {
 		return err
 	}
-	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, moneyutil.Micros(prevSub.Price.Amount), map[string]interface{}{
+	if err := validateCCBillBilledAmount(ctx, s, prevSub.Price.Currency, billedAmountCents, moneyutil.Micros(prevSub.Price.Amount), map[string]interface{}{
 		"price_id":                     prevSub.Price.ID.String(),
 		"rail_subscription_id":         ccBillSubID,
 		"subscription_id":              prevSub.ID.String(),

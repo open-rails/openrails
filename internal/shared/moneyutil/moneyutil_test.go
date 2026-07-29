@@ -16,13 +16,18 @@ func TestCentMicrosConversion(t *testing.T) {
 	// GAP-12: these are the typed unit boundary. The expectations are typed
 	// too, so a signature that silently reverted to int64 fails here.
 	require.Equal(t, Micros(12_340_000), CentsToMicros(1234))
-	require.Equal(t, Cents(1234), MicrosToCentsCeil(12_340_000))
-	require.Equal(t, Cents(1235), MicrosToCentsCeil(12_340_001))
 
-	got, err := MicrosToCentsExact(12_340_000)
+	ceil, err := NativeToRailMinor("USD", 12_340_000)
+	require.NoError(t, err)
+	require.Equal(t, Cents(1234), ceil)
+	ceil, err = NativeToRailMinor("USD", 12_340_001)
+	require.NoError(t, err)
+	require.Equal(t, Cents(1235), ceil)
+
+	got, err := NativeToRailMinorExact("USD", 12_340_000)
 	require.NoError(t, err)
 	require.Equal(t, Cents(1234), got)
-	_, err = MicrosToCentsExact(12_340_001)
+	_, err = NativeToRailMinorExact("USD", 12_340_001)
 	require.Error(t, err)
 }
 

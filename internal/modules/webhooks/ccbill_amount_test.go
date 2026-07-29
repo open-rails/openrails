@@ -15,11 +15,11 @@ func TestValidateCCBillBilledAmount(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1000, 10_000_000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 980, 10_000_000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1020, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 1000, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 980, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 1020, 10_000_000, nil, nil))
 
-	err := validateCCBillBilledAmount(ctx, nil, 979, 10_000_000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
+	err := validateCCBillBilledAmount(ctx, nil, "USD", 979, 10_000_000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
 	require.Error(t, err)
 
 	var billingErr *BillingError

@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -245,7 +246,7 @@ func holdTTL(expiresAt time.Time) time.Duration {
 // currency (cross-currency wasted policies are unsupported in one policy).
 func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
 	cur := money.NormalizeCurrency(requestCurrency)
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
 	explicit := false
@@ -254,7 +255,7 @@ func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindo
 			continue
 		}
 		wc := money.NormalizeCurrency(w.Currency)
-		if err := money.ValidateCurrency(wc); err != nil {
+		if err := moneyutil.ValidateCurrency(wc); err != nil {
 			return "", err
 		}
 		if !explicit {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
@@ -45,7 +46,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 		return fmt.Errorf("invalid period: to must be after from")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)

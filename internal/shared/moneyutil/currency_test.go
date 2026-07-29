@@ -1,4 +1,4 @@
-package money
+package moneyutil
 
 import "testing"
 

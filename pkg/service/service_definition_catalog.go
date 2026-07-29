@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -520,7 +521,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 			return nil, fmt.Errorf("trial pricing requires auto_renew")
 		}
 	}
-	if err := money.ValidateCurrency(req.Currency); err != nil {
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, err
 	}
 	req.Currency = strings.ToLower(req.Currency)

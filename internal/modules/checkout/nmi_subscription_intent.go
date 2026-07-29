@@ -164,7 +164,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 	// on a sub-cent remainder — same policy as the one-time sale path. Terminal,
 	// not parked: no retry can make an unrepresentable price representable, and
 	// nothing was sent, so the checkout fails clean instead of under-charging.
-	amountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(p.AmountMicros))
+	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {
 		return intents.Terminal("subscription amount must be representable in whole cents: " + err.Error())
 	}

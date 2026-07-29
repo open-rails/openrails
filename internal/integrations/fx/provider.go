@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 func normalizeCurrency(currency string) string {
@@ -46,10 +47,10 @@ type Provider interface {
 func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurrency string, amount int64) (int64, *Quote, error) {
 	from := money.NormalizeCurrency(fromCurrency)
 	to := money.NormalizeCurrency(toCurrency)
-	if err := money.ValidateCurrency(from); err != nil {
+	if err := moneyutil.ValidateCurrency(from); err != nil {
 		return 0, nil, err
 	}
-	if err := money.ValidateCurrency(to); err != nil {
+	if err := moneyutil.ValidateCurrency(to); err != nil {
 		return 0, nil, err
 	}
 	if amount < 0 {
@@ -69,11 +70,11 @@ func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurre
 	if q == nil || q.Rate <= 0 {
 		return 0, nil, fmt.Errorf("invalid FX quote for %s -> %s", from, to)
 	}
-	fromScale, ok := money.CurrencyScale(from)
+	fromScale, ok := moneyutil.CurrencyScale(from)
 	if !ok {
 		return 0, nil, fmt.Errorf("money: unknown currency %q", from)
 	}
-	toScale, ok := money.CurrencyScale(to)
+	toScale, ok := moneyutil.CurrencyScale(to)
 	if !ok {
 		return 0, nil, fmt.Errorf("money: unknown currency %q", to)
 	}

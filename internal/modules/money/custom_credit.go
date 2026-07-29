@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -46,7 +47,7 @@ func splitQualified(code string) (slug, name string, ok bool) {
 // active. Unknown / cross-merchant / inactive units are rejected.
 func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals int, builtin bool, err error) {
 	if !IsQualifiedUnit(code) {
-		d, ok := CurrencyScale(code)
+		d, ok := moneyutil.CurrencyScale(code)
 		if !ok {
 			return 0, false, fmt.Errorf("money: unknown currency %q", code)
 		}
@@ -101,7 +102,7 @@ func (s *MoneyService) validateUnit(ctx context.Context, code string) error {
 		_, _, err := s.ResolveUnit(ctx, code)
 		return err
 	}
-	return ValidateCurrency(code)
+	return moneyutil.ValidateCurrency(code)
 }
 
 // Registry writes live in the catalog sidecar push (#706): custom_credit_types

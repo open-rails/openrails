@@ -124,7 +124,7 @@ func (a *nmiAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCre
 	if in.UnitAmount <= 0 {
 		return fmt.Errorf("a positive unit_amount is required")
 	}
-	amountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(in.UnitAmount))
+	amountCents, err := moneyutil.NativeToRailMinorExact(in.Currency, in.UnitAmount)
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -552,7 +553,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	in.Source = strings.TrimSpace(in.Source)
@@ -677,7 +678,7 @@ func maxWastedWindowTTL(groups ...[]abuse.WastedWindow) time.Duration {
 func serviceWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
 	cur := money.NormalizeCurrency(requestCurrency)
 	explicit := false
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
 	for _, w := range windows {
@@ -685,7 +686,7 @@ func serviceWastedCurrency(requestCurrency string, windows []abuse.WastedWindow)
 			continue
 		}
 		wc := money.NormalizeCurrency(w.Currency)
-		if err := money.ValidateCurrency(wc); err != nil {
+		if err := moneyutil.ValidateCurrency(wc); err != nil {
 			return "", err
 		}
 		if !explicit {
@@ -743,7 +744,7 @@ func (s *Service) SetTrustLevelSchedule(ctx context.Context, payer identity.Cust
 	if err != nil {
 		return err
 	}
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	moneySvc := money.NewMoneyService(s.rt.DB)
@@ -769,7 +770,7 @@ func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, 
 	if err != nil {
 		return "", err
 	}
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
 	return money.NewMoneyService(s.rt.DB).GetTrustLevel(ctx, payer, cur)

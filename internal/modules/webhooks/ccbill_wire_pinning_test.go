@@ -101,12 +101,12 @@ func TestValidateCCBillBilledAmount_TwoPercentThreshold_WirePin(t *testing.T) {
 
 	// Within ±2%: exact, and both inclusive boundaries.
 	for _, raw := range []string{"19.99", "19.60", "20.38"} {
-		require.NoError(t, validateCCBillBilledAmount(ctx, nil, parse(t, raw), expectedMicros, nil, nil), raw)
+		require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", parse(t, raw), expectedMicros, nil, nil), raw)
 	}
 
 	// One cent past either boundary: the mismatch threshold fires.
 	for _, raw := range []string{"19.59", "20.39"} {
-		err := validateCCBillBilledAmount(ctx, nil, parse(t, raw), expectedMicros, nil, nil)
+		err := validateCCBillBilledAmount(ctx, nil, "USD", parse(t, raw), expectedMicros, nil, nil)
 		require.Error(t, err, raw)
 		var billingErr *BillingError
 		require.True(t, errors.As(err, &billingErr), raw)
@@ -116,11 +116,11 @@ func TestValidateCCBillBilledAmount_TwoPercentThreshold_WirePin(t *testing.T) {
 	}
 
 	// A 10,000×-style unit mixup (micros where cents belong) is FAR outside 2%.
-	err := validateCCBillBilledAmount(ctx, nil, 19_990_000, expectedMicros, nil, nil)
+	err := validateCCBillBilledAmount(ctx, nil, "USD", 19_990_000, expectedMicros, nil, nil)
 	require.Error(t, err)
 
 	// A sub-cent expected amount cannot be compared in whole cents: loud error,
 	// never rounding.
-	err = validateCCBillBilledAmount(ctx, nil, 1999, 19_995_000, nil, nil)
+	err = validateCCBillBilledAmount(ctx, nil, "USD", 1999, 19_995_000, nil, nil)
 	require.ErrorContains(t, err, "whole cents")
 }

@@ -10,9 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -235,7 +235,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 	if currency == "" {
 		return nil, fmt.Errorf("currency required")
 	}
-	if err := money.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		return nil, err
 	}
 	if req.TransactionID == "" {

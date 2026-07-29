@@ -52,6 +52,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
@@ -673,7 +674,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	}
 	if redisClient != nil {
 		redisFX := fx.NewRedisCachedProvider(redisClient, liveFX, 3*time.Hour)
-		redisFX.Start(context.Background(), money.CurrencyCodes(), 2*time.Hour)
+		redisFX.Start(context.Background(), moneyutil.CurrencyCodes(), 2*time.Hour)
 		fxProvider = redisFX
 		fxRateRefresher = redisFX
 	}

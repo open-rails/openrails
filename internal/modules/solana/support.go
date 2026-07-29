@@ -256,7 +256,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	if currency == "" {
 		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
 	}
-	if err := money.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		return nil, err
 	}
 	if amountMicros <= 0 {

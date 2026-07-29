@@ -622,7 +622,7 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
 	priceContentKey := openRailsPriceContentKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays())
 	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
-	unitAmountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(local.Amount))
+	unitAmountCents, err := moneyutil.NativeToRailMinorExact(local.Currency, local.Amount)
 	if err != nil {
 		return "", err
 	}

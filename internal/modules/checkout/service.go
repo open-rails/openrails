@@ -1769,7 +1769,7 @@ func (s *CheckoutService) processUpgrade(
 
 	// NMI charges in whole cents; prorationAmount is micros. Error (never round)
 	// on a sub-cent remainder — same policy as the one-time sale path.
-	prorationCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(prorationAmount))
+	prorationCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, prorationAmount)
 	if err != nil {
 		err := fmt.Errorf("upgrade proration amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -1777,7 +1777,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 	// Same rule for the successor's recurring enrollment charge, converted here
 	// so BOTH money conversions fail before any provider write happens.
-	recurringCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(newPrice.Amount))
+	recurringCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount)
 	if err != nil {
 		err := fmt.Errorf("upgrade recurring amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -2350,7 +2350,18 @@ func CalculateModelBUpgradeCharge(
 	// floating-point drift), rounded UP to a whole cent (customer-favored) so
 	// the resulting charge is whole-cent for whole-cent prices.
 	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
-	oldUnused = int64(moneyutil.MicrosToCentsCeil(moneyutil.Micros(oldUnused))) * moneyutil.MicrosPerCent
+	// or#863: ceil to a whole RAIL MINOR unit at this price's own currency
+	// scale, then back to internal units — not an inline /10_000 that assumes
+	// every currency is 2-decimal. RequireSameCurrency above already proved the
+	// currency is registered and shared by both operands.
+	oldUnusedMinor, err := moneyutil.NativeToRailMinor(old.Currency, oldUnused)
+	if err != nil {
+		return 0, 0, err
+	}
+	oldUnused, err = moneyutil.RailMinorToNative(old.Currency, oldUnusedMinor)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	firstChargeMicros = newFull - oldUnused
 	if firstChargeMicros < 0 {

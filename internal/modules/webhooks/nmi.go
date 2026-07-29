@@ -161,11 +161,11 @@ func transactionSubscriptionID(body *NMITransactionEventBody) string {
 	return ""
 }
 
-func nmiAmountMatchesExpected(amountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros) bool {
+func nmiAmountMatchesExpected(currency string, amountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros) bool {
 	if expectedAmountMicros <= 0 {
 		return true
 	}
-	expectedAmountCents, err := moneyutil.MicrosToCentsExact(expectedAmountMicros)
+	expectedAmountCents, err := moneyutil.NativeToRailMinorExact(currency, int64(expectedAmountMicros))
 	if err != nil {
 		return false
 	}

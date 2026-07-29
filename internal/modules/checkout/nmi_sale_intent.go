@@ -150,7 +150,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		}
 	}
 
-	amountCents, err := moneyutil.MicrosToCentsExact(moneyutil.Micros(p.AmountMicros))
+	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {
 		return intents.Terminal("sale amount must be representable in whole cents: " + err.Error())
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -289,7 +290,7 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		return false, nil
 	}
 	key := claim.idempotencyKey
-	chargeMinor, err := NativeToRailMinor(r.Currency, snapshot)
+	chargeMinor, err := moneyutil.NativeToRailMinor(r.Currency, snapshot)
 	if err != nil {
 		cleanupCtx, cancel := collectionCleanupContext(ctx)
 		defer cancel()

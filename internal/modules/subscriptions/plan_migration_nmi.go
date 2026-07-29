@@ -41,11 +41,12 @@ type NMIPusher interface {
 	// recurring record: the merchant declares an armable NMI account for it
 	// and the subscription carries a rail reference.
 	CanPush(ctx context.Context, sub *models.Subscription) bool
-	// PushPlanAmount sets the remote record's plan_amount to amountMicros
-	// (converted to NMI's decimal form), PRESERVING the record's current
+	// PushPlanAmount sets the remote record's plan_amount to amountNative
+	// (internal units at CURRENCY's registered scale, converted to NMI's
+	// decimal form through the registry), PRESERVING the record's current
 	// plan_payments, and read-back-verifies the flip took. It never touches
 	// the schedule (day/month frequency), so the rebill date is unchanged.
-	PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros moneyutil.Micros) error
+	PushPlanAmount(ctx context.Context, sub *models.Subscription, currency string, amountNative int64) error
 }
 
 type nmiPlanPusher struct {
@@ -69,7 +70,7 @@ func (p *nmiPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) b
 	return err == nil && ok
 }
 
-func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, amountMicros moneyutil.Micros) error {
+func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, currency string, amountNative int64) error {
 	client, _, ok, err := NMIClientForExistingSubscription(ctx, p.resolver, sub)
 	if err != nil {
 		return fmt.Errorf("nmi push: resolve client: %w", err)
@@ -81,7 +82,10 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if railID == "" {
 		return fmt.Errorf("nmi push: subscription missing nmi reference")
 	}
-	cents, err := moneyutil.MicrosToCentsExact(amountMicros)
+	// or#863: through the registry, never an inline /10_000 — the converter is
+	// the only thing here that knows the currency's scale, and the only thing
+	// that can refuse an amount whose currency was never established.
+	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
 		return fmt.Errorf("nmi push: %w", err)
 	}
