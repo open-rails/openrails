@@ -1001,6 +1001,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
+			MoneyMovement:            models.MoneyMovementRail, // or#827: the NMI subscription's first charge settled.
 			PurchasedAt:              now,
 			CreatedAt:                now,
 		}

@@ -264,6 +264,9 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 		Currency:      strings.ToLower(currency),
 		TransactionID: req.TransactionID,
 		Rail:          models.Rail(req.Rail),
+		// or#827: the operator is recording a charge that settled at the named
+		// rail under the given transaction id — that is what this endpoint is.
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   now,
 		CreatedAt:     now,
 	}

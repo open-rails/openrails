@@ -117,6 +117,7 @@ func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
 		FailureReason:     p.FailureReason,
 		ReversalKind:      p.ReversalKind,
 		TokenType:         p.TokenType,
+		MoneyMovement:     MoneyMovement(p.MoneyMovement),
 		DiscountCode:      p.DiscountCode,
 		DiscountReason:    p.DiscountReason,
 		PurchasedAt:       p.PurchasedAt,

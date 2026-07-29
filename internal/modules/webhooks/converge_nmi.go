@@ -267,6 +267,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				Currency:       currency,
 				Status:         "failed",
 				AttemptKind:    func() *string { k := payments.AttemptInitial; return &k }(),
+				MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 				PurchasedAt:    purchasedAt,
 			}
 			if probe.DeclineResponseCode != 0 {

@@ -888,6 +888,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			ListAmount:        original.ListAmount,
 			Currency:          original.Currency,
 			ReversalKind:      func() *string { k := payments.ReversalDisputeReversal; return &k }(),
+			MoneyMovement:     models.MoneyMovementRail, // or#827: Stripe returned the disputed funds.
 			PurchasedAt:       s.now(),
 			CreatedAt:         s.now(),
 		}

@@ -621,16 +621,6 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// Merchant logical-export bookkeeping (issue #225). Merchant deletion is gated on a completed export row (export-before-delete). Merchant-owned and RLS protected.
-type OpenrailsMerchantExport struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Status      string
-	RowCounts   []byte
-	CreatedAt   time.Time
-	CompletedAt *time.Time
-}
-
 // #736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).
 type OpenrailsMerchantNotification struct {
 	ID         uuid.UUID
@@ -643,6 +633,17 @@ type OpenrailsMerchantNotification struct {
 	Data       []byte
 	CreatedAt  time.Time
 	ReadAt     *time.Time
+}
+
+// or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
+type OpenrailsMerchantPurgeInventory struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Status     string
+	// The inventory manifest: row_counts, total_rows, secret_names (never values), not_captured, is_backup=false. total_rows must still match at purge time — a stale inventory does not authorise a purge.
+	Manifest    []byte
+	CreatedAt   time.Time
+	CompletedAt *time.Time
 }
 
 // DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
@@ -787,6 +788,8 @@ type OpenrailsPayment struct {
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
+	// or#827 rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
+	MoneyMovement string
 }
 
 // Generalized payment method table supporting multiple rails.

@@ -43,6 +43,32 @@ const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
 
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
+// IsSettlementCandidate reports whether this row will land as a completed,
+// positive, non-reversal charge — the shape the host settlement feed's enqueue
+// trigger considers. An empty status is 'completed' (the column default), so it
+// counts here exactly as it does in SQL.
+func IsSettlementCandidate(p *models.Payment) bool {
+	return p != nil && PaymentStatusCompleted(p.Status) && p.Amount > 0 && p.RefundedPaymentID == nil
+}
+
+// resolveMoneyMovement enforces or#827's positive marker at the one place every
+// payment row is minted. The feed publishes on this value alone, so on a row
+// that would otherwise be a settlement candidate an undeclared marker is a bug,
+// not a default: refusing the write is how a new synthetic payment shape gets
+// caught here instead of at a host that was told money arrived.
+func resolveMoneyMovement(p *models.Payment) (models.MoneyMovement, error) {
+	switch {
+	case p.MoneyMovement.Valid():
+		return p.MoneyMovement, nil
+	case p.MoneyMovement != models.MoneyMovementUndeclared:
+		return "", fmt.Errorf("payment money_movement %q is not a known value", string(p.MoneyMovement))
+	case IsSettlementCandidate(p):
+		return "", errors.New("payment money_movement must be declared on a completed positive charge (or#827)")
+	default:
+		return models.MoneyMovementNone, nil
+	}
+}
+
 // paymentInsertParams maps a model onto the insert parameter set shared by
 // CreatePayment and CreatePaymentIfNotExists (identical column lists).
 func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
@@ -66,6 +92,10 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		return gen.CreatePaymentParams{}, err
 	}
 	credSnap, err := models.ToJSONB(p.CreditsSpecSnapshot)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	movement, err := resolveMoneyMovement(p)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
@@ -97,6 +127,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureReason:            p.FailureReason,
 		ReversalKind:             p.ReversalKind,
 		TokenType:                p.TokenType,
+		MoneyMovement:            string(movement),
 	}, nil
 }
 
