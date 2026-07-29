@@ -135,7 +135,7 @@ All outbound provider mutations post a durable intent first, then execute.
 | ID-8 | Grant termination happens once; `event='grant' ⟺ supersedes_id IS NULL`. | `:1355,:1306` | **DB** |
 | ID-9 | Invoice period, invoice-item source, usage-event, and finding identities are unique per merchant. | `:1552,:1598,:2915,:2617` | **DB** |
 | ID-10 | Merchant slug unique; `api_host` unique among live merchants. | `:272,:276` | **DB** |
-| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`.** A cross-merchant unique is an existence oracle: under RLS the conflicting row is invisible, so the victim sees only an opaque insert failure. The exceptions are enumerated by name with reasons. | `0020_…up.sql`; guard `merchant_aware_schema_test.go` `TestUniqueIndexesAreMerchantScoped` | **DB** + **T** |
+| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`.** A cross-merchant unique is an existence oracle: under RLS the conflicting row is invisible, so the victim sees only an opaque insert failure. Checked TWICE against ONE shared exemption list — `TestUniqueIndexesAreMerchantScoped` derives the inventory from the migration text (no database, catches a bad migration); `TestGAP10_UniqueIndexesAreMerchantScoped` reads `pg_indexes` on a live DB as `openrails_app` (catches an index that arrived some other way). Both have vacuity guards. | `migrations/postgres/unique_scope_exemptions.go` (the ONE list); guards in `merchant_aware_schema_test.go` and `internal/invariantaudit` | **DB** + **T** |
 
 ## 7. Fail-closed posture
 
@@ -257,8 +257,8 @@ SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname='openrails' AND c.relkind='r' AND NOT c.relrowsecurity;
 
 -- ID-11 (was GAP-10): unique indexes not scoped by merchant.
--- Expect ONLY *_pkey rows plus the five named exceptions in
--- crossMerchantUniqueExemptions. This one is NOT RLS-blind — pg_indexes is catalog.
+-- Expect ONLY surrogate-id *_pkey rows plus the named exceptions in
+-- migrations/postgres/unique_scope_exemptions.go. NOT RLS-blind — pg_indexes is catalog.
 SELECT indexdef FROM pg_indexes WHERE schemaname='openrails'
    AND indexdef LIKE '%UNIQUE%' AND indexdef NOT LIKE '%merchant_id%';
 
