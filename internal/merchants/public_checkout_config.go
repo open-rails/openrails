@@ -2,11 +2,9 @@ package merchants
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -195,52 +193,6 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 			continue
 		}
 		out = append(out, cfg)
-	}
-	return out, nil
-}
-
-// activePSPScopes lists every non-archived PSP for merchant+environment in ONE
-// query — the whole-catalog sibling of ActivePSPScopesForRail, so the public
-// endpoint costs one round trip rather than one per known rail.
-func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environment string) ([]PSPScope, error) {
-	if s == nil || s.pool == nil || id.IsZero() {
-		return nil, nil
-	}
-	environment = normalizeProviderSecretEnvironment(environment)
-	if environment == "" {
-		return nil, fmt.Errorf("provider account environment must be live or test")
-	}
-	var out []PSPScope
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND environment = $2
-				   AND archived = false
-				 ORDER BY rail ASC, created_at DESC, id DESC
-			`, id.String(), environment)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		out = out[:0]
-		for rows.Next() {
-			var scope pspSecretScope
-			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
-				return err
-			}
-			scope.settings = pspSettings(evidence)
-			out = append(out, scope.exported())
-		}
-		return rows.Err()
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list provider accounts for %s: %w", environment, err)
 	}
 	return out, nil
 }
