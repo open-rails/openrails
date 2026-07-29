@@ -36,6 +36,10 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 	m := seedIntentMerchant(t)
 	seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 
+	// The #836 switch is INSTANCE-wide state; restore it or the rest of the
+	// package inherits whatever this test left behind.
+	restoreDestructiveSwitch(t, worker)
+
 	t.Run("failing_before: the bare-context claim leases nothing", func(t *testing.T) {
 		// The exact shape the worker used to run: sqlc on the base pool, no
 		// app.merchant_id. It returns zero rows AND no error — the silence that
@@ -150,6 +154,19 @@ func seedIntentMerchant(t *testing.T) intentMerchant {
 	m.exec(t, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		m.id, "or862-"+uuid.NewString()[:8])
 	return m
+}
+
+// restoreDestructiveSwitch snapshots the instance kill switch and puts it back
+// when the test ends.
+func restoreDestructiveSwitch(t *testing.T, dbi *db.DB) {
+	t.Helper()
+	ctx := context.Background()
+	before, err := dbi.Gen(ctx).IsDestructiveActionSwitchEnabled(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, destructive.New(dbi).SetSwitch(
+			context.Background(), before, "or862-test", "restore instance state"))
+	})
 }
 
 func (m intentMerchant) exec(t *testing.T, sql string, args ...any) {

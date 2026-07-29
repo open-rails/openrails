@@ -170,19 +170,19 @@ CREATE FUNCTION openrails.fleet_merchant_funnel(p_exclude uuid, p_since timestam
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT count(*),
-           count(*) FILTER (WHERE EXISTS (
+    SELECT count(*)::bigint,
+           (count(*) FILTER (WHERE EXISTS (
                SELECT 1 FROM openrails.psps p
-                WHERE p.merchant_id = m.id AND p.replaced_at IS NULL)),
-           count(*) FILTER (WHERE EXISTS (
+                WHERE p.merchant_id = m.id AND p.replaced_at IS NULL)))::bigint,
+           (count(*) FILTER (WHERE EXISTS (
                SELECT 1 FROM openrails.payments pay
                 WHERE pay.merchant_id = m.id AND pay.status = 'completed'
-                  AND pay.reversal_kind IS NULL)),
-           count(*) FILTER (WHERE EXISTS (
+                  AND pay.reversal_kind IS NULL)))::bigint,
+           (count(*) FILTER (WHERE EXISTS (
                SELECT 1 FROM openrails.payments pay
                 WHERE pay.merchant_id = m.id AND pay.status = 'completed'
                   AND pay.reversal_kind IS NULL
-                  AND pay.purchased_at >= p_since))
+                  AND pay.purchased_at >= p_since)))::bigint
       FROM openrails.merchants m
      WHERE m.deleted_at IS NULL AND m.status = 'active'
        AND (p_exclude IS NULL OR m.id <> p_exclude);
@@ -200,7 +200,7 @@ CREATE FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since time
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT p.currency, count(*), COALESCE(sum(p.amount), 0)
+    SELECT p.currency::text, count(*)::bigint, COALESCE(sum(p.amount), 0)::bigint
       FROM openrails.payments p
      WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.purchased_at >= p_since
        AND (p_exclude IS NULL OR p.merchant_id <> p_exclude)
@@ -219,10 +219,10 @@ CREATE FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamptz)
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT p.rail,
-           count(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IS NULL),
-           count(*) FILTER (WHERE p.status = 'failed' AND p.reversal_kind IS NULL),
-           count(*) FILTER (WHERE p.reversal_kind = 'chargeback')
+    SELECT p.rail::text,
+           (count(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IS NULL))::bigint,
+           (count(*) FILTER (WHERE p.status = 'failed' AND p.reversal_kind IS NULL))::bigint,
+           (count(*) FILTER (WHERE p.reversal_kind = 'chargeback'))::bigint
       FROM openrails.payments p
      WHERE p.purchased_at >= p_since AND p.status IN ('completed', 'failed')
        AND (p_exclude IS NULL OR p.merchant_id <> p_exclude)
@@ -241,8 +241,8 @@ CREATE FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid)
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT pr.currency, count(*),
-           COALESCE(sum((pr.amount::numeric * 720 / pr.access_duration_hours)::bigint), 0)
+    SELECT pr.currency::text, count(*)::bigint,
+           COALESCE(sum((pr.amount::numeric * 720 / pr.access_duration_hours)::bigint), 0)::bigint
       FROM openrails.subscriptions s
       JOIN openrails.prices pr ON pr.id = s.price_id
      WHERE s.status = 'active' AND pr.auto_renew AND pr.access_duration_hours > 0
@@ -262,7 +262,7 @@ CREATE FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since 
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT date_trunc('week', p.purchased_at), count(DISTINCT p.merchant_id)
+    SELECT date_trunc('week', p.purchased_at), (count(DISTINCT p.merchant_id))::bigint
       FROM openrails.payments p
      WHERE p.status = 'completed' AND p.reversal_kind IS NULL
        AND p.purchased_at >= date_trunc('week', p_since)
@@ -282,7 +282,7 @@ CREATE FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT date_trunc('week', s.cancelled_at), count(*)
+    SELECT date_trunc('week', s.cancelled_at), count(*)::bigint
       FROM openrails.subscriptions s
      WHERE s.cancelled_at IS NOT NULL
        AND s.cancelled_at >= date_trunc('week', p_since)
@@ -302,7 +302,7 @@ CREATE FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestampt
 BEGIN
     PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
-    SELECT date_trunc('week', p.purchased_at), p.currency, count(*), COALESCE(sum(p.amount), 0)
+    SELECT date_trunc('week', p.purchased_at), p.currency::text, count(*)::bigint, COALESCE(sum(p.amount), 0)::bigint
       FROM openrails.payments p
      WHERE p.status = 'completed' AND p.reversal_kind IS NULL
        AND p.purchased_at >= date_trunc('week', p_since)

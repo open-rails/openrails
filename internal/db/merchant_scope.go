@@ -55,17 +55,21 @@ func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 	if d == nil {
 		return fmt.Errorf("db: AssertMerchantScope on nil DB")
 	}
-	want, err := merchant.Require(ctx)
-	if err != nil {
-		return fmt.Errorf("db: %s requires a merchant on the context: %w", op, err)
-	}
 	var got string
 	if err := d.Qx(ctx).QueryRow(ctx,
 		"SELECT COALESCE(current_setting($1, true), '')", MerchantGUC,
 	).Scan(&got); err != nil {
 		return fmt.Errorf("db: %s could not read %s: %w", op, MerchantGUC, err)
 	}
-	if got == "" || got != want.String() {
+	// A merchant on the context is not required — the SESSION is what scopes the
+	// statement, and some callers (fixtures, pool-level pins) carry only that.
+	// When both are present they must agree, or the work belongs to one merchant
+	// and the rows to another.
+	want, _ := merchant.FromContext(ctx)
+	if got == "" {
+		return &ErrUnscopedMerchantWork{Op: op, Want: want, Got: got}
+	}
+	if !want.IsZero() && got != want.String() {
 		return &ErrUnscopedMerchantWork{Op: op, Want: want, Got: got}
 	}
 	return nil
