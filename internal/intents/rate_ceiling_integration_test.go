@@ -109,6 +109,11 @@ func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	assert.Equal(t, "requires_review", status)
 }
 
+// Each test in this file takes its OWN non-overlapping hour window: the global
+// ceiling deliberately counts across merchants, so tests sharing one bucket see
+// each other's intents. (They did not before or#860 fixed the count, which
+// returned 0 forever.)
+//
 // Global ceiling trips at the 16th op across ALL actors/merchants in the hour —
 // distinct actors so the per-actor ceiling never fires; the global wall does.
 func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
@@ -116,7 +121,7 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(5 * time.Hour)
 
 	// 14 prior ops (distinct actors): the 15th is still under the global wall.
 	for i := 0; i < 14; i++ {
@@ -151,7 +156,7 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(8 * time.Hour)
 
 	for i := 0; i < 20; i++ {
 		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
@@ -175,7 +180,7 @@ func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(11 * time.Hour)
 	actor := "w-" + uuid.NewString()
 
 	// 1 prior op: the 2nd op (running total 2) is below 50% of 5 — no warning.
