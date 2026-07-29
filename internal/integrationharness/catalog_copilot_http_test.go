@@ -274,7 +274,11 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		require.Equal(t, 0, draft.PriceChange.AffectedCount, "no subscribers seeded on this key")
 		require.Equal(t, incPriceKey, draft.PriceChange.CreatePrice.Key)
 		require.Equal(t, int64(15_000_000), draft.PriceChange.CreatePrice.UnitAmount)
-		require.Equal(t, "usd", draft.PriceChange.CreatePrice.Currency)
+		// CUR-6: UPPER is the canonical internal form, and the draft copies the
+		// existing price row's currency verbatim. Lowercase survives only on the
+		// three rail wires that demand it (Stripe catalog/invoice, FX) — this is
+		// an OpenRails surface, so it must read back exactly what is stored.
+		require.Equal(t, "USD", draft.PriceChange.CreatePrice.Currency)
 		require.NotEmpty(t, draft.PriceChange.CreatePrice.ProductID)
 
 		// The draft is a PROPOSAL only — nothing in the real catalog changed.
