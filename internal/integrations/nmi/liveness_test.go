@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,7 +43,7 @@ func TestProbeSalesByOrderID_SuccessfulSale(t *testing.T) {
 	})
 
 	since := time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC)
-	res, err := client.ProbeSalesByOrderID("order-abc", since)
+	res, err := client.ProbeSalesByOrderID(context.Background(), "order-abc", since)
 	require.NoError(t, err)
 	assert.True(t, res.SuccessFound)
 	assert.Equal(t, "txn123", res.SuccessTransactionID)
@@ -68,7 +69,7 @@ func TestProbeSalesByOrderID_DeclineCarriesEvidence(t *testing.T) {
 </nm_response>`))
 	})
 
-	res, err := client.ProbeSalesByOrderID("order-abc", time.Time{})
+	res, err := client.ProbeSalesByOrderID(context.Background(), "order-abc", time.Time{})
 	require.NoError(t, err)
 	assert.False(t, res.SuccessFound)
 	assert.True(t, res.DeclineFound)
@@ -90,7 +91,7 @@ func TestProbeSalesByOrderID_ClientSideDateFilter(t *testing.T) {
 </nm_response>`))
 	})
 
-	res, err := client.ProbeSalesByOrderID("order-abc", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	res, err := client.ProbeSalesByOrderID(context.Background(), "order-abc", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	assert.False(t, res.SuccessFound, "sales before the period window must be filtered even if the server echoes them")
 	assert.False(t, res.DeclineFound)
@@ -108,7 +109,7 @@ func TestProbeSalesByOrderID_MismatchedOrderIgnored(t *testing.T) {
 </nm_response>`))
 	})
 
-	res, err := client.ProbeSalesByOrderID("order-abc", time.Time{})
+	res, err := client.ProbeSalesByOrderID(context.Background(), "order-abc", time.Time{})
 	require.NoError(t, err)
 	assert.False(t, res.SuccessFound)
 }
@@ -117,7 +118,7 @@ func TestProbeSalesByOrderID_ErrorResponse(t *testing.T) {
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><error_response>Invalid security key</error_response></nm_response>`))
 	})
-	_, err := client.ProbeSalesByOrderID("order-abc", time.Time{})
+	_, err := client.ProbeSalesByOrderID(context.Background(), "order-abc", time.Time{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Invalid security key")
 }
@@ -138,7 +139,7 @@ func TestFindSuccessfulSaleByOrderID_NoDateBound(t *testing.T) {
 </nm_response>`))
 	})
 
-	txn, found, err := client.FindSuccessfulSaleByOrderID("rebill-x-1")
+	txn, found, err := client.FindSuccessfulSaleByOrderID(context.Background(), "rebill-x-1")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "txn-old", txn)
@@ -151,7 +152,7 @@ func TestGetRecurringLiveness_FoundWithNextCharge(t *testing.T) {
 		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","delayed_condition":"active","next_billing_date":"2026-07-01"}`))
 	})
 
-	liveness, err := client.GetRecurringLiveness("sub-77")
+	liveness, err := client.GetRecurringLiveness(context.Background(), "sub-77")
 	require.NoError(t, err)
 	assert.True(t, liveness.Found)
 	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), liveness.NextChargeDate)
@@ -162,7 +163,7 @@ func TestGetRecurringLiveness_ISO8601NextBilling(t *testing.T) {
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","next_billing_date":"2026-07-01T00:00:00.000Z"}`))
 	})
-	liveness, err := client.GetRecurringLiveness("sub-77")
+	liveness, err := client.GetRecurringLiveness(context.Background(), "sub-77")
 	require.NoError(t, err)
 	assert.True(t, liveness.Found)
 	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), liveness.NextChargeDate)
@@ -175,7 +176,7 @@ func TestGetRecurringLiveness_DeletionTombstoneIsAbsent(t *testing.T) {
 	client := newLivenessTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"object":"subscription","id":"sub-77","delayed_condition":"inactive","next_billing_date":"2026-07-29"}`))
 	})
-	liveness, err := client.GetRecurringLiveness("sub-77")
+	liveness, err := client.GetRecurringLiveness(context.Background(), "sub-77")
 	require.NoError(t, err)
 	assert.False(t, liveness.Found)
 }
@@ -185,7 +186,7 @@ func TestGetRecurringLiveness_Absent(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`))
 	})
-	liveness, err := client.GetRecurringLiveness("sub-gone")
+	liveness, err := client.GetRecurringLiveness(context.Background(), "sub-gone")
 	require.NoError(t, err)
 	assert.False(t, liveness.Found, "404 from the v5 subscription GET IS terminal at NMI")
 }
@@ -195,6 +196,6 @@ func TestGetRecurringLiveness_ErrorResponse(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"type":"internalError","error_code":"E_INTERNAL","message":"boom"}`))
 	})
-	_, err := client.GetRecurringLiveness("sub-77")
+	_, err := client.GetRecurringLiveness(context.Background(), "sub-77")
 	require.Error(t, err)
 }

@@ -110,7 +110,7 @@ waitToken:
 	require.NoError(t, err)
 	require.Equal(t, DefaultV5BaseURL, client.V5BaseURL, "must hit the real v5 gateway, not a stub")
 
-	created, err := client.CreateCustomerVault(CreateCustomerVaultData{
+	created, err := client.CreateCustomerVault(ctx, CreateCustomerVaultData{
 		PaymentToken: token,
 		FirstName:    "CollectJS",
 		LastName:     "LiveProof",
@@ -120,11 +120,11 @@ waitToken:
 	require.NotEmpty(t, created.CustomerVaultID)
 	require.NotEmpty(t, created.BillingID, "the token-minted billing entry id must be returned (#682)")
 	t.Cleanup(func() {
-		_ = client.DeleteCustomerVault(DeleteCustomerVaultData{CustomerVaultID: created.CustomerVaultID})
+		_ = client.DeleteCustomerVault(ctx, DeleteCustomerVaultData{CustomerVaultID: created.CustomerVaultID})
 	})
 
 	// Read back: the vault holds the tokenized test card.
-	page, err := client.ListCustomersPage("", 5, created.CustomerVaultID)
+	page, err := client.ListCustomersPage(ctx, "", 5, created.CustomerVaultID)
 	require.NoError(t, err)
 	require.Len(t, page.Customers, 1)
 	require.Len(t, page.Customers[0].Billing, 1)
@@ -133,7 +133,7 @@ waitToken:
 	require.True(t, strings.HasSuffix(ccnumber, "1111"), "vaulted card must be the tokenized 4111... test card, got %q", ccnumber)
 
 	// And the vault is chargeable — the full production checkout sequence.
-	sale, err := client.RunSale(SaleParams{
+	sale, err := client.RunSale(ctx, SaleParams{
 		CustomerVaultID:  created.CustomerVaultID,
 		Amount:           moneyCentsForCollectProbe(),
 		Currency:         "USD",
@@ -142,7 +142,7 @@ waitToken:
 	})
 	require.NoError(t, err, "token-minted vault must be chargeable")
 	require.NotEmpty(t, sale.TransactionID)
-	require.NoError(t, client.Void(sale.TransactionID))
+	require.NoError(t, client.Void(ctx, sale.TransactionID))
 }
 
 func findChrome() string {

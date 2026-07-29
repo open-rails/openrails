@@ -142,7 +142,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	require.NoError(t, err)
 	railCustomerRef := createNMISandboxVault(t, client)
 	t.Cleanup(func() {
-		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef})
+		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef})
 	})
 
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)

@@ -162,7 +162,7 @@ func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, i
 		return err
 	}
 	require.True(t, ok, "declared+seeded NMI account must resolve a client")
-	_, err = client.RunSale(nmi.SaleParams{
+	_, err = client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID: "vault-manifest-mode",
 		Amount:          moneyutil.Cents(500),
 		Currency:        "USD",

@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestCheckTestModeArmWithoutCache(t *testing.T) {
 	t.Run("simulated account never refuses", func(t *testing.T) {
 		server := probeServer(t, "1", nil)
 		defer server.Close()
-		decision := CheckTestModeArm(nil, probeClient(t, server.URL), "cache-key")
+		decision := CheckTestModeArm(context.Background(), nil, probeClient(t, server.URL), "cache-key")
 		require.False(t, decision.Refuse)
 		require.False(t, decision.Cached)
 		require.NoError(t, decision.ProbeErr)
@@ -60,7 +61,7 @@ func TestCheckTestModeArmWithoutCache(t *testing.T) {
 	t.Run("live account refuses", func(t *testing.T) {
 		server := probeServer(t, "2", nil)
 		defer server.Close()
-		decision := CheckTestModeArm(nil, probeClient(t, server.URL), "cache-key")
+		decision := CheckTestModeArm(context.Background(), nil, probeClient(t, server.URL), "cache-key")
 		require.True(t, decision.Refuse)
 		require.False(t, decision.Cached)
 	})
@@ -68,7 +69,7 @@ func TestCheckTestModeArmWithoutCache(t *testing.T) {
 	t.Run("indeterminate probe never refuses", func(t *testing.T) {
 		server := probeServer(t, "3", nil)
 		defer server.Close()
-		decision := CheckTestModeArm(nil, probeClient(t, server.URL), "cache-key")
+		decision := CheckTestModeArm(context.Background(), nil, probeClient(t, server.URL), "cache-key")
 		require.False(t, decision.Refuse)
 		require.Error(t, decision.ProbeErr)
 	})

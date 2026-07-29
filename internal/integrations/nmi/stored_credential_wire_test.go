@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func TestRunSale_StoredCredentialRoutesClassicWithCITFields(t *testing.T) {
 	client := newTestClient(t, server.URL)
 
 	// Unscheduled initial CIT: indicator=stored, no reference, NO billing_method.
-	_, err := client.RunSale(SaleParams{
+	_, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID: "v1",
 		Amount:          moneyutil.Cents(1999),
 		Currency:        "USD",
@@ -70,7 +71,7 @@ func TestRunSale_StoredCredentialMITCarriesReference(t *testing.T) {
 	client := newTestClient(t, server.URL)
 
 	// Unscheduled MIT: merchant + used + the sequence anchor.
-	_, err := client.RunSale(SaleParams{
+	_, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID: "v1",
 		BillingID:       "b1",
 		Amount:          moneyutil.Cents(500),
@@ -96,7 +97,7 @@ func TestRunSale_StoredCredentialValidation(t *testing.T) {
 	server, _ := classicFormServer(t)
 	client := newTestClient(t, server.URL)
 
-	_, err := client.RunSale(SaleParams{
+	_, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  "v1",
 		Amount:           moneyutil.Cents(100),
 		Currency:         "USD",
@@ -104,7 +105,7 @@ func TestRunSale_StoredCredentialValidation(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "initiated_by")
 
-	_, err = client.RunSale(SaleParams{
+	_, err = client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  "v1",
 		Amount:           moneyutil.Cents(100),
 		Currency:         "USD",
@@ -123,7 +124,7 @@ func TestAddRecurringSubscription_StoredCredentialRecurringCIT(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	_, err := client.AddRecurringSubscription(RecurringPaymentData{
+	_, err := client.AddRecurringSubscription(context.Background(), RecurringPaymentData{
 		PlanID:          "plan1",
 		CustomerVaultID: "v1",
 		Currency:        "USD",
@@ -153,7 +154,7 @@ func TestAttemptManualRebill_StoredCredentialRecurringMIT(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	resp, err := client.AttemptManualRebill(ManualRebillParams{
+	resp, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
 		VaultID:        "v1",
 		BillingID:      "b1",
 		SubscriptionID: "sub1",
@@ -185,7 +186,7 @@ func TestAttemptManualRebill_LegacyReferenceLessMITOmitsInitialTransactionID(t *
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	_, err := client.AttemptManualRebill(ManualRebillParams{
+	_, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
 		VaultID:        "v1",
 		BillingID:      "b1",
 		SubscriptionID: "sub1",
