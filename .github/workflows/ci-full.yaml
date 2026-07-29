@@ -70,12 +70,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Install Task
-        run: go install github.com/go-task/task/v3/cmd/task@latest
+      # or#855: pinned + checksum-verified downloads instead of compiling both
+      # tools from source on every run (see scripts/ci-install-tool.sh).
+      - name: Install pinned tools (task, sqlc)
+        run: |
+          echo "TASK_BIN=$(scripts/ci-install-tool.sh task)" >> "$GITHUB_ENV"
+          echo "SQLC_BIN=$(scripts/ci-install-tool.sh sqlc)" >> "$GITHUB_ENV"
       - name: sqlc generate + vet + diff + audit
         env:
           POSTGRES_HOST_PORT: "5434"
-        run: task sqlc-check
+        run: "$TASK_BIN sqlc-check"
 
   console-full:
     runs-on: ubuntu-latest

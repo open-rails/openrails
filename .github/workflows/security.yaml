@@ -71,12 +71,17 @@ jobs:
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
-      - name: Install gosec
+      # or#855: was `go install …@latest` — 47s of compiling a binary upstream
+      # ships, and a floating version with no integrity check. Pinned +
+      # checksum-verified download is ~4s. Pinning freezes the rule set on
+      # purpose (same doctrine as the golangci-lint and sqlc pins): bump the
+      # version in scripts/ci-install-tool.sh deliberately, reading the notes.
+      - name: Install pinned gosec
         if: needs.changes.outputs.go == 'true'
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: echo "GOSEC_BIN=$(scripts/ci-install-tool.sh gosec)" >> "$GITHUB_ENV"
       - name: Run gosec (fail on HIGH+)
         if: needs.changes.outputs.go == 'true'
-        run: gosec -severity high -confidence medium -exclude-dir=.agents ./...
+        run: "$GOSEC_BIN -severity high -confidence medium -exclude-dir=.agents ./..."
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
   govulncheck:
@@ -94,9 +99,12 @@ jobs:
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
+      # Pinned, but no prebuilt release exists and the install is only ~5s.
+      # Unlike gosec, pinning does NOT freeze what this detects: govulncheck
+      # fetches the vulnerability DB at run time.
       - name: Install govulncheck
         if: needs.changes.outputs.go == 'true'
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
       - name: Run govulncheck
         if: needs.changes.outputs.go == 'true'
         run: govulncheck ./...

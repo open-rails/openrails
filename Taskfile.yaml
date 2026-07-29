@@ -4,7 +4,13 @@ vars:
   BINARY_NAME: openrails
   BIN_DIR: bin
   SQLC_VERSION: v1.31.1
-  SQLC: go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}
+  # `go run …@version` compiles sqlc from source on a cold build cache — ~60s
+  # in CI, every run. SQLC_BIN lets a caller supply an already-installed binary
+  # of the SAME pinned version instead (scripts/ci-install-tool.sh sqlc, which
+  # checksum-verifies the upstream release). Local dev needs no setup and keeps
+  # the `go run` default. Same override shape as SQUAWK_BIN in
+  # scripts/migration-lint.sh.
+  SQLC: '{{if .SQLC_BIN}}{{.SQLC_BIN}}{{else}}go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}{{end}}'
   GIT_COMMIT:
     sh: git rev-parse HEAD
   GIT_TAG:
@@ -121,6 +127,15 @@ tasks:
       SQLC_DATABASE_URL:
         sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
     cmds:
+      # TestQueryAudit below SKIPS (and reports ok) when SQLC_DATABASE_URL is
+      # empty. Every other step in this chain errors loudly without it, so an
+      # empty value would silently degrade this gate to "everything but the
+      # auditor" — assert it up front rather than trusting the resolver above.
+      - |
+        if [ -z "${SQLC_DATABASE_URL:-}" ]; then
+          echo "sqlc-check: SQLC_DATABASE_URL is empty — TestQueryAudit would skip silently and this gate would report a pass it did not earn." >&2
+          exit 1
+        fi
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
       - git diff --exit-code -- internal/db/gen
