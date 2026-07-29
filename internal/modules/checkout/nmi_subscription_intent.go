@@ -207,8 +207,8 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 			// The subscription may exist at NMI; the verifier re-finds it.
 			return intents.Ambiguous("subscription create outcome unknown: " + err.Error())
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// #796: record the declined enrollment charge attempt (verbatim code).
 			if h.Checkout != nil && h.Checkout.PurchaseService != nil {
 				recordDeclinedAttempt(ctx, h.Checkout.PurchaseService.PaymentService, DeclinedAttempt{
@@ -218,15 +218,15 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 					SyntheticTransactionID: "nmi_sub_declined:" + intent.ID.String(),
 					AmountMicros:           p.AmountMicros,
 					Currency:               p.Currency,
-					FailureCode:            nmidirect.FailureCode(vaultErr),
+					FailureCode:            nmidirect.FailureCode(pmErr),
 					AttemptKind:            payments.AttemptInitial,
 					TokenType:              charge.TokenTypeProviderVault,
 				})
 			}
-			return intents.TerminalWithEvidence(vaultErr.Error(), map[string]any{
+			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
 				"declined":        true,
-				"response_code":   vaultErr.ResponseCode,
-				"localization_id": vaultErr.LocalizationID,
+				"response_code":   pmErr.ResponseCode,
+				"localization_id": pmErr.LocalizationID,
 			})
 		}
 		return intents.Terminal("subscription create request rejected: " + err.Error())
@@ -297,7 +297,7 @@ type railSubscriptionReader interface {
 // carries the given order id (a partially-completed finalize). Shared by the
 // nmi_subscription_create verify leg and the upgrade successor-create
 // ambiguity recovery (#674): both answer "did OUR create land at NMI?".
-func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscriptionReader, client *nmi.NMIClient, provider, vaultID, planID, orderID string) ([]string, error) {
+func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscriptionReader, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) ([]string, error) {
 	var candidates []string
 	cursor := ""
 	for {
@@ -306,7 +306,7 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 			return nil, fmt.Errorf("subscription roster read failed: %w", perr)
 		}
 		for _, sub := range page.Subscriptions {
-			if strings.TrimSpace(sub.CustomerVaultID) != strings.TrimSpace(vaultID) {
+			if strings.TrimSpace(sub.CustomerVaultID) != strings.TrimSpace(railCustomerRef) {
 				continue
 			}
 			if sub.Plan == nil || strings.TrimSpace(sub.Plan.ID) != strings.TrimSpace(planID) {

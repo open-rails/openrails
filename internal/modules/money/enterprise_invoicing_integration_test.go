@@ -128,7 +128,7 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 
 	// Saved payment method on file — the send_invoice skip below must be the
 	// collection_method, not a missing method.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})

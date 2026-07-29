@@ -118,7 +118,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 	}
 
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -144,8 +144,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		Payload: NMISalePayload{
 			Provider:            provider,
 			PSP:                 target.PSP,
-			CustomerVaultID:     customerVaultID,
-			BillingID:           vaultBillingID,
+			CustomerVaultID:     railCustomerRef,
+			BillingID:           railMethodRef,
 			AmountMicros:        price.Amount,
 			Currency:            price.Currency,
 			Description:         fmt.Sprintf("Purchase: %s", product.DisplayName),
@@ -177,7 +177,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		// Verified-clean decline/rejection: no money moved. Direct best-effort
 		// cleanup, NOT an intent (#674 tail): the vault was created for THIS
 		// declined attempt and is referenced nowhere — harmless if lost.
-		if createdVault && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
 			_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 		}
 		reason := "payment failed"

@@ -77,7 +77,7 @@ func TestChargeOutstanding_StoredCredentialMITAndBackfill(t *testing.T) {
 	client.V5BaseURL = server.URL
 
 	// Legacy instrument: seeded with NO stored-credential references.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailNMI), "vault-297-"+uuid.NewString()[:8])
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), "vault-297-"+uuid.NewString()[:8])
 
 	charger := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,

@@ -194,9 +194,9 @@ func UpsertStripeCardForCustomer(
 		return nil
 	}
 
-	vaultID := strings.TrimSpace(paymentMethodID)
-	if vaultID == "" {
-		vaultID = "stripe:" + customerID
+	railCustomerRef := strings.TrimSpace(paymentMethodID)
+	if railCustomerRef == "" {
+		railCustomerRef = "stripe:" + customerID
 	}
 
 	now := time.Now().UTC()
@@ -205,14 +205,14 @@ func UpsertStripeCardForCustomer(
 	}
 
 	methods := paymentmethods.NewPaymentMethodRepo(database)
-	pm, err := methods.GetByRailMethodRef(ctx, string(models.RailStripe), vaultID)
+	pm, err := methods.GetByRailMethodRef(ctx, string(models.RailStripe), railCustomerRef)
 	switch {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 			Rail:                 models.RailStripe,
-			RailMethodRef:        vaultID, // Stripe pm_ token is the instrument-scope handle
+			RailMethodRef:        railCustomerRef, // Stripe pm_ token is the instrument-scope handle
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,
 			LastFour:             &card.Last4,

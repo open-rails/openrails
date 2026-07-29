@@ -63,8 +63,8 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	if c == nil || c.Client == nil {
 		return charge.Result{}, errors.New("nmidirect charger not initialized")
 	}
-	vaultID := strings.TrimSpace(req.Instrument.CustomerRef)
-	if vaultID == "" {
+	railCustomerRef := strings.TrimSpace(req.Instrument.CustomerRef)
+	if railCustomerRef == "" {
 		return charge.Result{}, errors.New("nmi instrument missing customer vault id")
 	}
 	if req.AmountMinor <= 0 {
@@ -72,7 +72,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	}
 
 	sale, err := c.Client.RunSale(nmi.SaleParams{
-		CustomerVaultID:  vaultID,
+		CustomerVaultID:  railCustomerRef,
 		BillingID:        strings.TrimSpace(req.Instrument.MethodRef),
 		Amount:           req.AmountMinor,
 		Currency:         req.Currency,
@@ -81,10 +81,10 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		StoredCredential: StoredCredentialFor(req.Context),
 	})
 	if err != nil {
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) && IsHardDecline(vaultErr.ResponseCode) {
-			code := FailureCode(vaultErr)
-			message := vaultErr.Error()
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) && IsHardDecline(pmErr.ResponseCode) {
+			code := FailureCode(pmErr)
+			message := pmErr.Error()
 			return charge.Result{
 				TokenType:      charge.TokenTypeProviderVault,
 				Declined:       true,

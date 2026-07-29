@@ -232,13 +232,13 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
-		var vaultErr *paymentmethods.PaymentMethodError
-		if errors.As(err, &vaultErr) {
+		var pmErr *paymentmethods.PaymentMethodError
+		if errors.As(err, &pmErr) {
 			code := api.CodePaymentFailed
-			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
-				code = vaultErr.LocalizationID
+			if strings.TrimSpace(pmErr.LocalizationID) != "" {
+				code = pmErr.LocalizationID
 			}
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, pmErr.Error()))
 			return
 		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")

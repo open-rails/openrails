@@ -697,7 +697,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -749,8 +749,8 @@ func (s *CheckoutService) processNMISubscription(
 			Provider:               provider,
 			PSP:                    target.PSP,
 			PlanID:                 nmiPlanID,
-			CustomerVaultID:        customerVaultID,
-			BillingID:              vaultBillingID,
+			CustomerVaultID:        railCustomerRef,
+			BillingID:              railMethodRef,
 			AmountMicros:           price.Amount,
 			Currency:               price.Currency,
 			Email:                  req.Email,
@@ -789,9 +789,9 @@ func (s *CheckoutService) processNMISubscription(
 		// Verified-clean decline/rejection. Direct best-effort cleanup of the
 		// vault created for THIS attempt, NOT an intent (#674 tail): it is
 		// referenced nowhere — harmless if lost.
-		if createdVault && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
 			if cleanupErr := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod); cleanupErr != nil {
-				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
+				log.WithError(cleanupErr).WithField("vault_id", railCustomerRef).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
 		reason := "failed to create subscription"
@@ -1813,7 +1813,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Get or create vault
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1847,7 +1847,7 @@ func (s *CheckoutService) processUpgrade(
 	// the response. Adopt it instead of creating a duplicate.
 	var resp *nmi.AddSubscriptionResponse
 	if retryAfterFailure {
-		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
 		if aerr != nil {
 			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 			return nil, ErrCheckoutProcessing
@@ -1869,8 +1869,8 @@ func (s *CheckoutService) processUpgrade(
 				Country:   DefaultIfEmpty(req.Country, "US"),
 			},
 			PlanID:          nmiPlanID,
-			CustomerVaultID: customerVaultID,
-			BillingID:       vaultBillingID,
+			CustomerVaultID: railCustomerRef,
+			BillingID:       railMethodRef,
 			Amount:          moneyutil.Cents(recurringCents),
 			Currency:        newPrice.Currency,
 			Email:           req.Email,
@@ -1892,7 +1892,7 @@ func (s *CheckoutService) processUpgrade(
 			// "processing" so the retry (same content-derived key) re-runs the
 			// adopt scan. Never a second blind create, never a live remote
 			// subscription abandoned as failed (#674 tail).
-			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
 			if aerr != nil || !ok {
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
@@ -1946,8 +1946,8 @@ func (s *CheckoutService) processUpgrade(
 		}
 		if prorationTransactionID == "" {
 			saleResp, err := client.RunSale(nmi.SaleParams{
-				CustomerVaultID:  customerVaultID,
-				BillingID:        vaultBillingID,
+				CustomerVaultID:  railCustomerRef,
+				BillingID:        railMethodRef,
 				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
 				Currency:         newPrice.Currency,
 				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
@@ -1975,7 +1975,7 @@ func (s *CheckoutService) processUpgrade(
 				// best-effort cleanup of the vault created for THIS attempt,
 				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
-				if createdVault && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+				if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
 					_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 				}
 				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
@@ -2138,8 +2138,8 @@ func shortHash(s string) string {
 // create verifiably did not land (safe to create); more than one is refused
 // (never guess which orphan to adopt — operator attention via the returned
 // error, surfaced as ErrCheckoutProcessing).
-func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, vaultID, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
-	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, vaultID, planID, orderID)
+func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
+	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, railCustomerRef, planID, orderID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2155,7 +2155,7 @@ func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, cli
 		}).Info("adopted successor NMI subscription from a previous ambiguous upgrade attempt")
 		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
 	default:
-		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required", len(candidates), vaultID, planID)
+		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
 	}
 }
 

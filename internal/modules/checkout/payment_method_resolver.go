@@ -30,7 +30,7 @@ func NewCheckoutPaymentMethodResolver(paymentMethodService *paymentmethods.Payme
 // vaulted from a token in THIS request (created=true — the caller may
 // best-effort clean it up on a verified-clean decline). The billing id is ""
 // for pre-#682 rows that never recorded one.
-func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (vaultID, billingID string, pm *models.PaymentMethod, created bool, err error) {
+func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (railCustomerRef, billingID string, pm *models.PaymentMethod, created bool, err error) {
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
 		if err != nil {

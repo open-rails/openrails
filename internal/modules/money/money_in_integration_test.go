@@ -129,15 +129,15 @@ func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 	return seedPaymentMethodRow(t, pool, ctx, payer, rail, pm, "vault_"+pm.String())
 }
 
-func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, vaultID string) uuid.UUID {
+func seedPaymentMethodWithRailCustomerRef(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerRef string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	// One row with the requested rail + vault. (Was double-inserting the
 	// same id via seedPaymentMethod first → duplicate payment_methods_pkey.)
-	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), vaultID)
+	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), railCustomerRef)
 }
 
-func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, vaultID string) uuid.UUID {
+func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, railCustomerRef string) uuid.UUID {
 	t.Helper()
 	params := gen.CreatePaymentMethodParams{
 		ID:                   pm,
@@ -149,9 +149,9 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	// Mirror the migration's per-rail handle placement: NMI keeps the customer
 	// vault in rail_customer_ref; other rails put the instrument in rail_method_ref.
 	if rails.IsNMI(models.Rail(rail)) {
-		params.RailCustomerRef = vaultID
+		params.RailCustomerRef = railCustomerRef
 	} else {
-		params.RailMethodRef = vaultID
+		params.RailMethodRef = railCustomerRef
 	}
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
@@ -683,7 +683,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_invoice")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
@@ -792,7 +792,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_decline")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,

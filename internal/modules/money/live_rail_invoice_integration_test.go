@@ -66,7 +66,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 		"customer": {customerID},
 	})["id"].(string)
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), pmID)
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), pmID)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), customerID)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
@@ -140,12 +140,12 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 
 	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: storedSecret.Value}, true)
 	require.NoError(t, err)
-	vaultID := createNMISandboxVault(t, client)
+	railCustomerRef := createNMISandboxVault(t, client)
 	t.Cleanup(func() {
-		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID})
+		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef})
 	})
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailNMI), vaultID)
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -407,7 +407,7 @@ func createNMISandboxVault(t *testing.T, client *nmi.NMIClient) string {
 	if output.Get("response") != "1" {
 		t.Fatalf("NMI vault create failed: response=%s text=%s code=%s", output.Get("response"), output.Get("responsetext"), output.Get("response_code"))
 	}
-	vaultID := strings.TrimSpace(output.Get("customer_vault_id"))
-	require.NotEmpty(t, vaultID)
-	return vaultID
+	railCustomerRef := strings.TrimSpace(output.Get("customer_vault_id"))
+	require.NotEmpty(t, railCustomerRef)
+	return railCustomerRef
 }

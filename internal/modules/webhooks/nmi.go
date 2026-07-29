@@ -369,8 +369,8 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 		return err
 	}
 
-	vaultID := body.VaultID.Trimmed()
-	fields := log.Fields{"vault_id": vaultID}
+	railCustomerRef := body.VaultID.Trimmed()
+	fields := log.Fields{"vault_id": railCustomerRef}
 	if body.Subscription != nil && !body.Subscription.SubscriptionID.IsEmpty() {
 		fields["subscription_id"] = body.Subscription.SubscriptionID.Trimmed()
 	}

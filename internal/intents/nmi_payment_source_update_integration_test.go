@@ -110,12 +110,12 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	sfx := uuid.NewString()[:8]
 
-	mkPM := func(vaultID string) *models.PaymentMethod {
+	mkPM := func(railCustomerRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
-			RailCustomerRef:      vaultID,
+			RailCustomerRef:      railCustomerRef,
 			RailMethodRef:        "bill-" + uuid.NewString()[:8],
 			RebillDriver:         models.RebillDriverProvider,
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
@@ -329,9 +329,9 @@ func TestNMIPaymentSourceUpdateIntent_CrashBeforeExecute(t *testing.T) {
 			UserID:             fx.sub.CustomerID.String(),
 			RailSubscriptionID: fx.sub.RailSubscriptionID,
 			NewPaymentMethodID: fx.newPM.ID,
-			NewVaultID:         fx.newPM.RailCustomerRef,
+			NewRailCustomerRef:         fx.newPM.RailCustomerRef,
 			OldPaymentMethodID: &oldID,
-			OldVaultID:         fx.oldPM.RailCustomerRef,
+			OldRailCustomerRef:         fx.oldPM.RailCustomerRef,
 		},
 		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
 		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),

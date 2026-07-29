@@ -253,12 +253,12 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// The gateway answered with a decline: the refund definitively did
 			// not happen and re-sending the identical request cannot succeed.
-			return h.terminally(ctx, p, "nmi refund declined: "+vaultErr.Message, map[string]any{
-				"response_code": vaultErr.ResponseCode,
+			return h.terminally(ctx, p, "nmi refund declined: "+pmErr.Message, map[string]any{
+				"response_code": pmErr.ResponseCode,
 			})
 		}
 		// Transport-level failure: the refund MAY have been processed.

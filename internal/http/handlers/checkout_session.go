@@ -216,13 +216,13 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
-	var vaultErr *paymentmethods.PaymentMethodError
-	if errors.As(err, &vaultErr) {
+	var pmErr *paymentmethods.PaymentMethodError
+	if errors.As(err, &pmErr) {
 		code := api.CodePaymentFailed
-		if strings.TrimSpace(vaultErr.LocalizationID) != "" {
-			code = vaultErr.LocalizationID
+		if strings.TrimSpace(pmErr.LocalizationID) != "" {
+			code = pmErr.LocalizationID
 		}
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, pmErr.Error()))
 		return
 	}
 	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an

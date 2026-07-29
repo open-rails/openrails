@@ -48,14 +48,14 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	customerID, err := db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID)
 	require.NoError(t, err)
 
-	sharedVault := "vault-shared-" + uuid.NewString()[:8]
+	sharedRailCustomerRef := "vault-shared-" + uuid.NewString()[:8]
 	pmRepo := NewPaymentMethodRepo(database)
 	mk := func(methodRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
-			RailCustomerRef:      sharedVault,
+			RailCustomerRef:      sharedRailCustomerRef,
 			RailMethodRef:        methodRef,
 			RebillDriver:         models.RebillDriverProvider,
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
@@ -111,7 +111,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 
 	require.NoError(t, svc.CleanupPaymentMethodBestEffort(ctx, pmA), "shared vault deletes must scope to the billing entry")
 	require.Len(t, entryDeletes, 1, "exactly one billing-entry delete")
-	require.Contains(t, entryDeletes[0], "/customers/"+sharedVault+"/billing/"+pmA.RailMethodRef)
+	require.Contains(t, entryDeletes[0], "/customers/"+sharedRailCustomerRef+"/billing/"+pmA.RailMethodRef)
 	require.Empty(t, vaultDeletes, "the shared vault itself must NEVER be deleted")
 	if _, err := NewPaymentMethodRepo(database).GetByID(ctx, pmA.ID); err == nil {
 		t.Fatal("deleted row must be gone locally")

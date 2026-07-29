@@ -178,8 +178,8 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 			// The charge may have landed; the verifier resolves via reads.
 			return intents.Ambiguous("sale outcome unknown: " + err.Error())
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// #796: a parsed checkout decline is a charge attempt — record the
 			// failed payments row (verbatim code) or approval_rate silently
 			// inflates. Idempotent per intent.
@@ -190,14 +190,14 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 				SyntheticTransactionID: "nmi_sale_declined:" + intent.ID.String(),
 				AmountMicros:           p.AmountMicros,
 				Currency:               p.Currency,
-				FailureCode:            nmidirect.FailureCode(vaultErr),
+				FailureCode:            nmidirect.FailureCode(pmErr),
 				AttemptKind:            payments.AttemptInitial,
 				TokenType:              charge.TokenTypeProviderVault,
 			})
-			return intents.TerminalWithEvidence(vaultErr.Error(), map[string]any{
+			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
 				"declined":        true,
-				"response_code":   vaultErr.ResponseCode,
-				"localization_id": vaultErr.LocalizationID,
+				"response_code":   pmErr.ResponseCode,
+				"localization_id": pmErr.LocalizationID,
 			})
 		}
 		// Request-level rejection (validation, config): nothing was charged.
