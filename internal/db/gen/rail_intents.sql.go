@@ -440,9 +440,11 @@ type EnqueueRailIntentParams struct {
 // #358 phase A: provider intent ledger queries — idempotent enqueue, the
 // executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
 // and relevance-window expiry. merchant_id is stamped explicitly by the
-// producers (request paths run on a tenant-pinned connection, so RLS
-// double-checks the stamp); the executor/verifier workers sweep cross-tenant
-// on the privileged pool like the other River workers.
+// producers (request paths run on a merchant-pinned connection, so RLS
+// double-checks the stamp). The executor/verifier workers do NOT sweep
+// cross-merchant: there is no privileged pool, so they fan out over the
+// merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
+// that merchant's own pinned scope (or#862).
 // ============================================================================
 // Enqueue (effectively-once per logical intent)
 // ============================================================================
@@ -619,6 +621,81 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 		&i.NotifiedSeverity,
 	)
 	return i, err
+}
+
+const listDueRailIntentMerchants = `-- name: ListDueRailIntentMerchants :many
+
+SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListDueRailIntentMerchantsParams struct {
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// ============================================================================
+// or#862: deployment-wide executor / verifier fan-out
+// ============================================================================
+// CROSS-MERCHANT: the merchants the executor pass must visit, through migration
+// 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
+// River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
+// claim matched `merchant_id = NULL` and leased ZERO intents — the whole
+// outbound provider-mutation plane was inert, and the #836 kill switch and #679
+// volume breaker (which only run on a claimed intent) never executed. Ids only:
+// the claim, the gates and the execution run per-merchant under
+// RunInMerchantConn, where these same predicates re-apply.
+func (q *Queries) ListDueRailIntentMerchants(ctx context.Context, arg ListDueRailIntentMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueRailIntentMerchants, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueVerifyRailIntentMerchants = `-- name: ListDueVerifyRailIntentMerchants :many
+SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListDueVerifyRailIntentMerchantsParams struct {
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
+func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg ListDueVerifyRailIntentMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueVerifyRailIntentMerchants, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRailIntents = `-- name: ListRailIntents :many

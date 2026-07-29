@@ -1237,7 +1237,11 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 	// had exactly one deployment-wide credential set to consider; this one
 	// has many).
 	cacheKey := merchantID.String() + ":" + name
-	decision := nmi.CheckTestModeArm(database.GenGlobal(), client, cacheKey)
+	// probe_verdicts is one of the four RLS-EXEMPT tables (with merchants,
+	// worker_health and destructive_action_switch), so the base pool genuinely
+	// answers here — unlike the sites or#824's sweep found. The cache key
+	// carries the merchant, so scope is not lost.
+	decision := nmi.CheckTestModeArm(database.GenDirectory(), client, cacheKey)
 	if decision.ProbeErr != nil {
 		log.WithError(decision.ProbeErr).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,

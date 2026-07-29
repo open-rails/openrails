@@ -894,15 +894,15 @@ SELECT merchant_id FROM openrails.armed_findings_digest_merchant_ids()
 // base pool, which carries no app.merchant_id, so reconciliation_findings' RLS
 // matched nothing and the digest had never run (or#861). Now through migration
 // 0021's SECURITY DEFINER reader; ids only, digest content stays per-merchant.
-func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
+func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedFindingsDigestMerchants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

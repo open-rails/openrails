@@ -166,8 +166,48 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 	return s.db.Gen(ctx).GetRailIntent(ctx, id)
 }
 
+// DueExecuteMerchants lists the merchants with executor work (claimable or
+// expirable intents) through migration 0022's SECURITY DEFINER work queue —
+// the executor's fan-out list. Ids only; each merchant's pass then runs under
+// its own pinned connection (or#862).
+func (s *Store) DueExecuteMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
+	rows, err := s.db.GenDirectory().ListDueRailIntentMerchants(ctx, gen.ListDueRailIntentMerchantsParams{
+		Now: now.UTC(), MerchantLimit: limit,
+	})
+	return derefIDs(rows), err
+}
+
+// DueVerifyMerchants is DueExecuteMerchants for the verifier pass (or#862).
+func (s *Store) DueVerifyMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
+	rows, err := s.db.GenDirectory().ListDueVerifyRailIntentMerchants(ctx, gen.ListDueVerifyRailIntentMerchantsParams{
+		Now: now.UTC(), MerchantLimit: limit,
+	})
+	return derefIDs(rows), err
+}
+
+// derefIDs drops the pointer indirection sqlc emits for a set-returning
+// function's column. The definer bodies select a NOT NULL column, so a nil
+// here is impossible; it is skipped rather than dereferenced.
+func derefIDs(rows []*uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, id := range rows {
+		if id != nil {
+			out = append(out, *id)
+		}
+	}
+	return out
+}
+
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
+//
+// or#862: this MUST run on a merchant-pinned connection. rail_intents FORCEs
+// RLS, so a bare-context claim matched `merchant_id = NULL` and leased ZERO
+// intents — silently, with no error — which is how the entire outbound
+// provider-mutation plane came to be inert while its tests passed.
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent executor claim"); err != nil {
+		return nil, err
+	}
 	return s.db.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -175,8 +215,12 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	})
 }
 
-// ClaimDueVerify leases up to batch due unknown_needs_verify intents.
+// ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
+// merchant-pin requirement as ClaimDue (or#862).
 func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent verifier claim"); err != nil {
+		return nil, err
+	}
 	return s.db.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -188,6 +232,9 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 // except destructive intents whose merchant has an OPEN held_bulk finding
 // (#679): breaker-held intents never expire out from under the operator.
 func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent expiry sweep"); err != nil {
+		return 0, err
+	}
 	return s.db.Gen(ctx).ExpireOverdueRailIntents(ctx, gen.ExpireOverdueRailIntentsParams{
 		Now:              now.UTC(),
 		BreakerHeldTypes: DestructiveIntentTypes(),

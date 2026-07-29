@@ -10,8 +10,8 @@ import (
 )
 
 // Fleet timeseries (openrails-saas #38): the trend companion to FleetAnalytics
-// — weekly buckets over the same truth tables, on the same privileged
-// control-plane pool, under the same SearchMerchants (#226) doctrine: the
+// — weekly buckets over the same truth tables, through the same 0022
+// SECURITY DEFINER aggregates, under the same SearchMerchants (#226) doctrine: the
 // CALLER gates (platform superadmin) and audits every request. Buckets are
 // ISO weeks (Postgres date_trunc('week', ...), Monday-start, UTC), computed on
 // request — no rollup storage at current fleet scale.
@@ -61,10 +61,12 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 		excludeArg = exclude.UUID()
 	}
 
-	// #824 SWEEP: the aggregates below read RLS-bearing tables (payments,
-	// subscriptions) on the base pool with no app.merchant_id, so under the
-	// production openrails_app role every series is empty — see the same note on
-	// FleetAnalytics.
+	// or#861: the aggregates over RLS-bearing tables (payments, subscriptions)
+	// go through migration 0022's SECURITY DEFINER readers — read on the base
+	// pool they were silently empty under the production openrails_app role.
+	// The week list and the new-merchant series stay ordinary queries:
+	// generate_series touches no table, and openrails.merchants is the
+	// policy-free directory.
 	//
 	// Canonical week list from Postgres so bucket alignment can never drift
 	// from the aggregates' date_trunc semantics.
@@ -122,35 +124,23 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 	`, func(p *FleetWeeklyPoint, n int64) { p.NewMerchants = n }); err != nil {
 		return nil, fmt.Errorf("fleet timeseries: new merchants: %w", err)
 	}
-	if err := fill(`
-		SELECT date_trunc('week', purchased_at), count(DISTINCT merchant_id)
-		  FROM openrails.payments
-		 WHERE status = 'completed' AND reversal_kind IS NULL
-		   AND purchased_at >= date_trunc('week', $2::timestamptz)
-		   AND ($1::uuid IS NULL OR merchant_id <> $1)
-		 GROUP BY 1
-	`, func(p *FleetWeeklyPoint, n int64) { p.ActiveMerchants = n }); err != nil {
+	if err := fill(
+		`SELECT week_start, merchants
+		   FROM openrails.fleet_weekly_active_merchants($1::uuid, $2::timestamptz)`,
+		func(p *FleetWeeklyPoint, n int64) { p.ActiveMerchants = n }); err != nil {
 		return nil, fmt.Errorf("fleet timeseries: active merchants: %w", err)
 	}
-	if err := fill(`
-		SELECT date_trunc('week', cancelled_at), count(*)
-		  FROM openrails.subscriptions
-		 WHERE cancelled_at IS NOT NULL
-		   AND cancelled_at >= date_trunc('week', $2::timestamptz)
-		   AND ($1::uuid IS NULL OR merchant_id <> $1)
-		 GROUP BY 1
-	`, func(p *FleetWeeklyPoint, n int64) { p.CancelledSubscriptions = n }); err != nil {
+	if err := fill(
+		`SELECT week_start, cancellations
+		   FROM openrails.fleet_weekly_cancelled_subscriptions($1::uuid, $2::timestamptz)`,
+		func(p *FleetWeeklyPoint, n int64) { p.CancelledSubscriptions = n }); err != nil {
 		return nil, fmt.Errorf("fleet timeseries: cancelled subscriptions: %w", err)
 	}
 
-	volumeRows, err := c.pool.Query(ctx, `
-		SELECT date_trunc('week', purchased_at), currency, count(*), COALESCE(sum(amount), 0)
-		  FROM openrails.payments
-		 WHERE status = 'completed' AND reversal_kind IS NULL
-		   AND purchased_at >= date_trunc('week', $2::timestamptz)
-		   AND ($1::uuid IS NULL OR merchant_id <> $1)
-		 GROUP BY 1, 2 ORDER BY 1, 2
-	`, excludeArg, since)
+	volumeRows, err := c.pool.Query(ctx,
+		`SELECT week_start, currency, payments, settled_amount
+		   FROM openrails.fleet_weekly_volume($1::uuid, $2::timestamptz)`,
+		excludeArg, since)
 	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: volume: %w", err)
 	}

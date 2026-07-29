@@ -11,9 +11,11 @@ import (
 
 // Fleet analytics (openrails-saas #28): cross-merchant operator aggregates over
 // the engine's truth tables. Like SearchMerchants (#226) this is a sensitive
-// cross-merchant read on the privileged control-plane pool — no per-merchant
-// RLS scope could compute a fleet view — and the CALLER is responsible for
-// gating (platform superadmin) and auditing each request.
+// cross-merchant read — no per-merchant RLS scope could compute a fleet view —
+// and the CALLER is responsible for gating (platform superadmin) and auditing
+// each request. It reaches across merchants the ONE sanctioned way: migration
+// 0022's SECURITY DEFINER aggregates. The control-plane pool is not privileged;
+// it is the same role and the same DSN as the app's (or#861).
 
 // FleetMerchantFunnel counts merchants by lifecycle stage: provisioned (total),
 // armed (a live PSP declared), first-revenue (any completed payment ever), and
@@ -77,31 +79,20 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		excludeArg = exclude.UUID()
 	}
 
-	// #824 SWEEP: every query below reads RLS-bearing tables (payments,
-	// subscriptions, prices, psps) on the base pool, which carries no
-	// app.merchant_id — under the production openrails_app role they return
-	// ZERO ROWS AND NO ERROR, so this dashboard reports all zeros. It works only
-	// where the connected role bypasses RLS. Fix shape: a SECURITY DEFINER
-	// aggregate (migration 0016 pattern) or a per-merchant walk. Tracked in #824.
+	// or#861: every aggregate below reads RLS-bearing tables (payments,
+	// subscriptions, prices, psps). Read on the base pool they returned ZERO
+	// ROWS AND NO ERROR under the production openrails_app role, so this
+	// dashboard reported all zeros — it only ever "worked" where the connected
+	// role bypassed RLS. A fleet dashboard IS a genuinely cross-merchant read,
+	// so it goes through migration 0022's SECURITY DEFINER aggregates: they
+	// RAISE when their definer cannot bypass RLS (no silent zeros ever again)
+	// and they return AGGREGATES ONLY — counts and sums grouped by
+	// currency/rail — never a merchant-owned row.
 	out := &FleetAnalytics{WindowDays: windowDays}
-	if err := c.pool.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE EXISTS (
-		           SELECT 1 FROM openrails.psps p
-		            WHERE p.merchant_id = m.id AND p.replaced_at IS NULL)),
-		       count(*) FILTER (WHERE EXISTS (
-		           SELECT 1 FROM openrails.payments pay
-		            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
-		              AND pay.reversal_kind IS NULL)),
-		       count(*) FILTER (WHERE EXISTS (
-		           SELECT 1 FROM openrails.payments pay
-		            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
-		              AND pay.reversal_kind IS NULL
-		              AND pay.purchased_at >= $2))
-		  FROM openrails.merchants m
-		 WHERE m.deleted_at IS NULL AND m.status = 'active'
-		   AND ($1::uuid IS NULL OR m.id <> $1)
-	`, excludeArg, since).Scan(
+	if err := c.pool.QueryRow(ctx,
+		`SELECT total, armed, first_revenue, active_revenue
+		   FROM openrails.fleet_merchant_funnel($1::uuid, $2::timestamptz)`,
+		excludeArg, since).Scan(
 		&out.Merchants.Total, &out.Merchants.Armed,
 		&out.Merchants.FirstRevenue, &out.Merchants.ActiveRevenue,
 	); err != nil {
@@ -110,13 +101,10 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 
 	// Sale rows only: refund/chargeback mirror rows share status='completed'
 	// (with negative amounts + reversal_kind set) and must not count as sales.
-	revenueRows, err := c.pool.Query(ctx, `
-		SELECT currency, count(*), COALESCE(sum(amount), 0)
-		  FROM openrails.payments
-		 WHERE status = 'completed' AND reversal_kind IS NULL AND purchased_at >= $2
-		   AND ($1::uuid IS NULL OR merchant_id <> $1)
-		 GROUP BY currency ORDER BY currency
-	`, excludeArg, since)
+	revenueRows, err := c.pool.Query(ctx,
+		`SELECT currency, payments, settled_amount
+		   FROM openrails.fleet_revenue_by_currency($1::uuid, $2::timestamptz)`,
+		excludeArg, since)
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: revenue: %w", err)
 	}
@@ -132,16 +120,10 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		return nil, fmt.Errorf("fleet analytics: revenue rows: %w", err)
 	}
 
-	railRows, err := c.pool.Query(ctx, `
-		SELECT rail,
-		       count(*) FILTER (WHERE status = 'completed' AND reversal_kind IS NULL),
-		       count(*) FILTER (WHERE status = 'failed' AND reversal_kind IS NULL),
-		       count(*) FILTER (WHERE reversal_kind = 'chargeback')
-		  FROM openrails.payments
-		 WHERE purchased_at >= $2 AND status IN ('completed', 'failed')
-		   AND ($1::uuid IS NULL OR merchant_id <> $1)
-		 GROUP BY rail ORDER BY rail
-	`, excludeArg, since)
+	railRows, err := c.pool.Query(ctx,
+		`SELECT rail, succeeded, failed, chargebacks
+		   FROM openrails.fleet_rail_health($1::uuid, $2::timestamptz)`,
+		excludeArg, since)
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: rail health: %w", err)
 	}
@@ -157,15 +139,10 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		return nil, fmt.Errorf("fleet analytics: rail rows: %w", err)
 	}
 
-	mrrRows, err := c.pool.Query(ctx, `
-		SELECT pr.currency, count(*),
-		       COALESCE(sum((pr.amount::numeric * 720 / pr.access_duration_hours)::bigint), 0)
-		  FROM openrails.subscriptions s
-		  JOIN openrails.prices pr ON pr.id = s.price_id
-		 WHERE s.status = 'active' AND pr.auto_renew AND pr.access_duration_hours > 0
-		   AND ($1::uuid IS NULL OR s.merchant_id <> $1)
-		 GROUP BY pr.currency ORDER BY pr.currency
-	`, excludeArg)
+	mrrRows, err := c.pool.Query(ctx,
+		`SELECT currency, subscriptions, monthly_amount
+		   FROM openrails.fleet_mrr_by_currency($1::uuid)`,
+		excludeArg)
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: mrr: %w", err)
 	}

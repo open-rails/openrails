@@ -591,6 +591,43 @@ func (q *Queries) ListIncludedProductIDs(ctx context.Context, arg ListIncludedPr
 	return items, nil
 }
 
+const listLapsedCreditLotMerchants = `-- name: ListLapsedCreditLotMerchants :many
+SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListLapsedCreditLotMerchantsParams struct {
+	AsOf          time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: merchants holding a lapsed credit lot, through migration
+// 0022's SECURITY DEFINER reader (or#868 B1). The credit-expiry worker used to
+// run ListCustomersWithLapsedCreditLots inside a bare RunInTx on the base pool;
+// grants FORCEs RLS, so it enumerated nothing and NO credit lot has ever been
+// clawed back. Ids only — the per-customer work list and the ledger transfers
+// run per-merchant under RunInMerchantConn.
+func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLapsedCreditLotMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listLapsedCreditLotMerchants, arg.AsOf, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLapsedCreditLots = `-- name: ListLapsedCreditLots :many
 SELECT g.id,
     (g.amount - COALESCE((

@@ -152,9 +152,9 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	// tripped (or#860). Both queries now call migration 0021's SECURITY DEFINER
 	// readers, which RAISE if their owner cannot bypass RLS — so a mis-owned
 	// schema fails loudly here instead of silently permitting the burst.
-	// GenGlobal is still the right accessor: the definer needs no merchant GUC,
-	// and a merchant-pinned connection would scope nothing.
-	q := c.db.GenGlobal()
+	// GenDirectory is still the right accessor: the definer needs no merchant
+	// GUC, and a merchant-pinned connection would scope nothing.
+	q := c.db.GenDirectory()
 
 	globalCount, err := q.CountDestructiveIntentsGlobalSince(ctx, gen.CountDestructiveIntentsGlobalSinceParams{
 		IntentTypes: types,

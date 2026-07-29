@@ -313,15 +313,15 @@ SELECT merchant_id FROM openrails.armed_alert_merchant_ids()
 // alert_rules' FORCEd RLS matched `merchant_id = NULL` and this returned NO
 // MERCHANTS: the alert evaluator had never run in production. Ids only; the
 // rules themselves are still read per-merchant under MerchantTx.
-func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]uuid.UUID, error) {
+func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedAlertMerchants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

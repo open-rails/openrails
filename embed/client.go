@@ -52,11 +52,38 @@ type localClient struct {
 	remoteOpts []openrails.RemoteOption
 }
 
+// merchantScope is what the transcribed path must use instead of a bare
+// merchantCtx: it resolves the merchant AND pins a merchant-scoped DB
+// connection for the duration of fn — the transcription's equivalent of the
+// MerchantDBConnMW the in-process transport gets for free.
+//
+// or#868 B3: the transcribed methods (Admit, SetCustomerSpendDelegation(s))
+// bypass the transport, so they only ever set merchant.WithID — a context
+// VALUE. A value does not scope a database. Under the production
+// openrails_app role the payable-customer materialization inside Admit was
+// denied outright ("new row violates row-level security policy for table
+// customers", 42501), i.e. the embedded seam's admission surface 500'd for
+// every host — doujins, hentai0 and cozy-art all consume it. Pinning here
+// fixes the whole transcribed surface at its one shared entry point rather
+// than per handler.
+func (c *localClient) merchantScope(ctx context.Context, fn func(ctx context.Context) error) error {
+	mctx, err := c.merchantCtx(ctx)
+	if err != nil {
+		return err
+	}
+	if c.rt == nil || c.rt.DB == nil {
+		return fn(mctx)
+	}
+	return c.rt.DB.RunInMerchantConn(mctx, fn)
+}
+
 // merchantCtx replicates the transport's merchant pinning (transport.go) for
 // the transcribed path: live-read the bound merchant (provisioning may bind it
 // after New), fall back to a per-call ctx pin while unbound, and stamp it
 // before any merchant-owned DB access. Without this every store call fails
-// merchant.Require in embedded mode.
+// merchant.Require in embedded mode. It resolves the merchant only — callers
+// that touch the database go through merchantScope, which also pins the
+// connection carrying the RLS GUC.
 //
 // #772: an explicit per-call pin (openrails.WithMerchant) that disagrees with
 // an already-bound merchant is refused rather than silently overridden by the
@@ -126,6 +153,14 @@ func wrapInternalErr(msg string, cause error) error {
 	return openrails.NewStatusError(http.StatusInternalServerError, "", fmt.Sprintf("%s: %v", msg, cause))
 }
 
+// statusErr reports whether err is already a wire-shaped refusal (the #772
+// merchant-pin mismatch, raised inside merchantScope) that must reach the host
+// verbatim instead of being re-wrapped as an internal error.
+func statusErr(err error) bool {
+	var se *openrails.StatusError
+	return errors.As(err, &se)
+}
+
 // parseCustomer transcribes handlers.parseServiceCustomerID +
 // the per-handler nil/err handling. invalidMsg is the message the handler uses
 // for an unparseable id; an empty/missing id is always "customer_id
@@ -165,12 +200,15 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 	}
 	req.Currency = currency
 
-	mctx, err := c.merchantCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	res, err := c.svc.Admit(mctx, admitInputFromSDK(req, payer))
-	if err != nil {
+	var res *billingservice.AdmitResult
+	if err := c.merchantScope(ctx, func(ctx context.Context) error {
+		var e error
+		res, e = c.svc.Admit(ctx, admitInputFromSDK(req, payer))
+		return e
+	}); err != nil {
+		if statusErr(err) {
+			return nil, err
+		}
 		return nil, wrapInternalErr("admission check failed", err)
 	}
 	return admitResponseFromResult(res), nil
@@ -224,11 +262,12 @@ func (c *localClient) SetCustomerSpendDelegations(ctx context.Context, customerI
 	for _, d := range delegations {
 		next = append(next, spendDelegationInput(d))
 	}
-	mctx, err := c.merchantCtx(ctx)
-	if err != nil {
-		return err
-	}
-	if err := c.svc.ReplaceInvokerSpendLimits(mctx, payer, next); err != nil {
+	if err := c.merchantScope(ctx, func(ctx context.Context) error {
+		return c.svc.ReplaceInvokerSpendLimits(ctx, payer, next)
+	}); err != nil {
+		if statusErr(err) {
+			return err
+		}
 		return spendDelegationWriteError("set customer spend delegations failed", err)
 	}
 	return nil
@@ -242,11 +281,12 @@ func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID
 		return err
 	}
 	in := spendDelegationInput(delegation)
-	mctx, err := c.merchantCtx(ctx)
-	if err != nil {
-		return err
-	}
-	if err := c.svc.SetInvokerSpendLimits(mctx, payer, in); err != nil {
+	if err := c.merchantScope(ctx, func(ctx context.Context) error {
+		return c.svc.SetInvokerSpendLimits(ctx, payer, in)
+	}); err != nil {
+		if statusErr(err) {
+			return err
+		}
 		return spendDelegationWriteError("set customer spend delegation failed", err)
 	}
 	return nil

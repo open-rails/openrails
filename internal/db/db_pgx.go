@@ -63,24 +63,34 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 	return gen.New(d.Qx(ctx))
 }
 
-// GenGlobal returns a sqlc query catalog bound to the BASE pool, deliberately
-// IGNORING any merchant-pinned connection in the context — a merchant-pinned
-// connection's RLS GUC would scope a deployment-wide query to one merchant.
+// GenDirectory returns a sqlc query catalog bound to the BASE pool, deliberately
+// IGNORING any merchant-pinned connection in the context.
 //
-// WARNING (#824): this does NOT grant cross-merchant visibility. There is one
-// pool and one role; dropping the GUC does not escape RLS, it FAILS it. Under
-// the production openrails_app role a base-pool read of any policy-bearing
-// table (which is every table except merchants, probe_verdicts, worker_health
-// and destructive_action_switch) matches `merchant_id = NULL` and returns ZERO
-// ROWS AND NO ERROR. Every current caller — the #732 destructive-rate ceiling,
-// the alert/digest armed-merchant scans, the #816 re-driver, the intent sweeps —
-// is therefore inert in production; the #824 sweep tracks them. A genuinely
-// cross-merchant read needs a SECURITY DEFINER directory function (migration
-// 0016) or a per-merchant walk under MerchantTx (merchants.ProbeLiveRailPSPs).
+// It grants NO extra privilege, and its name says so. It was called GenGlobal
+// and read as "the cross-merchant accessor"; there is no such thing. There is
+// ONE pool and ONE role — dropping the app.merchant_id GUC does not escape RLS,
+// it FAILS it. Under the production openrails_app role a base-pool read of any
+// policy-bearing table (everything except merchants, probe_verdicts,
+// worker_health and destructive_action_switch) matches `merchant_id = NULL` and
+// returns ZERO ROWS AND NO ERROR. That false belief is what made the #732
+// destructive-rate ceiling, both armed-merchant scans, the #816 re-driver and
+// the whole provider-intent plane inert in production (#824/or#860/or#861/
+// or#862/or#868).
+//
+// So exactly two things may run on this handle:
+//  1. reads of the four POLICY-FREE tables above, and
+//  2. the SECURITY DEFINER directory / scan / work-queue functions of migrations
+//     0016, 0021 and 0022 — which RAISE when their definer cannot bypass RLS,
+//     so a mis-owned schema fails loudly instead of silently answering nothing.
+//
+// Anything else that spans merchants is a per-merchant walk: enumerate ids from
+// the policy-free merchants directory (or a 0022 work queue), then do the work
+// inside each merchant's own scope via RunInMerchantConn/MerchantTx.
+//
 // Returns an erroring catalog when this DB has no pool (a tx-scoped wrapper).
-func (d *DB) GenGlobal() *gen.Queries {
+func (d *DB) GenDirectory() *gen.Queries {
 	if d == nil || d.pool == nil {
-		return gen.New(errDBTX{fmt.Errorf("db: GenGlobal requires a pool-backed DB")})
+		return gen.New(errDBTX{fmt.Errorf("db: GenDirectory requires a pool-backed DB")})
 	}
 	return gen.New(d.rw.wrapDBTX(d.pool))
 }

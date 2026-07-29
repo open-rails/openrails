@@ -515,3 +515,14 @@ SELECT EXISTS (
       AND g.event = 'grant' AND g.kind = 'entitlement'
       AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
 ) AS exists;
+
+-- CROSS-MERCHANT: merchants holding a lapsed credit lot, through migration
+-- 0022's SECURITY DEFINER reader (or#868 B1). The credit-expiry worker used to
+-- run ListCustomersWithLapsedCreditLots inside a bare RunInTx on the base pool;
+-- grants FORCEs RLS, so it enumerated nothing and NO credit lot has ever been
+-- clawed back. Ids only — the per-customer work list and the ledger transfers
+-- run per-merchant under RunInMerchantConn.
+-- name: ListLapsedCreditLotMerchants :many
+SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+    sqlc.arg(as_of)::timestamptz,
+    sqlc.arg(merchant_limit)::int);

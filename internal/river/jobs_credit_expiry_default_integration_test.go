@@ -70,10 +70,12 @@ func TestCreditGrantExpiryDefault(t *testing.T) {
 			"a lot with no declared expiry must survive every sweep, forever")
 	})
 	t.Run("worker_claws_back_the_declared_expiry", func(t *testing.T) {
-		t.Skip("or#868/B1: CreditExpiryWorker enumerates lapsed lots via w.DB.RunInTx on the base pool " +
-			"under a comment claiming a 'Privileged (no-GUC) cross-merchant sweep'. There is no privileged " +
-			"pool: as openrails_app with no app.merchant_id the enumeration returns ZERO rows, so the worker " +
-			"has never expired a credit lot. Un-skip with the definer-backed enumeration fix.")
+		// or#868/B1 (FIXED): the worker used to enumerate lapsed lots via
+		// w.DB.RunInTx on the base pool, which as openrails_app with no
+		// app.merchant_id returned ZERO rows — it had never expired a lot, and
+		// this leg asserted 1000 instead of 0. It now fans out over the
+		// merchants named by 0022's lapsed_credit_lot_merchant_ids() and claws
+		// back inside each merchant's own scope.
 		bal, err := money.NewMoneyService(svcDB, clockwork.NewRealClock()).
 			GetBalanceForCustomer(mctx, explicit365.customer, explicit365.unit)
 		require.NoError(t, err)

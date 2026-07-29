@@ -116,3 +116,12 @@ SELECT
     count(*) FILTER (WHERE status <> 'blocked') AS scheduled
 FROM openrails.subscription_reprices
 WHERE reprice_batch_id = sqlc.arg(batch_id)::uuid;
+
+-- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
+-- through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
+-- used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
+-- RLS, so it enumerated nothing and never re-drove. A definer must not vend
+-- whole merchant rows, so it vends ids and the rows are read per-merchant.
+-- name: ListRedrivablePlanChangeMerchants :many
+SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+    sqlc.arg(merchant_limit)::int);

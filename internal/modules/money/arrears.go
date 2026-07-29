@@ -55,9 +55,15 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	now := s.now()
 
 	var trx *models.MoneyTransaction
-	// Privileged (no-GUC) transaction: this path runs with explicit merchant_id
-	// predicates, matching the bun-era plain BeginTx.
-	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	// or#868 B2: this was a bare RunInTx under the comment "privileged (no-GUC)
+	// transaction". No such pool exists — it worked only where an HTTP request
+	// had already pinned a merchant connection and pgxBegin inherited its GUC.
+	// Off that path (pkg/service.FinalizeInvoice, MoneyService.SweepUsage, both
+	// embedded seams) the transaction carried no app.merchant_id and every
+	// insert below was denied 42501, so metered/arrears billing was inoperable
+	// there. MerchantTx sets the GUC transaction-locally from the context's
+	// merchant, which the explicit merchant_id predicates then agree with.
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
 		// #677: per-customer spend mutex (same customers-row FOR UPDATE as

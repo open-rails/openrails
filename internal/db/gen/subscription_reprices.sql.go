@@ -339,6 +339,36 @@ func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, b
 	return items, nil
 }
 
+const listRedrivablePlanChangeMerchants = `-- name: ListRedrivablePlanChangeMerchants :many
+SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+    $1::int)
+`
+
+// CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
+// through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
+// used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
+// RLS, so it enumerated nothing and never re-drove. A definer must not vend
+// whole merchant rows, so it vends ids and the rows are read per-merchant.
+func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listRedrivablePlanChangeMerchants, merchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubscriptionReprices = `-- name: ListSubscriptionReprices :many
 SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
 WHERE ($1::uuid IS NULL OR subscription_id = $1::uuid)

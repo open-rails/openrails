@@ -97,6 +97,15 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
+	// or#862: both counts below read policied tables (rail_intents,
+	// subscriptions). On a connection with no app.merchant_id they came back 0
+	// and 0, giving budget = max(25, 1% × 0) = 25 against executed = 0 — a
+	// breaker that could never hold, on exactly the unattended plane it exists
+	// to guard. Assert the pin instead of reading zeros; Check's contract is
+	// fail-closed, so the caller parks the intent.
+	if err := b.db.AssertMerchantScope(ctx, "destructive-volume breaker"); err != nil {
+		return false, "", err
+	}
 	q := b.db.Gen(ctx)
 
 	windowStart := now.Add(-DestructiveWindow)
