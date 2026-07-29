@@ -70,9 +70,6 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		FetchedAt:    time.Now().UTC(),
 		Capabilities: f.Capabilities(),
 	}
-	if params.SubscriptionID == "" {
-		snap.Coverage.SubscriptionsExhaustive = true
-	}
 	snap.Coverage.TransactionsExhaustive = true
 	snap.Coverage.TransactionsPaginatedComplete = true
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
@@ -88,6 +85,18 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		if vault != nil {
 			snap.PaymentMethods = append(snap.PaymentMethods, *vault)
 		}
+	}
+	// #842 (same rule as nmi.go): "exhaustive" is an ABSENCE PROOF — it flips
+	// the §3.2 confirmed-absence gate and authorizes cancelling every local
+	// subscription missing from this list. It is therefore decided AFTER the
+	// fetch, from what actually came back. A 200 with an empty `data` and
+	// has_more=false is indistinguishable from a complete roster of an account
+	// that is not ours: a key rotated onto a sibling Stripe account, a restricted
+	// key, or an incident returning an empty first page all look exactly like
+	// "this merchant has no subscribers". A customer-filtered roster proves
+	// nothing about the merchant's book either.
+	if params.SubscriptionID == "" && params.CustomerID == "" && len(snap.Subscriptions) > 0 {
+		snap.Coverage.SubscriptionsExhaustive = true
 	}
 
 	charges, err := f.listRaw(ctx, "/v1/charges", params, nil)

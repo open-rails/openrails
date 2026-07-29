@@ -216,3 +216,43 @@ func TestStripeFetcher_APIErrorSurfaced(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Invalid API Key")
 }
+
+// or#842: SubscriptionsExhaustive is an ABSENCE PROOF — it authorizes cancelling
+// every local subscription missing from the roster and flips the §3.2
+// confirmed-absence gate for the whole merchant. Stripe used to stamp it before
+// the list call had even run, so a 200 with an empty `data` (a key rotated onto
+// a sibling account, a restricted key, an incident) was certified as "this
+// merchant has no subscribers".
+func TestStripeFetcher_EmptyRosterIsNotExhaustive(t *testing.T) {
+	t.Parallel()
+
+	newFetcher := func(t *testing.T, subsPage string) *StripeFetcher {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/subscriptions" {
+				fmt.Fprint(w, subsPage)
+				return
+			}
+			fmt.Fprint(w, `{"object":"list","has_more":false,"data":[]}`)
+		}))
+		t.Cleanup(server.Close)
+		return &StripeFetcher{SecretKey: "sk_test_x", BaseURL: server.URL, HTTPClient: server.Client()}
+	}
+
+	empty, err := newFetcher(t, stripeSubPage(false)).Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.Empty(t, empty.Subscriptions)
+	require.False(t, empty.Coverage.SubscriptionsExhaustive,
+		"an empty roster was stamped exhaustive — it would cancel the merchant's entire book")
+
+	full, err := newFetcher(t, stripeSubPage(false, stripeSubActive)).Fetch(context.Background(), FetchParams{})
+	require.NoError(t, err)
+	require.True(t, full.Coverage.SubscriptionsExhaustive, "a non-empty completed roster still proves absence")
+
+	// A customer-filtered roster is exhaustive for that customer, never for the
+	// merchant's book — and only the book-wide claim is what the gate reads.
+	scoped, err := newFetcher(t, stripeSubPage(false, stripeSubActive)).
+		Fetch(context.Background(), FetchParams{CustomerID: "cus_A"})
+	require.NoError(t, err)
+	require.False(t, scoped.Coverage.SubscriptionsExhaustive,
+		"a customer-scoped roster proves nothing about the subscriptions of every OTHER customer")
+}
