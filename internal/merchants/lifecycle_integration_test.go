@@ -25,6 +25,16 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// allowAllDestructive stands in for the #836/#835 gate in tests that are about
+// merchant ROUTING and tombstoning, not about the gate. The gate's own
+// behaviour on the purge path is pinned against the real migrated schema in
+// purge_integration_test.go.
+type allowAllDestructive struct{}
+
+func (allowAllDestructive) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
+	return true, ""
+}
+
 // applyDirectoryFunctionMigration replays the REAL text of migration 0016 onto
 // this package's hand-written schema, so the #824 cross-merchant directory
 // functions cannot drift from what production runs. schemaDDL below is a
@@ -136,13 +146,31 @@ CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     status text NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
+CREATE TABLE IF NOT EXISTS openrails.merchant_purge_inventories (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id  UUID NOT NULL,
     status       TEXT NOT NULL DEFAULT 'completed',
-    row_counts   JSONB,
+    manifest     JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS openrails.destructive_runs (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id   UUID NOT NULL,
+    psp_id        UUID,
+    kind          TEXT NOT NULL,
+    actor         TEXT NOT NULL,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at   TIMESTAMPTZ,
+    dry_run       BOOLEAN NOT NULL DEFAULT false,
+    coverage      JSONB,
+    expected_rows BIGINT,
+    affected      JSONB,
+    reversed_at   TIMESTAMPTZ,
+    reversed_by   TEXT,
+    status        TEXT NOT NULL DEFAULT 'running',
+    note          TEXT
 );
 `
 
@@ -366,20 +394,31 @@ func TestDelete_RequiresExport(t *testing.T) {
 	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeSecretKey, "sk")
 	require.NoError(t, err)
 
-	// Delete without confirm -> error.
-	require.Error(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: false}))
+	svc.WithDestructivePolicy(allowAllDestructive{})
 
-	// Delete with confirm but NO export -> ErrExportRequired.
-	err = svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true})
-	require.True(t, errors.Is(err, ErrExportRequired), "delete must require export, got %v", err)
+	// Unconfirmed -> refused, and the refusal states the true blast radius.
+	err = svc.Delete(ctx, tn.ID, DeleteOptions{})
+	var notConfirmed *ErrPurgeNotConfirmed
+	require.ErrorAs(t, err, &notConfirmed)
+	require.Equal(t, 1, notConfirmed.TotalRows)
 
-	// Export, then delete succeeds and purges rows.
-	exportID, counts, err := svc.Export(ctx, tn.ID)
+	one := 1
+	confirmed := DeleteOptions{ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &one}
+
+	// Confirmed but with NO purge inventory -> refused.
+	err = svc.Delete(ctx, tn.ID, confirmed)
+	var stale *ErrPurgeInventoryStale
+	require.ErrorAs(t, err, &stale, "delete must require a matching purge inventory, got %v", err)
+
+	// Take the inventory, then the purge proceeds.
+	inv, err := svc.TakePurgeInventory(ctx, tn.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, exportID)
-	require.Equal(t, 1, counts["entitlements"])
+	require.NotEmpty(t, inv.ID)
+	require.False(t, inv.IsBackup())
+	require.Equal(t, 1, inv.RowCounts["entitlements"])
+	require.NotEmpty(t, inv.NotCaptured)
 
-	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
+	require.NoError(t, svc.Delete(ctx, tn.ID, confirmed))
 
 	var entCount int
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
@@ -441,10 +480,12 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.Equal(t, "whsec_acme", creds.WebhookSigningSecret)
 
 	// A deleted merchant no longer resolves.
-	exportID, _, err := svc.Export(ctx, tn.ID)
+	svc.WithDestructivePolicy(allowAllDestructive{})
+	inv, err := svc.TakePurgeInventory(ctx, tn.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, exportID)
-	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
+	require.NotEmpty(t, inv.ID)
+	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{
+		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows}))
 	_, err = svc.ResolveBySlug(ctx, "acme")
 	require.ErrorIs(t, err, ErrMerchantRouteUnresolved)
 }
