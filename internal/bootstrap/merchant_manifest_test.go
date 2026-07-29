@@ -140,7 +140,8 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	parsed, err := config.ParseSolanaAccountSettings(solanaSettings)
 	require.NoError(t, err)
 	require.Equal(t, "helius", parsed.RPCProvider)
-	require.Equal(t, 6, parsed.Tokens["USDC"].Decimals)
+	// #817: the example declares mint + name only; decimals come from the chain.
+	require.Equal(t, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", parsed.Tokens["USDC"].Mint)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

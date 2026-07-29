@@ -136,8 +136,8 @@ merchants:
             # its target wallets accept co-signed transactions. Not enforced
             # server-side.
             tokens:
-              SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
-              USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
+              SOL: { name: Solana, mint: So11111111111111111111111111111111111111112 }
+              USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v }
           secrets:
             private_key: replace-with-base58-ed25519-keypair
 

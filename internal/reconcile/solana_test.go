@@ -997,33 +997,39 @@ func TestSolanaFiatCents(t *testing.T) {
 
 	usdc := usdcMint.String()
 	for _, tc := range []struct {
-		mint  string
-		base  uint64
-		cents int64
-		ok    bool
+		mint     string
+		decimals int
+		base     uint64
+		cents    int64
+		ok       bool
 	}{
-		{usdc, 1_000_000, 100, true}, // $1.00
-		{usdc, 10_000, 1, true},      // exactly one cent
-		{usdc, 9_990_000, 999, true}, // $9.99
-		{usdc, 123_450_000, 12_345, true},
-		{usdc, 1_234_567, 0, false}, // sub-cent precision: never rounded
-		{usdc, 9_999, 0, false},
-		// Registry-declared USD stablecoins with 6 decimals.
-		{"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB", 5_000_000, 500, true},  // USD1
-		{"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", 5_000_000, 500, true}, // PYUSD
-		{"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH", 5_000_000, 500, true}, // USDG
-		// USDT is in the stablecoin registry but has NO declared decimals in
-		// the token configs => not normalized (no fabricated decimals).
-		{"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 1_000_000, 0, false},
+		{usdc, 6, 1_000_000, 100, true}, // $1.00
+		{usdc, 6, 10_000, 1, true},      // exactly one cent
+		{usdc, 6, 9_990_000, 999, true}, // $9.99
+		{usdc, 6, 123_450_000, 12_345, true},
+		{usdc, 6, 1_234_567, 0, false}, // sub-cent precision: never rounded
+		{usdc, 6, 9_999, 0, false},
+		// #817: the shift is the MINT's, not a baked-in 6. The same $1.00 is a
+		// different base-unit integer at 9 and at 2 decimals.
+		{usdc, 9, 1_000_000_000, 100, true},
+		{usdc, 9, 1_000_000, 0, false}, // $0.001 — sub-cent at 9 decimals
+		{usdc, 2, 100, 100, true},
+		{usdc, 0, 1, 0, false},  // 0 decimals cannot represent a cent
+		{usdc, 19, 1, 0, false}, // outside the payable range
+		// Registry USD stablecoins.
+		{"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB", 6, 5_000_000, 500, true},  // USD1
+		{"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", 6, 5_000_000, 500, true}, // PYUSD
+		{"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH", 6, 5_000_000, 500, true}, // USDG
+		{"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6, 1_000_000, 100, true}, // USDT
 		// Devnet USDC is not in the canonical stablecoin registry.
-		{"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", 1_000_000, 0, false},
+		{"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", 6, 1_000_000, 0, false},
 		// SOL: not a stablecoin.
-		{"So11111111111111111111111111111111111111112", 1_000_000_000, 0, false},
-		{"", 1_000_000, 0, false},
+		{"So11111111111111111111111111111111111111112", 9, 1_000_000_000, 0, false},
+		{"", 6, 1_000_000, 0, false},
 	} {
-		cents, ok := solanaFiatCents(tc.mint, tc.base)
-		require.Equal(t, tc.ok, ok, "mint %s base %d", tc.mint, tc.base)
-		require.Equal(t, tc.cents, cents, "mint %s base %d", tc.mint, tc.base)
+		cents, ok := solanaFiatCents(tc.mint, tc.decimals, tc.base)
+		require.Equal(t, tc.ok, ok, "mint %s decimals %d base %d", tc.mint, tc.decimals, tc.base)
+		require.Equal(t, tc.cents, cents, "mint %s decimals %d base %d", tc.mint, tc.decimals, tc.base)
 	}
 }
 

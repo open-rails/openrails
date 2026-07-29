@@ -31,13 +31,13 @@ func TestTransferRequestURLIncludesPurchaseMemo(t *testing.T) {
 			AccountID: recipient,
 			Solana: &config.SolanaRailConfig{
 				Tokens: map[string]config.TokenConfig{
-					"USDC": {Mint: usdcMint, Decimals: 6},
+					"USDC": {Mint: usdcMint},
 				},
 			},
 		},
 	}}
 
-	got := s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, usdcMint, "USDC", reference, solanarpc.PurchaseMemo(sessionID))
+	got := s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, 6, usdcMint, "USDC", reference, solanarpc.PurchaseMemo(sessionID))
 	require.Equal(t,
 		"solana:"+recipient+
 			"?amount=5"+
@@ -48,6 +48,6 @@ func TestTransferRequestURLIncludesPurchaseMemo(t *testing.T) {
 		got)
 
 	// No memo (defensive: e.g. an empty stamp) omits the param entirely.
-	got = s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, usdcMint, "USDC", reference, "")
+	got = s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, 6, usdcMint, "USDC", reference, "")
 	require.NotContains(t, got, "memo=")
 }

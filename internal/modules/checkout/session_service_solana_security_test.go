@@ -314,7 +314,6 @@ func testSolanaCheckoutRails() railresolve.FixedSet {
 				Tokens: map[string]config.TokenConfig{
 					"USDC": {
 						Mint:     devnetUSDCMint,
-						Decimals: 6,
 					},
 				},
 			},

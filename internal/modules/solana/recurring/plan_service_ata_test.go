@@ -14,7 +14,7 @@ const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
 
 func testSolanaTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
-		"USDC": {Mint: testDevnetUSDCMint, Decimals: 6},
+		"USDC": {Mint: testDevnetUSDCMint},
 	}
 }
 

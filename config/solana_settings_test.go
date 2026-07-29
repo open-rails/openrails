@@ -20,15 +20,26 @@ func TestParseSolanaAccountSettings(t *testing.T) {
 			"rpc_provider": "Helius",
 			"rpc_api_key":  "key-123",
 			"tokens": map[string]any{
-				"usdc": map[string]any{"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "name": "USD Coin", "decimals": float64(6)},
+				"usdc": map[string]any{"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "name": "USD Coin"},
 			},
 			"recipient_wallet": "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu", // ignored here, checkout reads it
 		})
 		require.NoError(t, err)
 		require.Equal(t, "helius", s.RPCProvider)
 		require.Equal(t, "key-123", s.RPCAPIKey)
-		require.Equal(t, 6, s.Tokens["USDC"].Decimals)
 		require.Equal(t, "USD Coin", s.Tokens["USDC"].Name)
+	})
+
+	// #817: decimals belong to the mint on-chain. A merchant-declared copy could
+	// disagree and misprice by 10^n, so the retired key fails loudly.
+	t.Run("tokens.<sym>.decimals is rejected", func(t *testing.T) {
+		_, err := ParseSolanaAccountSettings(map[string]any{
+			"tokens": map[string]any{
+				"usdc": map[string]any{"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "decimals": float64(6)},
+			},
+		})
+		require.ErrorContains(t, err, "no longer configurable")
+		require.ErrorContains(t, err, "read from the SPL mint on-chain")
 	})
 
 	t.Run("malformed values fail loudly", func(t *testing.T) {
@@ -70,19 +81,19 @@ func TestSolanaAccountSettingsApplyTo(t *testing.T) {
 	base := &SolanaRailConfig{
 		RPCProvider: "helius",
 		RPCAPIKey:   "boot-key",
-		Tokens:      map[string]TokenConfig{"SOL": {Mint: "So1", Decimals: 9}},
+		Tokens:      map[string]TokenConfig{"SOL": {Mint: "So1"}},
 		Network:     "devnet",
 	}
 	overlay := SolanaAccountSettings{
 		RPCAPIKey: "store-key",
-		Tokens:    map[string]TokenConfig{"USDC": {Mint: "EPj", Decimals: 6}},
+		Tokens:    map[string]TokenConfig{"USDC": {Mint: "EPj"}},
 	}
 
 	out := overlay.ApplyTo(base)
 	// Store-wins on declared knobs (#699); undeclared knobs keep the boot value.
 	require.Equal(t, "helius", out.RPCProvider)
 	require.Equal(t, "store-key", out.RPCAPIKey)
-	require.Equal(t, map[string]TokenConfig{"USDC": {Mint: "EPj", Decimals: 6}}, out.Tokens)
+	require.Equal(t, map[string]TokenConfig{"USDC": {Mint: "EPj"}}, out.Tokens)
 	require.Equal(t, "devnet", out.Network)
 
 	// base is never mutated.
