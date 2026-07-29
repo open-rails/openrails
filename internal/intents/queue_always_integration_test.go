@@ -24,8 +24,7 @@ import (
 // limited), and it drains once the mode allows.
 func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	subID, productID, priceID := uuid.New(), uuid.New(), uuid.New()

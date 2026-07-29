@@ -25,9 +25,8 @@ import (
 // A different product is allowed; once the sub resolves terminal (cancelled),
 // checkout is allowed again.
 func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()

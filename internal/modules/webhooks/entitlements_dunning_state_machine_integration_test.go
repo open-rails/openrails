@@ -26,10 +26,9 @@ import (
 // the paid-through FACT (period end + a bounded per-period grant), never the
 // window.
 func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 

@@ -21,10 +21,9 @@ import (
 )
 
 func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 
@@ -150,10 +149,9 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 // stored amount, status-agnostic), while NEW purchases of the same price are
 // rejected.
 func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 

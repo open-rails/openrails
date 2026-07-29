@@ -132,8 +132,7 @@ type saleIntentFixture struct {
 
 func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	t.Helper()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)

@@ -15,13 +15,12 @@ import (
 )
 
 func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	// The entitlement Service is RLS/merchant-scoped (MerchantTx); provide the
 	// test merchant on the ctx (#511: entitlement creation now also goes through
 	// the merchant-scoped grant ledger).
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
 
 	now := time.Now().UTC().Truncate(time.Second)

@@ -18,7 +18,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
 	return dbi, dsn, dbtest.WithTestMerchant(ctx)
 }

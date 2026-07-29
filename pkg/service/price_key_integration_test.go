@@ -18,8 +18,7 @@ import (
 func newPriceKeyTestService(t *testing.T) (*Service, context.Context, uuid.UUID) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
 	svc := &Service{rt: &app.Runtime{
 		DB:             dbi,

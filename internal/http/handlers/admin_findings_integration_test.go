@@ -115,10 +115,9 @@ type findingsFixture struct {
 
 func newFindingsFixture(t *testing.T) *findingsFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
 	mid := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, mid)
+	pool := dbi.Pool()
 	ctx := merchant.WithID(context.Background(), merchant.ID(mid))
 	sfx := uuid.NewString()[:8]
 

@@ -270,9 +270,8 @@ func (f *stripeApplyFixture) paymentCount(t *testing.T, ctx context.Context, sta
 // converge re-fetches the SAME truth. Recovery happens only when provider
 // truth actually changes.
 func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -317,9 +316,8 @@ func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
 // order collapse to converges against the SAME renewed truth — the period end
 // is the provider's, exactly one payment row exists, in every order/count.
 func TestStripeConvergeRenewalIdempotentAnyOrder(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -347,9 +345,8 @@ func TestStripeConvergeRenewalIdempotentAnyOrder(t *testing.T) {
 // subscription cannot resurrect it (terminal rows take no transition), but the
 // charge IS money truth and must leave a durable payment row.
 func TestStripeConvergeTerminalRowKeepsMoneyTruth(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -375,9 +372,8 @@ func TestStripeConvergeTerminalRowKeepsMoneyTruth(t *testing.T) {
 // provider-confirmed-gone, and the REAL decider turns it into a terminal
 // cancel (#679 certainty ladder), never a guess.
 func TestStripeConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -397,9 +393,8 @@ func TestStripeConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
 // parks (the job retries), local state and access stay intact, and a later
 // converge against healthy truth converges normally.
 func TestStripeConvergeProviderDownParksAndRecovers(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -423,9 +418,8 @@ var _ = fmt.Sprintf // keep fmt for the CCBill/NMI sections below
 // A CCBill void racing the sale must return a retryable error (redelivery
 // wins once the sale materializes), never a plain ACK.
 func TestCCBillVoidBeforeSaleReturnsRetryableError(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	body, err := json.Marshal(CCBillVoidEvent{
 		TransactionID:  "void_txn_" + uuid.New().String(),
@@ -450,9 +444,8 @@ func TestCCBillVoidBeforeSaleReturnsRetryableError(t *testing.T) {
 
 // Same property for CCBill chargebacks.
 func TestCCBillChargebackBeforeSaleReturnsRetryableError(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	body, err := json.Marshal(CCBillChargebackEvent{
 		TransactionID:  "cb_txn_" + uuid.New().String(),
@@ -478,9 +471,8 @@ func TestCCBillChargebackBeforeSaleReturnsRetryableError(t *testing.T) {
 // An NMI void whose original payment is unknown must return a retryable error
 // regardless of whether the subscription resolved.
 func TestNMIVoidBeforeSaleReturnsRetryableError(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	body, err := json.Marshal(map[string]any{"transaction_id": "void_missing_" + uuid.New().String()})
 	require.NoError(t, err)
@@ -500,9 +492,8 @@ func TestNMIVoidBeforeSaleReturnsRetryableError(t *testing.T) {
 // payload) must reverse the original payment — previously it ACKed with zero
 // effect because the reversal block was gated on subscription != nil.
 func TestNMIOneOffRefundReversesPayment(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -592,9 +583,8 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 // An NMI one-off refund whose sale has not landed yet must return a retryable
 // error so redelivery wins the race.
 func TestNMIOneOffRefundBeforeSaleRetries(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	refundBody, err := json.Marshal(map[string]any{
 		"transaction_id": "refund_race_" + uuid.New().String(),
@@ -618,9 +608,8 @@ func TestNMIOneOffRefundBeforeSaleRetries(t *testing.T) {
 // A transient/config credit-grant failure must fail the event (retry) instead
 // of warn-and-ack losing the period's credit lot.
 func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 

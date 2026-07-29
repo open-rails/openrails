@@ -525,7 +525,7 @@ func TestNotificationsBell(t *testing.T) {
 func TestArmedMerchantSelection(t *testing.T) {
 	// Cross-merchant enumeration runs on the base pool (BYPASSRLS admin DSN),
 	// matching the deployment posture of the #358 intent executor sweeps.
-	appDB := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	appDB := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	cfg, err := pgxpool.ParseConfig(dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)

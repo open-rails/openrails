@@ -404,6 +404,13 @@ func SharedSuperuserPGXPool(t *testing.T) *pgxpool.Pool {
 // MerchantPinnedDSN is the default (RLS-enforcing) DSN with app.merchant_id
 // pinned at connection startup — what MerchantTx/RunInMerchantConn establish in
 // production, in DSN form.
+//
+// CAVEAT: the startup pin is a SESSION value, and db.lazyMerchantPgxConn.release
+// resets app.merchant_id to ” at session level when a merchant connection goes
+// back to the pool. A handle built from this DSN therefore loses its pin on any
+// connection that has served a RunInMerchantConn block. Use it for pure fixture
+// pools; use SharedMerchantPool / OpenMerchantDB (BeforeAcquire re-pin) for a
+// handle that also drives code.
 func MerchantPinnedDSN(t *testing.T, merchantID uuid.UUID) string {
 	t.Helper()
 	u, err := url.Parse(SharedPostgresDSN(t))
@@ -418,9 +425,19 @@ func MerchantPinnedDSN(t *testing.T, merchantID uuid.UUID) string {
 // not a superuser pool, is what a test wants when it seeds or asserts on ONE
 // merchant's own rows: the policies stay live and the fixture proves the
 // merchant can see its own data. Superuser is for fixtures spanning merchants.
+//
+// The pin is re-applied on every acquire, so it survives the session-level GUC
+// reset db.lazyMerchantPgxConn.release performs when a merchant connection is
+// returned to the pool.
 func SharedMerchantPool(t *testing.T, merchantID uuid.UUID) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), MerchantPinnedDSN(t, merchantID))
+	cfg, err := pgxpool.ParseConfig(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	cfg.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+		_, err := conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
+		return err == nil
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err, "open merchant-pinned pgx pool")
 	t.Cleanup(pool.Close)
 	return pool

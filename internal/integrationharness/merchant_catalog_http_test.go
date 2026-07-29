@@ -640,7 +640,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	// events (100+200+120) plus one without the dimension (counts as 1) —
 	// aggregate 421 -> round_half_up(421 * 250_000 / 100) = 1_052_500.
 	mctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payerID := uuid.New()
 	t.Cleanup(func() {
@@ -740,7 +740,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 	var child billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &child))
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customer := uuid.New()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
@@ -846,7 +846,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	var product20 billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product20))
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customer := openrails.CustomerID(uuid.New())
 	customerID := customer.UUID()
@@ -1070,7 +1070,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Nil(t, moviePrices[0].AccessDurationHours)
 	require.False(t, moviePrices[0].AutoRenew)
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customerID := uuid.New()
 	customer := identity.CustomerID(customerID)
@@ -1221,7 +1221,7 @@ func serviceCreditsToModel(in billingservice.CreditsSpec) models.CreditsSpec {
 func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, productID uuid.UUID) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payer := openrails.CustomerID(uuid.New())
 	payerID := payer.UUID()

@@ -24,7 +24,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, string) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()

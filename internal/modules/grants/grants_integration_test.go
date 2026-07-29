@@ -26,7 +26,7 @@ func short() string { return strings.ReplaceAll(uuid.NewString(), "-", "")[:10] 
 func testGrants(t *testing.T) (*grants.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()

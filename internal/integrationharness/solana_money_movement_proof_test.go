@@ -234,7 +234,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID, priceID uuid.UUID, reference, entitlement string) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payer := openrails.CustomerID(uuid.New())
 	payerID := payer.UUID()

@@ -32,5 +32,7 @@ func OpenAppDB(t *testing.T, dsn string) *db.DB {
 // the merchant itself is their whole point.
 func OpenMerchantDB(t *testing.T, merchantID uuid.UUID) *db.DB {
 	t.Helper()
-	return OpenAppDB(t, MerchantPinnedDSN(t, merchantID))
+	d, err := db.NewWithPGXPool(SharedMerchantPool(t, merchantID), config.DefaultSchema)
+	require.NoError(t, err)
+	return d
 }

@@ -70,7 +70,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 	t.Helper()
 
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 

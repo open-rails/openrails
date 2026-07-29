@@ -45,9 +45,8 @@ type failopenFixture struct {
 // autoRenew=false models a bounded (rental/one-off duration) price.
 func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failopenFixture {
 	t.Helper()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 	now := time.Now().UTC().Truncate(time.Second)

@@ -26,8 +26,7 @@ import (
 func captureFallbackEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, *redis.Client, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)

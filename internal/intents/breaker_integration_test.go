@@ -125,8 +125,7 @@ func breakerRunner(dbi *db.DB, client *nmi.NMIClient) *Runner {
 // merchant is unaffected; operator ack resumes.
 func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	const over = 2 // intents beyond the budget floor

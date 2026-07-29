@@ -94,8 +94,7 @@ type rebillFixture struct {
 func seedPastDueSubscription(t *testing.T) rebillFixture {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	fx := rebillFixture{db: dbi, store: NewStore(dbi)}

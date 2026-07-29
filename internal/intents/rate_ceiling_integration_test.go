@@ -74,7 +74,7 @@ func trippedFindingCount(t *testing.T, dbi *db.DB, merchantID uuid.UUID, finding
 // on the actor id with no role bypass, so a "root" principal trips identically.
 func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	merchant := seedCeilingMerchant(t, dbi)
 	gate := NewRateCeiling(dbi)
 
@@ -113,7 +113,7 @@ func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 // distinct actors so the per-actor ceiling never fires; the global wall does.
 func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	merchant := seedCeilingMerchant(t, dbi)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
@@ -148,7 +148,7 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 // window leave both ceilings untouched.
 func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	merchant := seedCeilingMerchant(t, dbi)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
@@ -172,7 +172,7 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 // notice-and-rotate.
 func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	merchant := seedCeilingMerchant(t, dbi)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
@@ -205,7 +205,7 @@ func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 // intent never exists, so the destructive op cannot happen).
 func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	merchant := seedCeilingMerchant(t, dbi)
 

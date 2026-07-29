@@ -20,8 +20,7 @@ import (
 // test rows end-to-end: real Postgres rail_merchant_accounts + merchant_secrets
 // rows, resolved through the REAL merchants.Service (no fake resolvers).
 func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)

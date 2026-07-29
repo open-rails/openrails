@@ -66,8 +66,7 @@ func newSolanaMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 }
 
 func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-store-"+sfx)
@@ -96,8 +95,7 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 // resolves NO client (fail closed); a declared account without RPC knobs
 // arms the public-RPC default.
 func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	// Merchant declares NO solana account at all.
@@ -121,8 +119,7 @@ func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 }
 
 func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-bad-"+sfx)
@@ -183,8 +180,7 @@ func jsonID(id any) string {
 // SKIPPED (fail closed — no boot plane exists, #788). Per merchant, per pass,
 // RLS-scoped.
 func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	rdb := dbtest.NewSharedRedisClient(t)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]

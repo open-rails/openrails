@@ -27,8 +27,7 @@ type archiveFixture struct {
 
 func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
-	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	// The archive intents reference TestMerchant (rail_intents +
 	// rail_mutation_logs FK into openrails.merchants), so the merchant
 	// row must exist.
