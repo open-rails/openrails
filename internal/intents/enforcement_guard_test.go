@@ -255,9 +255,14 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
 			return nil
 		}
-		if !strings.HasPrefix(rel, "internal/") && !strings.HasPrefix(rel, "pkg/") {
-			return nil
-		}
+		// or#865: the walk used to cover only internal/ and pkg/, so cmd/,
+		// tests/, embed/, config/ and the repo root could reach a provider
+		// write unseen. Widened to the whole module — it costs nothing, there
+		// are zero violations outside internal//pkg/ today, and a guard that
+		// only looks where nobody would cheat is not a guard.
+		//
+		// _test.go files stay out on purpose: the live-sandbox suites call
+		// writes directly BY DESIGN, and that is the point of them.
 		fset := token.NewFileSet()
 		file, perr := parser.ParseFile(fset, path, nil, 0)
 		if perr != nil {
