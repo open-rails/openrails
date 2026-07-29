@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
@@ -97,19 +98,53 @@ func checkRLSEnforcing(ctx context.Context, dsn string) error {
 	return nil
 }
 
+// appRoleLoginLockKey serializes the ALTER ROLE below across every test process
+// sharing one Postgres server. Roles are CLUSTER-wide, so `go test -p N` has N
+// processes altering the same pg_authid tuple at once, which Postgres rejects
+// with `tuple concurrently updated` (XX000) — the ALTER is idempotent but not
+// concurrency-safe. An arbitrary fixed key; only this function takes it.
+const appRoleLoginLockKey = 8670001
+
 // enableAppRoleLogin grants the openrails_app role LOGIN + a password so tests can
 // connect as it. Migration 001 creates the role NOLOGIN; production attaches login
 // credentials out of band. The role keeps NOBYPASSRLS so RLS still enforces.
+//
+// Serialized on a cluster-wide advisory lock, and retried, because the role is
+// shared by every concurrently running test package.
 func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 	sqlDB, err := sql.Open("pgx", superDSN)
 	if err != nil {
 		return fmt.Errorf("open super dsn: %w", err)
 	}
 	defer func() { _ = sqlDB.Close() }()
-	if _, err := sqlDB.ExecContext(ctx, `ALTER ROLE `+appRole+` WITH LOGIN PASSWORD '`+appPassword+`'`); err != nil {
-		return fmt.Errorf("grant %s login: %w", appRole, err)
+
+	var lastErr error
+	for attempt := range 5 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+		lastErr = func() error {
+			conn, err := sqlDB.Conn(ctx)
+			if err != nil {
+				return fmt.Errorf("acquire conn: %w", err)
+			}
+			defer func() { _ = conn.Close() }()
+			if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, appRoleLoginLockKey); err != nil {
+				return fmt.Errorf("take app-role lock: %w", err)
+			}
+			defer func() {
+				_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, appRoleLoginLockKey)
+			}()
+			if _, err := conn.ExecContext(ctx, `ALTER ROLE `+appRole+` WITH LOGIN PASSWORD '`+appPassword+`'`); err != nil {
+				return fmt.Errorf("grant %s login: %w", appRole, err)
+			}
+			return nil
+		}()
+		if lastErr == nil {
+			return nil
+		}
 	}
-	return nil
+	return lastErr
 }
 
 // withUserInfo returns dsn with its userinfo replaced by user:password.
