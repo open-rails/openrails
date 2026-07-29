@@ -102,7 +102,12 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 			Config:   cfg,
 		}
 	}
-	_, err := runnerFor(limitedModeConfig()).RunExecuteOnce(ctx)
+	// or#842: a system-origin delete is queued with a cooling-off window, so it
+	// is not due yet. This test is about the MODE gate, not the schedule — make
+	// it due so the executor actually claims it.
+	_, err := pool.Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", intentID)
+	require.NoError(t, err)
+	_, err = runnerFor(limitedModeConfig()).RunExecuteOnce(ctx)
 	require.NoError(t, err)
 	got := fx.intent(t, intentID)
 	assert.Equal(t, StatusPending, got.Status, "limited mode parks the queued delete, never executes it")
