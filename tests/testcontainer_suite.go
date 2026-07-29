@@ -418,7 +418,18 @@ func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID,
 		},
 	})
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	// Stamp the manifest KEY the account was declared under. The harness's
+	// UpsertPSP carries only the natural key (rail/environment/account_id), so
+	// psps.key stays NULL and the #848 wire selector — "PSP key first,
+	// unambiguous rail-kind fallback" — can never name this account: a second
+	// armed NMI PSP would make every checkout ambiguous with no way to say
+	// which one.
 	rowID, _, _, _ := merchants.PSPNaturalKey(string(models.RailNMI), env, accountID)
+	_, err := suite.MerchantPool().Exec(context.Background(),
+		`UPDATE openrails.psps SET key = $1
+		  WHERE rail = $2 AND environment = $3 AND account_id = $4`,
+		accountID, string(models.RailNMI), env, accountID)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx := dbtest.WithTestMerchant(context.Background())
 		if store := suite.App.Runtime.Merchants.Secrets(); store != nil {
