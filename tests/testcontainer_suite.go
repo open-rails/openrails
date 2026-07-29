@@ -371,8 +371,8 @@ func (suite *TestContainerSuite) SetNMIGateway(url string) {
 	if rt.CheckoutService != nil {
 		rt.CheckoutService.NMIEndpointOverride = url
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.NMIEndpointOverride = url
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.NMIEndpointOverride = url
 	}
 	suite.RearmIntentPlumbing()
 }
@@ -421,8 +421,8 @@ func (suite *TestContainerSuite) RearmIntentPlumbing() {
 			rt.CheckoutService.NMISaleService.Intents = runner
 		}
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
 	}
 }
 

@@ -94,11 +94,11 @@ type CheckoutService struct {
 	PaymentService       *payments.PaymentService
 	EntitlementService   *entitlements.EntitlementService
 	PurchaseService      *CheckoutPurchaseService
-	VaultResolver        *CheckoutVaultService
+	PaymentMethodResolver        *CheckoutPaymentMethodResolver
 	NMISaleService       *CheckoutNMISaleService
 	VaultedCardService   *CheckoutVaultedCardService
 	PaymentMethodService *paymentmethods.PaymentMethodService
-	VaultService         *paymentmethods.VaultService
+	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
 	IdempotencyService   checkoutIdempotencyStore
 	MerchantSecrets      merchants.MerchantSecretReader
 	ProviderSecrets      merchants.PSPSecretResolver
@@ -150,7 +150,7 @@ func NewCheckoutService(
 	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
-	vaultService *paymentmethods.VaultService,
+	railPMService *paymentmethods.RailPaymentMethodService,
 	idempotencyService checkoutIdempotencyStore,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
@@ -165,9 +165,9 @@ func NewCheckoutService(
 		PaymentService:       paymentService,
 		EntitlementService:   entitlementService,
 		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		VaultResolver:        NewCheckoutVaultService(paymentMethodService, vaultService),
+		PaymentMethodResolver:        NewCheckoutPaymentMethodResolver(paymentMethodService, railPMService),
 		PaymentMethodService: paymentMethodService,
-		VaultService:         vaultService,
+		RailPaymentMethodService:         railPMService,
 		IdempotencyService:   idempotencyService,
 		RailCustomerService:  railCustomerService,
 		StripeService:        &subscriptions.StripeService{Config: cfg, Rails: railSet},
@@ -177,8 +177,8 @@ func NewCheckoutService(
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
-		service.VaultResolver,
-		vaultService,
+		service.PaymentMethodResolver,
+		railPMService,
 		idempotencyService,
 	)
 	// The scoped resolver is the ONLY NMI client source (#788); armed for
@@ -191,8 +191,8 @@ func NewCheckoutService(
 		Rails:                railSet,
 		Config:               cfg,
 	}
-	if vaultService != nil {
-		service.VaultedCardService.DB = vaultService.DB
+	if railPMService != nil {
+		service.VaultedCardService.DB = railPMService.DB
 	}
 	return service
 }
@@ -697,7 +697,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -789,8 +789,8 @@ func (s *CheckoutService) processNMISubscription(
 		// Verified-clean decline/rejection. Direct best-effort cleanup of the
 		// vault created for THIS attempt, NOT an intent (#674 tail): it is
 		// referenced nowhere — harmless if lost.
-		if createdVault && resolvedMethod != nil && s.VaultService != nil {
-			if cleanupErr := s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod); cleanupErr != nil {
+		if createdVault && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+			if cleanupErr := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod); cleanupErr != nil {
 				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
@@ -800,7 +800,7 @@ func (s *CheckoutService) processNMISubscription(
 		}
 		var failErr error = errors.New(reason)
 		if locID := terminalEvidenceLocalization(intent); locID != "" {
-			failErr = &paymentmethods.VaultError{Err: failErr, LocalizationID: locID, Message: reason}
+			failErr = &paymentmethods.PaymentMethodError{Err: failErr, LocalizationID: locID, Message: reason}
 		}
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
@@ -1813,7 +1813,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Get or create vault
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
+	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1903,7 +1903,7 @@ func (s *CheckoutService) processUpgrade(
 			subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
 			var nmiErr *nmi.CustomerVaultError
 			if errors.As(err, &nmiErr) {
-				subErr = &paymentmethods.VaultError{
+				subErr = &paymentmethods.PaymentMethodError{
 					Err:            subErr,
 					LocalizationID: nmiErr.LocalizationID,
 					Message:        subErr.Error(),
@@ -1975,8 +1975,8 @@ func (s *CheckoutService) processUpgrade(
 				// best-effort cleanup of the vault created for THIS attempt,
 				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
-				if createdVault && resolvedMethod != nil && s.VaultService != nil {
-					_ = s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod)
+				if createdVault && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+					_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 				}
 				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
@@ -3055,7 +3055,7 @@ func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *mo
 	if pm == nil || ref == "" {
 		return
 	}
-	if s.VaultService == nil || s.VaultService.DB == nil {
+	if s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
 		log.WithContext(ctx).Warn("checkout: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
@@ -3064,7 +3064,7 @@ func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *mo
 		log.WithContext(ctx).WithError(err).Warn("checkout: no merchant context to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := s.VaultService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+	if _, err := s.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
 		MerchantID: tid.UUID(),
 		ID:         pm.ID,
 		Agreement:  string(agreement),

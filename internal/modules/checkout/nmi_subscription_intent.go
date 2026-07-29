@@ -423,11 +423,11 @@ func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merch
 // enrolled instrument (#297), keyed by the rail handles the payload carries.
 // Best-effort: a miss means the next successful recurring charge re-captures.
 func (h *NMISubscriptionCreateIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, transactionID string) {
-	if h.Checkout == nil || h.Checkout.VaultService == nil || h.Checkout.VaultService.DB == nil {
+	if h.Checkout == nil || h.Checkout.RailPaymentMethodService == nil || h.Checkout.RailPaymentMethodService.DB == nil {
 		log.WithContext(ctx).Warn("nmi subscription finalize: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := h.Checkout.VaultService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+	if _, err := h.Checkout.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
 		MerchantID:      merchantID,
 		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
 		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),

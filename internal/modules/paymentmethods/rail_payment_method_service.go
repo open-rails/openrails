@@ -23,7 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type VaultService struct {
+type RailPaymentMethodService struct {
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	MerchantSecrets      merchants.MerchantSecretReader
@@ -34,7 +34,7 @@ type VaultService struct {
 	ProviderScopes      merchants.PSPScopeResolver
 	Config              *config.Config
 	DB                  *db.DB
-	// DeleteIntents routes DeleteVault through the durable nmi_vault_delete
+	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents VaultDeleteExecutor
 	clock         clockwork.Clock
@@ -53,21 +53,21 @@ type paymentMethodStore interface {
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
-func (s *VaultService) now() time.Time {
+func (s *RailPaymentMethodService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
 	}
 	return time.Now()
 }
 
-func (s *VaultService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
+func (s *RailPaymentMethodService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
 	if s == nil {
 		return
 	}
 	s.MerchantSecrets = store
 }
 
-func (s *VaultService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *RailPaymentMethodService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -77,15 +77,15 @@ func (s *VaultService) SetRailMerchantAccountSecretResolver(resolver merchants.P
 	}
 }
 
-func (s *VaultService) SetClock(c clockwork.Clock) {
+func (s *RailPaymentMethodService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
-func (s *VaultService) Clock() clockwork.Clock {
+func (s *RailPaymentMethodService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-type CreateVaultRequest struct {
+type CreatePaymentMethodRequest struct {
 	PaymentToken string
 	Provider     string
 	NameOnCard   string
@@ -106,7 +106,7 @@ type CreateVaultRequest struct {
 	Metadata     map[string]any
 }
 
-type UpdateVaultRequest struct {
+type UpdatePaymentMethodRequest struct {
 	PaymentToken *string
 	Provider     *string
 	NameOnCard   *string
@@ -126,14 +126,14 @@ type UpdateVaultRequest struct {
 	ExpiryDate   *string
 }
 
-// VaultError carries additional context for vault creation failures, including localization codes.
-type VaultError struct {
+// PaymentMethodError carries additional context for vault creation failures, including localization codes.
+type PaymentMethodError struct {
 	Err            error
 	LocalizationID string
 	Message        string
 }
 
-func (e *VaultError) Error() string {
+func (e *PaymentMethodError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
@@ -143,12 +143,12 @@ func (e *VaultError) Error() string {
 	return "vault error"
 }
 
-func (e *VaultError) Unwrap() error {
+func (e *PaymentMethodError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *VaultService {
-	return &VaultService{
+func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *RailPaymentMethodService {
+	return &RailPaymentMethodService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
 		Config:               cfg,
@@ -157,11 +157,11 @@ func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.D
 	}
 }
 
-// CreateVault creates a NMI customer vault and stores a local PaymentMethod.
+// CreatePaymentMethod creates a NMI customer vault and stores a local PaymentMethod.
 // req.Provider names the PSP (account key, e.g. "mobius") or a bare rail — the
 // vault is created IN that PSP's account, and the row's rail comes from the
 // resolved scope.
-func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
+func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, userID string, req *CreatePaymentMethodRequest) (*models.PaymentMethod, error) {
 	psp := strings.TrimSpace(strings.ToLower(req.Provider))
 	if psp == "" {
 		return nil, errors.New("provider is required")
@@ -202,7 +202,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			return nil, &VaultError{
+			return nil, &PaymentMethodError{
 				Err:            err,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        fmt.Sprintf("failed to create payment vault: %s", err.Error()),
@@ -249,7 +249,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	return pm, nil
 }
 
-func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, pspID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
+func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provider string, pspID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, nil, errors.New("rail is required")
@@ -312,7 +312,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string, ps
 // name: a declared PSP key pins its own account; a rail resolves to the
 // active armed account. Returns the resolved scope (nil when only static
 // resolution was possible).
-func (s *VaultService) resolveNMIClientByName(ctx context.Context, name string) (*nmi.NMIClient, *merchants.PSPScope, error) {
+func (s *RailPaymentMethodService) resolveNMIClientByName(ctx context.Context, name string) (*nmi.NMIClient, *merchants.PSPScope, error) {
 	name = strings.TrimSpace(strings.ToLower(name))
 	if name == "" {
 		return nil, nil, errors.New("psp is required")
@@ -354,7 +354,7 @@ func (s *VaultService) resolveNMIClientByName(ctx context.Context, name string) 
 	return client, nil, nil
 }
 
-func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	provider := strings.TrimSpace(scope.AccountID)
 	if provider == "" {
 		return nil, errors.New("provider account_id required")
@@ -385,7 +385,7 @@ func (s *VaultService) resolveNMIClientForScope(ctx context.Context, scope merch
 	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
 }
 
-func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
+func (s *RailPaymentMethodService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
 	testMode := s != nil && s.Config != nil && s.Config.IsTestMode()
 	if s != nil && s.newNMIClient != nil {
 		return s.newNMIClient(provider, cfg, testMode)
@@ -468,8 +468,8 @@ func stringPtrOrNil(value string) *string {
 	return &value
 }
 
-// UpdateVault updates vault in NMI and updates local record timestamp
-func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod, req *UpdateVaultRequest) (*models.PaymentMethod, error) {
+// UpdatePaymentMethod updates vault in NMI and updates local record timestamp
+func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) (*models.PaymentMethod, error) {
 	// Use rail from the payment method.
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
@@ -546,7 +546,7 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	return pm, nil
 }
 
-func applyUpdatedCardMetadata(pm *models.PaymentMethod, req *UpdateVaultRequest) {
+func applyUpdatedCardMetadata(pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) {
 	pm.LastFour = sanitizedStringPtr(req.LastFour, sanitizeLastFour)
 	pm.CardType = sanitizedStringPtr(req.CardType, sanitizeCardType)
 	pm.ExpiryDate = sanitizedStringPtr(req.ExpiryDate, sanitizeExpiryDate)
@@ -559,11 +559,11 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 	return stringPtrOrNil(sanitize(*value))
 }
 
-// ErrVaultDeleteProcessing: the durable vault-delete intent could not confirm
+// ErrPaymentMethodDeleteProcessing: the durable vault-delete intent could not confirm
 // the remote delete inline (transport-ambiguous outcome, parked provider). The
 // intent ledger completes it out-of-band; a retried request maps onto the SAME
 // intent. Never a lost delete.
-var ErrVaultDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
+var ErrPaymentMethodDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
 
 // VaultDeleteOutcome mirrors the durable intent's post-execution state without
 // importing the intents package (import cycle: intents → subscriptions →
@@ -582,13 +582,13 @@ type VaultDeleteExecutor interface {
 	ExecuteVaultDelete(ctx context.Context, pm *models.PaymentMethod) (VaultDeleteOutcome, error)
 }
 
-// DeleteVault deletes a stored payment method the DURABLE way (#674 tail):
+// DeletePaymentMethod deletes a stored payment method the DURABLE way (#674 tail):
 // guards run inline, then the remote NMI delete goes through the write-ahead
 // nmi_vault_delete intent — a crash or lost response after the user's request
 // is accepted can never lose the delete (the verifier resolves "vault gone at
 // provider ⇒ done" and finalizes the local removal).
-func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
-	if _, _, err := s.deleteVaultGuards(ctx, pm); err != nil {
+func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *models.PaymentMethod) error {
+	if _, _, err := s.deletePaymentMethodGuards(ctx, pm); err != nil {
 		return err
 	}
 	if s.DeleteIntents == nil {
@@ -605,30 +605,30 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 	case out.Terminal:
 		return fmt.Errorf("failed to delete payment vault: %s", out.Reason)
 	default:
-		return ErrVaultDeleteProcessing
+		return ErrPaymentMethodDeleteProcessing
 	}
 }
 
-// CleanupVaultBestEffort is the DIRECT delete for reactive decline-cleanup
+// CleanupPaymentMethodBestEffort is the DIRECT delete for reactive decline-cleanup
 // (checkout removing a vault it just created for a now-declined attempt).
 // Deliberately NOT intent-routed (#674 tail): the vault is referenced nowhere,
 // a lost delete leaves only an inert orphan entry at NMI (no billing state can
 // act on it), and card-testing decline floods must not spam the intent ledger
 // or burn the #679 destructive-volume budget. Durable user-initiated deletes
-// go through DeleteVault.
-func (s *VaultService) CleanupVaultBestEffort(ctx context.Context, pm *models.PaymentMethod) error {
-	shared, client, err := s.deleteVaultGuards(ctx, pm)
+// go through DeletePaymentMethod.
+func (s *RailPaymentMethodService) CleanupPaymentMethodBestEffort(ctx context.Context, pm *models.PaymentMethod) error {
+	shared, client, err := s.deletePaymentMethodGuards(ctx, pm)
 	if err != nil {
 		return err
 	}
-	return s.deleteVaultDirect(ctx, client, pm, shared)
+	return s.deletePaymentMethodDirect(ctx, client, pm, shared)
 }
 
-// deleteVaultGuards runs the shared pre-delete checks: no active subscription
+// deletePaymentMethodGuards runs the shared pre-delete checks: no active subscription
 // may use the method, the rail must resolve to a configured client (fail fast
 // instead of parking a user-facing request), and a shared vault without a
 // billing id is refused outright.
-func (s *VaultService) deleteVaultGuards(ctx context.Context, pm *models.PaymentMethod) (shared bool, client *nmi.NMIClient, err error) {
+func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context, pm *models.PaymentMethod) (shared bool, client *nmi.NMIClient, err error) {
 	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for vault")
@@ -680,9 +680,9 @@ func (s *VaultService) deleteVaultGuards(ctx context.Context, pm *models.Payment
 	return shared, client, nil
 }
 
-// deleteVaultDirect performs the remote delete (billing-entry-scoped for
+// deletePaymentMethodDirect performs the remote delete (billing-entry-scoped for
 // shared vaults, whole-vault otherwise) followed by the local removal.
-func (s *VaultService) deleteVaultDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
+func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
 	if shared {
 		if err := client.DeleteCustomerBillingEntry(pm.RailCustomerRef, pm.RailMethodRef); err != nil {
 			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
@@ -708,7 +708,7 @@ func (s *VaultService) deleteVaultDirect(ctx context.Context, client *nmi.NMICli
 // ResolveClientForPaymentMethod resolves the per-merchant NMI client for the
 // payment method's rail + declared rail merchant account — the surface the
 // nmi_vault_delete intent handler executes through.
-func (s *VaultService) ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error) {
+func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error) {
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
@@ -717,7 +717,7 @@ func (s *VaultService) ResolveClientForPaymentMethod(ctx context.Context, pm *mo
 	return client, err
 }
 
-// GetUserVaults lists all vaults for a user
-func (s *VaultService) GetUserVaults(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
+// GetUserPaymentMethods lists all vaults for a user
+func (s *RailPaymentMethodService) GetUserPaymentMethods(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	return s.PaymentMethodService.GetByUserID(ctx, userID)
 }

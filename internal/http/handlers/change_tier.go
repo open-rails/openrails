@@ -117,7 +117,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		return
 	}
 
-	var vaultErr *paymentmethods.VaultError
+	var vaultErr *paymentmethods.PaymentMethodError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
 		if strings.TrimSpace(vaultErr.LocalizationID) != "" {

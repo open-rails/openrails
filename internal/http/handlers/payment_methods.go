@@ -225,14 +225,14 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		createReq.Metadata["e2e_run_id"] = e2eRunID
 	}
 
-	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
+	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, createReq)
 	if err != nil {
 		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
-		var vaultErr *paymentmethods.VaultError
+		var vaultErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &vaultErr) {
 			code := api.CodePaymentFailed
 			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
@@ -248,7 +248,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(paymentMethodToAPI(pm, nil))
 }
 
-func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreateVaultRequest {
+func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
@@ -279,7 +279,7 @@ func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest,
 	setMetadata("billing_state", req.State)
 	setMetadata("billing_company", req.Company)
 
-	return &paymentmethods.CreateVaultRequest{
+	return &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
@@ -354,7 +354,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	updateReq := &paymentmethods.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &trimmedToken,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
@@ -377,7 +377,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	updated, err := r.State.VaultService.UpdateVault(ctx, pm, updateReq)
+	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {

@@ -95,7 +95,7 @@ type Runtime struct {
 	NotificationService  *subscriptions.NotificationService
 	PaymentMethodService *paymentmethods.PaymentMethodService
 	PaymentService       *payments.PaymentService
-	VaultService         *paymentmethods.VaultService
+	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
 	// RepriceService is the #773 reprice primitive (move subscribers to a
 	// different price at their next renewal).
 	RepriceService *subscriptions.RepriceService

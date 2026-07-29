@@ -124,26 +124,26 @@ func (s *Service) requirePaymentMethodService() (*paymentmethods.PaymentMethodSe
 	return rt.PaymentMethodService, nil
 }
 
-func (s *Service) requireVaultService() (*paymentmethods.VaultService, error) {
+func (s *Service) requireVaultService() (*paymentmethods.RailPaymentMethodService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	if rt.VaultService == nil {
+	if rt.RailPaymentMethodService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
-	return rt.VaultService, nil
+	return rt.RailPaymentMethodService, nil
 }
 
-func (s *Service) requireVaultAndPaymentMethodServices() (*paymentmethods.VaultService, *paymentmethods.PaymentMethodService, error) {
+func (s *Service) requireVaultAndPaymentMethodServices() (*paymentmethods.RailPaymentMethodService, *paymentmethods.PaymentMethodService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, nil, err
 	}
-	if rt.VaultService == nil || rt.PaymentMethodService == nil {
+	if rt.RailPaymentMethodService == nil || rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}
-	return rt.VaultService, rt.PaymentMethodService, nil
+	return rt.RailPaymentMethodService, rt.PaymentMethodService, nil
 }
 
 func (s *Service) requireDB() (*db.DB, error) {

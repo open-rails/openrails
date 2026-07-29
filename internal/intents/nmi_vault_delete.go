@@ -27,7 +27,7 @@ import (
 //
 // Reactive decline-cleanup deletes (checkout removing a vault it just created
 // for a declined attempt) deliberately stay DIRECT — see
-// paymentmethods.CleanupVaultBestEffort.
+// paymentmethods.CleanupPaymentMethodBestEffort.
 const TypeNMIVaultDelete = "nmi_vault_delete"
 
 // NMIVaultDeleteIdempotencyKey is the logical identity of "the delete of this
@@ -47,7 +47,7 @@ type NMIVaultDeletePayload struct {
 }
 
 // VaultClientResolver resolves the per-merchant NMI client for a payment
-// method (implemented by paymentmethods.VaultService).
+// method (implemented by paymentmethods.RailPaymentMethodService).
 type VaultClientResolver interface {
 	ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error)
 }

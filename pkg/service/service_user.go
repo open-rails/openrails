@@ -666,7 +666,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
+	pm, err := vaults.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -716,7 +716,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &paymentmethods.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -735,7 +735,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 		ExpiryDate:   req.ExpiryDate,
 	}
 
-	pm, err = vaults.UpdateVault(ctx, pm, updateReq)
+	pm, err = vaults.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +766,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
-	return vaults.DeleteVault(ctx, pm)
+	return vaults.DeletePaymentMethod(ctx, pm)
 }
 
 // -------------------------------- Notifications --------------------------------

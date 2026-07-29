@@ -300,7 +300,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
-		VaultService:             serviceInstances.VaultService,
+		RailPaymentMethodService:             serviceInstances.RailPaymentMethodService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
@@ -414,8 +414,8 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
-	if runtime.VaultService != nil {
-		runtime.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
+	if runtime.RailPaymentMethodService != nil {
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
@@ -562,7 +562,7 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
-	VaultService             *paymentmethods.VaultService
+	RailPaymentMethodService             *paymentmethods.RailPaymentMethodService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -734,8 +734,8 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		Clock:    clock,
 	})
 
-	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, database, cfg, clock)
-	subscriptionService.VaultService = vaultService
+	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
+	subscriptionService.RailPaymentMethodService = railPMService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
 	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
@@ -804,7 +804,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		purchaseService,
 		entitlementService,
 		paymentMethodService,
-		vaultService,
+		railPMService,
 		idempotencyService,
 		railCustomerService,
 		cfg,
@@ -859,7 +859,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
-		VaultService:                 vaultService,
+		RailPaymentMethodService:                 railPMService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,

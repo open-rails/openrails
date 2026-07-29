@@ -25,7 +25,7 @@ var destructiveIntentTypes = map[string]struct{}{
 	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
 	// is exactly the #679 threat model. Held user deletes stay pending and
 	// complete after operator ack; decline-cleanup deletes bypass the ledger
-	// entirely (paymentmethods.CleanupVaultBestEffort) so card-testing floods
+	// entirely (paymentmethods.CleanupPaymentMethodBestEffort) so card-testing floods
 	// cannot burn this budget.
 	TypeNMIVaultDelete: {},
 	// TypeNMIPaymentSourceUpdate is deliberately NOT listed: repointing which

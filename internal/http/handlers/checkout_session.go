@@ -108,7 +108,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		// repeated failures escalate to captcha/block (and feed site-wide
 		// attack-mode detection). Best-effort + nil-safe; never affects the
 		// response.
-		var vErr *paymentmethods.VaultError
+		var vErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &vErr) {
 			r.State.CardAbuseGuard.RecordChargeFailure(
 				r.Request.Context(),
@@ -216,7 +216,7 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
-	var vaultErr *paymentmethods.VaultError
+	var vaultErr *paymentmethods.PaymentMethodError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
 		if strings.TrimSpace(vaultErr.LocalizationID) != "" {

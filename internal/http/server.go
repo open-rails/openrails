@@ -176,7 +176,7 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.PaymentMethodService == nil {
 		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
-	if deps.Runtime.VaultService == nil {
+	if deps.Runtime.RailPaymentMethodService == nil {
 		return nil, fmt.Errorf("server runtime vault service is required")
 	}
 	if deps.Runtime.RailCustomerService == nil {
@@ -260,9 +260,9 @@ func New(deps Dependencies) (*Server, error) {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
 				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
-			if deps.Runtime.VaultService != nil {
-				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.VaultService.SetRailMerchantAccountSecretResolver(tsvc)
+			if deps.Runtime.RailPaymentMethodService != nil {
+				deps.Runtime.RailPaymentMethodService.SetMerchantSecretStore(secretStore)
+				deps.Runtime.RailPaymentMethodService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
 		}
 

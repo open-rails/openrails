@@ -34,7 +34,7 @@ func (noSubsReader) GetPaginatedByUserID(context.Context, string, int, int) ([]m
 // the sibling card survives. A shared row WITHOUT a billing id (cannot
 // identify which entry) still refuses outright.
 //
-// This exercises the DIRECT decline-cleanup path (CleanupVaultBestEffort);
+// This exercises the DIRECT decline-cleanup path (CleanupPaymentMethodBestEffort);
 // the durable intent path's identical scoping is covered by the handler
 // tests in internal/intents (nmi_vault_delete_integration_test.go — this
 // package cannot import intents: import cycle via subscriptions).
@@ -91,7 +91,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, "test-key")
 	require.NoError(t, err)
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		SubscriptionService:  noSubsReader{},
 		PaymentMethodService: NewPaymentMethodService(database),
 		DB:                   database,
@@ -109,7 +109,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, svc.CleanupVaultBestEffort(ctx, pmA), "shared vault deletes must scope to the billing entry")
+	require.NoError(t, svc.CleanupPaymentMethodBestEffort(ctx, pmA), "shared vault deletes must scope to the billing entry")
 	require.Len(t, entryDeletes, 1, "exactly one billing-entry delete")
 	require.Contains(t, entryDeletes[0], "/customers/"+sharedVault+"/billing/"+pmA.RailMethodRef)
 	require.Empty(t, vaultDeletes, "the shared vault itself must NEVER be deleted")
@@ -124,7 +124,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	pmC := mk("")
 	pmD := mk("bill-d-" + uuid.NewString()[:8])
 	_ = pmD
-	err = svc.CleanupVaultBestEffort(ctx, pmC)
+	err = svc.CleanupPaymentMethodBestEffort(ctx, pmC)
 	require.Error(t, err, "shared vault without a billing id must refuse")
 	require.Contains(t, err.Error(), "no billing id", "refusal names the missing handle: %v", err)
 }

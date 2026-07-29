@@ -169,9 +169,9 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		),
 		// #788: the scoped resolver is the ONLY NMI client source.
 		ResolveNMIClient: func(context.Context, string) (*nmi.NMIClient, error) { return client, nil },
-		// VaultService carries the DB handle finalize persists the #297
+		// RailPaymentMethodService carries the DB handle finalize persists the #297
 		// stored-credential anchor through.
-		VaultService: &paymentmethods.VaultService{DB: dbi},
+		RailPaymentMethodService: &paymentmethods.RailPaymentMethodService{DB: dbi},
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),

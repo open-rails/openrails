@@ -81,8 +81,8 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 		r.CheckoutService.SetMerchantSecretStore(store)
 		r.CheckoutService.SetRailMerchantAccountSecretResolver(svc)
 	}
-	if r.VaultService != nil {
-		r.VaultService.SetMerchantSecretStore(store)
-		r.VaultService.SetRailMerchantAccountSecretResolver(svc)
+	if r.RailPaymentMethodService != nil {
+		r.RailPaymentMethodService.SetMerchantSecretStore(store)
+		r.RailPaymentMethodService.SetRailMerchantAccountSecretResolver(svc)
 	}
 }

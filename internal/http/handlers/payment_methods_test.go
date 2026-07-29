@@ -188,5 +188,5 @@ func TestCreateVaultRequestDoesNotStoreRawProviderPayload(t *testing.T) {
 	require.NotContains(t, got.Metadata, "raw_tokenization_payload")
 	require.NotContains(t, got.Metadata, "pan")
 	require.NotContains(t, got.Metadata, "cvv")
-	require.IsType(t, &paymentmethods.CreateVaultRequest{}, got)
+	require.IsType(t, &paymentmethods.CreatePaymentMethodRequest{}, got)
 }

@@ -279,11 +279,11 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 // Best-effort by design: a miss just means the next successful charge
 // re-captures (the query is write-once either way).
 func (h *NMISaleIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISalePayload, transactionID string) {
-	if h.Sale == nil || h.Sale.VaultService == nil || h.Sale.VaultService.DB == nil {
+	if h.Sale == nil || h.Sale.RailPaymentMethodService == nil || h.Sale.RailPaymentMethodService.DB == nil {
 		log.WithContext(ctx).Warn("nmi sale finalize: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := h.Sale.VaultService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+	if _, err := h.Sale.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
 		MerchantID:      merchantID,
 		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
 		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),

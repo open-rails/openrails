@@ -121,10 +121,10 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/subscriptions/user_service.go:CancelUserSubscription": "reactive user cancel (see admin_service note)",
 
 	// --- vault lifecycle -------------------------------------------------
-	"internal/modules/paymentmethods/vault_service.go:CreateVault":            "the create half of the vault lifecycle: no durable intent exists until a vault does",
-	"internal/modules/paymentmethods/vault_service.go:UpdateVault":            "card update on an existing vault (reactive, user-initiated)",
-	"internal/modules/paymentmethods/vault_service.go:deleteVaultDirect":      "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeleteVault → nmi_vault_delete intent (#674 tail)",
-	"internal/modules/paymentmethods/vault_service.go:cleanupVaultBestEffort": "reactive decline-cleanup (shared-vault scope); see deleteVaultDirect",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":            "the create half of the vault lifecycle: no durable intent exists until a vault does",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:UpdatePaymentMethod":            "card update on an existing vault (reactive, user-initiated)",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect":      "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort": "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 
 	// --- catalog push + plan migration ----------------------------------
 	"pkg/service/catalog_provider_nmi.go:createPlan":                      "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",

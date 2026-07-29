@@ -42,7 +42,7 @@ type SubscriptionService struct {
 	PriceService         *catalog.PriceService
 	ProductService       *catalog.ProductService
 	PaymentMethodService *paymentmethods.PaymentMethodService
-	VaultService         *paymentmethods.VaultService
+	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
