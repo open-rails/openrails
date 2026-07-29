@@ -25,9 +25,21 @@ import (
 // "vault (or billing entry) absent at the provider ⇒ done" (the
 // tombstone-reads-as-gone pattern from nmi_delete.go).
 //
-// Reactive decline-cleanup deletes (checkout removing a vault it just created
-// for a declined attempt) deliberately stay DIRECT — see
-// paymentmethods.CleanupPaymentMethodBestEffort.
+// or#870 — THE STANDING RULE, and why this type is USER-ONLY.
+// OpenRails never deletes a stored payment method. Not on expiry, not on a
+// stolen card, not on cancellation, not ever. Only the end user does. This
+// intent has exactly ONE producer — VaultDeleteThrough, reached only from the
+// authenticated DELETE /payment-methods/:id route after an ownership check —
+// and it must keep exactly one. If you are adding a caller because a
+// subscription died, you are looking for TypeNMIDeleteSubscription, which
+// cancels the recurring SCHEDULE at the rail and leaves the instrument alone so
+// the customer can update or remove it themselves.
+//
+// The only other remote-vault deletes in the codebase roll back a vault minted
+// MILLISECONDS earlier in the same request — creation that failed to persist
+// locally, or a checkout whose very first charge was declined. They are gated
+// on `createdVault` and can never reach an instrument the customer has saved.
+// See paymentmethods.CleanupPaymentMethodBestEffort.
 const TypeNMIVaultDelete = "nmi_vault_delete"
 
 // NMIVaultDeleteIdempotencyKey is the logical identity of "the delete of this

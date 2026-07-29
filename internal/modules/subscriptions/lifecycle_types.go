@@ -128,8 +128,10 @@ type FailMembershipParams struct {
 	Decline collection.DeclineOutcome
 	// TerminalCertainty (#821/#839/#840) names the evidence leg that justifies a
 	// terminal outcome — one of the collection.Certainty* constants. A terminal
-	// cancel revokes entitlements AND queues an IRREVERSIBLE provider-side vault
-	// delete, so it requires certainty: provider truth, a non-retryable decline,
+	// cancel revokes entitlements AND queues the irreversible cancellation of the
+	// recurring SCHEDULE at the rail — never the customer's stored payment
+	// method (or#870: nothing on this path can delete one) — so it requires
+	// certainty: provider truth, a non-retryable decline,
 	// or genuinely exhausted dunning ATTEMPTS. A date comparison, a lapsed
 	// window, and the absence of one of our own rows are NOT evidence. Empty ⇒
 	// FailMembership refuses to terminate and parks the row as `unknown`, access

@@ -268,7 +268,7 @@ func (w *DunningWorker) processSubscription(
 	// surprise-charged by a catch-up run.
 	//
 	// #839: expiry SKIPS THE CHARGE and PARKS. It used to cancel + revoke
-	// entitlements + queue the irreversible NMI vault delete, with a date
+	// entitlements + queue the irreversible NMI SCHEDULE delete, with a date
 	// comparison as its only evidence and zero charge attempts — and because a
 	// sub-4-day cycle derived a ZERO window, `now > periodEnd + 0` was true by
 	// construction, so a daily subscription was destroyed on its first dunning
@@ -371,7 +371,7 @@ func (w *DunningWorker) processSubscription(
 	// indistinguishable here from a dead card. It used to run the failure
 	// policy, which counted it as a dunning failure and (DunningMaxFailures == 1
 	// for sub-4-day cycles) terminated on the FIRST observation: cancel +
-	// entitlement revoke + irreversible NMI vault delete, with no forensic
+	// entitlement revoke + irreversible NMI SCHEDULE delete, with no forensic
 	// `payments` row to show for it.
 	//
 	// It now PARKS, BEFORE the claim, so it never touches last_retry_at or
