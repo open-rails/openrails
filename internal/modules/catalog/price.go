@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
@@ -31,6 +32,10 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 	if err != nil {
 		return err
 	}
+	// CUR-6: the single price-INSERT chokepoint, so every price row is
+	// canonical whatever minted it (service API, catalog manifest apply,
+	// importer).
+	price.Currency = moneyutil.NormalizeCurrency(price.Currency)
 	rows, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  price.ID,
 		MerchantID:          price.MerchantID,

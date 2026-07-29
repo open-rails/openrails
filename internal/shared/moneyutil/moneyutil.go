@@ -23,6 +23,16 @@ type Cents int64
 
 // ParseDecimalToCents is the provider-decimal-string -> minor-unit boundary
 // (MONEY-6): exact rational, half-away-from-zero, int64-overflow error.
+// NormalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
+// It lives here, in the leaf, rather than in the registry package, because it
+// is a pure string operation with no registry dependency — and because the
+// repo-level write chokepoints that must call it (payments, prices) cannot
+// import internal/modules/money without an import cycle. ONE definition:
+// money.NormalizeCurrency delegates here.
+func NormalizeCurrency(code string) string {
+	return strings.ToUpper(strings.TrimSpace(code))
+}
+
 func ParseDecimalToCents(value string) (Cents, error) {
 	v, err := parseDecimalScaled(value, CentsPerMajorUnit)
 	return Cents(v), err

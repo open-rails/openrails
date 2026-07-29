@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
@@ -45,7 +46,10 @@ func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 // paymentInsertParams maps a model onto the insert parameter set shared by
 // CreatePayment and CreatePaymentIfNotExists (identical column lists).
 func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
-	currency := strings.TrimSpace(p.Currency)
+	// CUR-6: the ONE place both CreatePayment and CreatePaymentIfNotExists
+	// build their params, so canonicalising here covers every payment row the
+	// repo mints regardless of which rail's ingestion produced it.
+	currency := moneyutil.NormalizeCurrency(p.Currency)
 	if currency == "" {
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment currency required")
 	}

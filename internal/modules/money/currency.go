@@ -3,7 +3,6 @@ package money
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -32,7 +31,7 @@ var currencies = map[string]Currency{
 // normalizeCurrency upper-cases the code, so built-in currency codes are
 // case-insensitive ("usd" == "USD"). Registry keys are upper.
 func normalizeCurrency(c string) string {
-	return strings.ToUpper(strings.TrimSpace(c))
+	return moneyutil.NormalizeCurrency(c)
 }
 
 // NormalizeCurrency upper-cases built-in currency codes. It is exported for
