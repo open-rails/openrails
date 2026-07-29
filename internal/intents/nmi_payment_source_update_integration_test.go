@@ -159,6 +159,9 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	runner := &Runner{
 		Store:    NewStore(dbi),
 		Registry: NewRegistry(NewNMIPaymentSourceUpdateHandler(dbi, fakeNMIResolver{client: client}, nil)),
+		// or#865 made a nil ModeView fail CLOSED: without it every intent parks
+		// rather than executing, so the fixture must state its mode.
+		Config: fullModeConfig(),
 	}
 	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)

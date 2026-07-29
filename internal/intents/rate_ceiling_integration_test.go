@@ -282,9 +282,14 @@ func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 // intent never exists, so the destructive op cannot happen).
 func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	// rail_intents is RLS-forced with a WITH CHECK on app.merchant_id, so the
+	// handle must be pinned to the merchant whose rows this test writes — seeding
+	// through a handle pinned to a DIFFERENT merchant makes every insert fail.
+	// (merchants itself is RLS-exempt, hence the two-step.)
+	bootstrap := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	merchant := seedCeilingMerchant(t, bootstrap)
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	pool := dbi.Pool()
-	merchant := seedCeilingMerchant(t, dbi)
 
 	// Clean the rolling window of any leftover user/admin destructive rows so the
 	// global count cannot be inflated by earlier tests in this package.

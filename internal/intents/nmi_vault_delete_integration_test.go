@@ -134,6 +134,9 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	runner := &Runner{
 		Store:    NewStore(dbi),
 		Registry: NewRegistry(NewNMIVaultDeleteHandler(dbi, fakeVaultClientResolver{client: client})),
+		// or#865 made a nil ModeView fail CLOSED: without it every intent parks
+		// rather than executing, so the fixture must state its mode.
+		Config: fullModeConfig(),
 	}
 	return &vaultDeleteFixture{db: dbi, runner: runner, gateway: gateway, pm: pm, ctx: ctx}
 }
