@@ -189,8 +189,39 @@ global process configuration.
 | Operation | Behavior |
 |---|---|
 | `Provision` | Idempotently creates the `openrails.merchants` row and records `permission_group_id` for control-plane merchants. |
-| `Export` | Writes a completed `merchant_exports` row: per-table row counts plus secret **names** — values are never exported. |
-| `Delete` | Gated purge: requires `Confirm` and a completed export; purges every merchant-owned row and secret, then tombstones the directory row (`status='deleted'`, `deleted_at`). |
+| `TakePurgeInventory` | Records what a purge would destroy: per-table row counts, secret **names**, and an explicit `not_captured` list. **It is not a backup and restores nothing** (was `Export`, a name that implied otherwise). |
+| `Delete` | One-way gated purge. See below. |
+
+### The purge is one-way, and the inventory is not a backup
+
+`TakePurgeInventory` copies no data. It writes counts and secret names to
+`openrails.merchant_purge_inventories` so an operator sees the blast radius
+before confirming — nothing more. The only way back from a purge is
+**whole-cluster Postgres point-in-time recovery** with the
+`ENCRYPTION_MASTER_KEY` and Vault alongside it (`backup-and-recovery.md`).
+
+`Delete` therefore stands behind five walls:
+
+1. the destructive-action gate (`operations.md`) — the same instance kill switch
+   and per-merchant policy that hold a mass cancellation. **Unwired = denied.**
+2. a typed confirmation phrase: `purge merchant <slug> permanently, no backup exists`
+3. a typed row count that must equal the true total
+4. a purge inventory recorded against *that* count — a stale one authorises nothing
+5. a `destructive_runs` row (`kind='merchant_purge'`) recording who, what and how many
+
+**There is deliberately no route and no CLI for it.** A test guard fails the
+build if `merchants.DeleteOptions` is constructed anywhere outside the package.
+The purge gains an operator surface when a real per-merchant snapshot/restore
+exists to gate it on, not before.
+
+Two things a purge cannot do, by construction:
+
+- **It cannot revoke stored instruments.** It drops the local custody mirror;
+  the cards stay at the PSP. Only the end user deletes their own instrument.
+- **It cannot delete a merchant with real billing history.** The append-only
+  grant log FK-pins the products and payments it justifies and is never purged,
+  so `Delete` refuses whole rather than half-purging. Retire the merchant
+  instead.
 
 ## API keys
 
