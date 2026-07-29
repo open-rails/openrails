@@ -27,9 +27,14 @@ func TestNMIDeclineBuckets(t *testing.T) {
 		460, // feature not available
 	}
 	// Bucket 2 — their card, fixable. Stop charging, keep access, ask them.
-	fix := []int{201, 204, 220, 221, 222, 223, 224, 225, 226, 240, 263, 461}
+	// 250/251 (pick-up/lost) sit here by owner decision (or#870, 2026-07-29):
+	// same treatment as an expired card. The instrument is dead but the customer
+	// did nothing wrong, and a reissued card works — losing a wallet must not
+	// cost a subscription.
+	fix := []int{201, 204, 220, 221, 222, 223, 224, 225, 226, 240, 250, 251, 263, 461}
 	// Bucket 3 — non-recoverable. Cancel at the rail, never touch the card.
-	nonRecoverable := []int{250, 251, 252, 253, 261, 262}
+	// 252/253 carry a fraud signal; 261/262 are the issuer withdrawing the mandate.
+	nonRecoverable := []int{252, 253, 261, 262}
 
 	for _, code := range retry {
 		if got := ClassifyNMIResponseCode(code); got != DeclineRetry {

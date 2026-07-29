@@ -96,16 +96,17 @@ var nmiDeclineOutcomes = map[int]DeclineOutcome{
 	263: DeclineFixPaymentMethod, // declined — update cardholder data
 	461: DeclineFixPaymentMethod, // unsupported card type
 
+	// 250/251 are bucket 2 by owner decision (or#870, 2026-07-29): "treat this as
+	// if it were an expired card; same bucket. It's no longer valid but we want
+	// the user to re-subscribe before they lose their membership." The instrument
+	// is dead, but the CUSTOMER did nothing wrong and a reissued card works — so
+	// losing a wallet must not cost a subscription.
+	250: DeclineFixPaymentMethod, // pick up card
+	251: DeclineFixPaymentMethod, // lost card
+
 	// Bucket 3 — non-recoverable. Cancel at the rail; never touch the stored
-	// payment method.
-	//
-	// OPEN CALL (or#870, unresolved at implementation time): 250/251 (pick-up /
-	// lost) could argue for bucket 2 instead — the card is dead but the customer
-	// is not a fraudster, and bucket 2 keeps their access while they add a
-	// different card. 252/253 carry a genuine fraud signal and belong here.
-	// Filed as bucket 3; flipping 250/251 is a two-line change to this table.
-	250: DeclineNonRecoverable, // pick up card
-	251: DeclineNonRecoverable, // lost card
+	// payment method. 252/253 carry a genuine fraud signal; 261/262 are the
+	// issuer withdrawing the recurring mandate outright.
 	252: DeclineNonRecoverable, // stolen card
 	253: DeclineNonRecoverable, // fraudulent card
 	261: DeclineNonRecoverable, // declined — stop all recurring payments
