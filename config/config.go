@@ -2158,11 +2158,12 @@ func Load(configPath string) (*Config, error) {
 	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
 	// closed on its own; this one decides WHICH way the others fail, so it must
 	// be declared, not inferred. Silently reading unset as "development" meant a
-	// container deployed without ENV kept merchant secrets in PLAINTEXT and
-	// stopped requiring the DB role to enforce RLS.
+	// container deployed without ENV kept merchant secrets in PLAINTEXT. (The
+	// DB role is no longer on this switch — or#782 made RLS enforcement
+	// unconditional.)
 	cfg.Env = strings.TrimSpace(cfg.Env)
 	if cfg.Env == "" {
-		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one")
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
 	}
 
 	// These sections are intentionally tolerated for operator visibility during

@@ -77,6 +77,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      # ENV has no default in the binary and config.Load refuses an empty one,
+      # so the migrate service must declare it too — without this the stack
+      # never gets past migrations.
+      ENV: "${ENV:-development}"
+      TEST_MODE: "${TEST_MODE:-sandbox}"
       # Database connection over the compose network.
       DB_HOST: "postgres"
       DB_PORT: "5432"
