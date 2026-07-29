@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -260,17 +262,37 @@ func ledgerFixture(t *testing.T, ctx context.Context, super, app *pgxpool.Pool, 
 	return pgtx, debit, credit, merchantID
 }
 
+// attemptInTx runs one statement inside a SAVEPOINT so an EXPECTED error does
+// not poison the surrounding transaction.
+//
+// Postgres aborts a transaction on ANY error, so a guard that asserts "this
+// must raise" and then asserts "this must be allowed" cannot pass without
+// isolating the first: the second statement returns 25P02 (transaction
+// aborted) whatever the schema does. Both ledger guards below were failing
+// that way — permanently red, and therefore about to be ignored, which is the
+// same failure mode as a guard that can never fail.
+func attemptInTx(ctx context.Context, tx pgx.Tx, sql string, args ...any) error {
+	if _, err := tx.Exec(ctx, "SAVEPOINT audit_probe"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT audit_probe")
+		return err
+	}
+	_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT audit_probe")
+	return nil
+}
+
 // MONEY-8 + LED-6: amount > 0, distinct accounts, non-negative floor.
 func TestMONEY8_TransferAmountAndFloorChecks(t *testing.T) {
 	ctx, super, app := pools(t)
 	tx, debit, credit, merchantID := ledgerFixture(t, ctx, super, app, "USD", false)
 
 	insert := func(amount int64, d, c uuid.UUID, floor int64) error {
-		_, err := tx.Exec(ctx,
+		return attemptInTx(ctx, tx,
 			`INSERT INTO openrails.ledger_transfers
 			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
-			 VALUES ($1,$2,$3,$4,'USD','capture',$5)`, merchantID, d, c, amount, floor)
-		return err
+			 VALUES ($1,$2,$3,$4,'USD','credit_spend',$5)`, merchantID, d, c, amount, floor)
 	}
 	require.Error(t, insert(0, debit, credit, 0), "MONEY-8: amount = 0 must be rejected")
 	require.Error(t, insert(-1, debit, credit, 0), "MONEY-8: negative amount must be rejected")
@@ -290,10 +312,16 @@ func TestCUR3_CrossCurrencyTransferRaises(t *testing.T) {
 		`INSERT INTO openrails.ledger_accounts (merchant_id, account_type, currency)
 		 VALUES ($1,'processor_clearing','EUR') RETURNING id`, merchantID).Scan(&eurCredit))
 
-	_, err := tx.Exec(ctx,
+	// transfer_type is 'credit_spend' (a real GAP-7 vocabulary value) rather
+	// than the 'capture' this used to send. 'capture' also violates
+	// ledger_transfers_type_check, so the row had TWO reasons to be rejected;
+	// the assertion below stayed honest only because a BEFORE INSERT trigger
+	// fires ahead of CHECK constraints. Relying on that ordering to keep a
+	// guard pointed at the right failure is luck, not design.
+	err := attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type)
-		 VALUES ($1,$2,$3,100,'USD','capture')`, merchantID, debit, eurCredit)
+		 VALUES ($1,$2,$3,100,'USD','credit_spend')`, merchantID, debit, eurCredit)
 	require.ErrorContains(t, err, "cross-currency transfer",
 		"CUR-3: a transfer whose account currency differs from the transfer currency must raise")
 }
@@ -308,7 +336,7 @@ func TestLED2_MissingAccountRaises(t *testing.T) {
 	_, err := tx.Exec(ctx,
 		`INSERT INTO openrails.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type)
-		 VALUES ($1,$2,$3,100,'USD','capture')`, merchantID, debit, uuid.New())
+		 VALUES ($1,$2,$3,100,'USD','credit_spend')`, merchantID, debit, uuid.New())
 	require.Error(t, err, "LED-2: an unknown credit account must raise, never silently apply")
 }
 
@@ -317,16 +345,16 @@ func TestLED3_InsufficientFundsFloorRaises(t *testing.T) {
 	ctx, super, app := pools(t)
 	tx, debit, credit, merchantID := ledgerFixture(t, ctx, super, app, "USD", true)
 
-	_, err := tx.Exec(ctx,
+	err := attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
-		 VALUES ($1,$2,$3,500,'USD','capture',0)`, merchantID, debit, credit)
+		 VALUES ($1,$2,$3,500,'USD','credit_spend',0)`, merchantID, debit, credit)
 	require.ErrorContains(t, err, "ledger_insufficient_funds",
 		"LED-3: debiting an empty balance-floored account must raise")
 
 	// …and the arrears allowance is honoured, so the floor is a real threshold
 	// rather than a blanket refusal.
-	_, err = tx.Exec(ctx,
+	err = attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
 		 VALUES ($1,$2,$3,500,'USD','owed_accrual',500)`, merchantID, debit, credit)
@@ -403,14 +431,26 @@ func TestGAP10_UniqueIndexesAreMerchantScoped(t *testing.T) {
 	require.NoError(t, err)
 	defer rows.Close()
 	var offenders []string
+	seen := 0
 	for rows.Next() {
 		var tbl, idx, def string
 		require.NoError(t, rows.Scan(&tbl, &idx, &def))
+		seen++
+		// ONE exemption list, shared with the migration-text guard
+		// (migrations/postgres/unique_scope_exemptions.go). A surrogate-id
+		// primary key is not a tenancy statement; every other exception is
+		// named there with a reason.
+		if postgresmigrations.UniqueScopeExemptDef(idx, def) {
+			continue
+		}
 		offenders = append(offenders, tbl+"."+idx+": "+def)
 	}
 	require.NoError(t, rows.Err())
+	// Vacuity guard: if the query stops returning rows the check is a no-op.
+	require.GreaterOrEqual(t, seen, 40,
+		"pg_indexes returned only %d unique indexes lacking merchant_id: the query is broken and this guard would pass vacuously", seen)
 	require.Emptyf(t, offenders,
-		"GAP-10: unique index on a merchant-owned table omits merchant_id — one merchant can block another:\n%v", offenders)
+		"ID-11 (was GAP-10): unique index on a merchant-owned table omits merchant_id — one merchant can block another:\n%v", offenders)
 }
 
 // GAP-9: org ↔ merchant is 1:1. Enforced on the policy-free merchants

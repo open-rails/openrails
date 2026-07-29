@@ -606,33 +606,6 @@ func TestConsolidatedSchemaUsesMerchantPermissionGroup(t *testing.T) {
 	}
 }
 
-// crossMerchantUniqueExemptions: unique indexes on a merchant-scoped table that
-// deliberately span merchants. Each needs a reason that survives review — a
-// cross-merchant unique is a cross-tenant existence oracle, because under RLS
-// the conflicting row is INVISIBLE and the collision surfaces only as an opaque
-// insert failure in the victim's tenant.
-var crossMerchantUniqueExemptions = map[string]string{
-	"merchants_pkey":                   "the tenant directory itself — its rows ARE the merchants",
-	"merchants_slug_key":               "slug is the global tenant address (ID-10)",
-	"uq_merchants_api_host_live":       "api_host routes unauthenticated webhooks; it must be globally unique (ID-10)",
-	"uq_merchants_permission_group_id": "org<->merchant is 1:1 across the whole install (GAP-9)",
-	"probe_verdicts_pkey":              "RLS-exempt: instance-level credential state",
-	"worker_health_pkey":               "RLS-exempt: per-worker-kind process health",
-	"destructive_action_switch_pkey":   "RLS-exempt: instance-level operator kill switch",
-	"schema_migrations_pkey":           "migration ledger",
-
-	// Keyed on a surrogate uuid that is ITSELF merchant-owned. The FK target
-	// row cannot be seen, let alone referenced, across a tenant boundary, so
-	// the unique cannot collide between merchants and is not an oracle.
-	"uq_grants_termination":                  "supersedes_id FKs a merchant-owned grant",
-	"uq_payment_settlement_events_payment":   "payment_id FKs a merchant-owned payment",
-	"uq_subscription_reprices_one_scheduled": "subscription_id FKs a merchant-owned subscription",
-
-	// Genuinely global identifiers, unique across the install by construction.
-	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",
-	"uq_psps_identity":                          "one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide",
-}
-
 // TestUniqueIndexesAreMerchantScoped is the GAP-10 / SEC-24 guard. A UNIQUE
 // index on a merchant-owned table must constrain uniqueness WITHIN a merchant.
 // A primary key on a surrogate uuid is fine (uuidv7 collisions are not a
@@ -666,12 +639,9 @@ func TestUniqueIndexesAreMerchantScoped(t *testing.T) {
 			if !ix.unique || ix.scopedBy("merchant_id") {
 				continue
 			}
-			if _, ok := crossMerchantUniqueExemptions[ix.name]; ok {
-				continue
-			}
-			// A single-column unique on a surrogate id column is a primary key
-			// over a uuid — not a tenancy statement.
-			if len(ix.cols) == 1 && ix.cols[0] == "id" {
+			// ONE exemption list, shared with the live-database guard in
+			// internal/invariantaudit (unique_scope_exemptions.go).
+			if UniqueScopeExempt(ix.name, ix.cols) {
 				continue
 			}
 			violations = append(violations, tbl+"."+ix.name+" "+strings.Join(ix.cols, ","))
@@ -682,7 +652,7 @@ func TestUniqueIndexesAreMerchantScoped(t *testing.T) {
 		t.Errorf("UNIQUE index %s is not scoped by merchant_id — under RLS the conflicting row is invisible, "+
 			"so one merchant can block another's insert and squat its provider reference (GAP-10 / SEC-24). "+
 			"Lead the index with merchant_id (COALESCE a nullable PSP dimension to the nil uuid, as 0017/0020 do), "+
-			"or add it to crossMerchantUniqueExemptions with a reason.", v)
+			"or add it to CrossMerchantUniqueExemptions with a reason.", v)
 	}
 }
 
