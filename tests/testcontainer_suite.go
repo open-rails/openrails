@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -163,12 +164,38 @@ func (suite *TestContainerSuite) boot() {
 	suite.RedisClient = suite.harness.Redis
 	suite.Config = suite.App.Config
 	suite.ServerURL = suite.surface.BaseURL
+	// SEC-19 replaced the old implicit "test_mode accepts any source IP" CCBill
+	// bypass with a DECLARED allowlist, honored only under sandbox posture and
+	// only while the catalog proves no live CCBill PSP exists. This suite posts
+	// its CCBill callbacks from loopback, so it has to declare loopback — the
+	// same declaration embed's and internal/http's webhook suites make.
+	suite.Config.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32", "::1/128"}
 
 	suite.seedRailMerchantAccountFixtures()
 
 	// One real delegated issuer per suite (unique slug: suites share one DB and
 	// an upsert on a shared slug would rotate a live suite's keys mid-run).
 	suite.minter = suite.surface.RegisterDelegatedIssuer("tests-host-"+uuid.NewString()[:8], dbtest.TestMerchantSlug)
+}
+
+// The suite's ONE armed CCBill account, split out of defaultSuiteRails'
+// "945280-0000" account id (#711: the pair derives from the account id).
+const (
+	suiteCCBillAccnum = "945280"
+	suiteCCBillSubacc = "0000"
+)
+
+// CCBillWebhookClient arms the per-merchant half of CCBill webhook
+// authentication. CCBill signs nothing, so matching the callback's
+// clientAccnum/clientSubacc against the merchant's armed account is the only
+// authentication the rail has — and CCBillWebhookService fails CLOSED with no
+// client. A test that constructs the service directly is standing in for the
+// HTTP handler, which arms it from the merchant's PSP catalog.
+func (suite *TestContainerSuite) CCBillWebhookClient() *ccbill.RESTClient {
+	return ccbill.NewRESTClient(&config.CCBillConfig{
+		ClientAccNum: suiteCCBillAccnum,
+		ClientSubAcc: suiteCCBillSubacc,
+	})
 }
 
 // defaultSuiteRails is the construction-time payment-rail merchant-account
@@ -403,7 +430,10 @@ func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID,
 		}
 		// Archive (not delete): rows this test stamped (payments/subscriptions)
 		// hold FK references; archived accounts drop out of active resolution.
-		_, _ = suite.Pool.Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
+		// psps FORCEs RLS, so this MUST run on the merchant-pinned pool — on the
+		// bare one the UPDATE matched nothing and the extra armed NMI account
+		// leaked into every later test's rail resolution as an ambiguity.
+		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
 	})
 }
 
