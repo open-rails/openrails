@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/merchants"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +14,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchants"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

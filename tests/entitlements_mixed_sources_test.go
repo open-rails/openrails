@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -22,7 +21,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NotNil(t, rt.DB)
 	require.NotNil(t, rt.EntitlementService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-60 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)
@@ -182,7 +181,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	userID := uuid.New().String()
 	entName := "soft_delete_test_entitlement"
@@ -229,7 +228,7 @@ func TestEntitlements_RevokeExistingEntitlement_DropsAccessImmediately(t *testin
 	require.NotNil(t, rt)
 	require.NotNil(t, rt.EntitlementService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-30 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

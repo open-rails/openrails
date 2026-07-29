@@ -34,7 +34,7 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 	// PublicStripeWebhookURL only registers endpoints for a public https base.
 	suite.Config.APIURL = "https://api.openrails-e2e.example.com"
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	const accountID = "acct_river_e2e"
 	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")

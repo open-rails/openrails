@@ -22,7 +22,7 @@ import (
 
 func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// Ensure catalog + profile mapping exists for webhook resolution.
 	products := suite.SeedProducts()
@@ -135,7 +135,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	_ = suite.SeedProducts()
 

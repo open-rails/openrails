@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -27,7 +26,7 @@ import (
 // the subscription, across all statuses.
 func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, status string, nextAttemptAt time.Time) {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(MAX(status), ''),
@@ -44,7 +43,7 @@ func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.U
 // row).
 func countLiveNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) int {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	var count int
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM openrails.rail_intents
@@ -90,7 +89,7 @@ func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.Deferred
 // (#358), so NMI stops retrying the dead subscription.
 func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -158,7 +157,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 // invoked exactly once after commit with the subscription's user and ~now.
 func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -210,7 +209,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 // is set (the remote subscription is left for reconciliation).
 func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -324,7 +323,7 @@ func TestDunningWorkerStalenessSchedulesNoDelete(t *testing.T) {
 // minus the safety margin), and the resume worker supersedes it.
 func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()

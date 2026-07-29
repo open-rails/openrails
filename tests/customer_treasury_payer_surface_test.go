@@ -64,7 +64,7 @@ func customerPath(suffix string) string {
 
 func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 // second invoker is independently metered (per-invoker, not pooled — #563).
 func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	customerPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
 
 	svc, err := billingservice.New(suite.App.Runtime)

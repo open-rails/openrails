@@ -74,7 +74,7 @@ func decodeHostSeamBody(t *testing.T, w *httptest.ResponseRecorder) map[string]a
 
 func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)

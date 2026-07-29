@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -23,7 +22,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	fixedTime := time.Date(2024, 8, 1, 10, 0, 0, 0, time.UTC)
 	mockClock := clockwork.NewFakeClockAt(fixedTime)
 	suite := setupTestSuite(t, WithSuiteClock(mockClock))
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	rt := suite.App.Runtime
 	// #694: services capture ONE construction-time SettableClock whose delegate
@@ -209,7 +208,7 @@ func TestSubscriptionExpiryWithMockClock(t *testing.T) {
 // TestLifecycleServiceUsesMockClock verifies that SubscriptionLifecycleService uses the mock clock
 func TestLifecycleServiceUsesMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// Seed products
 	products := suite.SeedProducts()

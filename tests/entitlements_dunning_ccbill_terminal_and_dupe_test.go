@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
@@ -26,7 +24,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
@@ -201,7 +199,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

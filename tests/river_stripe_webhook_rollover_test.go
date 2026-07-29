@@ -139,7 +139,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	suite := setupTestSuite(t)
 	suite.Config.APIURL = "https://api.openrails-e2e.example.com"
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	const accountID = "acct_rollover_856"
 	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")

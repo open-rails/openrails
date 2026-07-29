@@ -64,7 +64,7 @@ func postNMIMerchantWebhook(t *testing.T, suite *TestContainerSuite, body []byte
 
 func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// Seed the webhook signing secret for the suite's active NMI account — the
 	// exact secret LoadNMIWebhookSigningSecret resolves on the merchant surface.

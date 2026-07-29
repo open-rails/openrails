@@ -3,14 +3,12 @@
 package tests
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -26,7 +24,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	require.NotNil(t, rt.DB)
 	require.NotNil(t, rt.IdempotencyService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
@@ -171,7 +169,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	rt := suite.App.Runtime
 	require.NotNil(t, rt)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

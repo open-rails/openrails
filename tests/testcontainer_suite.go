@@ -509,6 +509,26 @@ func (suite *TestContainerSuite) FixtureDB() *db.DB {
 	return suite.harness.MerchantDB(dbtest.TestMerchantID.UUID())
 }
 
+// MerchantCtx returns a context carrying the suite's merchant AND a pinned
+// merchant DB connection on the app runtime's pool — literally what
+// MerchantDBConnMW does for every request and what a River job does via
+// RunInMerchantConn. The connection is released at test end.
+//
+// A test that calls an App.Runtime service DIRECTLY has stepped below the layer
+// that pins in production, so it must stand in for that layer; this is how. A
+// test driving a full ENTRY POINT (an HTTP route, a worker) must NOT use the
+// result to reach past the entry point — proving the code pins itself is that
+// test's whole point, and the server pins its own request context regardless of
+// what the test holds.
+func (suite *TestContainerSuite) MerchantCtx() context.Context {
+	suite.t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx, release, err := suite.App.Runtime.DB.WithMerchantConn(ctx)
+	require.NoError(suite.t, err, "pin merchant db connection")
+	suite.t.Cleanup(release)
+	return ctx
+}
+
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()

@@ -3,13 +3,11 @@
 package tests
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/dbtest"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -19,7 +17,7 @@ import (
 // round-trip via Deactivate/Activate.
 func TestCatalogArchived_RoundTripsThroughFacade(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -51,7 +49,7 @@ func TestCatalogArchived_RoundTripsThroughFacade(t *testing.T) {
 // public catalog does not surface it.
 func TestCatalogArchived_CreateAsArchivedInOneStep(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)

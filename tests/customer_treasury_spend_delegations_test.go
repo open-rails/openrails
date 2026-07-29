@@ -30,7 +30,7 @@ import (
 
 func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	_, err := suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
@@ -101,7 +101,7 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 
 func TestReplaceInvokerSpendLimitsRollsBackOnWriteFailure(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -152,7 +152,7 @@ EXECUTE FUNCTION openrails.%s()`, functionName, triggerName, failingKey, functio
 
 func TestReplaceInvokerSpendLimitsPurgesLegacyPaddedScopeKeys(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -209,7 +209,7 @@ WHERE merchant_id = $1 AND customer_id = $2
 
 func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
