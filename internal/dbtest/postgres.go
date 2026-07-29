@@ -158,10 +158,48 @@ func testDBIsStale(name string) bool {
 	return time.Since(time.Unix(0, nano)) > testDBStaleAfter
 }
 
-// SharedPostgresDSN returns a DSN to a migrated Postgres shared across all
-// integration tests in the calling package process. It fails the test if the
-// database cannot be provisioned.
+// SharedPostgresDSN returns the DEFAULT DSN to a migrated Postgres shared across
+// all integration tests in the calling package process.
+//
+// It connects as the unprivileged `openrails_app` role (NOBYPASSRLS) — the SAME
+// role production connects as — so every per-merchant RLS policy actually
+// constrains the code under test. A query that forgets to set the
+// `app.merchant_id` GUC returns zero rows here, exactly as it would in
+// production, instead of silently succeeding against a superuser connection.
+//
+// Tests that legitimately need privilege (seeding cross-merchant fixtures,
+// asserting on another merchant's rows, driving migrations) must say so:
+// SharedSuperuserDSN(t, "<reason>").
+//
+// It fails the test if the database cannot be provisioned, or if the DSN it is
+// about to hand back turns out to be privileged (see requireRLSEnforcing).
 func SharedPostgresDSN(t *testing.T) string {
+	t.Helper()
+	dsn := sharedAppDSN(t)
+	requireRLSEnforcing(t, dsn)
+	return dsn
+}
+
+// SharedSuperuserDSN returns the PRIVILEGED (RLS-bypassing) DSN on the same
+// shared database as SharedPostgresDSN.
+//
+// reason is required and must be non-empty: every bypass of the production
+// isolation constraint has to be self-documenting and greppable in review. Valid
+// reasons are narrow — seeding cross-merchant fixtures, asserting on rows the
+// merchant under test cannot see, or exercising the migrator. "The test fails
+// otherwise" is NOT a reason: that is the harness reporting a production bug.
+func SharedSuperuserDSN(t *testing.T, reason string) string {
+	t.Helper()
+	if strings.TrimSpace(reason) == "" {
+		t.Fatal("dbtest.SharedSuperuserDSN: a non-empty reason is required — state why this test needs to bypass RLS")
+	}
+	return sharedPrivilegedDSN(t)
+}
+
+// sharedPrivilegedDSN provisions (once) the shared database and returns the
+// admin/superuser DSN. Unexported on purpose: callers go through
+// SharedSuperuserDSN so the bypass carries a stated reason.
+func sharedPrivilegedDSN(t *testing.T) string {
 	t.Helper()
 	sharedOnce.Do(func() {
 		sharedDSN, sharedErr = provision(context.Background())
@@ -349,12 +387,23 @@ func waitForDB(ctx context.Context, sqlDB *sql.DB) error {
 	}
 }
 
-// SharedPGXPool returns a pgx/v5 pool on the shared integration postgres —
-// the handle for exercising sqlc-converted code paths (#334).
+// SharedPGXPool returns a pgx/v5 pool on the shared integration postgres, as the
+// RLS-ENFORCING openrails_app role (see SharedPostgresDSN) — the handle for
+// exercising sqlc-converted code paths (#334) the way production runs them.
 func SharedPGXPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool, err := pgxpool.New(context.Background(), SharedPostgresDSN(t))
 	require.NoError(t, err, "open pgx pool on shared integration postgres")
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// SharedSuperuserPGXPool returns a pgx/v5 pool as the privileged role. reason is
+// required — see SharedSuperuserDSN.
+func SharedSuperuserPGXPool(t *testing.T, reason string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), SharedSuperuserDSN(t, reason))
+	require.NoError(t, err, "open privileged pgx pool on shared integration postgres")
 	t.Cleanup(pool.Close)
 	return pool
 }

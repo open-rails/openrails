@@ -77,8 +77,13 @@ type Harness struct {
 	t   *testing.T
 	ctx context.Context
 
-	// DSN is the shared, fully-migrated Postgres (OpenRails + AuthKit profiles.*).
+	// DSN is the shared, fully-migrated Postgres (OpenRails + AuthKit profiles.*),
+	// as the unprivileged openrails_app role: RLS ENFORCES on it, exactly as in
+	// production. This is what every server this harness boots connects with.
 	DSN string
+	// SuperDSN is the same database over the privileged role. Fixture seeding
+	// only — it bypasses every RLS policy, so no code under test may run on it.
+	SuperDSN string
 	// Redis is a client over shared Redis (admission throughput axis).
 	Redis *redis.Client
 
@@ -114,12 +119,13 @@ func (h *Harness) Close() {
 	h.cleanups = nil
 }
 
-// sharedPool lazily opens a privileged pgx pool over the shared DSN for fixture
-// writes (merchant directory row, payer subjects, entitlements).
+// sharedPool lazily opens a privileged pgx pool over SuperDSN for fixture
+// writes (merchant directory row, payer subjects, entitlements) that legitimately
+// span merchants. Never hand it to code under test — it bypasses RLS.
 func (h *Harness) sharedPool() *pgxpool.Pool {
 	h.t.Helper()
 	if h.pool == nil {
-		p, err := pgxpool.New(h.ctx, h.DSN)
+		p, err := pgxpool.New(h.ctx, h.SuperDSN)
 		require.NoError(h.t, err, "open shared pgx pool")
 		h.pool = p
 		h.cleanup(p.Close)
@@ -189,10 +195,11 @@ func New(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
+	superDSN := dbtest.SharedSuperuserDSN(t, "harness fixture pool: seeds merchant-directory/payer rows across merchants")
 
 	rdb, _ := dbtest.SharedRedisClient(t)
 
-	return &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb}
+	return &Harness{t: t, ctx: ctx, DSN: dsn, SuperDSN: superDSN, Redis: rdb}
 }
 
 // NewPersistent is New for a package-shared harness: resource lifetimes are NOT
@@ -202,9 +209,10 @@ func NewPersistent(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
+	superDSN := dbtest.SharedSuperuserDSN(t, "harness fixture pool: seeds merchant-directory/payer rows across merchants")
 	rdb := dbtest.NewSharedRedisClient(t)
 
-	h := &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb, persistent: true}
+	h := &Harness{t: t, ctx: ctx, DSN: dsn, SuperDSN: superDSN, Redis: rdb, persistent: true}
 	h.cleanup(func() { _ = rdb.Close() })
 	return h
 }
@@ -358,8 +366,7 @@ func WithDelegatedAuthenticator(a billingauth.DelegatedAuthenticator) Standalone
 // real RLS, never a privileged bypass. Fixtures are still seeded via the super pool
 // (h.sharedPool), which bypasses RLS for cross-merchant setup an admin does out of band.
 func (h *Harness) StartStandalone(currency string, opts ...StandaloneOption) *Surface {
-	_, appDSN := dbtest.SharedRLSPostgres(h.t)
-	return h.startStandalone(currency, appDSN, "standalone", opts...)
+	return h.startStandalone(currency, h.DSN, "standalone", opts...)
 }
 
 // StartStandaloneSuper boots the same real standalone graph over the PRIVILEGED
@@ -368,7 +375,7 @@ func (h *Harness) StartStandalone(currency string, opts ...StandaloneOption) *Su
 // covered by StartStandalone consumers (cross-merchant isolation + rls tests).
 // New tests should prefer StartStandalone.
 func (h *Harness) StartStandaloneSuper(currency string, opts ...StandaloneOption) *Surface {
-	return h.startStandalone(currency, h.DSN, "standalone-super", opts...)
+	return h.startStandalone(currency, h.SuperDSN, "standalone-super", opts...)
 }
 
 func (h *Harness) startStandalone(currency, appDSN, name string, opts ...StandaloneOption) *Surface {
