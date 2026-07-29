@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -278,11 +279,14 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		if !t.Success {
 			status = "failed"
 		}
-		currency := t.Currency
+		// CUR-6: this is a provider INGESTION boundary — Stripe reports currency
+		// lower-case on the wire — and the value lands in payments.currency, so
+		// it must be canonicalised here, not left as the rail wrote it.
+		currency := money.NormalizeCurrency(t.Currency)
 		if currency == "" && sub.Price != nil {
 			// #651: don't fabricate "usd". A decline/void carries no currency of its
 			// own; fall back to the subscription's real billing currency (truthful).
-			currency = sub.Price.Currency
+			currency = money.NormalizeCurrency(sub.Price.Currency)
 		}
 		if currency == "" {
 			// Genuinely unknown currency (transaction and subscription both lack one):

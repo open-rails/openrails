@@ -487,7 +487,10 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	req.Currency = strings.TrimSpace(req.Currency)
+	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
+	// is case-insensitive, so without this a caller-supplied "usd" validated
+	// fine and then failed the prices_currency_shape CHECK at INSERT.
+	req.Currency = money.NormalizeCurrency(req.Currency)
 	if req.UnitAmount < 0 {
 		return nil, fmt.Errorf("unit_amount must be non-negative")
 	}
