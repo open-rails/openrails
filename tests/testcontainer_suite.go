@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
@@ -496,10 +497,22 @@ func (suite *TestContainerSuite) ClearJobQueue() {
 	}
 }
 
+// FixtureDB is the handle this suite's fixture helpers write and read through:
+// the RLS-ENFORCING app role with app.merchant_id pinned to the suite's one
+// merchant. Those helpers drive MODULE SERVICES and REPOS directly — below the
+// layer that opens the merchant connection in production (MerchantDBConnMW on
+// the HTTP path, the River worker's own wrap) — so the fixture has to supply
+// what that layer supplies. suite.App.Runtime.DB is the SERVER's unpinned pool:
+// code under test must pin it itself, which is exactly what these tests prove.
+func (suite *TestContainerSuite) FixtureDB() *db.DB {
+	suite.t.Helper()
+	return suite.harness.MerchantDB(dbtest.TestMerchantID.UUID())
+}
+
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price, err := catalog.NewPriceService(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
+	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

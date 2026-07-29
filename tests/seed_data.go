@@ -905,7 +905,7 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	sub, err := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(suite.FixtureDB()).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get subscription %s", id)
 
 	return sub
@@ -917,7 +917,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB)
+	repo := subscriptions.NewSubscriptionRepo(suite.FixtureDB())
 	var subs []*models.Subscription
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.subscriptions WHERE customer_id = $1 ORDER BY created_at DESC",
@@ -936,7 +936,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := payments.NewPaymentRepo(suite.App.Runtime.DB)
+	repo := payments.NewPaymentRepo(suite.FixtureDB())
 	var payments []*models.Payment
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.payments WHERE customer_id = $1 ORDER BY purchased_at DESC",
@@ -955,7 +955,7 @@ func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*mod
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	repo := paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB)
+	repo := paymentmethods.NewPaymentMethodRepo(suite.FixtureDB())
 	var pms []*models.PaymentMethod
 	for _, id := range suite.queryIDs(ctx,
 		"SELECT id FROM openrails.payment_methods WHERE customer_id = $1 ORDER BY created_at DESC",
