@@ -33,18 +33,12 @@ var (
 
 // SharedRLSPostgres returns a super (admin) DSN and an app-role DSN.
 //
-// Both point at the SAME shared, fully-migrated database — so a package that uses
-// both helpers still provisions only one container. The super DSN bypasses RLS
-// (use it to seed cross-merchant fixtures); the app DSN is the same DSN
-// SharedPostgresDSN hands out by default.
-//
-// Prefer SharedPostgresDSN + SharedSuperuserDSN(t, reason) in new tests: this
-// helper predates the default inversion and its super DSN carries no stated
-// reason.
+// Both point at the SAME shared, fully-migrated database. Kept for tests that
+// want both handles in one line; new tests can just call SharedPostgresDSN and,
+// where privilege is genuinely needed, SharedSuperuserDSN.
 func SharedRLSPostgres(t *testing.T) (superDSN, appDSN string) {
 	t.Helper()
-	return SharedSuperuserDSN(t, "SharedRLSPostgres: seeds cross-merchant fixtures alongside the RLS-enforcing app DSN"),
-		SharedPostgresDSN(t)
+	return SharedSuperuserDSN(t), SharedPostgresDSN(t)
 }
 
 // sharedAppDSN provisions (once) and returns the openrails_app DSN on the shared
@@ -67,14 +61,10 @@ var (
 	rlsGuardErr  error
 )
 
-// requireRLSEnforcing fails the test unless dsn authenticates as a role that RLS
-// actually constrains — i.e. NOT rolsuper AND NOT rolbypassrls.
-//
-// This is the harness-level guard that makes "the test bypassed RLS" impossible
-// to reintroduce silently. Five shipped guards read as protection and could not
-// fire because their tests connected as superuser (SEC-16, or#824, or#860,
-// or#861, or#862); the default handle is now checked before it is handed out.
-// Checked once per test-binary process — the DSN is a process-level constant.
+// requireRLSEnforcing fails the test unless dsn authenticates as a role RLS
+// actually constrains — NOT rolsuper AND NOT rolbypassrls. Without it,
+// repointing the default at superuser would leave every test passing and
+// meaning nothing. Checked once per process; the DSN is a process constant.
 func requireRLSEnforcing(t *testing.T, dsn string) {
 	t.Helper()
 	rlsGuardOnce.Do(func() { rlsGuardErr = checkRLSEnforcing(context.Background(), dsn) })
@@ -101,8 +91,7 @@ func checkRLSEnforcing(ctx context.Context, dsn string) error {
 		return fmt.Errorf(
 			"dbtest: SharedPostgresDSN handed back the privileged role %q (rolsuper or rolbypassrls). "+
 				"The default integration DSN MUST connect as %s so per-merchant RLS policies constrain the test "+
-				"exactly as they do in production. If this test genuinely needs privilege, call "+
-				"SharedSuperuserDSN(t, \"<reason>\") explicitly instead of widening the default",
+				"exactly as in production. A test that genuinely needs privilege calls SharedSuperuserDSN(t)",
 			user, appRole)
 	}
 	return nil

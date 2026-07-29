@@ -23,7 +23,7 @@ import (
 // the policy would hold the line and the query's own predicate would go untested.
 func TestSearchCustomersScopedToMerchant(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedSuperuserPGXPool(t, "proves SearchCustomers' OWN merchant predicate holds with RLS disabled; also seeds a second merchant's customer")
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	otherMerchantID := uuid.New()

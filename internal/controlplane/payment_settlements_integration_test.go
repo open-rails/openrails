@@ -25,7 +25,7 @@ import (
 func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
 	appDSN := dbtest.SharedPostgresDSN(t)
-	super := dbtest.SharedSuperuserPGXPool(t, "seeds two merchants and their customers/products/prices — cross-merchant fixture setup RLS correctly forbids")
+	super := dbtest.SharedSuperuserPGXPool(t)
 
 	appPool, err := pgxpool.New(ctx, appDSN)
 	require.NoError(t, err)

@@ -195,7 +195,7 @@ func New(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
-	superDSN := dbtest.SharedSuperuserDSN(t, "harness fixture pool: seeds merchant-directory/payer rows across merchants")
+	superDSN := dbtest.SharedSuperuserDSN(t)
 
 	rdb, _ := dbtest.SharedRedisClient(t)
 
@@ -209,7 +209,7 @@ func NewPersistent(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
-	superDSN := dbtest.SharedSuperuserDSN(t, "harness fixture pool: seeds merchant-directory/payer rows across merchants")
+	superDSN := dbtest.SharedSuperuserDSN(t)
 	rdb := dbtest.NewSharedRedisClient(t)
 
 	h := &Harness{t: t, ctx: ctx, DSN: dsn, SuperDSN: superDSN, Redis: rdb, persistent: true}

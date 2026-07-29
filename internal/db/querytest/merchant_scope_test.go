@@ -31,7 +31,7 @@ import (
 // not the policy.
 func TestMerchantAdminByIDQueriesScopeToTheRequestMerchant(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedSuperuserPGXPool(t, "querytest asserts the QUERY PREDICATE with RLS deliberately disabled (SEC-18) and TRUNCATE/ANALYZEs the perf corpus")
+	pool := dbtest.SharedSuperuserPGXPool(t)
 
 	var bypasses bool
 	require.NoError(t, pool.QueryRow(ctx, `

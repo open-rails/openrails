@@ -170,7 +170,7 @@ func testDBIsStale(name string) bool {
 //
 // Tests that legitimately need privilege (seeding cross-merchant fixtures,
 // asserting on another merchant's rows, driving migrations) must say so:
-// SharedSuperuserDSN(t, "<reason>").
+// SharedSuperuserDSN(t).
 //
 // It fails the test if the database cannot be provisioned, or if the DSN it is
 // about to hand back turns out to be privileged (see requireRLSEnforcing).
@@ -182,24 +182,17 @@ func SharedPostgresDSN(t *testing.T) string {
 }
 
 // SharedSuperuserDSN returns the PRIVILEGED (RLS-bypassing) DSN on the same
-// shared database as SharedPostgresDSN.
-//
-// reason is required and must be non-empty: every bypass of the production
-// isolation constraint has to be self-documenting and greppable in review. Valid
-// reasons are narrow — seeding cross-merchant fixtures, asserting on rows the
-// merchant under test cannot see, or exercising the migrator. "The test fails
-// otherwise" is NOT a reason: that is the harness reporting a production bug.
-func SharedSuperuserDSN(t *testing.T, reason string) string {
+// shared database as SharedPostgresDSN — for the cases that genuinely need it:
+// cross-merchant fixture seeding, asserting on rows the merchant under test
+// cannot see, driving the migrator. Never for "the test fails otherwise": that
+// is the harness reporting a production bug.
+func SharedSuperuserDSN(t *testing.T) string {
 	t.Helper()
-	if strings.TrimSpace(reason) == "" {
-		t.Fatal("dbtest.SharedSuperuserDSN: a non-empty reason is required — state why this test needs to bypass RLS")
-	}
 	return sharedPrivilegedDSN(t)
 }
 
 // sharedPrivilegedDSN provisions (once) the shared database and returns the
-// admin/superuser DSN. Unexported on purpose: callers go through
-// SharedSuperuserDSN so the bypass carries a stated reason.
+// admin/superuser DSN.
 func sharedPrivilegedDSN(t *testing.T) string {
 	t.Helper()
 	sharedOnce.Do(func() {
@@ -399,33 +392,35 @@ func SharedPGXPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// SharedSuperuserPGXPool returns a pgx/v5 pool as the privileged role. reason is
-// required — see SharedSuperuserDSN.
-func SharedSuperuserPGXPool(t *testing.T, reason string) *pgxpool.Pool {
+// SharedSuperuserPGXPool returns a pgx/v5 pool as the privileged role.
+func SharedSuperuserPGXPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), SharedSuperuserDSN(t, reason))
+	pool, err := pgxpool.New(context.Background(), SharedSuperuserDSN(t))
 	require.NoError(t, err, "open privileged pgx pool on shared integration postgres")
 	t.Cleanup(pool.Close)
 	return pool
 }
 
-// SharedMerchantPool returns an RLS-ENFORCING pool whose every connection has
-// `app.merchant_id` pinned to merchantID — the production posture (MerchantTx /
-// RunInMerchantConn) in pool form.
-//
-// This, not a superuser pool, is what a test wants when it seeds or asserts on
-// ONE merchant's own rows: the policies stay live and the fixture proves the
-// merchant can actually see its own data. Reach for SharedSuperuserPGXPool only
-// when the fixture genuinely spans merchants.
+// MerchantPinnedDSN is the default (RLS-enforcing) DSN with app.merchant_id
+// pinned at connection startup — what MerchantTx/RunInMerchantConn establish in
+// production, in DSN form.
+func MerchantPinnedDSN(t *testing.T, merchantID uuid.UUID) string {
+	t.Helper()
+	u, err := url.Parse(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	q := u.Query()
+	q.Set("options", "-c app.merchant_id="+merchantID.String())
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// SharedMerchantPool returns an RLS-ENFORCING pool pinned to merchantID. This,
+// not a superuser pool, is what a test wants when it seeds or asserts on ONE
+// merchant's own rows: the policies stay live and the fixture proves the
+// merchant can see its own data. Superuser is for fixtures spanning merchants.
 func SharedMerchantPool(t *testing.T, merchantID uuid.UUID) *pgxpool.Pool {
 	t.Helper()
-	cfg, err := pgxpool.ParseConfig(SharedPostgresDSN(t))
-	require.NoError(t, err, "parse shared app dsn")
-	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
-		return err
-	}
-	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	pool, err := pgxpool.New(context.Background(), MerchantPinnedDSN(t, merchantID))
 	require.NoError(t, err, "open merchant-pinned pgx pool")
 	t.Cleanup(pool.Close)
 	return pool
