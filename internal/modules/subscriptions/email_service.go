@@ -175,6 +175,25 @@ func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data Subscri
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
+// SendPaymentMethodUpdateRequired is the or#870 bucket-2 send: charging has
+// STOPPED but the subscription and the customer's access are intact.
+func (s *EmailService) SendPaymentMethodUpdateRequired(ctx context.Context, userID string) error {
+	if !s.IsEnabled() {
+		log.WithContext(ctx).Debug("email service not available - skipping payment-method-update email")
+		return nil
+	}
+	emailData, err := s.getEmailData(ctx, userID)
+	if err != nil {
+		if errors.Is(err, errUserEmailUnavailable) {
+			log.WithContext(ctx).Debug("email unavailable - skipping payment-method-update email")
+			return nil
+		}
+		return fmt.Errorf("failed to get email data: %w", err)
+	}
+	rendered := RenderPaymentMethodUpdateRequiredEmail(s.storeName(ctx), s.signupURL(ctx), *emailData)
+	return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
 func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
 	rendered := RenderPaymentFailedEmail(s.storeName(ctx), "", data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
@@ -400,6 +419,11 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	switch reason {
 	case PremiumEndReasonExpired:
 		return s.SendSubscriptionExpired(ctx, *emailData)
+	case PremiumEndReasonNonRecoverable:
+		// or#870 bucket 3: the mandate is gone. Distinct copy — their saved card
+		// was NOT touched, and re-subscribing is the way back.
+		rendered := RenderSubscriptionNonRecoverableEmail(s.storeName(ctx), s.signupURL(ctx), *emailData)
+		return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonRail:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
 	case PremiumEndReasonUserCancel:

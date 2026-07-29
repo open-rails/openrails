@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
 type CreateMembershipParams struct {
@@ -112,12 +113,19 @@ type FailMembershipParams struct {
 	// REQUEST, not a command: TerminalCertainty must name the evidence, or the
 	// row parks as `unknown` instead (#839).
 	Terminal bool
-	// HardDecline, when true, requests immediate cancellation with no further
-	// retry scheduling regardless of dunning mode. Set by dunning when the rail
-	// returns a permanent decline (stolen card, do-not-honor, account closed,
-	// expired card, pickup card). See collection.ClassifyNMIDecline. Also gated
-	// on TerminalCertainty.
-	HardDecline bool
+	// Decline (or#870) is the three-way meaning of the rail's decline code, from
+	// the ONE classifier collection.ClassifyDecline. The zero value
+	// (DeclineRetry) is the safe default for every caller that has no code:
+	//
+	//   DeclineRetry            keep the dunning schedule
+	//   DeclineFixPaymentMethod stop charging, KEEP the subscription and its
+	//                           entitlements, notify the customer to update the
+	//                           card. Never cancels, never revokes.
+	//   DeclineNonRecoverable   terminal: cancel the schedule at the rail. Still
+	//                           gated on TerminalCertainty + TerminalBlocked.
+	//
+	// No value of this field ever deletes a stored payment method.
+	Decline collection.DeclineOutcome
 	// TerminalCertainty (#821/#839/#840) names the evidence leg that justifies a
 	// terminal outcome — one of the collection.Certainty* constants. A terminal
 	// cancel revokes entitlements AND queues an IRREVERSIBLE provider-side vault

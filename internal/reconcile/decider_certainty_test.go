@@ -101,7 +101,10 @@ func TestGateCancelCertainty_NoCancelWithoutALeg(t *testing.T) {
 	}
 }
 
-func TestIsNonRetryableDecline(t *testing.T) {
+func TestDeciderCancelCertaintyUsesTheOr870Classifier(t *testing.T) {
+	// The decider's terminal leg fires for bucket 3 and NOTHING else: a bucket-2
+	// card problem beyond the dunning window is a customer who can still fix it,
+	// and an unreadable code is missing evidence.
 	cases := []struct {
 		rail, code string
 		want       bool
@@ -110,10 +113,10 @@ func TestIsNonRetryableDecline(t *testing.T) {
 		{"nmi", "262", true},  // stop this recurring program
 		{"nmi", "252", true},  // stolen card
 		{"nmi", "202", false}, // insufficient funds — dun, never cancel
-		{"nmi", "201", false}, // do not honor
-		{"nmi", "223", false}, // expired card — the customer can update it
+		{"nmi", "201", false}, // do not honor — bucket 2, they can fix it
+		{"nmi", "223", false}, // expired card — bucket 2
 		{"nmi", "264", false}, // "retry in a few days" is literally retryable
-		{"nmi", "420", false}, // communication error
+		{"nmi", "420", false}, // communication error — ours
 		{"nmi", "declined_stop_all_recurring_payments", true},
 		{"nmi", "nmi_declined_stop_all_recurring_payments", true},
 		{"nmi", "", false},
@@ -124,8 +127,9 @@ func TestIsNonRetryableDecline(t *testing.T) {
 		{"solana", "anything", false},
 	}
 	for _, c := range cases {
-		if got := collection.IsNonRetryableDecline(c.rail, c.code); got != c.want {
-			t.Errorf("collection.IsNonRetryableDecline(%q, %q) = %v, want %v", c.rail, c.code, got, c.want)
+		got := collection.ClassifyDecline(c.rail, c.code) == collection.DeclineNonRecoverable
+		if got != c.want {
+			t.Errorf("ClassifyDecline(%q, %q)==NonRecoverable = %v, want %v", c.rail, c.code, got, c.want)
 		}
 	}
 }

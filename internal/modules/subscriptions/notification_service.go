@@ -211,8 +211,8 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		log.WithContext(ctx).Debug("payment method auto-updated - no email sent")
 		return nil
 	case models.NotificationPaymentMethodUpdateRequired:
-		log.WithContext(ctx).Debug("payment method update required - no specific email template")
-		return nil
+		// or#870 bucket 2: charging stopped, access retained, customer must act.
+		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
 	case models.NotificationSystemAlert:
 		log.WithContext(ctx).Debug("system alert - no user email sent")
 		return nil

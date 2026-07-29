@@ -503,26 +503,24 @@ func (w *DunningWorker) applyDeclinedRebill(
 		reason = "rebill declined"
 	}
 	responseCode := manualRebillEvidenceResponseCode(intent)
-	hardDecline := collection.ClassifyNMIDecline(responseCode) == collection.DeclineHard
 	var failureCode *string
 	if responseCode != 0 {
 		code := fmt.Sprintf("%d", responseCode)
 		failureCode = &code
 	}
 
+	// or#870: ONE classifier, three outcomes. Unknown codes land in bucket 1.
+	outcome := collection.ClassifyDecline(string(rail), normalize.FromPtr(failureCode))
+
 	// #821/#839: name the evidence leg that would justify a terminal outcome.
-	// A real gateway decline IS evidence — unlike a date or a missing local row
-	// — but the strength differs: only the tight non-retryable set means "never
-	// charge this again". Anything else the dunning classifier calls hard names
-	// the weaker CertaintyHardDecline leg rather than borrowing a stronger one.
-	// A soft decline names nothing here; FailMembership derives the
-	// dunning-exhausted leg from the recorded attempts if the schedule runs out.
+	// Only bucket 3 does — the issuer has withdrawn the mandate or the
+	// instrument is permanently dead. Bucket 2 stops charging WITHOUT
+	// terminating, so it names nothing; bucket 1 names nothing either and
+	// FailMembership derives the dunning-exhausted leg from recorded attempts
+	// if the schedule runs out.
 	certainty := ""
-	switch {
-	case collection.IsNonRetryableDecline(string(rail), normalize.FromPtr(failureCode)):
+	if outcome == collection.DeclineNonRecoverable {
 		certainty = collection.CertaintyNonRetryableDecline
-	case hardDecline:
-		certainty = collection.CertaintyHardDecline
 	}
 
 	// #836: the operator kill switch, read on this merchant-scoped connection.
@@ -536,19 +534,19 @@ func (w *DunningWorker) applyDeclinedRebill(
 	declineLog := logEntry.WithFields(log.Fields{
 		"response_code":      responseCode,
 		"reason":             reason,
-		"hard_decline":       hardDecline,
+		"decline_outcome":    outcome.String(),
 		"terminal_certainty": certainty,
 		"terminal_blocked":   blocked,
 	})
 	switch {
 	case blocked != "":
 		declineLog.Warn("Dunning: decline recorded but destructive actions are gated; no terminal cancellation will execute — " + blocked)
-	case hardDecline:
-		// Emit a high-visibility signal: a hard decline permanently terminates
-		// the subscription rather than retrying.
-		declineLog.Error("Dunning: hard decline; terminating subscription without further retries")
+	case outcome == collection.DeclineNonRecoverable:
+		declineLog.Error("Dunning: non-recoverable decline (or#870 bucket 3); cancelling the subscription at the rail — the stored payment method is NOT touched")
+	case outcome == collection.DeclineFixPaymentMethod:
+		declineLog.Warn("Dunning: customer's card needs fixing (or#870 bucket 2); charging STOPS, subscription and entitlements retained, update-payment-method notice sent")
 	default:
-		declineLog.Warn("Dunning: soft decline; will retry on schedule")
+		declineLog.Warn("Dunning: retryable decline (or#870 bucket 1); will retry on schedule")
 	}
 
 	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
@@ -556,7 +554,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 		SubscriptionID:      &sub.ID,
 		FailureReason:       &reason,
 		FailureCode:         failureCode,
-		HardDecline:         hardDecline,
+		Decline:             outcome,
 		RecordFailedAttempt: true,
 		TerminalCertainty:   certainty,
 		TerminalBlocked:     blocked,

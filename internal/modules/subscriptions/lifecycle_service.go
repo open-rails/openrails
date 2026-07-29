@@ -1778,6 +1778,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// Set inside the tx when a terminal cancellation must also stop the
 	// remote NMI recurring subscription; the job is enqueued after commit.
 	var scheduleDeferredDelete bool
+	// or#870 bucket 2: the decline means the customer must fix their card.
+	// Drives the payment_method_update_required notification below.
+	var needsPaymentMethodUpdate bool
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail":                 params.Rail,
@@ -1805,6 +1808,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
 		scheduleDeferredDelete = false // reset in case the tx is retried
+		needsPaymentMethodUpdate = false
 
 		now := s.now()
 
@@ -1864,16 +1868,40 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}).Warn("Terminal cancellation REFUSED; parking subscription as unknown (entitlements intact, no provider delete queued)")
 		}
 
-		// Hard declines (stolen card, do-not-honor, account closed, expired card,
-		// pickup card) terminate immediately: cancel now with no grace period and
-		// no further retry scheduling. Retrying a hard decline cannot succeed and
-		// risks flagging the merchant with the card networks.
-		if params.HardDecline && terminalRefusal(params.TerminalCertainty) == "" {
+		// or#870 bucket 2 — THEIR card, fixable (expired, bad CVC, do-not-honor,
+		// call issuer...). Retrying cannot succeed and burns attempts against the
+		// issuer, but the customer fixes it in a minute. So: stop charging NOW,
+		// keep the subscription alive and its entitlements intact (an `unknown`
+		// row projects standing access, #691), and notify them to update the
+		// payment method. NOT a terminal outcome — no cancel, no revoke, no
+		// certainty leg required, and emphatically no touching of their stored
+		// card. This is where recoverable revenue lives.
+		if params.Decline == collection.DeclineFixPaymentMethod {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID,
 				"failure_code":    normalize.FromPtr(params.FailureCode),
-			}).Warn("Hard decline received; immediately cancelling subscription (no retry)")
+			}).Warn("or#870 bucket 2: payment method needs the customer's attention; charging STOPS, access and the stored card are untouched")
+			subscription.Status = models.StatusUnknown
+			subscription.GraceEndsAt = nil
+			subscription.NextRetryAt = nil
+			needsPaymentMethodUpdate = true
+		} else if params.Decline == collection.DeclineNonRecoverable && terminalRefusal(params.TerminalCertainty) != "" {
+			// Bucket 3 with the #836 kill switch closed (or no certainty leg
+			// named): the mandate is gone, so continuing to charge is wrong, but
+			// cancelling is forbidden. Park as `unknown` — access intact, out of
+			// the dunning queue, no rail action queued.
+			parkUnknown(terminalRefusal(params.TerminalCertainty))
+		} else if params.Decline == collection.DeclineNonRecoverable {
+			// or#870 bucket 3 — the issuer withdrew the recurring mandate, or the
+			// instrument is permanently dead. Cancel now with no grace and no
+			// further retries; the deferred rail-side SCHEDULE delete below stops
+			// NMI rebilling forever. The stored payment method is not touched.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.CustomerID,
+				"failure_code":    normalize.FromPtr(params.FailureCode),
+			}).Warn("or#870 bucket 3: non-recoverable decline; cancelling the subscription at the rail (stored payment method left intact)")
 			expired := models.CancelTypeExpired
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
@@ -2063,14 +2091,28 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
+		// or#870 notification ladder. One rung per outcome, so a customer is
+		// never silent-treated through a whole dunning cycle and then suddenly
+		// cancelled:
+		//   bucket 1, still trying  -> payment_method_failed ("we'll keep trying")
+		//   bucket 1, schedule out  -> premium_ended / expired ("we gave up")
+		//   bucket 2                -> payment_method_update_required ("fix it,
+		//                              your access is still on")
+		//   bucket 3                -> premium_ended / non_recoverable ("the
+		//                              mandate is gone; re-subscribe")
 		eventType := models.NotificationPaymentMethodFailed
-		if subscription.Status == models.StatusCancelled {
-			eventType = models.NotificationPremiumEnded
-		}
-
 		var data map[string]any
-		if eventType == models.NotificationPremiumEnded {
-			data = map[string]any{"reason": string(PremiumEndReasonExpired)}
+		switch {
+		case needsPaymentMethodUpdate:
+			eventType = models.NotificationPaymentMethodUpdateRequired
+			data = map[string]any{"failure_code": normalize.FromPtr(params.FailureCode)}
+		case subscription.Status == models.StatusCancelled:
+			eventType = models.NotificationPremiumEnded
+			endReason := PremiumEndReasonExpired
+			if params.Decline == collection.DeclineNonRecoverable {
+				endReason = PremiumEndReasonNonRecoverable
+			}
+			data = map[string]any{"reason": string(endReason)}
 		}
 
 		notification := &models.NotificationQueue{

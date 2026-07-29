@@ -17,11 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -295,6 +297,9 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		SubscriptionID: &sub.ID,
 		FailureReason:  failureReason,
 		FailureCode:    failureCode,
+		// or#870: the same ONE classifier the dunning worker uses, so a decline
+		// arriving over the webhook plane gets the identical three-way answer.
+		Decline: collection.ClassifyDecline(rail, normalize.FromPtr(failureCode)),
 		// The failed payments row for this decline was written above, so a real
 		// provider attempt underlies this failure (#840 certainty input).
 		AttemptRecorded: true,
