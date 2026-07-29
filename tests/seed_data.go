@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -427,7 +428,7 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 			psp_links, key, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11, $12)
 		ON CONFLICT (id) DO NOTHING`,
-		price.ID, price.ProductID, price.Archived, price.Amount, price.Currency,
+		price.ID, price.ProductID, price.Archived, price.Amount, money.NormalizeCurrency(price.Currency),
 		price.AccessDurationHours, price.AutoRenew,
 		suite.mustJSONB(price.PSPLinks, len(price.PSPLinks) == 0), price.Key,
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
