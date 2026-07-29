@@ -147,7 +147,9 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	_, err = super.Exec(ctx, `UPDATE openrails.payment_settlement_events SET delivered_at = now() - interval '31 days' WHERE payment_id = $1`, payB)
 	require.NoError(t, err)
 	appTx(&mB, func(tx gen.DBTX) {
-		n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, time.Now().Add(-30*24*time.Hour))
+		n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
+			MerchantID: idB.UUID(), Cutoff: time.Now().Add(-30 * 24 * time.Hour),
+		})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 	})

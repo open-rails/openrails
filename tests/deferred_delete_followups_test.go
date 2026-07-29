@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -270,9 +271,6 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 // TestFailMembershipDunningExhaustionSchedulesNMIDelete, on real exhausted
 // dunning where a terminal outcome is actually earned.
 func TestDunningWorkerStalenessSchedulesNoDelete(t *testing.T) {
-	t.Skip("or#877 B5: DunningWorker's due-subscription scan reads a policied table on the base pool, so the " +
-		"scheduled path finds nothing. Un-skip with the definer-backed per-merchant fan-out.")
-
 	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
@@ -325,9 +323,6 @@ func TestDunningWorkerStalenessSchedulesNoDelete(t *testing.T) {
 // open undo window enqueues a USER-origin intent due at deleteAt (period end
 // minus the safety margin), and the resume worker supersedes it.
 func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
-	t.Skip("or#877 B7: ResumeSubscriptionWorker cannot see its own subscription on the bare job context and " +
-		"returns nil, so a user-requested resume is silently dropped. Un-skip once it pins from job args.")
-
 	suite := getSharedTestSuite(t)
 	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
@@ -379,7 +374,9 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 	}
 	require.NoError(t, resumeWorker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
-		Args: riverjobs.ResumeSubscriptionArgs{UserID: userID, SubscriptionID: sub.ID},
+		Args: riverjobs.ResumeSubscriptionArgs{
+			MerchantID: dbtest.TestMerchantID.UUID(), UserID: userID, SubscriptionID: sub.ID,
+		},
 	}))
 
 	resumed := suite.GetSubscription(sub.ID)
@@ -390,4 +387,46 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 	require.Equal(t, 1, count)
 	assert.Equal(t, intents.StatusSuperseded, status, "resume supersedes the pending delete intent")
 	assert.Zero(t, countLiveNMIDeleteIntents(t, suite, sub.ID))
+}
+
+// TestResumeWorkerRefusesToSilentlyDropAUserRequestedResume is or#877 B7's
+// standing guard. The defect was never "the resume failed" — it was that the
+// worker could not SEE its own subscription on the bare job context, took the
+// not-found branch, logged at INFO and returned nil. River recorded a completed
+// job, the user stayed cancelled, and nothing above INFO said so.
+//
+// A resume is user-requested work. Not doing it is an error, whatever the
+// reason: an unresolvable merchant and an invisible subscription both surface.
+func TestResumeWorkerRefusesToSilentlyDropAUserRequestedResume(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	rt := suite.App.Runtime
+
+	worker := &riverjobs.ResumeSubscriptionWorker{
+		DB:                           rt.DB,
+		Config:                       rt.Config,
+		EntitlementService:           rt.EntitlementService,
+		SubscriptionService:          rt.SubscriptionService,
+		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
+	}
+
+	t.Run("a subscription it cannot see is an error, not a success", func(t *testing.T) {
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
+			Args: riverjobs.ResumeSubscriptionArgs{
+				MerchantID:     dbtest.TestMerchantID.UUID(),
+				UserID:         uuid.New().String(),
+				SubscriptionID: uuid.New(),
+			},
+		})
+		require.Error(t, err, "an invisible subscription must not be reported as a completed resume")
+	})
+
+	t.Run("no merchant on the job args is an error", func(t *testing.T) {
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
+			Args: riverjobs.ResumeSubscriptionArgs{
+				UserID:         uuid.New().String(),
+				SubscriptionID: uuid.New(),
+			},
+		})
+		require.Error(t, err, "a River job carries no ambient merchant; the worker must refuse rather than read nothing")
+	})
 }

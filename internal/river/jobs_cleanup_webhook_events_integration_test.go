@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,10 +37,12 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE event_id IN ($1, $2)", oldID, recentID)
 	})
 
-	w := CleanupExpiredDataWorker{DB: dbi}
-	deleted, err := w.cleanupWebhookEvents(ctx, now, 90*24*time.Hour)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, deleted, int64(1))
+	// Driven through Work on the BARE context a River job actually receives
+	// (or#877): the worker must walk the merchant directory and delete under
+	// each merchant's own scope. Handed a pinned context this would pass even
+	// while inert.
+	w := CleanupExpiredDataWorker{DB: dbi, Config: DefaultCleanupConfig()}
+	require.NoError(t, w.Work(ctx, &river.Job[CleanupExpiredDataArgs]{}))
 
 	remaining := func(eventID string) int {
 		var n int

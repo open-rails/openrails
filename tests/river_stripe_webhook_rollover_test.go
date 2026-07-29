@@ -135,9 +135,6 @@ func (f *fakeStripeWebhookAPI) snapshot() (creates int, deletes []string, live m
 // delivering; both secrets verify; and the delete waits on the operator kill
 // switch even after the overlap window has expired.
 func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
-	t.Skip("or#877 B6: the reconciler's target list is empty under openrails_app, so no successor endpoint " +
-		"is created. Un-skip with the per-merchant walk.")
-
 	fake := newFakeStripeWebhookAPI(t)
 	suite := setupTestSuite(t)
 	suite.Config.APIURL = "https://api.openrails-e2e.example.com"

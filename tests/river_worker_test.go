@@ -25,9 +25,6 @@ import (
 
 // TestCleanupExpiredDataWorker tests the cleanup worker for expired data
 func TestCleanupExpiredDataWorker(t *testing.T) {
-	t.Skip("or#877 B4: CleanupExpiredDataWorker's four retention sweeps run unqualified DELETEs on the base pool; " +
-		"under openrails_app they match zero rows every hour. Un-skip with the per-merchant walk.")
-
 	suite := setupTestSuite(t)
 	ctx := context.Background()
 

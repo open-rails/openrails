@@ -52,20 +52,24 @@ func TestFullStackServesAndDrainsRiverAsOpenrailsApp(t *testing.T) {
 	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/subscriptions", token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	// River: enqueue a resume job for a subscription id that does not exist.
-	// The worker's own not-found handling (jobs_subscription_manage.go) treats
-	// this as a graceful no-op success, so this needs no product/price/
-	// customer/subscription fixtures at all — the only thing under test is
-	// whether river_job/river_queue/river_leader are actually usable by
-	// openrails_app end to end. If any of those grants were missing, either
-	// the Insert below fails outright (a real Postgres permission-denied
-	// error) or no worker ever claims the job and the Eventually poll times
-	// out — both are unambiguous failures of this test.
+	// River: enqueue a resume job for a customer with nothing to resume. That
+	// path (no subscription id ⇒ "latest resumable cancelled" lookup ⇒ none)
+	// is a genuine no-op success, so this needs no product/price/customer/
+	// subscription fixtures at all — the only thing under test is whether
+	// river_job/river_queue/river_leader are actually usable by openrails_app
+	// end to end. If any of those grants were missing, either the Insert below
+	// fails outright (a real Postgres permission-denied error) or no worker
+	// ever claims the job and the Eventually poll times out — both are
+	// unambiguous failures of this test.
+	//
+	// It deliberately no longer enqueues an UNKNOWN subscription id: that used
+	// to "complete" only because the worker could not see the row and called
+	// that success (or#877 B7). It is an error now.
 	producer := surface.App().Runtime.RiverProducer
 	require.NotNil(t, producer, "River producer must be initialized")
 	_, err := producer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
-		UserID:         uuid.NewString(),
-		SubscriptionID: uuid.New(),
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		UserID:     uuid.NewString(),
 	}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
 	require.NoError(t, err, "enqueueing a River job as openrails_app must succeed (INSERT on river_job)")
 
