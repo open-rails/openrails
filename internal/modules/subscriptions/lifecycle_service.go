@@ -1533,11 +1533,16 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 		// (stale decline, roster didn't confirm gone) — durably record the
 		// deferred NMI delete like FailMembership.
 		scheduleDelete := false
+		// or#842: the automated delete is due after a cooling-off window, not at
+		// `now`. The handler's relevance re-check supersedes it if this row stops
+		// being a cancelled-awaiting-delete one in the meantime, so a convergence
+		// we got wrong never reaches the provider.
+		deleteAt := SystemDeferredDeleteAt(sub, now)
 		if res == ResolveCancelledRemoteAlive {
 			fb = "renewal declined beyond dunning window (converged from unknown)"
 			if rails.RemoteDeleteOnTerminalCancel(sub.Rail) && sub.RailSubscriptionID != "" {
 				if s.deferDelete != nil {
-					sub.DeletionScheduledAt = &now
+					sub.DeletionScheduledAt = &deleteAt
 					scheduleDelete = true
 				} else {
 					log.WithContext(ctx).WithFields(log.Fields{
@@ -1566,7 +1571,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			if err := s.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
 				return err
 			}
-			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now)
+			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, deleteAt)
 		})
 	default:
 		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
@@ -1826,7 +1831,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		// #821/#839/#840/#836: ONE gate for every terminal outcome in this flow.
 		// A terminal cancel revokes entitlements AND queues the IRREVERSIBLE
-		// provider-side vault delete, so it requires (a) a named certainty leg —
+		// cancellation of the recurring SCHEDULE at the rail (or#870: never the
+		// customer's stored payment method — nothing here can delete that), so it
+		// requires (a) a named certainty leg —
 		// provider truth, a non-retryable decline, or genuinely exhausted dunning
 		// ATTEMPTS — and (b) an open operator kill switch. A date comparison, an
 		// expired dunning window, and the absence of one of our own rows are not
@@ -2000,11 +2007,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// recorded UNCONDITIONALLY — provider_write_mode / credentials / the
 		// volume breaker gate EXECUTION at the intent executor, never queuing
 		// (limited mode parks system-origin intents until mode=full).
+		// or#842: due after a cooling-off window, not at `now` — dunning
+		// exhaustion is our own inference, and the handler's relevance re-check
+		// supersedes the delete if the row recovers inside the window.
+		deferredDeleteAt := SystemDeferredDeleteAt(subscription, now)
 		if subscription.Status == models.StatusCancelled &&
 			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
 			if s.deferDelete != nil {
-				subscription.DeletionScheduledAt = &now
+				subscription.DeletionScheduledAt = &deferredDeleteAt
 				scheduleDeferredDelete = true
 			} else {
 				log.WithContext(ctx).WithFields(log.Fields{
@@ -2027,7 +2038,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// DeletionScheduledAt marker and the intent commit atomically (no
 		// crash window between them).
 		if scheduleDeferredDelete {
-			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, now); err != nil {
+			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, deferredDeleteAt); err != nil {
 				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
 			}
 		}

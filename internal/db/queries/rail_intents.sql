@@ -361,6 +361,18 @@ SELECT openrails.count_destructive_intents_since(
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
+-- or#842: the AUTOMATED leg. The two counts above are deliberately blind to
+-- origin='system', which left the ceiling absent for exactly the paths that
+-- queue the most irreversible work with no human in the loop. System origin is
+-- walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
+-- survive fleet scale, a per-merchant window does, and one merchant's runaway
+-- convergence is the shape this must see.
+-- name: CountSystemDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_system_destructive_intents_for_merchant_since(
+    sqlc.arg(merchant_id)::uuid,
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
+
 -- ============================================================================
 -- or#862: deployment-wide executor / verifier fan-out
 -- ============================================================================

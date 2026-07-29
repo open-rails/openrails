@@ -360,6 +360,32 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 	return count, err
 }
 
+const countSystemDestructiveIntentsForMerchantSince = `-- name: CountSystemDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_system_destructive_intents_for_merchant_since(
+    $1::uuid,
+    $2::text[],
+    $3::timestamptz)
+`
+
+type CountSystemDestructiveIntentsForMerchantSinceParams struct {
+	MerchantID  uuid.UUID
+	IntentTypes []string
+	Since       time.Time
+}
+
+// or#842: the AUTOMATED leg. The two counts above are deliberately blind to
+// origin='system', which left the ceiling absent for exactly the paths that
+// queue the most irreversible work with no human in the loop. System origin is
+// walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
+// survive fleet scale, a per-merchant window does, and one merchant's runaway
+// convergence is the shape this must see.
+func (q *Queries) CountSystemDestructiveIntentsForMerchantSince(ctx context.Context, arg CountSystemDestructiveIntentsForMerchantSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSystemDestructiveIntentsForMerchantSince, arg.MerchantID, arg.IntentTypes, arg.Since)
+	var count_system_destructive_intents_for_merchant_since int64
+	err := row.Scan(&count_system_destructive_intents_for_merchant_since)
+	return count_system_destructive_intents_for_merchant_since, err
+}
+
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
 
 

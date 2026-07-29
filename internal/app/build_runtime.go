@@ -373,13 +373,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	// #732: user/admin destructive cancels pass the anti-credential-compromise
-	// rate ceiling before their write-ahead intent is created. System-origin
-	// deletes (dunning) skip it (the gate is inert for system origin).
+	// #732: every destructive cancel passes the rate ceiling before its
+	// write-ahead intent is created — user/admin on the deployment-wide
+	// anti-credential-compromise ceilings, system on the per-merchant automation
+	// ceiling (or#842: the system scheduler used to pass nil, so the paths that
+	// queue the most irreversible work were the only ungated ones).
 	rateCeiling := runtime.RateCeiling()
 	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginUser,
 		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, nil, intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {

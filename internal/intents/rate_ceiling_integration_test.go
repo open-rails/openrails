@@ -148,10 +148,9 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	assert.Equal(t, "critical", severity)
 }
 
-// System-origin destructive ops (automated dunning / decline cleanup) are
-// #679's job and must NOT burn the anti-theft budget: 20 system ops in the
-// window leave both ceilings untouched.
-func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
+// System-origin destructive ops do NOT burn the anti-theft budget — that budget
+// is about a stolen credential, and no principal produced these.
+func TestRateCeiling_SystemOriginDoesNotBurnTheAntiTheftBudget(t *testing.T) {
 	ctx := context.Background()
 	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	dbi := dbtest.OpenMerchantDB(t, merchant)
@@ -164,12 +163,85 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 	// A user op sees a clean budget (system ops excluded).
 	require.NoError(t, gate.Check(ctx, CheckParams{
 		Actor: "u-" + uuid.NewString(), MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginUser,
-	}, base), "system-origin ops must not count against the ceilings")
+	}, base), "system-origin ops must not count against the anti-theft ceilings")
+}
 
-	// And a system op itself is never gated (inert for system origin).
+// or#842: but they are NOT ungated. Check returned nil for origin='system', so
+// the ceiling was absent for exactly the paths that queue the most irreversible
+// work with no human in the loop. The system wall is PER MERCHANT: one
+// merchant's runaway convergence hits it; a large fleet of merchants each
+// converging their own book does not.
+func TestRateCeiling_SystemOriginWalledPerMerchant(t *testing.T) {
+	ctx := context.Background()
+	root := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	merchant := seedCeilingMerchant(t, root)
+	neighbour := seedCeilingMerchant(t, root)
+	dbi := dbtest.OpenMerchantDB(t, merchant)
+	gate := NewRateCeiling(dbi)
+	base := time.Now().UTC().Add(14 * time.Hour)
+
+	// 49 automated destructive ops this hour: the 50th is still admitted.
+	for i := 0; i < 49; i++ {
+		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	}
 	require.NoError(t, gate.Check(ctx, CheckParams{
-		Actor: "", MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "50th automated op (49 prior) must be admitted")
+
+	// 50 prior: the 51st is refused, and nothing is queued.
+	insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	err := gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base)
+	require.Error(t, err, "the 51st automated destructive op must be refused")
+	require.True(t, errors.Is(err, ErrRateCeilingTripped))
+	var rce *RateCeilingError
+	require.ErrorAs(t, err, &rce)
+	assert.Equal(t, ceilingSystemMerchant, rce.Ceiling)
+	assert.EqualValues(t, 50, rce.SystemMerchantCount)
+
+	// The refusal reaches the operator queue, keyed on the merchant.
+	n, severity, status := trippedFindingCount(t, dbi, merchant, RateCeilingTrippedFindingType, "system:"+merchant.String())
+	assert.Equal(t, 1, n, "an automated trip must raise exactly one standing finding")
+	assert.Equal(t, "critical", severity)
+	assert.Equal(t, "requires_review", status)
+
+	// Fleet scale: the neighbour merchant's automation is untouched by it. A
+	// deployment-wide wall on system origin would have stopped this one too.
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: neighbour, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "one merchant hitting its wall must not stop every other merchant's dunning")
+}
+
+// Early warning on the automated leg: crossing 50% of the per-merchant ceiling
+// raises the finding before the wall, so a runaway is visible while it builds.
+func TestRateCeiling_SystemEarlyWarningFires(t *testing.T) {
+	ctx := context.Background()
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
+	gate := NewRateCeiling(dbi)
+	base := time.Now().UTC().Add(17 * time.Hour)
+	subject := "system:" + merchant.String()
+
+	for i := 0; i < 23; i++ {
+		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	}
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
 	}, base))
+	if n, _, _ := trippedFindingCount(t, dbi, merchant, RateCeilingWarningFindingType, subject); n != 0 {
+		t.Fatalf("no warning expected below 50%%, got %d", n)
+	}
+
+	insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "an op crossing 50%% is warned, not refused")
+
+	n, severity, status := trippedFindingCount(t, dbi, merchant, RateCeilingWarningFindingType, subject)
+	assert.Equal(t, 1, n, "the 50% crossing raises an early-warning finding")
+	assert.Equal(t, "high", severity)
+	assert.Equal(t, "requires_review", status)
 }
 
 // Early warning: an op that crosses 50% of a ceiling (but stays below the wall)
