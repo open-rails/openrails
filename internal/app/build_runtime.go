@@ -299,7 +299,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
-		RailPaymentMethodService:             serviceInstances.RailPaymentMethodService,
+		RailPaymentMethodService: serviceInstances.RailPaymentMethodService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
@@ -346,6 +346,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	runtime.CollectionResolver = collectionResolver
 	moneyCharger.SetAdapterResolver(collectionResolver)
 	runtime.SolanaRPCResolver = solanaRPCResolver
+	// #817: decimals come from the SPL mint on-chain, read through the same
+	// per-merchant chain reader and cached (mint decimals are immutable).
+	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
+	if serviceInstances.SolanaPayService != nil {
+		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
+	}
+	if serviceInstances.CheckoutSessionService != nil {
+		serviceInstances.CheckoutSessionService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
@@ -563,7 +572,7 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
-	RailPaymentMethodService             *paymentmethods.RailPaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -860,7 +869,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
-		RailPaymentMethodService:                 railPMService,
+		RailPaymentMethodService:     railPMService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,

@@ -983,26 +983,33 @@ type AuthConfig struct {
 }
 
 // TokenConfig defines configuration for a specific Solana token.
+//
+// There is deliberately NO `decimals` field (#817): an SPL token's base-unit
+// precision is a property of the MINT on-chain, immutable since InitializeMint,
+// and the chain is the source of truth. A merchant-settable copy is a field
+// they can get wrong, and a wrong value misprices every charge by a power of
+// ten. Decimals are read from the mint (internal/integrations/solana.
+// ReadMintDecimals) and cached, never declared.
 type TokenConfig struct {
-	Mint     string `json:"mint"`     // Token mint address accepted on the configured Solana network.
-	Name     string `json:"name"`     // Token name.
-	Decimals int    `json:"decimals"` // Token base-unit precision; REQUIRED (see ValidateTokenDecimals).
+	Mint string `json:"mint"` // Token mint address accepted on the configured Solana network.
+	Name string `json:"name"` // Token name.
 }
 
-// Token base-unit precision bounds. SPL mints top out at 9 in practice; the
-// slack guards the 10^n rescale against absurd configuration.
+// Payable base-unit precision bounds for an SPL mint. Applied to the value READ
+// FROM THE MINT, not to configuration. SPL mints top out at 9 in practice; the
+// slack accommodates exotic mints while still refusing an absurd 10^n rescale.
+// 0 is rejected: a whole-unit token cannot represent a sub-unit charge, so it is
+// not usable as a payment token here.
 const (
 	MinTokenDecimals = 1
 	MaxTokenDecimals = 18
 )
 
-// ValidateTokenDecimals rejects an unusable base-unit precision. Zero is
-// rejected on purpose (#817): an OMITTED `decimals` decodes as 0, and treating
-// that as whole-token precision silently misprices every charge by 10^6.
-func ValidateTokenDecimals(symbol string, decimals int) error {
+// ValidateTokenDecimals rejects an on-chain precision unusable for payments.
+func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	if decimals < MinTokenDecimals || decimals > MaxTokenDecimals {
-		return fmt.Errorf("solana token %s: decimals must be %d..%d (got %d) — declare it in the merchant's solana tokens config",
-			symbol, MinTokenDecimals, MaxTokenDecimals, decimals)
+		return fmt.Errorf("solana token %s: on-chain mint decimals %d are outside the payable range %d..%d",
+			mintOrSymbol, decimals, MinTokenDecimals, MaxTokenDecimals)
 	}
 	return nil
 }

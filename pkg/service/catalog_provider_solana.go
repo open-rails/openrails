@@ -105,7 +105,12 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	symbol := strings.ToUpper(strings.TrimSpace(in.Currency))
-	mint, decimals, err := plan.ResolveMint(symbol)
+	mint, err := plan.ResolveMint(symbol)
+	if err != nil {
+		return nil, err
+	}
+	// #817: decimals come from the SPL mint ON-CHAIN, never from config.
+	decimals, err := plan.MintDecimals(ctx, symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +134,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		PlanID:            planID,
 		TokenSymbol:       symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
 		AmountBaseUnits:   amountBaseUnits,
+		AmountDecimals:    decimals,
 		PeriodHours:       periodHours,
 		BillingCycleHours: *in.AccessDurationHours,
 		EndTs:             0, // perpetual; OpenRails models open-ended subscriptions
@@ -222,17 +228,21 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
 		}
 	}
-	// Amount + mint + merchant validation requires the plan service (token
-	// decimals, mint allowlist, merchant resolution); skip gracefully when it is
-	// unconfigured — the price is in MICROS and only the token's decimals turn
-	// that into the plan's base units (#817).
+	// Amount + mint + merchant validation requires the plan service (mint
+	// allowlist, on-chain decimals, merchant resolution); skip gracefully when it
+	// is unconfigured — the price is in MICROS and only the MINT's on-chain
+	// decimals turn that into the plan's base units (#817).
 	if plan, ok := a.planService(); ok {
 		if symbol := strings.ToUpper(strings.TrimSpace(in.Currency)); symbol != "" {
-			if mint, decimals, err := plan.ResolveMint(symbol); err == nil {
+			if mint, err := plan.ResolveMint(symbol); err == nil {
 				if !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
 					return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
 				}
 				if in.UnitAmount > 0 {
+					decimals, err := plan.MintDecimals(ctx, symbol)
+					if err != nil {
+						return nil, err
+					}
 					want, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
 					if err != nil {
 						return nil, err

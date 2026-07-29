@@ -35,10 +35,9 @@ func NormalizeForNetwork(network string, tokens map[string]config.TokenConfig) m
 			log.Warnf("⚠️  solana token %s has no mint configured; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
 			continue
 		}
-		if err := config.ValidateTokenDecimals(normalizedSymbol, token.Decimals); err != nil {
-			log.Warnf("⚠️  %v; payments in %s unavailable", err, normalizedSymbol)
-			continue
-		}
+		// Decimals are NOT validated here (#817): they are not configuration.
+		// They are read from the mint on-chain at conversion time, where an
+		// unreadable or unpayable precision fails the charge closed.
 		if strings.TrimSpace(token.Name) == "" {
 			token.Name = normalizedSymbol
 		}

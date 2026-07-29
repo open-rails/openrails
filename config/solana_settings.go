@@ -176,18 +176,17 @@ func settingTokens(raw any) (map[string]TokenConfig, error) {
 					return nil, err
 				}
 			case "decimals":
-				if token.Decimals, err = settingInt("tokens."+symbol+".decimals", value); err != nil {
-					return nil, err
-				}
+				// #817: retired. Decimals belong to the mint on-chain and are read
+				// from it; a merchant-declared copy could disagree and misprice by
+				// 10^n. Fail loudly rather than silently ignoring a stale key.
+				return nil, fmt.Errorf("solana settings: tokens.%s.decimals is no longer configurable — "+
+					"decimals are read from the SPL mint on-chain; remove this key", symbol)
 			default:
-				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name, decimals)", symbol, key)
+				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name)", symbol, key)
 			}
 		}
 		if strings.TrimSpace(token.Mint) == "" {
 			return nil, fmt.Errorf("solana settings: tokens.%s requires mint", symbol)
-		}
-		if err := ValidateTokenDecimals(symbol, token.Decimals); err != nil {
-			return nil, fmt.Errorf("solana settings: tokens.%s: %w", symbol, err)
 		}
 		out[symbol] = token
 	}

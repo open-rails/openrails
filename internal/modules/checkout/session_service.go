@@ -126,9 +126,12 @@ type CheckoutSessionService struct {
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
-	config                   *config.Config
-	rails                    railresolve.Source
-	clock                    clockwork.Clock
+	// solanaMints reads SPL mint decimals from the chain (#817). Late-bound —
+	// it needs the per-merchant RPC resolver. nil = solana quotes fail closed.
+	solanaMints solanamodule.MintDecimalsSource
+	config      *config.Config
+	rails       railresolve.Source
+	clock       clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
 	// composition root. nil -> solana+subscription checkout returns 503.
@@ -275,6 +278,11 @@ func NewCheckoutSessionService(
 		rails:                    rails,
 		clock:                    timeutil.FirstClock(clocks...),
 	}
+}
+
+// SetSolanaMintDecimals arms the on-chain mint-decimals resolver (#817).
+func (s *CheckoutSessionService) SetSolanaMintDecimals(mints solanamodule.MintDecimalsSource) {
+	s.solanaMints = mints
 }
 
 func (s *CheckoutSessionService) now() time.Time {
@@ -940,7 +948,11 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaTransactionService == nil {
 			return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
+		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMints, tokenCfg.Mint)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -1543,7 +1555,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}
-		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol)
+		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol, s.solanaMints)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}

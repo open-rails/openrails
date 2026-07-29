@@ -106,6 +106,10 @@ type SolanaPayService struct {
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
 	priceProvider      TokenPriceProvider
+	// mints reads SPL mint decimals from the chain (#817). Late-bound like the
+	// poller's merchant RPC: it needs the per-merchant RPC resolver, which is
+	// armed after service construction. nil = quotes fail closed.
+	mints MintDecimalsSource
 }
 
 // NewSolanaPayService creates a new SolanaPayService
@@ -133,6 +137,11 @@ func NewSolanaPayService(
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
 	}
+}
+
+// SetMintDecimals arms the on-chain mint-decimals resolver (#817).
+func (s *SolanaPayService) SetMintDecimals(mints MintDecimalsSource) {
+	s.mints = mints
 }
 
 func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChecker) {
@@ -216,8 +225,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
+	// Decimals come from the MINT on-chain, never from config (#817).
+	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
+	if err != nil {
+		return nil, err
+	}
+
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -268,14 +283,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// checkout session id on the wallet-built tx: per the Solana Pay spec the
 	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
 	// Discovery hint, never money truth.
-	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
-		TokenAmount:    formatTokenAmount(tokenUnits, tokenCfg.Decimals),
+		TokenAmount:    formatTokenAmount(tokenUnits, decimals),
 		TokenUnits:     tokenUnits,
 		TokenMint:      tokenMint,
 		Recipient:      recipient,
@@ -290,22 +305,12 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 }
 
 // buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
-func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference, memo string) string {
+func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, decimals int, tokenMint, tokenSymbol, reference, memo string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
-	// Get token config for decimals
-	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
-	if err != nil {
-		return baseURL // fallback without params if not configured
-	}
-	if solanaProc.Solana == nil {
-		return baseURL
-	}
-	tokenCfg := solanaProc.Solana.Tokens[tokenSymbol]
-
-	// Format amount with proper decimals
-	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)
+	// Format amount at the mint's on-chain decimals, resolved by the caller (#817).
+	formattedAmount := formatTokenAmount(amount, decimals)
 
 	// Add query params
 	params := fmt.Sprintf("?amount=%s", formattedAmount)

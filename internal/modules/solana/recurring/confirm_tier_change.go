@@ -302,7 +302,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 // same-group change).
 func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
 	mintStr := oldRow.Mint
-	if resolved, _, rerr := ResolveRecurringMintFromTokens(in.NewMintSymbol, s.tokens); rerr == nil && resolved != "" {
+	if resolved, rerr := ResolveRecurringMintFromTokens(in.NewMintSymbol, s.tokens); rerr == nil && resolved != "" {
 		mintStr = resolved
 	}
 

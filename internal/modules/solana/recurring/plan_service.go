@@ -158,8 +158,43 @@ func (s *PlanService) MerchantAddress(ctx context.Context, tenantID merchant.ID)
 	return s.submitter.MerchantAddress(ctx, tenantID)
 }
 
-func (s *PlanService) ResolveMint(symbol string) (string, int, error) {
+// ResolveMint returns the merchant's configured mint for a recurring-eligible
+// symbol. Decimals are NOT returned — they belong to the mint on-chain; call
+// MintDecimals (#817).
+func (s *PlanService) ResolveMint(symbol string) (string, error) {
 	return ResolveRecurringMintFromTokens(symbol, s.tokens)
+}
+
+// MintDecimals returns the ON-CHAIN base-unit precision of the mint backing
+// symbol. This is the ONLY decimals source on the recurring path: a plan's
+// amount is written immutably on-chain, so a wrong shift cannot be corrected
+// afterwards. Fails closed when no reader is wired or the mint is unreadable.
+func (s *PlanService) MintDecimals(ctx context.Context, symbol string) (int, error) {
+	mintStr, err := s.ResolveMint(symbol)
+	if err != nil {
+		return 0, err
+	}
+	return s.mintDecimals(ctx, mintStr)
+}
+
+// mintDecimals reads + validates a mint's on-chain decimals through the wired
+// reader.
+func (s *PlanService) mintDecimals(ctx context.Context, mintStr string) (int, error) {
+	if s.reader == nil {
+		return 0, fmt.Errorf("recurring: no chain reader armed to read mint %s decimals (#817)", mintStr)
+	}
+	mint, err := solanago.PublicKeyFromBase58(mintStr)
+	if err != nil {
+		return 0, fmt.Errorf("recurring: invalid configured mint %q: %w", mintStr, err)
+	}
+	decimals, err := solanaint.ReadMintDecimals(ctx, s.reader, mint)
+	if err != nil {
+		return 0, err
+	}
+	if err := config.ValidateTokenDecimals(mintStr, decimals); err != nil {
+		return 0, err
+	}
+	return decimals, nil
 }
 
 // PublishPlanInput describes a recurring plan to publish on-chain.
@@ -169,6 +204,12 @@ type PublishPlanInput struct {
 	TokenSymbol     string // must be recurring-eligible (USDC/USD1)
 	AmountBaseUnits uint64 // fixed charge per period, in token base units
 	PeriodHours     uint64 // billing period (0 < h <= 8760)
+
+	// AmountDecimals is the base-unit precision AmountBaseUnits was computed at.
+	// PublishPlan cross-checks it against the mint's ON-CHAIN decimals and
+	// refuses to publish on disagreement (#817): the plan amount is immutable
+	// once created, so a 10^n scale error is unrecoverable.
+	AmountDecimals  int
 	ReceivingWallet string // optional cold wallet; sets the plan's destination whitelist
 	MetadataURI     string // optional (<=128 bytes)
 	EndTs           int64  // 0 = perpetual
@@ -254,13 +295,27 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 	symbol := normalizeSymbol(in.TokenSymbol)
-	mintStr, _, err := ResolveRecurringMintFromTokens(symbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(symbol, s.tokens)
 	if err != nil {
 		return nil, err // not recurring-eligible / no mint for network
 	}
 	mint, err := solanago.PublicKeyFromBase58(mintStr)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: invalid configured mint %q: %w", mintStr, err)
+	}
+
+	// #817: the plan amount is IMMUTABLE once on-chain, so verify the shift the
+	// caller converted at is the shift the mint actually uses. The chain is the
+	// source of truth; a caller that guessed is refused, not tolerated.
+	onchainDecimals, err := s.mintDecimals(ctx, mintStr)
+	if err != nil {
+		return nil, err
+	}
+	if in.AmountDecimals != onchainDecimals {
+		return nil, fmt.Errorf(
+			"recurring: plan amount %d was computed at %d decimals but mint %s (%s) has %d on-chain — "+
+				"refusing to publish an immutable plan at the wrong scale (#817)",
+			in.AmountBaseUnits, in.AmountDecimals, symbol, mintStr, onchainDecimals)
 	}
 
 	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)

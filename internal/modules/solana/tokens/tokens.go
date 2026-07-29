@@ -40,17 +40,14 @@ func DefaultSupportedTokens() map[string]config.TokenConfig {
 		"SOL": {
 			Name:     "Solana",
 			Mint:     "So11111111111111111111111111111111111111112",
-			Decimals: 9,
 		},
 		"USDC": {
 			Name:     "USD Coin",
 			Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-			Decimals: 6,
 		},
 		"PYUSD": {
 			Name:     "PayPal USD",
 			Mint:     "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-			Decimals: 6,
 		},
 		// USD1 (World Liberty Financial USD) — plain SPL Token mint, no
 		// extensions, so it is recurring-eligible (verified by mint inspection,
@@ -58,7 +55,6 @@ func DefaultSupportedTokens() map[string]config.TokenConfig {
 		"USD1": {
 			Name:     "World Liberty Financial USD",
 			Mint:     "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
-			Decimals: 6,
 		},
 		// USDG (Global Dollar, Paxos) is a Token-2022 mint with extensions the
 		// Subscriptions program rejects, so it is supported for ONE-OFF purchases
@@ -66,7 +62,6 @@ func DefaultSupportedTokens() map[string]config.TokenConfig {
 		"USDG": {
 			Name:     "Global Dollar",
 			Mint:     "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
-			Decimals: 6,
 		},
 	}
 }
@@ -206,17 +201,14 @@ func DefaultDevnetTokens() map[string]config.TokenConfig {
 		"SOL": {
 			Name:     "Solana",
 			Mint:     "So11111111111111111111111111111111111111112",
-			Decimals: 9,
 		},
 		"USDC": {
 			Name:     "USD Coin (Devnet)",
 			Mint:     "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-			Decimals: 6,
 		},
 		"PYUSD": {
 			Name:     "PayPal USD (Devnet)",
 			Mint:     "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
-			Decimals: 6,
 		},
 	}
 }
