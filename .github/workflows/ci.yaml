@@ -109,6 +109,30 @@ jobs:
         if: needs.changes.outputs.go == 'true'
         run: go test -race ./...
 
+  # or#869: .golangci.yml existed for a year with nothing running it — and could
+  # not have run (v1 schema, which current golangci-lint refuses to load). The
+  # enabled rule set is exactly what passes today; deferred linters are recorded
+  # in the config header with counts. This job is REQUIRED, not advisory: an
+  # advisory gate is the same claim of coverage the file used to make.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
+      - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        if: needs.changes.outputs.go == 'true'
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.6.0
+          args: --timeout=15m
+
   sqlc:
     runs-on: ubuntu-latest
     timeout-minutes: 15

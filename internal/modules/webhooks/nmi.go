@@ -954,7 +954,9 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			}
 
 			if originalPayment == nil {
-				shouldTerminate = false
+				// No `shouldTerminate = false` here: this path returns an
+				// error, so the flag is never read again. The caller sees the
+				// failure and nothing is terminated.
 				log.WithContext(ctx).WithFields(log.Fields{
 					"refund_transaction_id":   txnID,
 					"subscription_id":         subscription.ID,

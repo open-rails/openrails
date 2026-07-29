@@ -1,28 +1,69 @@
 # golangci-lint configuration for OpenRails.
-# Introduced alongside CI security scanning (SEC-2). The linter step is advisory
-# in CI for now; this config keeps the enabled set focused on high-signal checks.
+#
+# WIRED INTO CI (or#869). Before that this file existed but nothing ran it — and
+# it could not have run: it was still v1 schema, which current golangci-lint
+# refuses to load at all. A config nobody runs is a claim of coverage that does
+# not exist, so the rule set below is exactly what passes today.
+#
+# THE RULE: this gate is green. Do not make it green by moving a linter into the
+# deferred list — fix the finding. The deferred list is a debt record with
+# counts, not a suppression mechanism; shrinking it is the work.
+#
+# ENABLED — bug finders. Every one had findings on first run and every finding
+# was FIXED, not excluded:
+#   govet         suspicious constructs (0 findings)
+#   ineffassign   values assigned and never read — 3 fixed, incl. a webhook
+#                 terminate flag and a checkout `claimed` flag
+#   bodyclose     leaked HTTP response bodies (0 findings)
+#   noctx         requests built without a context — the or#866 bug class; the
+#                 NMI choke point is now clean and this keeps it that way
+#   staticcheck   restricted to SA* (correctness) + ST1019 (duplicate import).
+#                 SA found two real defects: a comparison that is never true in
+#                 Solana pay, and a test assertion comparing a value with itself
+#                 (a guard that could not fail — the or#865 class).
+#
+# DEFERRED — real findings, recorded rather than hidden. Counts as of
+# 2026-07-29. Enable one at a time, fix, delete its line:
+#   errcheck   19  mostly unchecked Close()/Fprintf() on teardown and CLI output
+#   unused      7  dead helpers in db, payments, embedded, migrations tests
+#   staticcheck QF*/ST1005/ST1023/S1016/QF1001/QF1008 — 22 stylistic
+#                  simplifications, no correctness content
+#
+# NOT DUPLICATED — the repo's bespoke guards each check something no golangci
+# linter does, so none is subsumed:
+#   config/env_boundary_test.go               os.Getenv outside binary boundaries
+#   internal/db/queryguard                    RLS / merchant scoping of SQL
+#   internal/river/merchant_scope_lint_test   workers running in merchant conns
+#   internal/intents/enforcement_guard_test   provider writes behind intents
+#   internal/shared/moneyutil/float_guard     floats in money packages
+# The one genuine overlap is `noctx` vs the NMI/Stripe choke points: noctx is
+# strictly weaker (it wants *a* context, not *the right transport*), so it is a
+# cheap second net, not a replacement.
+version: "2"
+
 run:
-  timeout: 5m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
-    - errcheck      # unchecked errors
-    - govet         # suspicious constructs
-    - ineffassign   # ineffectual assignments
-    - staticcheck   # static analysis / bug detection
-    - unused        # unused code
-    - gosimple      # simplifications
-    - bodyclose     # unclosed HTTP response bodies (resource leak / DoS surface)
-    - noctx         # HTTP requests without context
+    - govet
+    - ineffassign
+    - bodyclose
+    - noctx
+    - staticcheck
 
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-rules:
-    # Test files frequently ignore errors on cleanup/teardown.
-    - path: _test\.go
-      linters:
-        - errcheck
-        - noctx
+  settings:
+    staticcheck:
+      # SA = correctness. ST1019 = duplicate import. The QF*/ST* style checks
+      # are deferred (see header); turning them on is a separate mechanical PR.
+      checks:
+        - "SA*"
+        - "ST1019"
+
+  exclusions:
+    rules:
+      # Tests build requests by hand against httptest servers constantly, and a
+      # missing ctx there cannot hang a production worker.
+      - path: _test\.go
+        linters: [noctx, bodyclose]

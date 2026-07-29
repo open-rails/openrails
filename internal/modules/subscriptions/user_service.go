@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	openrailsdb "github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -560,7 +559,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// Persist the cancellation; any durable remote intent (deferred NMI delete,
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := openrailsdb.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(tx)
 		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
 		if err := txSubSvc.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription status: %w", err)

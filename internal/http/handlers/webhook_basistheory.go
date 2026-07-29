@@ -71,7 +71,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID me
 	rail := string(models.RailVaultedCard)
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
-	if err := basisTheoryVerifier(r).Verify(body, sig, sigVersion); err != nil {
+	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context(), rail)
 		log.Warn("basistheory webhook signature verification failed")
 		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")

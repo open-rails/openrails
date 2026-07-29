@@ -346,7 +346,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				if !taken {
 					return nil, ErrCheckoutSessionPending
 				}
-				claimed = true
+				// claimed is set unconditionally after the switch.
 			case IdempotencyStatusFailed:
 				return nil, fmt.Errorf("%w: previous request failed: %s", ErrCheckoutSessionConflict, rec.Error)
 			}

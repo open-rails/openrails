@@ -1,6 +1,7 @@
 package grants
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -98,7 +99,7 @@ func TestDeriveWalletGrant_RejectsBadWindow(t *testing.T) {
 	// expires == purchased → not after → no-op, no panic, no DB touch.
 	now := time.Now().UTC()
 	row := gen.ListUngrantedWalletPaymentsRow{ID: uuid.New(), CustomerID: uuid.New(), PurchasedAt: now, ExpiresAt: now}
-	if err := l.DeriveWalletGrant(nil, row); err != nil {
+	if err := l.DeriveWalletGrant(context.TODO(), row); err != nil {
 		t.Fatalf("expected no-op, got %v", err)
 	}
 }

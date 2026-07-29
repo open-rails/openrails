@@ -573,11 +573,15 @@ func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, referenc
 
 // GetPaymentStatus checks if a payment is pending, confirmed, or expired
 func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
-	// First check Postgres for confirmed payment
-	payment, err = s.getPaymentByReference(ctx, reference)
-	if err == nil && payment != nil {
-		return "confirmed", payment, nil
-	}
+	// or#869 (staticcheck SA4023): there used to be a "first check Postgres for
+	// a confirmed payment" step here, guarded by `err == nil && payment != nil`.
+	// It could never be taken — its helper, getPaymentByReference, was a stub
+	// that unconditionally returned an error, because a Solana reference is
+	// EPHEMERAL: it exists only for on-chain matching during checkout, and a
+	// confirmed payment is identified by its transaction signature instead.
+	// So there is no confirmed-payment lookup by reference to do, and pretending
+	// to try one made this function read as if there were. Redis is the only
+	// answer this reference can have.
 
 	// Check Redis for pending payment
 	pending, err := s.GetPendingPayment(ctx, reference)
@@ -590,17 +594,6 @@ func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference strin
 	}
 
 	return "pending", nil, nil
-}
-
-// getPaymentByReference looks up a payment by its Solana reference.
-// Note: Reference-based lookup is not currently supported since payments
-// are identified by their transaction signature (stored in Payment.TransactionID).
-// The reference is only used during the checkout flow for on-chain matching.
-func (s *SolanaPayService) getPaymentByReference(ctx context.Context, reference string) (*models.Payment, error) {
-	// References are ephemeral and used only during checkout flow for on-chain matching.
-	// Once a payment is confirmed, it's identified by its transaction signature.
-	// Return not found - callers should check Redis for pending status.
-	return nil, fmt.Errorf("payment not found for reference")
 }
 
 // formatTokenAmount formats a token amount with the appropriate decimal places
