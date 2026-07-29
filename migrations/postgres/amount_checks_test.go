@@ -2,6 +2,7 @@ package postgresmigrations
 
 import (
 	"io/fs"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -43,9 +44,90 @@ func TestAmountValueChecks(t *testing.T) {
 		t.Errorf("baseline %s: expected predicate 'check (amount >= 0)' on prices.amount", files[0])
 	}
 
-	// payments.amount and payments.list_amount must NOT be constrained —
-	// refund rows legitimately store negative amounts on those columns.
-	if strings.Contains(sql, "payments_amount_nonneg_chk") || strings.Contains(sql, "payments_list_amount_nonneg_chk") {
-		t.Errorf("baseline %s: must NOT have a non-negative CHECK on payments.amount or payments.list_amount — refund rows store negative amounts on these columns", files[0])
+	assertNoPaymentsAmountCheck(t)
+}
+
+// assertNoPaymentsAmountCheck is MONEY-9's real enforcement (or#865).
+//
+// It used to match two literal constraint names in the baseline only, so the
+// SAME constraint added in a LATER migration, or added without an explicit name
+// (Postgres then generates payments_amount_check), passed silently. Both holes
+// are the likely ways this actually breaks — nobody re-edits a squashed baseline
+// to add a CHECK; they write migration 007.
+//
+// Now: every migration file, matched on the PREDICATE rather than the name.
+func assertNoPaymentsAmountCheck(t *testing.T) {
+	t.Helper()
+	all, err := fs.Glob(FS, "*.sql")
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
 	}
+	if len(all) == 0 {
+		t.Fatal("no migrations found in the embedded FS: this guard would pass vacuously")
+	}
+
+	// Any CHECK predicate that bounds payments.amount / payments.list_amount
+	// below, in any paren form, named or not.
+	cols := []string{"amount", "list_amount"}
+	ops := []string{">= 0", "> -1", ">= 0::bigint", ">= (0)"}
+
+	for _, name := range all {
+		raw, rerr := fs.ReadFile(FS, name)
+		if rerr != nil {
+			t.Fatalf("read %s: %v", name, rerr)
+		}
+		sql := collapseWS(string(raw))
+		// Only inspect statements that touch the payments table at all.
+		if !strings.Contains(sql, "payments") {
+			continue
+		}
+		for _, col := range cols {
+			// Named form, whatever the suffix (…_nonneg_chk, …_check, …_chk).
+			// Anchored so invoice_payments_amount_positive_chk — a DIFFERENT
+			// table, legitimately positive-only — is not a false positive.
+			named := regexp.MustCompile(`(^|[^a-z_])payments_` + col + `_[a-z_]*(chk|check)\b`)
+			if loc := named.FindStringIndex(sql); loc != nil {
+				t.Errorf("%s: names a CHECK constraint on payments.%s (%q). Refund rows store NEGATIVE "+
+					"amounts on that column — a non-negative CHECK would reject every refund. MONEY-9.",
+					name, col, sql[loc[0]:min(loc[1]+24, len(sql))])
+			}
+			// Unnamed / inline form: check (amount >= 0) inside the payments DDL.
+			for _, op := range ops {
+				for _, form := range []string{
+					"check (" + col + " " + op + ")",
+					"check ((" + col + " " + op + "))",
+					"check (payments." + col + " " + op + ")",
+				} {
+					if strings.Contains(sql, form) && paymentsTableSection(sql, form) {
+						t.Errorf("%s: %q applies to payments.%s. Refund rows store NEGATIVE amounts there. MONEY-9.",
+							name, form, col)
+					}
+				}
+			}
+		}
+	}
+}
+
+// paymentsTableSection reports whether the nearest preceding "table" keyword
+// before pred belongs to openrails.payments — enough to tell a CHECK inside the
+// payments DDL from an identically worded one on prices/invoices.
+func paymentsTableSection(sql, pred string) bool {
+	i := strings.Index(sql, pred)
+	if i < 0 {
+		return false
+	}
+	head := sql[:i]
+	j := strings.LastIndex(head, "table ")
+	if j < 0 {
+		return false
+	}
+	decl := head[j:min(j+48, len(head))]
+	return strings.Contains(decl, "payments") && !strings.Contains(decl, "invoice_payments")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
