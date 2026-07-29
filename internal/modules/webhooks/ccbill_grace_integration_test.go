@@ -24,7 +24,7 @@ import (
 // grace entitlement windows — the auto-renew sub's STANDING window keeps
 // access intact through CCBill's dunning.
 func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -172,7 +172,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)

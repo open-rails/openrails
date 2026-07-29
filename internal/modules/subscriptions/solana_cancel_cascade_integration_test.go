@@ -24,7 +24,7 @@ import (
 // the hourly cranker's ListDue (status = active filter) no longer returns it,
 // which stops billing because OpenRails is the only puller.
 func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -95,7 +95,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 // Solana subscription that was never enrolled on-chain (no solana_subscriptions
 // row): the cancel still succeeds rather than erroring.
 func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)

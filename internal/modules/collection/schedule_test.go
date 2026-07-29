@@ -27,6 +27,10 @@ func TestClassifyNMIDecline(t *testing.T) {
 // TestRetryOffsets pins the cadence-relative tier table (#359), including the
 // exact tier boundaries. The binding principle: the derived staleness window
 // (last retry offset + one day of slack) must fit inside ONE billing cycle.
+//
+// #839: the 0-retry tier's window is the SLACK, never zero. A zero window is
+// true by construction the instant a row lapses, so it gave a short-cycle
+// subscription no chance to be charged at all before collection wrote it off.
 func TestRetryOffsets(t *testing.T) {
 	day := 24 * time.Hour
 	weekly := []time.Duration{1 * day, 2 * day}
@@ -40,15 +44,15 @@ func TestRetryOffsets(t *testing.T) {
 		window      time.Duration
 	}{
 		// Anchors.
-		{"daily: no dunning, first failure terminal", 24, nil, 1, 0},
+		{"daily: no retries, but a full day of slack to attempt the charge", 24, nil, 1, 1 * day},
 		{"weekly: retries at +1d, +2d", 7 * 24, weekly, 3, 3 * day},
 		{"monthly: progressive +2d/+5d/+9d/+13d", 30 * 24, monthly, 5, 14 * day},
 		{"yearly: capped at the monthly schedule", 365 * 24, monthly, 5, 14 * day},
 
 		// Boundaries of the 0-retry tier: a 2-3 day cycle retried daily would
 		// still be dunning when the next period is due (window 3d > cycle).
-		{"2d: still no dunning", 2 * 24, nil, 1, 0},
-		{"3d: still no dunning", 3 * 24, nil, 1, 0},
+		{"2d: still no retries", 2 * 24, nil, 1, 1 * day},
+		{"3d: still no retries", 3 * 24, nil, 1, 1 * day},
 		{"4d: first cycle with retries (window 3d fits inside the cycle)", 4 * 24, weekly, 3, 3 * day},
 
 		// Boundaries of the monthly tier: the 14d window must fit well inside

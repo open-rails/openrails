@@ -85,7 +85,7 @@ type ccbillFixture struct {
 func seedCCBillSubscription(t *testing.T) ccbillFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 
@@ -363,7 +363,7 @@ func TestCCBillCancelSupersededByReactivation(t *testing.T) {
 // exactly the budget executes, the rest park behind ONE held_bulk finding.
 func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	store := NewStore(dbi)

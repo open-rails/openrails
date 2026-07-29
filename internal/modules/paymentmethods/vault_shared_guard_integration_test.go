@@ -39,7 +39,7 @@ func (noSubsReader) GetPaginatedByUserID(context.Context, string, int, int) ([]m
 // tests in internal/intents (nmi_vault_delete_integration_test.go — this
 // package cannot import intents: import cycle via subscriptions).
 func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	database, err := db.NewWithPGXPool(pool, "openrails")
 	require.NoError(t, err)
 	ctx := dbtest.WithTestMerchant(context.Background())

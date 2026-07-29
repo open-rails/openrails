@@ -94,7 +94,7 @@ type rebillFixture struct {
 func seedPastDueSubscription(t *testing.T) rebillFixture {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 

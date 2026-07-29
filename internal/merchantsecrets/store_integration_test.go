@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func startSecretsPostgres(t *testing.T) (*db.Pool, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	rawPool, err := pgxpool.New(ctx, dbtest.SharedPostgresDSN(t))
+	rawPool, err := pgxpool.New(ctx, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 	require.NoError(t, err)
 	t.Cleanup(rawPool.Close)
 	return db.WrapPool(rawPool, config.DefaultSchema), ctx

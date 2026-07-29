@@ -23,7 +23,7 @@ import (
 // NOT "no intro".
 func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 
 	dbi, err := db.NewWithPGXPool(pool, "")

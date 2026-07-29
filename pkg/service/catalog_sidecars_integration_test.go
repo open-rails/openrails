@@ -17,7 +17,7 @@ import (
 
 func TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -104,7 +104,7 @@ WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 // reference it).
 func TestSyncCatalogSidecars_AutoDefinesCustomCreditTypes(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)

@@ -21,7 +21,7 @@ import (
 )
 
 func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)

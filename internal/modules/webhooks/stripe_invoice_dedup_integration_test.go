@@ -24,7 +24,7 @@ import (
 // unique index cannot see across those keys, so without this helper a
 // backfill-then-converge ordering inserts a duplicate row.
 func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)

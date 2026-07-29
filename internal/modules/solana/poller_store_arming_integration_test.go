@@ -66,7 +66,7 @@ func newSolanaMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 }
 
 func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
@@ -96,7 +96,7 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 // resolves NO client (fail closed); a declared account without RPC knobs
 // arms the public-RPC default.
 func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
@@ -121,7 +121,7 @@ func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 }
 
 func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
@@ -183,7 +183,7 @@ func jsonID(id any) string {
 // SKIPPED (fail closed — no boot plane exists, #788). Per merchant, per pass,
 // RLS-scoped.
 func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	rdb := dbtest.NewSharedRedisClient(t)
 	svc := newSolanaMerchantsService(t, dbi)

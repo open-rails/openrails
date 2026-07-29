@@ -125,7 +125,7 @@ func breakerRunner(dbi *db.DB, client *nmi.NMIClient) *Runner {
 // merchant is unaffected; operator ack resumes.
 func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 

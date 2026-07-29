@@ -27,7 +27,7 @@ type archiveFixture struct {
 
 func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	// The archive intents reference TestMerchant (rail_intents +
 	// rail_mutation_logs FK into openrails.merchants), so the merchant

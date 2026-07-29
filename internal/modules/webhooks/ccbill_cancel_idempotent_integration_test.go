@@ -21,7 +21,7 @@ import (
 // own local cancel (user cancel + ccbill_cancel_subscription intent) must be a
 // NO-OP: no cancel provenance overwrite, no double revoke, no re-notification.
 func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()

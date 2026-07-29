@@ -43,7 +43,7 @@ func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Cust
 
 func moneyInEnvWithDB(t *testing.T) (*money.MoneyService, *db.DB, *pgxpool.Pool, identity.CustomerID, string, context.Context) {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := context.Background()
 
 	dbi := dbtest.OpenAppDB(t, dsn)

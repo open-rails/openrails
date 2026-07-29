@@ -15,7 +15,7 @@ import (
 )
 
 func TestCreditsDepositOverflowGuard(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()

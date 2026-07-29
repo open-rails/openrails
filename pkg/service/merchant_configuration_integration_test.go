@@ -31,7 +31,7 @@ import (
 func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -87,7 +87,7 @@ func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.
 
 func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 	svc, _, _, ctxA := wastedSvcEnv(t)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 
 	merchantB := merchant.ID(uuid.New())
 	_, err := pool.Exec(context.Background(), `
@@ -261,7 +261,7 @@ func TestMerchantConfiguration_InvalidJSONShapeReturnsError(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 	tid, err := merchant.Require(ctx)
 	require.NoError(t, err)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.merchant_configurations (merchant_id, config)
 		VALUES ($1, '{"delegated_invoker_wasted_spend_windows":[{"key":"bad","window_seconds":"oops","limit":1}]}'::jsonb)
@@ -287,7 +287,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	svc, ms, payerA, ctx := wastedSvcEnv(t)
 	payerB := identity.CustomerIDFromString(uuid.NewString())
 	payerBID := payerB.UUID()
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerBID)
@@ -341,7 +341,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 
 func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
 		TrustLevel: "free",
 		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{

@@ -21,7 +21,7 @@ import (
 // active-only. Real Postgres via testcontainers.
 func TestGetByProductID_IncludesArchived(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 
 	dbi, err := db.NewWithPGXPool(pool, "")

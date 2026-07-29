@@ -139,7 +139,7 @@ type vaultedCardFixture struct {
 
 func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)

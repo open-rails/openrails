@@ -15,7 +15,7 @@ import (
 )
 
 func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	// The entitlement Service is RLS/merchant-scoped (MerchantTx); provide the
 	// test merchant on the ctx (#511: entitlement creation now also goes through

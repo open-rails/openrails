@@ -40,7 +40,7 @@ func cleanupDedupMark(t *testing.T, ctx context.Context, dbi *db.DB, eventID str
 // the event — the Postgres truth row backstops the flushed cache.
 func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	rdb, rctx := dbtest.SharedRedisClient(t)
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -76,7 +76,7 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 // Two replicas with NO shared Redis (independent per-process memStores) but
 // one Postgres: the second replica's delivery must not reapply.
 func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -102,7 +102,7 @@ func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
 // mark, no cache entry. Redelivery must RUN the (replay-safe, #675) handler and
 // converge — final state correct, effect applied once, mark recorded.
 func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -143,7 +143,7 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 // commits atomically with the effects — a rollback takes the mark with it, and
 // a commit makes the wrapper's verify-or-write a no-op.
 func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -191,7 +191,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 // Without a merchant on ctx there is no Postgres truth row — dedup degrades to
 // the Redis/memory layer with a warning instead of failing the webhook.
 func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := context.Background() // deliberately no merchant
 
@@ -214,7 +214,7 @@ func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
 // Non-retryable failures are terminally handled: the truth row is written, so
 // even a cache flush cannot resurrect the futile retries.
 func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := dbtest.WithTestMerchant(context.Background())
 

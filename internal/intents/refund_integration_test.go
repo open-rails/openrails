@@ -97,7 +97,7 @@ type refundFixture struct {
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 

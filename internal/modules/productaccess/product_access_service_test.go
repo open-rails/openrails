@@ -21,7 +21,7 @@ import (
 // product_id FK. Skips when no DSN is configured.
 func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uuid.UUID) {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	// The Service is RLS-scoped (MerchantTx), so it needs a merchant on the ctx.
 	ctx := dbtest.WithTestMerchant(context.Background())
@@ -116,7 +116,7 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 
 	// grants.payment_id has a real FK to payments (the old product_access_grants
 	// table had none), so seed a real purchase payment for this customer/product.
-	seedPool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	seedPool := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 	custID := dbtest.EnsureCustomerIDPgx(ctx, t, seedPool, userID)
 	priceID := uuid.New()
 	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,

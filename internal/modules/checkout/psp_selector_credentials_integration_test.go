@@ -23,7 +23,7 @@ import (
 // merchants.Service — no fake resolvers), and the bare rail kind must refuse
 // with both keys named instead of silently picking one.
 func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 

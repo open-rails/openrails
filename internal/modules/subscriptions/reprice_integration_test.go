@@ -48,7 +48,7 @@ type repriceFixture struct {
 func newRepriceFixture(t *testing.T) *repriceFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	merchantID := dbtest.TestMerchantID.UUID()

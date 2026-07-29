@@ -20,7 +20,7 @@ import (
 func TestMetrics_DenialFlushEndToEnd(t *testing.T) {
 	_, svc, _, ctxB := seed(t)
 	rdb, rctx := dbtest.SharedRedisClient(t)
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 
 	now := time.Now().UTC()
 	rec := admission.NewDenialRecorder(rdb)

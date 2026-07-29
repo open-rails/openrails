@@ -226,7 +226,7 @@ func (f *nmiConvergeFixture) status(t *testing.T, ctx context.Context) string {
 // row, and grants the entitlement — fetch-sourced, never payload-sourced.
 // Duplicate wake-ups are no-ops.
 func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := f.dbi.Pool()
@@ -277,7 +277,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 // A pending signup with NO fetched charge attempt yet (settlement lag) parks
 // as retry-later; the subscription stays pending, nothing is fabricated.
 func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -290,7 +290,7 @@ func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
 // NMI v5 404 IS provider truth (cancelled records are deleted at NMI): the
 // REAL decider turns provider-confirmed-gone into a terminal cancel.
 func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -303,7 +303,7 @@ func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
 // Provider API down: the converge fails retryably and local state (access)
 // stays intact; a later converge against healthy truth proceeds.
 func TestNMIConvergeProviderDownParks(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
 	ctx := dbtest.WithTestMerchant(context.Background())
 

@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 func genApplyParams(subID, toPriceID uuid.UUID) gen.ApplyScheduledRepriceForSubscriptionPriceParams {
@@ -94,12 +93,13 @@ func (f *fakeNMIPusher) CanPush(_ context.Context, sub *models.Subscription) boo
 	return f != nil && f.canPush && strings.TrimSpace(sub.RailSubscriptionID) != ""
 }
 
-func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, amountMicros moneyutil.Micros) error {
+func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, currency string, amountNative int64) error {
 	if f.pushErr != nil {
 		return f.pushErr
 	}
 	f.pushes = append(f.pushes, map[string]any{
-		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID, "amount_micros": int64(amountMicros),
+		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID,
+		"amount_micros": amountNative, "currency": currency,
 	})
 	return nil
 }

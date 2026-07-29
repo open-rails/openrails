@@ -90,7 +90,7 @@ type intentFixture struct {
 func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) intentFixture {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 

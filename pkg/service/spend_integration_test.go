@@ -21,7 +21,7 @@ import (
 
 func authzEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -60,7 +60,7 @@ func authzEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, ident
 // cleanup).
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	return dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	return dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())).Pool()
 }
 
 func TestGetCreditAccount_Snapshot(t *testing.T) {

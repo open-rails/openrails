@@ -19,7 +19,7 @@ import (
 )
 
 func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -139,7 +139,7 @@ func TestGrantSubscriptionCredits_ReplaySafety_StripeStyle(t *testing.T) {
 }
 
 func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -253,7 +253,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 }
 
 func TestGrantPurchaseCredits_OnlyOnceCadence(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)

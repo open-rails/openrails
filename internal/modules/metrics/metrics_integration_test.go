@@ -85,7 +85,7 @@ func exec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql string, arg
 func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 	pool := dbi.Pool()
 	svc := metrics.NewService(dbi)
 	ctxA := merchant.WithID(ctx, merchant.ID(mA))

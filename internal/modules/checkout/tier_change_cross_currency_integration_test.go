@@ -25,7 +25,7 @@ import (
 // €20 -> $25 UNDERCHARGES ($6.33 taken for ~$20.16 of unused value) and
 // $25 -> €20 OVERCHARGES.
 func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
