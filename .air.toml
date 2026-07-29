@@ -6,8 +6,12 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -buildvcs=false -o ./tmp/main.exe ./cmd/billing"
-entrypoint = "tmp/main.exe"
+# The binary is ./cmd/openrails (there is no ./cmd/billing) and `bin` is the
+# air key that names the built artifact — `entrypoint` is not an air key, so
+# air silently fell back to its ./tmp/main default and could never have
+# launched a ./tmp/main.exe build. Both halves were broken (#886).
+cmd = "go build -buildvcs=false -o ./tmp/openrails ./cmd/openrails"
+bin = "./tmp/openrails"
 args_bin = ["run-server"]
 
 include_ext = ["go"]
