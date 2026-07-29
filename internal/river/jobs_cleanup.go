@@ -220,7 +220,10 @@ func (w CleanupExpiredDataWorker) cleanupPaymentSettlements(ctx context.Context,
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
-			n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, cutoff)
+			n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
+				MerchantID: mid,
+				Cutoff:     cutoff,
+			})
 			total += n
 			return err
 		}); err != nil {

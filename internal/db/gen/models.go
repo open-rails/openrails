@@ -536,7 +536,7 @@ type OpenrailsLedgerTransfer struct {
 	CreatedAt  time.Time
 }
 
-// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.
+// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. RLS-exempt by design: it IS the tenant directory — the scope, not a scoped row.
 type OpenrailsMerchant struct {
 	ID uuid.UUID
 	// Stable merchant slug used in merchant-scoped routes and resolution.
@@ -1239,7 +1239,7 @@ type OpenrailsWebhookHealthDaily struct {
 	Drift      int64
 }
 
-// #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table (no merchant scope, no RLS — see merchants).
+// #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table. RLS-exempt by design: process health per worker kind, not tenant data.
 type OpenrailsWorkerHealth struct {
 	WorkerKind string
 	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.

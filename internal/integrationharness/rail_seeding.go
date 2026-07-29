@@ -38,6 +38,8 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		if proc == nil {
 			continue
 		}
+		pspKey := strings.ToLower(strings.TrimSpace(name))
+		require.NotEmpty(t, pspKey, "PSP key required")
 		rail := string(proc.EffectiveRail(name))
 		require.NotEmpty(t, rail, "rail for account %q", name)
 		accountID := proc.EffectiveAccountID()
@@ -61,6 +63,7 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 				Rail:        nRail,
 				Environment: &nEnv,
 				AccountID:   nAccount,
+				Key:         &pspKey,
 				Archived:    &archived,
 				Evidence:    evidence,
 			})

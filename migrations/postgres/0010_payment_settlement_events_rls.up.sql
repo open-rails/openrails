@@ -2,6 +2,9 @@
 -- in a shared DB any openrails_app connection could read/ack every merchant's
 -- settlement events. Fail-closed merchant_isolation, same pattern as 0001/0002.
 
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 ALTER TABLE openrails.payment_settlement_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ONLY openrails.payment_settlement_events FORCE ROW LEVEL SECURITY;
 

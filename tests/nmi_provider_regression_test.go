@@ -24,7 +24,8 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	suite, mock := SetupSuiteWithMockNMI(t)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
-	configureSecondaryNMIProvider(t, suite, mock, "nmi", priceID)
+	const provider = "secondary-nmi"
+	configureSecondaryNMIProvider(t, suite, mock, provider, priceID)
 
 	userID := uuid.New().String()
 	email := "checkout-nmi-" + uuid.NewString() + "@test.example.com"
@@ -33,7 +34,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"rail":          "nmi",
+			"rail":          provider,
 			"payment_token": "tok_test_123",
 			"email":         email,
 			"first_name":    "Test",
