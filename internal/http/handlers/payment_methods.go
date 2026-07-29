@@ -220,7 +220,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		email = strings.TrimSpace(*user.Email)
 	}
 
-	createReq := createVaultRequestFromPaymentMethodRequest(req, email)
+	createReq := toCreatePaymentMethodRequest(req, email)
 	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
 		createReq.Metadata["e2e_run_id"] = e2eRunID
 	}
@@ -248,7 +248,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(paymentMethodToAPI(pm, nil))
 }
 
-func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
+func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]

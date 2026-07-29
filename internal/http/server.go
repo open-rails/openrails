@@ -177,7 +177,7 @@ func New(deps Dependencies) (*Server, error) {
 		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
 	if deps.Runtime.RailPaymentMethodService == nil {
-		return nil, fmt.Errorf("server runtime vault service is required")
+		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
 	if deps.Runtime.RailCustomerService == nil {
 		return nil, fmt.Errorf("server runtime rail customer service is required")

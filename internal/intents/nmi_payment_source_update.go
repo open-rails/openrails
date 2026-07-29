@@ -48,9 +48,9 @@ type NMIPaymentSourceUpdatePayload struct {
 	UserID             string     `json:"user_id"`
 	RailSubscriptionID string     `json:"rail_subscription_id,omitempty"`
 	NewPaymentMethodID uuid.UUID  `json:"new_payment_method_id"`
-	NewRailCustomerRef         string     `json:"new_vault_id"`
+	NewRailCustomerRef string     `json:"new_vault_id"`
 	OldPaymentMethodID *uuid.UUID `json:"old_payment_method_id,omitempty"`
-	OldRailCustomerRef         string     `json:"old_vault_id,omitempty"`
+	OldRailCustomerRef string     `json:"old_vault_id,omitempty"`
 }
 
 // NMIPaymentSourceUpdateHandler implements the effectively-once swap:
@@ -372,14 +372,14 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	// missing/unlinked old method degrades to "old unknown" (verify re-executes
 	// on any non-new vault).
 	var oldPMID *uuid.UUID
-	var oldVault string
+	var oldRailCustomerRef string
 	if sub.PaymentMethodID != nil {
 		id := *sub.PaymentMethodID
 		oldPMID = &id
 		old, err := paymentmethods.NewPaymentMethodRepo(t.DB).GetByID(ctx, id)
 		switch {
 		case err == nil:
-			oldVault = strings.TrimSpace(old.RailCustomerRef)
+			oldRailCustomerRef = strings.TrimSpace(old.RailCustomerRef)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			// linked row gone; old vault stays unknown
 		default:
@@ -407,9 +407,9 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 			UserID:             sub.CustomerID.String(),
 			RailSubscriptionID: sub.RailSubscriptionID,
 			NewPaymentMethodID: newPM.ID,
-			NewRailCustomerRef:         newRailCustomerRef,
+			NewRailCustomerRef: newRailCustomerRef,
 			OldPaymentMethodID: oldPMID,
-			OldRailCustomerRef:         oldVault,
+			OldRailCustomerRef: oldRailCustomerRef,
 		},
 		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(sub.ID, newRailCustomerRef, priorSwaps),
 		NextAttemptAt:  time.Now().UTC(),

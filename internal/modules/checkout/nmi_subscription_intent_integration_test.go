@@ -52,12 +52,12 @@ type fakeNMISubGateway struct {
 	createMode  atomic.Value // "approve" | "ambiguous500"
 	createForm  atomic.Value // url.Values: full form of the last create (#297 wire assertions)
 	// remote state
-	subExists atomic.Bool
-	railCustomerRef   string
-	planID    string
-	subID     string
-	txnID     string
-	charged   atomic.Bool
+	subExists       atomic.Bool
+	railCustomerRef string
+	planID          string
+	subID           string
+	txnID           string
+	charged         atomic.Bool
 }
 
 func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {

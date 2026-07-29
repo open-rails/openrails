@@ -84,8 +84,8 @@ func (s *statefulIdemStub) Complete(_ context.Context, op, key string, result js
 // classic query search (unused here — proration is zero).
 type fakeNMIUpgradeGateway struct {
 	railCustomerRef string
-	planID  string
-	subID   string
+	planID          string
+	subID           string
 
 	createCalls atomic.Int64
 	createMode  atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"

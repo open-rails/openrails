@@ -88,20 +88,20 @@ type TierChangePreviewResponse struct {
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
-	SubscriptionService  *subscriptions.SubscriptionService
-	ProductService       *catalog.ProductService
-	PriceService         *catalog.PriceService
-	PaymentService       *payments.PaymentService
-	EntitlementService   *entitlements.EntitlementService
-	PurchaseService      *CheckoutPurchaseService
-	PaymentMethodResolver        *CheckoutPaymentMethodResolver
-	NMISaleService       *CheckoutNMISaleService
-	VaultedCardService   *CheckoutVaultedCardService
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
-	IdempotencyService   checkoutIdempotencyStore
-	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.PSPSecretResolver
+	SubscriptionService      *subscriptions.SubscriptionService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
+	PaymentService           *payments.PaymentService
+	EntitlementService       *entitlements.EntitlementService
+	PurchaseService          *CheckoutPurchaseService
+	PaymentMethodResolver    *CheckoutPaymentMethodResolver
+	NMISaleService           *CheckoutNMISaleService
+	VaultedCardService       *CheckoutVaultedCardService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	IdempotencyService       checkoutIdempotencyStore
+	MerchantSecrets          merchants.MerchantSecretReader
+	ProviderSecrets          merchants.PSPSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
@@ -159,21 +159,21 @@ func NewCheckoutService(
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
 	service := &CheckoutService{
-		SubscriptionService:  subscriptionService,
-		ProductService:       productService,
-		PriceService:         priceService,
-		PaymentService:       paymentService,
-		EntitlementService:   entitlementService,
-		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		PaymentMethodResolver:        NewCheckoutPaymentMethodResolver(paymentMethodService, railPMService),
-		PaymentMethodService: paymentMethodService,
-		RailPaymentMethodService:         railPMService,
-		IdempotencyService:   idempotencyService,
-		RailCustomerService:  railCustomerService,
-		StripeService:        &subscriptions.StripeService{Config: cfg, Rails: railSet},
-		clock:                clock,
-		Config:               cfg,
-		Rails:                railSet,
+		SubscriptionService:      subscriptionService,
+		ProductService:           productService,
+		PriceService:             priceService,
+		PaymentService:           paymentService,
+		EntitlementService:       entitlementService,
+		PurchaseService:          NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		PaymentMethodResolver:    NewCheckoutPaymentMethodResolver(paymentMethodService, railPMService),
+		PaymentMethodService:     paymentMethodService,
+		RailPaymentMethodService: railPMService,
+		IdempotencyService:       idempotencyService,
+		RailCustomerService:      railCustomerService,
+		StripeService:            &subscriptions.StripeService{Config: cfg, Rails: railSet},
+		clock:                    clock,
+		Config:                   cfg,
+		Rails:                    railSet,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
@@ -696,14 +696,14 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
-	// Get or create vault (payment method)
+	// Get or create the payment method
 	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 	// #297: the instrument's recurring-sequence stored-credential anchor. ""
-	// (fresh vault or legacy instrument) makes this enrollment the sequence's
+	// (fresh payment method or legacy instrument) makes this enrollment the sequence's
 	// initial CIT; the intent's finalize captures the first-charge txn id.
 	storedCredentialRef := ""
 	if resolvedMethod != nil {
@@ -787,7 +787,7 @@ func (s *CheckoutService) processNMISubscription(
 		return nmiSubscriptionResponseFromIntent(intent)
 	case intents.StatusFailedTerminal:
 		// Verified-clean decline/rejection. Direct best-effort cleanup of the
-		// vault created for THIS attempt, NOT an intent (#674 tail): it is
+		// payment method created for THIS attempt, NOT an intent (#674 tail): it is
 		// referenced nowhere — harmless if lost.
 		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
 			if cleanupErr := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod); cleanupErr != nil {
@@ -1617,7 +1617,7 @@ func parseStripeError(body []byte) string {
 	return strings.TrimSpace(out.Error.Message)
 }
 
-// resolveVault gets an existing vault or creates one from payment token
+// ResolvePaymentMethod gets an existing payment method or creates one from a payment token
 // grantProductEntitlements grants entitlements from product spec after a one-time or subscription purchase
 
 func timePtr(t time.Time) *time.Time {
@@ -1812,7 +1812,7 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
-	// Get or create vault
+	// Get or create the payment method
 	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -1972,7 +1972,7 @@ func (s *CheckoutService) processUpgrade(
 				}
 			default:
 				// Verified-clean decline/rejection: no money moved. Direct
-				// best-effort cleanup of the vault created for THIS attempt,
+				// best-effort cleanup of the payment method created for THIS attempt,
 				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
 				if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
@@ -2134,7 +2134,7 @@ func shortHash(s string) string {
 
 // findAdoptableUpgradeSuccessor re-finds a successor subscription a previous
 // (transport-ambiguous) upgrade attempt created at NMI: a live roster entry on
-// (vault, plan) unknown locally. Exactly one match is adopted; zero means the
+// (payment method, plan) unknown locally. Exactly one match is adopted; zero means the
 // create verifiably did not land (safe to create); more than one is refused
 // (never guess which orphan to adopt — operator attention via the returned
 // error, surfaced as ErrCheckoutProcessing).
@@ -2155,7 +2155,7 @@ func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, cli
 		}).Info("adopted successor NMI subscription from a previous ambiguous upgrade attempt")
 		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
 	default:
-		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
+		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match payment method %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
 	}
 }
 

@@ -45,10 +45,10 @@ type intentExecutor interface {
 var ErrCheckoutProcessing = errors.New("payment is processing; retry with the same idempotency key to check the result")
 
 type CheckoutNMISaleService struct {
-	PurchaseService  *CheckoutPurchaseService
+	PurchaseService          *CheckoutPurchaseService
 	PaymentMethodResolver    *CheckoutPaymentMethodResolver
-	RailPaymentMethodService     *paymentmethods.RailPaymentMethodService
-	IdempotencyStore checkoutIdempotencyStore
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	IdempotencyStore         checkoutIdempotencyStore
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state (#788) — the ONLY client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
@@ -59,15 +59,15 @@ type CheckoutNMISaleService struct {
 
 func NewCheckoutNMISaleService(
 	purchaseService *CheckoutPurchaseService,
-	vaultResolver *CheckoutPaymentMethodResolver,
+	pmResolver *CheckoutPaymentMethodResolver,
 	railPMService *paymentmethods.RailPaymentMethodService,
 	idempotencyStore checkoutIdempotencyStore,
 ) *CheckoutNMISaleService {
 	return &CheckoutNMISaleService{
-		PurchaseService:  purchaseService,
-		PaymentMethodResolver:    vaultResolver,
-		RailPaymentMethodService:     railPMService,
-		IdempotencyStore: idempotencyStore,
+		PurchaseService:          purchaseService,
+		PaymentMethodResolver:    pmResolver,
+		RailPaymentMethodService: railPMService,
+		IdempotencyStore:         idempotencyStore,
 	}
 }
 

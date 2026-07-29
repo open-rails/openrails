@@ -13,14 +13,14 @@ import (
 )
 
 type CheckoutPaymentMethodResolver struct {
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 }
 
 func NewCheckoutPaymentMethodResolver(paymentMethodService *paymentmethods.PaymentMethodService, railPMService *paymentmethods.RailPaymentMethodService) *CheckoutPaymentMethodResolver {
 	return &CheckoutPaymentMethodResolver{
-		PaymentMethodService: paymentMethodService,
-		RailPaymentMethodService:         railPMService,
+		PaymentMethodService:     paymentMethodService,
+		RailPaymentMethodService: railPMService,
 	}
 }
 
@@ -58,7 +58,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 		return "", "", nil, false, errors.New("payment_method_id or payment_token is required")
 	}
 	if s.RailPaymentMethodService == nil {
-		return "", "", nil, false, errors.New("vault service unavailable")
+		return "", "", nil, false, errors.New("payment method service unavailable")
 	}
 
 	pmNew, err := s.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{

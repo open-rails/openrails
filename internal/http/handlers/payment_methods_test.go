@@ -89,7 +89,7 @@ func TestCreateVaultRequestFromPaymentMethodRequestMinimalInternationalMetadata(
 				ExpiryDate:     "12/30",
 			}
 
-			got := createVaultRequestFromPaymentMethodRequest(req, "ada@example.com")
+			got := toCreatePaymentMethodRequest(req, "ada@example.com")
 
 			require.Equal(t, "provider-token", got.PaymentToken)
 			require.Equal(t, "mobius", got.Provider)
@@ -123,7 +123,7 @@ func TestCreateVaultRequestFromPaymentMethodRequestSupportsLegacyAddressFields(t
 		Country:      "US",
 	}
 
-	got := createVaultRequestFromPaymentMethodRequest(req, "ada@example.com")
+	got := toCreatePaymentMethodRequest(req, "ada@example.com")
 
 	require.Equal(t, "Ada", got.FirstName)
 	require.Equal(t, "Lovelace", got.LastName)
@@ -178,7 +178,7 @@ func TestPaymentMethodToAPIIncludesStoredBillingMetadata(t *testing.T) {
 }
 
 func TestCreateVaultRequestDoesNotStoreRawProviderPayload(t *testing.T) {
-	got := createVaultRequestFromPaymentMethodRequest(&createPaymentMethodRequest{
+	got := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
 		PaymentToken: "opaque-provider-token",
 		Provider:     "mobius",
 		NameOnCard:   "Ada Lovelace",
