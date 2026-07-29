@@ -81,3 +81,7 @@ identifiers OUT of committed files (code, trackers, this file).
 - Known fragility: running a SINGLE integration package in isolation can hit a pre-existing
   `*_merchant_fk` fixture-seeding failure (the merchant isn't seeded for that subset). That's NOT a
   regression — the full suite seeds it correctly.
+- `tests/` is a SEPARATE package that asserts behavioural contracts end-to-end. A deliberate
+  behaviour change must sweep it too — `grep tests/` for the codes/constants/statuses you changed.
+  Twice now (or#870, or#842) a fix updated only its own package's tests and left `tests/` red
+  asserting the old contract. Green-in-my-package is not green.
