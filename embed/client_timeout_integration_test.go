@@ -36,6 +36,14 @@ func TestInProcessClientHasNoHiddenTimeout(t *testing.T) {
 	t.Cleanup(pool.Close)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
+	// The competing locker must run in the SAME merchant scope as the call it is
+	// meant to block. The default integration DSN is the RLS-enforcing
+	// openrails_app role, so a FOR UPDATE on an unpinned connection matches ZERO
+	// rows — no error, nothing locked, and the timing assertion below would pass
+	// on an unblocked call. dbtest.SharedMerchantPool pins app.merchant_id on
+	// every acquire, exactly as MerchantTx does for the call under test.
+	lockPool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg}})
 	require.NoError(t, err)
@@ -49,12 +57,14 @@ func TestInProcessClientHasNoHiddenTimeout(t *testing.T) {
 	// the row lock) rather than a lock-free first INSERT.
 	require.NoError(t, c.SetMerchantSettings(ctx, openrails.MerchantSettings{}))
 
-	lockTx, err := pool.Begin(ctx)
+	lockTx, err := lockPool.Begin(ctx)
 	require.NoError(t, err)
-	_, err = lockTx.Exec(ctx,
+	tag, err := lockTx.Exec(ctx,
 		`SELECT 1 FROM openrails.merchant_configurations WHERE merchant_id = $1 FOR UPDATE`,
 		dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected(),
+		"the competing tx locked no row — the timing assertion below would be vacuous")
 
 	const holdFor = 3 * time.Second
 	released := make(chan struct{})
@@ -73,6 +83,8 @@ func TestInProcessClientHasNoHiddenTimeout(t *testing.T) {
 	start := time.Now()
 	err = c.SetMerchantSettings(callCtx, openrails.MerchantSettings{})
 	elapsed := time.Since(start)
+
+	t.Logf("in-process SetMerchantSettings blocked on the row lock for %s (hold %s)", elapsed, holdFor)
 
 	require.NoError(t, err, "in-process call must succeed once the real row lock releases, "+
 		"bounded only by the caller ctx (not a hidden per-call deadline)")
