@@ -416,9 +416,17 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 // a distinct explicit key; a blank Key still auto-derives via the DB trigger.
 func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
 	suite.t.Helper()
-	// These shared fixtures key links directly by rail. The PSP hard-cut also
-	// requires every entry to record that rail explicitly.
-	for rail, link := range price.PSPLinks {
+	// Shared fixtures use the NMI rail name as an authoring shorthand. Persist
+	// the runtime's actual PSP key while retaining the gateway in link metadata.
+	if link, ok := price.PSPLinks[string(models.RailNMI)]; ok {
+		delete(price.PSPLinks, string(models.RailNMI))
+		price.PSPLinks[testNMIProviderKey] = link
+	}
+	for psp, link := range price.PSPLinks {
+		rail := psp
+		if psp == testNMIProviderKey {
+			rail = string(models.RailNMI)
+		}
 		link[models.RailKeyRail] = rail
 	}
 	_, err := suite.Pool.Exec(ctx, `
