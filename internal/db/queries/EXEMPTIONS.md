@@ -176,9 +176,10 @@ migration" means for the ledger. Roughly two days, and it buys nothing until
 the schema is large enough that a non-concurrent index build actually blocks
 production writes. Deliberately not started.
 
-### The eleven inline exemptions
+### The inline exemptions
 
-All are in already-applied migrations, all classified **PERMANENT — history**:
+Ten statements, fourteen rule instances, all in already-applied migrations and
+all classified **PERMANENT — history**:
 rewriting them changes no live database and the honest record is what actually
 ran. The rules stay armed for new migrations.
 
