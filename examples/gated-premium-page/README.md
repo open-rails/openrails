@@ -11,6 +11,11 @@ A ~300-line Go webserver showing the whole standalone integration:
 - `/api/token` — the ONE backend endpoint the frontend needs: swaps the (fake,
   signed-cookie) session for a short-lived delegated JWT
 
+Payment configuration is **discovered, not configured**: the buy page reads
+OpenRails' public `GET /v1/checkout-config` for the merchant's armed PSPs and
+their public tokenization values, so this app holds no rail, PSP or Collect.js
+settings of its own.
+
 It is the living companion to
 [docs/standalone-integration.md](../../docs/standalone-integration.md),
 [docs/frontend-integration.md](../../docs/frontend-integration.md) and
@@ -93,8 +98,15 @@ and an API key. The deployment must run with `PROVIDER_WRITE_MODE=full`
 5. **Run**:
 
    ```bash
-   OPENRAILS_API_KEY=openrails_st_... NMI_TOKENIZATION_KEY=<Collect.js key> go run .
+   OPENRAILS_API_KEY=openrails_st_... go run .
    ```
+
+   Nothing payment-shaped is configured here. The buy page reads
+   `GET /v1/checkout-config` — a public, unauthenticated, per-merchant
+   document listing the merchant's armed PSPs and, for each, how a browser
+   drives it (`flow`) plus the public values it needs (for NMI, the Collect.js
+   `tokenization_key` + `tokenization_url`). The PSP key it returns is the
+   `payment.rail` wire value and the catalog `psps:` name.
 
 Renewals (not the first charge — that is synchronous) need the NMI webhook
 pointed at OpenRails; for local tunnels see
@@ -123,11 +135,7 @@ pointed at OpenRails; for local tunnels see
 | `OPENRAILS_API_KEY` | — (required) | merchant API key (`openrails_st_…`) |
 | `MERCHANT_SLUG` | `demo` | merchant this demo belongs to |
 | `DEMO_USER_ID` | fixed UUID | the fake logged-in user (must be a UUID) |
-| `NMI_PSP` | `mobius-sandbox` | the merchant's PSP key (price filtering) |
-| `NMI_RAIL` | `nmi` | checkout wire `rail` value (should be the PSP key, but the engine's checkout gate currently rejects PSP keys — E2E.md bug 2) |
 | `ENTITLEMENT` | `premium` | entitlement string gating `/premium` |
-| `NMI_TOKENIZATION_KEY` | — (required for /buy) | public Collect.js key |
-| `NMI_TOKENIZATION_URL` | NMI's Collect.js URL | tokenization script |
 | `DEMO_ISSUER` | `https://gated-premium-page.example` | registered `remote_application.issuer` |
 | `ISSUER_KEY_FILE` | `issuer_key.pem` | RS256 signing key (generated on first run) |
 | `SESSION_SECRET` | random per boot | HMAC key for the demo session cookie |
