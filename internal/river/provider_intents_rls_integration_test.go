@@ -153,6 +153,16 @@ func seedIntentMerchant(t *testing.T) intentMerchant {
 	m.pool = dbtest.SharedMerchantPool(t, m.id)
 	m.exec(t, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		m.id, "or862-"+uuid.NewString()[:8])
+	// Self-cleaning: an ACTIVE merchant left behind is not inert. Every
+	// deployment-wide fan-out (ListActiveMerchantIDs — the worker-health repair
+	// alert, the converge sweep) then walks this merchant too, in id order, and
+	// the rest of the package inherits whatever that does.
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.rail_intents WHERE merchant_id = $1`, m.id)
+		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id = $1`, m.id)
+		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, m.id)
+	})
 	return m
 }
 
