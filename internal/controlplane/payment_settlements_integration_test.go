@@ -56,7 +56,7 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2), ($3, $4)`, custA, mA, custB, mB)
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'PS A', $3), ($4, $5, 'PS B', $6)`,
 		prodA, "psiso-pa-"+suffix, mA, prodB, "psiso-pb-"+suffix, mB)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'usd', $3, false), ($4, $5, 9000000, 'usd', $6, false)`,
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false), ($4, $5, 9000000, 'USD', $6, false)`,
 		priceA, prodA, mA, priceB, prodB, mB)
 
 	// Insert completed payments as openrails_app under each merchant's GUC: the
@@ -70,7 +70,7 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx, `INSERT INTO openrails.payments
 			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status)
-			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'usd', 'completed')`,
+			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', 'completed')`,
 			payID, mid, custID, priceID, "psiso-"+suffix+"-"+payID.String()[:8], amount)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))

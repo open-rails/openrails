@@ -61,9 +61,9 @@ type Runner struct {
 	// deletes with one UPDATE instead of a deploy. Same convention as Breaker:
 	// nil = ungated (unit tests); production wiring always sets it.
 	Destructive DestructiveGate
-	Clock   clockwork.Clock
-	Lease   time.Duration
-	Batch   int64
+	Clock       clockwork.Clock
+	Lease       time.Duration
+	Batch       int64
 }
 
 func (r *Runner) now() time.Time {
