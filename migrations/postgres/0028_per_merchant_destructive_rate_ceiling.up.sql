@@ -1,4 +1,4 @@
--- or#866: the #732 anti-credential-compromise ceiling was DEPLOYMENT-WIDE, which
+-- or#887: the #732 anti-credential-compromise ceiling was DEPLOYMENT-WIDE, which
 -- makes it a cross-tenant denial of service.
 --
 -- 15 destructive ops per rolling hour is the right wall for a stolen credential;
@@ -50,7 +50,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION openrails.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz) IS
-    'ONE merchant''s destructive intents in a rolling window, for a caller-supplied origin set — both legs of the #732 ceiling: the anti-theft wall (user/admin, or#866) and the automation wall (system, or#842). Definer, not a base-pool read: the gate holds the root pool and carries no app.merchant_id, where a GUC-less count would return 0 and fail open.';
+    'ONE merchant''s destructive intents in a rolling window, for a caller-supplied origin set — both legs of the #732 ceiling: the anti-theft wall (user/admin, or#887) and the automation wall (system, or#842). Definer, not a base-pool read: the gate holds the root pool and carries no app.merchant_id, where a GUC-less count would return 0 and fail open.';
 
 REVOKE ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION openrails.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz) TO openrails_app;

@@ -48,7 +48,7 @@ const (
 	// (user/admin) destructive ops per rolling hour — the frying-protection
 	// wall that holds even when many actor identities are forged.
 	//
-	// PER MERCHANT, not deployment-wide (or#866). The number is right; the
+	// PER MERCHANT, not deployment-wide (or#887). The number is right; the
 	// scope was not. A shared deployment budget means merchant A's ordinary
 	// customer cancellations exhaust it and merchant B's next cancellation is
 	// refused — cross-tenant denial of service on a platform built for
@@ -188,7 +188,7 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	if c == nil || c.db == nil {
 		return fmt.Errorf("rate ceiling: db not configured") // fail closed
 	}
-	// Same fail-closed reason as the system leg (or#866): the wall is now the
+	// Same fail-closed reason as the system leg (or#887): the wall is now the
 	// merchant's window, and an op with no merchant has no window to count in.
 	if p.MerchantID == uuid.Nil {
 		return fmt.Errorf("rate ceiling: destructive op has no merchant to scope its ceiling to") // fail closed
@@ -350,7 +350,7 @@ func (c *RateCeiling) warn(ctx context.Context, p CheckParams, which ceilingKind
 // separate subjects — a human burst and a runaway automation are different
 // investigations). The merchant-wide anti-theft key was the literal "global"
 // while the wall was deployment-wide; migration 0028 re-keys the findings that
-// carry it, so no operator alert is orphaned by the rename (or#866).
+// carry it, so no operator alert is orphaned by the rename (or#887).
 func (c *RateCeiling) subjectKey(which ceilingKind, p CheckParams) string {
 	switch which {
 	case ceilingPerActor:

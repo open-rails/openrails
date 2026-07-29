@@ -145,7 +145,7 @@ func TestRateCeiling_PerMerchantTripsAtSixteenth(t *testing.T) {
 	assert.Equal(t, "critical", severity)
 }
 
-// or#866: the anti-theft ceiling is PER MERCHANT. One merchant exhausting its
+// or#887: the anti-theft ceiling is PER MERCHANT. One merchant exhausting its
 // hourly destructive budget must not refuse another merchant's FIRST op — a
 // deployment-wide budget makes merchant A's ordinary customer cancellations
 // deny service to merchant B, which is cross-tenant DoS on a platform built for
@@ -323,7 +323,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	// merchant is freshly seeded, so no sibling test can inflate it. It needed
 	// scrubbing while the wall was deployment-wide — and under enforced RLS that
 	// DELETE could not even reach another merchant's rows, which is precisely
-	// the fleet-scale failure or#866 removed rather than papered over.
+	// the fleet-scale failure or#887 removed rather than papered over.
 	gated := NewStoreGated(dbi, NewRateCeiling(dbi))
 	actor := "cust-" + uuid.NewString()
 
