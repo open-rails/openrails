@@ -154,7 +154,10 @@ func TestInvoiceVerify_NotExecutedReleasesAndCollectsOnce(t *testing.T) {
 
 	released, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
 	require.NoError(t, err)
-	require.Equal(t, "past_due", released.Status)
+	// or#828: no charge ever landed and nothing declined, so the invoice is
+	// exactly where the clock left it. Claiming and parking an attempt never
+	// age an invoice — only a terminal outcome and MarkInvoicesPastDue do.
+	require.Equal(t, "open", released.Status)
 	require.Nil(t, released.LastCollectionFailureCode)
 	attempts, total, err := svc.ListInvoicePaymentAttempts(ctx, payer, invoiceID, 20, 0)
 	require.NoError(t, err)
@@ -339,7 +342,10 @@ func TestInvoiceVerify_ScheduleParityAndTerminal(t *testing.T) {
 	// The accrual lands AT clock-now; the finalize window is [from, to) so the
 	// frozen clock must advance past it.
 	clock.Advance(time.Minute)
-	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, clock.Now().Add(-time.Hour), clock.Now())
+	// A MONTHLY statement period — parity is "same cycle ⇒ same offsets", and
+	// since or#828 the invoice consumer reads its cycle off this window rather
+	// than assuming a month for every invoice ever issued.
+	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, clock.Now().AddDate(0, -1, 0), clock.Now())
 	require.NoError(t, err)
 
 	offsets := collection.RetryOffsets(collection.MonthlyCycleHours)

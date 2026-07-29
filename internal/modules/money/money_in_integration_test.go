@@ -837,10 +837,14 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 
-	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	// Stripe's do_not_honor is or#870 bucket 2 — their card, fixable — so
+	// charging stops and the invoice is left exactly where the clock put it:
+	// OPEN, still owed, nothing terminated (or#828).
+	stopped, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "past_due", pastDue.Status)
-	require.Equal(t, int64(50_000), pastDue.AmountDue)
+	require.Equal(t, "open", stopped.Status)
+	require.Nil(t, stopped.NextCollectionAttemptAt)
+	require.Equal(t, int64(50_000), stopped.AmountDue)
 
 	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
