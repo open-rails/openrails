@@ -1,4 +1,5 @@
-BEGIN;
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE OR REPLACE FUNCTION openrails.enqueue_payment_settlement_event()
 RETURNS trigger
@@ -23,5 +24,3 @@ $$;
 
 ALTER TABLE openrails.payments DROP CONSTRAINT IF EXISTS chk_payments_money_movement;
 ALTER TABLE openrails.payments DROP COLUMN IF EXISTS money_movement;
-
-COMMIT;

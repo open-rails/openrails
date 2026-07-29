@@ -14,6 +14,9 @@
 --   SELECT merchant_id, rail, transaction_id, count(*) FROM openrails.payments
 --    GROUP BY 1,2,3 HAVING count(*) > 1;
 
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 DROP INDEX openrails.uq_payments_merchant_rail_transaction_legacy;
 DROP INDEX openrails.uq_payments_psp_transaction;
 

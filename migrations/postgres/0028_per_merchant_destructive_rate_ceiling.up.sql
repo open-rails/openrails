@@ -26,8 +26,8 @@
 -- definer, and it still asserts its owner can bypass RLS, so a mis-owned schema
 -- RAISES instead of silently permitting unlimited destructive intents.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE FUNCTION openrails.count_destructive_intents_for_merchant_since(
     p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamptz)

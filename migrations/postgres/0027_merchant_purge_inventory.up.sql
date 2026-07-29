@@ -15,13 +15,17 @@
 -- loudly rather than silently writing to a table that no longer means what it
 -- says.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
+-- Deliberate greenfield hard cut, already applied — see the no-alias note
+-- above. Breaking a client that still names merchant_exports is the point.
+-- squawk-ignore renaming-table
 ALTER TABLE openrails.merchant_exports RENAME TO merchant_purge_inventories;
 
 -- `row_counts` undersold itself in the other direction: the column holds the
 -- whole manifest (counts, secret names, and the explicit not-captured list).
+-- squawk-ignore renaming-column
 ALTER TABLE openrails.merchant_purge_inventories RENAME COLUMN row_counts TO manifest;
 
 ALTER TABLE openrails.merchant_purge_inventories

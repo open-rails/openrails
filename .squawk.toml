@@ -1,15 +1,27 @@
 # Migration lint (or#838). Gate: scripts/migration-lint.sh, `task migration-lint`.
 #
-# Each migration file is applied inside one transaction by the migrator, so
-# per-statement rerunnability rules do not apply.
+# Each migration file is applied inside one transaction — migratekit's
+# applyOne() does BeginTx / Exec(whole file) / Commit, and scripts/sqlc-vet-db.sh
+# mirrors that with `psql -1`. So per-statement rerunnability rules do not apply,
+# and a file must NOT open a transaction of its own (transaction-nesting).
 assume_in_transaction = true
 
-# BASELINE: migrations already applied everywhere. They are frozen history —
-# 0001 is the squashed baseline (creates the schema from nothing, so lock-safety
-# rules are vacuous), 0002-0009 predate this gate. Rationale in
-# internal/db/queries/EXEMPTIONS.md. New migrations are NOT excluded: they must
-# pass clean, including require-lock-timeout / require-statement-timeout, which
-# only 0001 currently sets.
+# Rules that CANNOT be satisfied under a single-transaction migrator. Both ask
+# for `CONCURRENTLY`, which Postgres refuses inside a transaction block — squawk
+# itself then fires ban-concurrent-index-creation-in-transaction on the "fix".
+# Verified both ways (see internal/db/queries/EXEMPTIONS.md). Excluding a rule
+# that cannot apply is honest; excluding a FILE from a rule that does apply is
+# not, which is why nothing after 0009 is added to excluded_paths.
+excluded_rules = [
+    "require-concurrent-index-creation",
+    "require-concurrent-index-deletion",
+]
+
+# BASELINE: 0001 is the squashed baseline (creates the schema from nothing, so
+# lock-safety rules are vacuous) and 0002-0009 predate this gate. Rationale in
+# internal/db/queries/EXEMPTIONS.md. NOTHING ELSE IS EXCLUDED BY PATH: 0010-0029
+# were brought clean, and every remaining judgement call is an inline
+# `-- squawk-ignore <rule>` carrying its reason, written at the site.
 excluded_paths = [
     "migrations/postgres/0001_schema.up.sql",
     "migrations/postgres/0002_enterprise_invoicing.up.sql",

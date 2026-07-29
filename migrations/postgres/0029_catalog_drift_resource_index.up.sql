@@ -9,8 +9,8 @@
 -- resource identity. Partial on the same `resolved_at IS NULL` the query and the
 -- other open-drift indexes use — resolved rows are never looked up this way and
 -- are the bulk of the table over time.
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE INDEX IF NOT EXISTS idx_catalog_drift_open_resource
     ON openrails.catalog_drift_events

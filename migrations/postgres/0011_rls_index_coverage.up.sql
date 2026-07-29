@@ -7,6 +7,10 @@
 -- all. TestMerchantIsolationPolicyIsIndexBacked makes the class a build failure.
 
 -- Only index was idx_solana_subscriptions_due ... WHERE status = 'active'.
+
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 CREATE INDEX idx_solana_subscriptions_merchant_id
     ON openrails.solana_subscriptions USING btree (merchant_id);
 

@@ -24,8 +24,11 @@
 --     and mutates nothing. A legacy NMI book imported into a new deployment is
 --     therefore surveyed on first boot, not cancelled within seconds of it.
 
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 CREATE TABLE openrails.destructive_action_switch (
-    id uuid DEFAULT uuidv7() NOT NULL,
+    id uuid DEFAULT uuidv7() NOT NULL PRIMARY KEY,
     singleton boolean DEFAULT true NOT NULL,
     enabled boolean DEFAULT false NOT NULL,
     updated_by text,
@@ -36,9 +39,6 @@ CREATE TABLE openrails.destructive_action_switch (
 
 COMMENT ON TABLE openrails.destructive_action_switch IS 'RLS-exempt by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.';
 
-ALTER TABLE ONLY openrails.destructive_action_switch
-    ADD CONSTRAINT destructive_action_switch_pkey PRIMARY KEY (id);
-
 CREATE UNIQUE INDEX uq_destructive_action_switch_singleton
     ON openrails.destructive_action_switch USING btree (singleton);
 
@@ -48,7 +48,7 @@ INSERT INTO openrails.destructive_action_switch (enabled, reason)
 VALUES (false, 'default safe (#836): arm deliberately once the first pull''s findings have been reviewed');
 
 CREATE TABLE openrails.merchant_destructive_policy (
-    id uuid DEFAULT uuidv7() NOT NULL,
+    id uuid DEFAULT uuidv7() NOT NULL PRIMARY KEY,
     merchant_id uuid NOT NULL,
     destructive_actions_enabled boolean DEFAULT true NOT NULL,
     enforce_armed_at timestamp with time zone,
@@ -63,9 +63,6 @@ ALTER TABLE ONLY openrails.merchant_destructive_policy FORCE ROW LEVEL SECURITY;
 COMMENT ON TABLE openrails.merchant_destructive_policy IS '#836/#835 per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant''s provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.';
 
 COMMENT ON COLUMN openrails.merchant_destructive_policy.enforce_armed_at IS '#835: NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.';
-
-ALTER TABLE ONLY openrails.merchant_destructive_policy
-    ADD CONSTRAINT merchant_destructive_policy_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY openrails.merchant_destructive_policy
     ADD CONSTRAINT merchant_destructive_policy_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;

@@ -31,17 +31,25 @@
 -- rail='vaulted_card' is phase 2 / or#879), and the backfill only names the
 -- fact each row already carried.
 
-BEGIN;
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
+-- Deliberate greenfield hard cut (or#880), already applied: the standing rule
+-- is no alias and no compatibility view on a pre-launch schema, so a caller
+-- still naming vault_provider must fail loudly rather than silently read a
+-- column that no longer means what it says.
+-- squawk-ignore renaming-column
 ALTER TABLE openrails.payment_methods RENAME COLUMN vault_provider TO custodian;
 
 UPDATE openrails.payment_methods SET custodian = 'psp' WHERE custodian = '';
 
+-- Already applied, and the row set was normalised by the UPDATE two lines up,
+-- so NOT VALID would defer a scan the same transaction has just guaranteed.
 ALTER TABLE openrails.payment_methods
     ALTER COLUMN custodian SET DEFAULT 'psp'::text,
+    -- squawk-ignore constraint-missing-not-valid
     ADD CONSTRAINT payment_methods_custodian_check
         CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text])));
 
 COMMENT ON COLUMN openrails.payment_methods.custodian IS 'or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
 
-COMMIT;

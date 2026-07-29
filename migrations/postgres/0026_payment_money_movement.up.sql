@@ -22,12 +22,18 @@
 -- withholds one event instead of inventing one, and is caught loudly in Go:
 -- payments.paymentInsertParams rejects an undeclared completed positive charge.
 
-BEGIN;
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 ALTER TABLE openrails.payments
     ADD COLUMN money_movement text NOT NULL DEFAULT 'none';
 
+-- Already applied. NOT VALID buys nothing inside a single-transaction migrator
+-- — the ADD's ACCESS EXCLUSIVE lock is held to COMMIT either way — and
+-- rewriting it now would leave the file claiming an unvalidated constraint that
+-- every migrated database has long since validated.
 ALTER TABLE openrails.payments
+    -- squawk-ignore constraint-missing-not-valid
     ADD CONSTRAINT chk_payments_money_movement
     CHECK (money_movement = ANY (ARRAY['rail'::text, 'none'::text]));
 
@@ -66,5 +72,3 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-COMMIT;
