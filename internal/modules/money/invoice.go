@@ -65,7 +65,14 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	}
 	// Materialize the payable customers row so the invoices FK (migration
 	// 076) is satisfied even if no prior money op touched this subject (#317).
-	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
+	//
+	// or#868 B2: on a merchant-PINNED connection. FinalizeInvoice is a
+	// host/embedded-facing seam (pkg/service.Service.FinalizeInvoice), so nothing
+	// upstream necessarily pinned one, and off the request path this INSERT was
+	// denied 42501 — taking the whole arrears close down with it.
+	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID())
+	}); err != nil {
 		return nil, err
 	}
 
