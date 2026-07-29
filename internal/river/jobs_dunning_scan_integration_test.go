@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -130,19 +129,19 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	require.NoError(t, worker.Work(context.Background(), &river.Job[DunningArgs]{Args: DunningArgs{}}))
 }
 
-// TestDunningScan_MissingPaymentMethodAppliesFailurePolicy pins the two
+// TestDunningScan_MissingPaymentMethodParksInsteadOfFailing pins the two
 // nothing-chargeable shapes (replaces the tests/ dunning_worker
 // missing-payment-method tests (#694), which only asserted
 // status ∈ {past_due, cancelled}):
 //
-//   - an OPENRAILS-driven payment method with missing vault refs goes to the
-//     dunning failure policy — no provider mutation, no charge intent, the
-//     soft-failure schedule (past_due + retry_attempts + cadence-derived
-//     next_retry_at) applied;
+//   - an OPENRAILS-driven payment method with missing vault refs PARKS as
+//     `unknown` (#840) — no provider mutation, no charge intent, and crucially
+//     no dunning failure recorded: the absence of one of OUR OWN rows is not a
+//     decline, and must never burn a retry ordinal or reach a terminal outcome;
 //   - NO payment method at all on NMI means PROVIDER-AUTO-BILLED (#635/#682:
 //     vault-less legacy import) — the sub is left completely untouched for
 //     provider-pull reconciliation, never failed or charged.
-func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
+func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -173,7 +172,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 	nextRetry := now.Add(-time.Minute)
 
 	// Sub A: openrails-driven payment method whose vault refs are MISSING —
-	// nothing chargeable, the failure policy must apply.
+	// nothing chargeable, and nothing that could justify a failure either.
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
 	paymentMethodID := uuid.New()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
@@ -245,7 +244,7 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
-	// --- Sub A: openrails-driven pm with missing vault refs -> failure policy ---
+	// --- Sub A: openrails-driven pm with missing vault refs -> park (#840) ---
 	sub, err := subSvc.GetByID(ctx, subID)
 	require.NoError(t, err)
 	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, moneySvc, false)
@@ -258,20 +257,19 @@ func TestDunningScan_MissingPaymentMethodAppliesFailurePolicy(t *testing.T) {
 		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
 	assert.Zero(t, intentCount, "missing vault refs never record a charge intent")
 
-	// The soft-failure policy applied: still past_due, first recorded attempt,
-	// next retry on the monthly schedule (+2d, #359) — not terminal-cancelled.
+	// #840: parked for provider verification — NOT failed. No retry ordinal is
+	// burned and no claim is stamped, because no attempt was ever made.
 	var status string
 	var retryAttempts *int32
-	var nextRetryAt *time.Time
+	var lastRetryAt, nextRetryAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, retry_attempts, next_retry_at FROM openrails.subscriptions WHERE id = $1`, subID).
-		Scan(&status, &retryAttempts, &nextRetryAt))
-	assert.Equal(t, string(models.StatusPastDue), status)
-	require.NotNil(t, retryAttempts)
-	assert.EqualValues(t, 1, *retryAttempts)
-	require.NotNil(t, nextRetryAt)
-	assert.WithinDuration(t, time.Now().UTC().Add(collection.NextRetryIn(720, 1)), nextRetryAt.UTC(), time.Minute,
-		"soft failure reschedules on the cadence-derived monthly schedule")
+		`SELECT status, retry_attempts, last_retry_at, next_retry_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		Scan(&status, &retryAttempts, &lastRetryAt, &nextRetryAt))
+	assert.Equal(t, string(models.StatusUnknown), status,
+		"missing local vault refs park the row; the unknown-cohort probe verifies it against the provider")
+	assert.Nil(t, retryAttempts, "an attempt we never made cannot count toward retry_attempts")
+	assert.Nil(t, lastRetryAt, "the claim must not run: last_retry_at is dunning forensic evidence")
+	assert.Nil(t, nextRetryAt, "a parked row leaves the dunning queue")
 
 	// --- Sub B: pm-less = provider-auto-billed (#635) -> untouched ---
 	autoSub, err := subSvc.GetByID(ctx, autoBilledSubID)

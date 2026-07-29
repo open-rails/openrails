@@ -161,16 +161,23 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, 1, intentCount)
 }
 
-// TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally (#366): the
-// window-expired path is LOCAL convergence (cancel + downgrade, no charge)
-// and applies under materialize exactly as under full mode.
-func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) {
+// TestDunningWorker_MaterializeStalenessParksLocally (#366 + #839): the
+// stale-window path is LOCAL convergence and applies under materialize exactly
+// as under full mode — but since #839 that convergence is a PARK, not a cancel.
+// Limited mode used to be documented as "local window-expiry cancellations
+// apply"; there is no longer any local terminal cancellation on this path to
+// apply, in any mode. The charge is still skipped: a months-stale rebill is
+// never fired by a catch-up run.
+func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// RLS-enforcing harness: this fixture seeds and asserts on ONE merchant's
+	// own rows, so it uses the merchant-pinned pool rather than a raw one.
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
-	dbtest.EnsureTestMerchant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t,
+		dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
@@ -239,15 +246,28 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	// Same shape as the production Work loop: the pass runs on a merchant-scoped
+	// connection, so both the read and the lifecycle writes carry the GUC.
+	var outcome dunningOutcome
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(mctx, subID)
+		if err != nil {
+			return err
+		}
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)
 	assert.Zero(t, nmiMutations.Load(), "window expiry never charges")
 
 	var subStatus string
+	var cancelledAt *time.Time
+	var deletionScheduledAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
-	assert.NotEqual(t, string(models.StatusPastDue), subStatus, "stale subscription must be cancelled, not left premium")
+		`SELECT status, cancelled_at, deletion_scheduled_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		Scan(&subStatus, &cancelledAt, &deletionScheduledAt))
+	assert.Equal(t, string(models.StatusUnknown), subStatus,
+		"a stale subscription parks for provider verification; staleness is a clock reading, not a death certificate (#839)")
+	assert.Nil(t, cancelledAt, "no local terminal cancellation on the staleness path, in any mode")
+	assert.Nil(t, deletionScheduledAt, "and therefore no irreversible NMI vault delete is ever queued for it")
 }

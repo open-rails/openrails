@@ -1820,11 +1820,55 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			failureAttemptNum = *subscription.RetryAttempts + 1
 		}
 
+		// #821/#839/#840/#836: ONE gate for every terminal outcome in this flow.
+		// A terminal cancel revokes entitlements AND queues the IRREVERSIBLE
+		// provider-side vault delete, so it requires (a) a named certainty leg —
+		// provider truth, a non-retryable decline, or genuinely exhausted dunning
+		// ATTEMPTS — and (b) an open operator kill switch. A date comparison, an
+		// expired dunning window, and the absence of one of our own rows are not
+		// evidence. Refused terminals PARK as `unknown`: access intact, out of the
+		// dunning queue, resolved by the provider-verification plane.
+		terminalRefusal := func(leg string) string {
+			if params.TerminalBlocked != "" {
+				return params.TerminalBlocked
+			}
+			if leg == "" {
+				return "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts"
+			}
+			return ""
+		}
+		// scheduleExhaustionLeg: running the retry schedule out is certainty ONLY
+		// when the attempts were REAL — a recorded charge attempt per failure
+		// (#733 payments row). Attempts we declined to make because our own data
+		// was missing (#840) carry no leg and cannot exhaust anything.
+		scheduleExhaustionLeg := func() string {
+			if params.TerminalCertainty != "" {
+				return params.TerminalCertainty
+			}
+			if params.RecordFailedAttempt || params.AttemptRecorded {
+				return collection.CertaintyDunningExhausted
+			}
+			return ""
+		}
+		// parkUnknown is ApplyLocalUnknown's shape applied inside this tx: the
+		// row leaves the dunning queue without losing the customer's access.
+		parkUnknown := func(why string) {
+			subscription.Status = models.StatusUnknown
+			subscription.GraceEndsAt = nil
+			subscription.NextRetryAt = nil
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":    subscription.ID,
+				"failure_reason":     normalize.FromPtr(params.FailureReason),
+				"terminal_certainty": params.TerminalCertainty,
+				"refusal":            why,
+			}).Warn("Terminal cancellation REFUSED; parking subscription as unknown (entitlements intact, no provider delete queued)")
+		}
+
 		// Hard declines (stolen card, do-not-honor, account closed, expired card,
 		// pickup card) terminate immediately: cancel now with no grace period and
 		// no further retry scheduling. Retrying a hard decline cannot succeed and
 		// risks flagging the merchant with the card networks.
-		if params.HardDecline {
+		if params.HardDecline && terminalRefusal(params.TerminalCertainty) == "" {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID,
@@ -1879,11 +1923,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				terminal = *subscription.RetryAttempts >= maxFailures
 			}
 
-			// Terminal (window expired, or the schedule's max failures reached):
-			// cancel; otherwise schedule the next retry at the schedule's gap
-			// for this failure count (relative to now, so a late worker run
-			// never schedules into the past)
-			if terminal {
+			// Terminal (the schedule's max failures reached, or a caller-declared
+			// terminal): cancel — but only through the certainty + kill-switch
+			// gate. Refused ⇒ park as `unknown`. Otherwise schedule the next retry
+			// at the schedule's gap for this failure count (relative to now, so a
+			// late worker run never schedules into the past).
+			leg := params.TerminalCertainty
+			if !params.Terminal {
+				leg = scheduleExhaustionLeg()
+			}
+			if refusal := terminalRefusal(leg); terminal && refusal != "" {
+				parkUnknown(refusal)
+			} else if terminal {
 				expired := models.CancelTypeExpired
 				reason := normalize.FromPtr(params.FailureReason)
 				if reason == "" {
