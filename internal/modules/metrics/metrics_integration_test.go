@@ -85,8 +85,11 @@ func exec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql string, arg
 func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
-	pool := dbi.Pool()
+	// The metrics corpus deliberately spans TWO merchants (mA/mB) so isolation is
+	// assertable, so the FIXTURE writes need privilege. The service under test
+	// still runs on the RLS-enforcing default handle.
+	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	svc := metrics.NewService(dbi)
 	ctxA := merchant.WithID(ctx, merchant.ID(mA))
 	ctxB := merchant.WithID(ctx, merchant.ID(mB))

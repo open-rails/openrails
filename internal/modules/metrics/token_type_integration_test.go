@@ -20,11 +20,11 @@ import (
 // 3 settled + 1 failed (0.75), one NULL-token_type row folding to 'unknown'.
 func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
+	m := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, m)
 	pool := dbi.Pool()
 	svc := metrics.NewService(dbi)
 
-	m := uuid.New()
 	mctx := merchant.WithID(ctx, merchant.ID(m))
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	customerID, productID, priceID := uuid.New(), uuid.New(), uuid.New()
