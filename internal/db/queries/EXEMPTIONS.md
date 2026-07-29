@@ -7,7 +7,7 @@ correctness check:
 |---|---|---|
 | `internal/db/sqlaudit` | every query is bounded and index-backed | `AUDIT_ALLOWLIST.txt` |
 | `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
-| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` |
+| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` + inline `squawk-ignore` |
 
 Every allowlist entry is classified **PERMANENT** (bounded by design) or
 **DEBT** (a real bug, kept only so the gate could be switched on), carries a
@@ -133,9 +133,64 @@ Nothing about them requires raw SQL.
 
 ## .squawk.toml
 
-`assume_in_transaction` is set because the migrator applies each file inside one
-transaction. The nine existing migrations are excluded by path: `0001` is the
-squashed baseline (creates the schema from nothing, so lock-safety rules are
-vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
-excluded and must pass clean — including `require-lock-timeout` and
-`require-statement-timeout`, which only `0001` currently sets.
+`assume_in_transaction` is set because migratekit's `applyOne()` does
+`BeginTx` / `Exec(whole file)` / `Commit`, and `scripts/sqlc-vet-db.sh` mirrors
+that with `psql -1`. Those are the only two apply paths — there is no
+non-transactional one — which is why migrations use `SET LOCAL` for their
+timeouts rather than `SET`.
+
+`0001` is excluded by path (the squashed baseline creates the schema from
+nothing, so lock-safety rules are vacuous) and `0002`-`0009` predate the gate.
+**Nothing else is excluded by path.** `0010`-`0029` were brought clean under
+or#887; everything still exempt is an inline `-- squawk-ignore <rule>` written
+at the statement with its reason on the lines above it, so the rest of the file
+stays linted and the reason sits where the next person edits.
+
+### The two rules this migrator cannot satisfy
+
+`require-concurrent-index-creation` and `require-concurrent-index-deletion` are
+in `excluded_rules`. They are not judgement calls — they are unsatisfiable here,
+verified both ways:
+
+```
+BEGIN; CREATE INDEX CONCURRENTLY …;
+  ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+BEGIN; DROP INDEX CONCURRENTLY …;
+  ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
+```
+
+and squawk, run with `assume_in_transaction`, fires
+`ban-concurrent-index-creation-in-transaction` on the very edit the rule asks
+for. Between them the pair accounted for 52 of the gate's 96 original findings.
+Excluding a rule that cannot apply is honest; excluding a *file* from a rule
+that does apply is not, which is the distinction `excluded_paths` above holds
+to.
+
+The alternative is a non-transactional migration mode — per-file
+`-- migratekit:no-transaction`, applied statement-by-statement outside a
+transaction, with every such file responsible for its own idempotency (an
+interrupted `CREATE INDEX CONCURRENTLY` leaves an INVALID index behind and must
+be re-runnable). That is a change to migratekit, not to this repo, plus a
+matching change to `sqlc-vet-db.sh`, plus a review of what "half-applied
+migration" means for the ledger. Roughly two days, and it buys nothing until
+the schema is large enough that a non-concurrent index build actually blocks
+production writes. Deliberately not started.
+
+### The eleven inline exemptions
+
+All are in already-applied migrations, all classified **PERMANENT — history**:
+rewriting them changes no live database and the honest record is what actually
+ran. The rules stay armed for new migrations.
+
+| where | rule(s) | why |
+|---|---|---|
+| `0013` ledger_transfers CHECK | `constraint-missing-not-valid` | `NOT VALID` buys nothing inside a single-transaction migrator — the ADD's `ACCESS EXCLUSIVE` lock is held to COMMIT either way. The two-step only pays off across two transactions, i.e. two migration files. |
+| `0018` ×4 destructive_run FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | The referencing columns were added `NULL` a few statements earlier and the referenced table is created by the same file, so the validating scan is over an all-NULL column. squawk suppresses both rules when the *referencing* table is new, but cannot see this case. |
+| `0025` vault_provider→custodian | `renaming-column` | Deliberate greenfield hard cut (or#880): no alias, no compatibility view. A caller still naming `vault_provider` must fail loudly. |
+| `0025` custodian CHECK | `constraint-missing-not-valid` | The `UPDATE` two lines above normalises the rows the CHECK then validates, in the same transaction. |
+| `0026` money_movement CHECK | `constraint-missing-not-valid` | Same as `0013`. |
+| `0027` merchant_exports→merchant_purge_inventories | `renaming-table`, `renaming-column` | Same hard-cut rationale as `0025`; breaking a client that still names `merchant_exports` is the point of or#858. |
+
+A new migration that genuinely needs one of these must add the constraint
+`NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction
+each. That is the only shape that actually reduces lock time here.
