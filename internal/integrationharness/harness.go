@@ -386,8 +386,9 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
 	cfg := &config.Config{
-		Env:      "dev",
-		TestMode: config.CredentialPostureSandbox,
+		Env:                      "dev",
+		TestMode:                 config.CredentialPostureSandbox,
+		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		// MODE 2 (#723): the standalone harness IS the API-driven SaaS shape —
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.
