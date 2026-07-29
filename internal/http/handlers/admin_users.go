@@ -284,6 +284,7 @@ func AdminResumeSubscription(r *httprequest.Request) {
 		return
 	}
 	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     sub.MerchantID,
 		UserID:         sub.CustomerID.String(),
 		SubscriptionID: subscriptionID,
 	}, &river.InsertOpts{

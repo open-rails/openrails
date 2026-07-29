@@ -34,6 +34,11 @@ const (
 	KindDunning  = "openrails.dunning"
 
 	dunningAttemptLease = 15 * time.Minute
+
+	// dunningMerchantBatch caps how many merchants one pass fans out to. The
+	// work queue is indexed on the due-dunning predicate, so this bounds a pass
+	// by ACTIVITY, never by the size of the merchant directory.
+	dunningMerchantBatch = 500
 )
 
 // dunningOutcome classifies what a dunning pass did with one subscription.
@@ -154,26 +159,28 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		return nil
 	}
 
-	// Query all due past_due NMI-backed subscriptions
-	// Use w.now() instead of SQL NOW() to support time mocking in tests
+	// or#877 B5: the due scan used to run on the job's BARE context.
+	// subscriptions FORCEs RLS, so under openrails_app it matched
+	// `merchant_id = NULL` — an empty slice, a "no subscriptions due" debug line
+	// and a successful return, every four hours since the worker shipped. The
+	// per-subscription RunInMerchantConn below it never executed because the
+	// loop it lived in never had a row. Scheduled dunning — retries, #839
+	// staleness parking, #840 terminal handling — had therefore never run at
+	// all. Enumerate the merchants with due work through migration 0023's
+	// SECURITY DEFINER work queue (ids only; it RAISES if its definer cannot
+	// bypass RLS), then scan and charge inside each merchant's own scope.
+	// Use w.now() instead of SQL NOW() to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
-	dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiRails, w.now())
+	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch,
+	})
 	if err != nil {
-		return fmt.Errorf("query due subscriptions: %w", err)
+		return fmt.Errorf("query merchants with due subscriptions: %w", err)
 	}
-
-	if len(dueSubscriptions) == 0 {
+	if len(merchantIDs) == 0 {
 		log.WithContext(ctx).Debug("Dunning: no subscriptions due for retry")
 		return nil
 	}
-
-	if observeOnly {
-		log.WithContext(ctx).WithField("count", len(dueSubscriptions)).
-			Warn("Readonly mode: found due subscriptions but skipping dunning mutations")
-		return nil
-	}
-
-	log.WithContext(ctx).WithField("count", len(dueSubscriptions)).Info("Dunning: processing due subscriptions")
 
 	// Build services once for all attempts
 	priceSvc := catalog.NewPriceService(w.DB)
@@ -190,44 +197,69 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	}
 	moneySvc := money.NewMoneyService(w.DB, w.Clock)
 
+	total := 0
 	successCount := 0
 	failCount := 0
 	windowExpiredCount := 0
 	materializedCount := 0
 
-	for _, sub := range dueSubscriptions {
-		// #336: pin the subscription's merchant so writes in processSubscription
-		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
-		outcome := dunningOutcomeFailed
-		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
-			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
-			// #511 Phase E: re-converge this customer inline after the dunning
-			// transition (past_due / grace / terminal cancel / renewal) — already
-			// on the merchant-scoped connection, so call Converge directly. Best-
-			// effort: a convergence error must not fail the dunning run.
-			if _, cerr := converge.AfterMutation(tctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID); cerr != nil {
-				log.WithContext(tctx).WithError(cerr).WithField("subscription_id", sub.ID).
-					Warn("Dunning: inline converge failed; the sweep will reconcile")
+	for _, mid := range merchantIDs {
+		if mid == nil {
+			continue
+		}
+		merchantID := merchant.ID(*mid)
+		// The pin AND the proof it took: every read and write below runs under
+		// this merchant's app.merchant_id, exactly as a request would.
+		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
+			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now())
+			if err != nil {
+				return fmt.Errorf("query due subscriptions: %w", err)
+			}
+			total += len(dueSubscriptions)
+			if len(dueSubscriptions) == 0 {
+				return nil
+			}
+			if observeOnly {
+				log.WithContext(mctx).WithField("count", len(dueSubscriptions)).
+					Warn("Readonly mode: found due subscriptions but skipping dunning mutations")
+				return nil
+			}
+			log.WithContext(mctx).WithFields(log.Fields{
+				"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
+			}).Info("Dunning: processing due subscriptions")
+
+			for _, sub := range dueSubscriptions {
+				outcome := w.processSubscription(mctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
+				// #511 Phase E: re-converge this customer inline after the dunning
+				// transition (past_due / grace / terminal cancel / renewal) — already
+				// on the merchant-scoped connection, so call Converge directly. Best-
+				// effort: a convergence error must not fail the dunning run.
+				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID); cerr != nil {
+					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
+						Warn("Dunning: inline converge failed; the sweep will reconcile")
+				}
+				switch outcome {
+				case dunningOutcomeSucceeded:
+					successCount++
+				case dunningOutcomeWindowExpired:
+					windowExpiredCount++
+				case dunningOutcomeMaterialized:
+					materializedCount++
+				default:
+					failCount++
+				}
 			}
 			return nil
 		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-				Error("Dunning: failed to pin merchant connection; counting subscription as failed")
-		}
-		switch outcome {
-		case dunningOutcomeSucceeded:
-			successCount++
-		case dunningOutcomeWindowExpired:
-			windowExpiredCount++
-		case dunningOutcomeMaterialized:
-			materializedCount++
-		default:
-			failCount++
+			// One merchant's failure must not abort the rest of the run.
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
+				Error("Dunning: merchant pass failed; continuing")
 		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"total":          len(dueSubscriptions),
+		"merchants":      len(merchantIDs),
+		"total":          total,
 		"success":        successCount,
 		"failed":         failCount,
 		"window_expired": windowExpiredCount,

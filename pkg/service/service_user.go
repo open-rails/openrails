@@ -462,6 +462,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 	}
 
 	if _, err := rt.RiverProducer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     target.MerchantID,
 		UserID:         userID,
 		SubscriptionID: target.ID,
 	}, &river.InsertOpts{
