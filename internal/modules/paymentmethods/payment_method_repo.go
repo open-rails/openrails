@@ -56,7 +56,7 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		Metadata:             meta,
 		CreatedAt:            m.CreatedAt,
 		UpdatedAt:            m.UpdatedAt,
-		VaultProvider:        m.VaultProvider,
+		Custodian:            m.Custodian, // "" -> DB default 'psp'
 		VaultFingerprint:     m.VaultFingerprint,
 		NetworkTokenID:       m.NetworkTokenID,
 		NetworkTokenStatus:   m.NetworkTokenStatus,

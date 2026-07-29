@@ -75,7 +75,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		RailMethodRef:        fx.tokenID,
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
-		VaultProvider:        "basis_theory",
+		Custodian:            models.CustodianBasisTheory,
 		VaultFingerprint:     "fp_" + uuid.NewString()[:10],
 		NetworkTokenID:       fx.ntID,
 		NetworkTokenStatus:   "active",

@@ -45,7 +45,7 @@ func CanonicalRail(rail string) string {
 		return "nmi"
 	}
 	// #795: the BT webhook endpoint is /webhooks/basistheory; the rail is
-	// vaulted_card (basis_theory is the vault_provider, not the rail).
+	// vaulted_card (basis_theory is the custodian, not the rail — or#880).
 	if rail == "basistheory" || rail == "basis_theory" {
 		return "vaulted_card"
 	}

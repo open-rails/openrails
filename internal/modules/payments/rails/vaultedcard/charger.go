@@ -22,6 +22,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -31,8 +32,9 @@ import (
 // Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
 const Rail = "vaulted_card"
 
-// VaultProvider is the payment_methods.vault_provider value for BT rows.
-const VaultProvider = "basis_theory"
+// Custodian is the payment_methods.custodian value for BT rows (or#880):
+// the PAN is held at Basis Theory while the processor stays NMI.
+const Custodian = models.CustodianBasisTheory
 
 // Charger charges BT-vaulted instruments through the seam. Source selects the
 // credential per charge (callers construct one Charger per charge site from

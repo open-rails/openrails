@@ -47,10 +47,15 @@ type PaymentMethod struct {
 	StoredCredentialRecurringRef   string `json:"-"`
 	StoredCredentialUnscheduledRef string `json:"-"`
 
+	// Custodian (or#880) is WHO HOLDS this instrument — the axis orthogonal to
+	// who charges it (Rail + PspID). Always stated, never empty; see the
+	// Custodian* constants. "No stored instrument" (CCBill, Solana) is the
+	// absence of a payment_methods row, not a custodian value.
+	Custodian string `json:"-"`
+
 	// Neutral-vault instrument fields (#795, rail='vaulted_card'). ChargeVia
 	// routes pan_proxy|network_token; ParkReason non-empty = instrument parked
 	// (vault-side problem; cancellation-last-resort, never a terminal cancel).
-	VaultProvider      string     `json:"-"` // 'basis_theory' on vaulted_card rows; '' elsewhere
 	VaultFingerprint   string     `json:"-"`
 	NetworkTokenID     string     `json:"-"`
 	NetworkTokenStatus string     `json:"-"`
@@ -77,6 +82,22 @@ const (
 	RebillDriverProvider  = "provider"
 	RebillDriverOpenRails = "openrails"
 )
+
+// Custodian values (or#880) — payment_methods.custodian. Custody (who holds
+// the card) is orthogonal to the processor (Rail + PspID, who charges it):
+// psp/stripe, psp/nmi and basis_theory/nmi are all real combinations today.
+// The DB CHECK pins the same set; adding a custodian is a migration.
+const (
+	// CustodianPSP: the instrument lives at the processor itself — a Stripe
+	// pm_ on a Stripe Customer, an NMI customer_vault_id in the gateway.
+	CustodianPSP = "psp"
+	// CustodianBasisTheory: the PAN lives in the Basis Theory neutral vault
+	// (#795) and is proxied to the processor at charge time.
+	CustodianBasisTheory = "basis_theory"
+)
+
+// Custodians lists the declared custody values in stable order.
+func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory} }
 
 // PaymentMethodCharge is the DERIVED last-charge health for a payment method
 // (#589) — computed at query time from openrails.payments, never a stored column.

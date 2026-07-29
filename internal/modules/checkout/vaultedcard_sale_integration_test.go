@@ -255,14 +255,14 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	require.Equal(t, charge.TokenTypePANViaVault, tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
 
-	// Instrument row: BT token id, vault provider, fingerprint, pan_proxy,
+	// Instrument row: BT token id, custodian, fingerprint, pan_proxy,
 	// anchored unscheduled sequence = the NMI transactionid.
-	var vaultProvider, fingerprint, chargeVia, anchor, lastFour string
+	var custodian, fingerprint, chargeVia, anchor, lastFour string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT vault_provider, vault_fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
+		`SELECT custodian, vault_fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
 		 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
-		fx.bt.tokenID).Scan(&vaultProvider, &fingerprint, &chargeVia, &anchor, &lastFour))
-	require.Equal(t, vaultedcard.VaultProvider, vaultProvider)
+		fx.bt.tokenID).Scan(&custodian, &fingerprint, &chargeVia, &anchor, &lastFour))
+	require.Equal(t, vaultedcard.Custodian, custodian)
 	require.Equal(t, fx.bt.fingerprint, fingerprint)
 	require.Equal(t, vaultedcard.ViaPANProxy, chargeVia)
 	require.Equal(t, fx.bt.txnID, anchor)

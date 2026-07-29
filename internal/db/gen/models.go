@@ -814,8 +814,8 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
-	// #795 neutral card vault holding this instrument ('basis_theory' on vaulted_card rows; '' elsewhere).
-	VaultProvider string
+	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
+	Custodian string
 	// #795 vault card fingerprint (BT default expression over the PAN) for dedup/lookup.
 	VaultFingerprint string
 	// #795 BT network-token uuid; '' = not provisioned.

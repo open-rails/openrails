@@ -561,7 +561,7 @@ func (h *VaultedCardSaleIntentHandler) ensureInstrument(ctx context.Context, mer
 		Rail:             models.RailVaultedCard,
 		RailMethodRef:    token.ID,
 		RebillDriver:     models.RebillDriverOpenRails,
-		VaultProvider:    vaultedcard.VaultProvider,
+		Custodian:        vaultedcard.Custodian,
 		VaultFingerprint: token.Fingerprint,
 		ChargeVia:        vaultedcard.ViaPANProxy,
 		CreatedAt:        now,
