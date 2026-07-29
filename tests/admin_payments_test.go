@@ -742,7 +742,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 
 	// The durable intent records the execution.
 	var intentStatus string
-	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
 		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "succeeded", intentStatus)
@@ -838,7 +838,7 @@ func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
 	assert.Equal(t, "5.00", form.Get("amount"), "provider must see the exact decimal amount")
 
 	var intentStatus string
-	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
 		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'ccbill_refund' AND payment_id = $1",
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "succeeded", intentStatus)
@@ -848,7 +848,7 @@ func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
 	// subscription+transaction (ccbillRefundProviderRef).
 	var refundAmount int64
 	var refundStatus, refundTxn string
-	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
 		"SELECT amount, status, transaction_id FROM openrails.payments WHERE refunded_payment_id = $1",
 		payment.ID).Scan(&refundAmount, &refundStatus, &refundTxn))
 	assert.EqualValues(t, -5_000_000, refundAmount)
@@ -900,7 +900,7 @@ func TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code, "parked intent reports 202 with the pending reservation: %s", w.Body.String())
 
 	var intentStatus string
-	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
 		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'ccbill_refund' AND payment_id = $1",
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "pending", intentStatus, "the durable intent waits for the scheduled executor")

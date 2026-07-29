@@ -529,6 +529,23 @@ func (suite *TestContainerSuite) MerchantCtx() context.Context {
 	return ctx
 }
 
+// MerchantPool is the raw-SQL counterpart of FixtureDB: the RLS-ENFORCING app
+// role pinned to the suite's merchant. Assertions about the suite merchant's own
+// rows belong here, not on suite.App.Runtime.DB.Pool() — that is the server's
+// BASE pool, which carries no GUC and therefore returns nothing.
+func (suite *TestContainerSuite) MerchantPool() *pgxpool.Pool {
+	suite.t.Helper()
+	return suite.harness.MerchantPool(dbtest.TestMerchantID.UUID())
+}
+
+// WorkerCtx is the context a River worker actually receives in production: no
+// merchant, no pinned connection. A test that drives a worker's Work() directly
+// MUST hand it this and not MerchantCtx() — the worker pinning its own merchant
+// connection (RunInMerchantConn) is precisely what such a test exists to prove,
+// and a pre-pinned context does the worker's job for it, turning an inert sweep
+// into a green test. That is the failure mode or#867 exists to remove.
+func (suite *TestContainerSuite) WorkerCtx() context.Context { return context.Background() }
+
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()

@@ -133,7 +133,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
 	}
-	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
 	// Fail-open mid-dunning (#691): the failed retry must not have touched
 	// access — entitled well past the missed paid end, with zero grace rows.
@@ -152,7 +152,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// the standing window needs no extension.
 	mock.ShouldFail = false
 	clock.Advance(collection.NextRetryIn(30*24, 2))
-	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
 	for _, entName := range []string{"premium", "extra"} {
 		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
@@ -238,7 +238,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	maxDunningFailures := collection.MaxFailures(30 * 24)
 	for i := 0; i < maxDunningFailures+1; i++ {
 		clock.Advance(4 * 24 * time.Hour)
-		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+		require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 		refreshed := suite.GetSubscription(sub.ID)
 		if refreshed.Status == models.StatusCancelled {
 			break

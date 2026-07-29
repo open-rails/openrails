@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type testDelegatedResolver struct {
@@ -69,7 +68,7 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	endAt := now.Add(30 * 24 * time.Hour)
 	adminSourceID := uuid.New()
 	// The RLS-aware Runtime.DB insert needs the merchant pinned on the context.
-	mctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mctx := suite.MerchantCtx()
 	suite.InsertEntitlement(mctx, &models.Entitlement{
 		ID:          uuid.New(),
 		CustomerID:  suite.ensureCustomer(mctx, userID),

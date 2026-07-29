@@ -372,7 +372,7 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 	}
-	require.NoError(t, resumeWorker.Work(ctx, &river.Job[riverjobs.ResumeSubscriptionArgs]{
+	require.NoError(t, resumeWorker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
 		Args: riverjobs.ResumeSubscriptionArgs{UserID: userID, SubscriptionID: sub.ID},
 	}))
 

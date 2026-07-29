@@ -154,11 +154,11 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 
 	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Clock: rt.Clock}
 
-	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
+	require.NoError(t, creditWorker.Work(suite.WorkerCtx(), &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, int64(75), suite.lotRemaining(ctx, merchantID, lotID), "lot intact before expiry")
 
 	mockClock.Advance(2 * time.Hour)
-	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
+	require.NoError(t, creditWorker.Work(suite.WorkerCtx(), &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, int64(0), suite.lotRemaining(ctx, merchantID, lotID), "lapsed lot remainder clawed to expired_credits")
 }
 

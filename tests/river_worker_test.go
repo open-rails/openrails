@@ -72,7 +72,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Clock:  mockClock,
 			Config: riverjobs.DefaultCleanupConfig(),
 		}
-		err := worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.CleanupExpiredDataArgs]{})
 		require.NoError(t, err)
 
 		// Verify notification was deleted
@@ -101,7 +101,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Clock:  mockClock,
 			Config: riverjobs.DefaultCleanupConfig(),
 		}
-		err := worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.CleanupExpiredDataArgs]{})
 		require.NoError(t, err)
 
 		// Verify recent notification was preserved

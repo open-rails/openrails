@@ -241,9 +241,14 @@ func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
 		Scope: "invoker", ScopeKey: "serialized-upsert",
 		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 300}},
 	}
+	// Each caller gets its OWN pinned merchant connection, as two concurrent
+	// requests would. Sharing one pinned context would serialize them on that
+	// single connection and they would never contend on the advisory lock the
+	// test is about.
+	replaceCtx, upsertCtx := suite.MerchantCtx(), suite.MerchantCtx()
 	replaceDone := make(chan error, 1)
 	go func() {
-		replaceDone <- svc.ReplaceInvokerSpendLimits(ctx, payer, []billingservice.InvokerSpendLimitInput{replacement})
+		replaceDone <- svc.ReplaceInvokerSpendLimits(replaceCtx, payer, []billingservice.InvokerSpendLimitInput{replacement})
 	}()
 
 	waiters := func(want int) bool {
@@ -261,7 +266,7 @@ WHERE datname = current_database()
 
 	upsertDone := make(chan error, 1)
 	go func() {
-		upsertDone <- svc.SetInvokerSpendLimits(ctx, payer, singular)
+		upsertDone <- svc.SetInvokerSpendLimits(upsertCtx, payer, singular)
 	}()
 	require.Eventually(t, func() bool { return waiters(2) }, 5*time.Second, 20*time.Millisecond,
 		"singular upsert must queue behind replacement on the same lock")
