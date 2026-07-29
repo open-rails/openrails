@@ -43,8 +43,10 @@ identifiers OUT of committed files (code, trackers, this file).
     "the merchant ID"). It is NOT the reseller/ISO (e.g. MobiusPay). It is NOT fetchable from the
     `security_key` — operator must declare it.
   - **Stripe** — `acct_…` (the one rail that self-discovers, via `GET /v1/account`).
-  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (e.g. `945280-0000`, #697 — never a slash).
-  - **Solana** — the recipient wallet address.
+  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (dash-joined like `999999-0000`, #697 — never a slash).
+  - **Solana** — DERIVED from the signer public key (a declared `account_id` is ignored
+    with a warning); the payout destination is `settings.recipient_wallet`, defaulting to
+    the signer pubkey.
   - Don't try to derive any of these from credentials at runtime.
 
 ## Catalog
