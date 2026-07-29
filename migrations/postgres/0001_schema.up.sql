@@ -19,11 +19,19 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
+-- Roles are CLUSTER-wide while migratekit's advisory lock is per-DATABASE, so two
+-- databases migrating concurrently on one cluster (every parallel integration run,
+-- and any two services sharing a cluster) both pass a check-then-act guard and one
+-- loses. Let the CREATE race and swallow the duplicate instead.
+--
+-- BOTH SQLSTATEs are required: a plain sequential duplicate raises duplicate_object
+-- (42710), but the loser of a genuine race gets a raw unique_violation (23505) off
+-- pg_authid_rolname_index before the friendly check runs.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
-        CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
-    END IF;
+    CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
+EXCEPTION WHEN duplicate_object OR unique_violation THEN
+    NULL;
 END $$;
 
 -- btree_gist backs the EXCLUDE constraints on uuid+tstzrange
