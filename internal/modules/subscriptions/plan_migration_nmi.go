@@ -93,7 +93,7 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	// Read the current record FIRST: existence check + plan_payments
 	// preservation (update_subscription always sends plan_payments; resetting
 	// it would rewrite a finite-payments schedule).
-	remote, found, err := client.GetSubscription(railID)
+	remote, found, err := client.GetSubscription(ctx, railID)
 	if err != nil {
 		return fmt.Errorf("nmi push: read %s: %w", railID, err)
 	}
@@ -115,7 +115,7 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 		}
 	}
 
-	if _, err := client.UpdateRecurringSubscription(railID, moneyutil.FormatCentsDecimal(cents), planPayments); err != nil {
+	if _, err := client.UpdateRecurringSubscription(ctx, railID, moneyutil.FormatCentsDecimal(cents), planPayments); err != nil {
 		return fmt.Errorf("nmi push: update %s: %w", railID, err)
 	}
 
@@ -123,7 +123,7 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	// applies the internal cutover. A mismatch (or ambiguous update) leaves
 	// the row blocked; a re-run re-pushes the same amount (a set-to-value op,
 	// idempotent at NMI) and re-verifies.
-	after, found, err := client.GetSubscription(railID)
+	after, found, err := client.GetSubscription(ctx, railID)
 	if err != nil {
 		return fmt.Errorf("nmi push: verify %s: %w", railID, err)
 	}

@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -42,10 +43,28 @@ type NMIClient struct {
 	httpClient *http.Client
 }
 
-// nmiRequestTimeout caps a single direct-post/query round-trip to NMI. NMI's
-// own tokenization timeout is separate (client-side Collect.js); this protects
-// the server->gateway add_customer/sale/query call.
-const nmiRequestTimeout = 25 * time.Second
+// Per-request deadlines. Split on the SAME axis the read-only guard and the
+// ambiguity classifier already use — mutation vs read — because the cost of a
+// timeout differs entirely between the two:
+//
+//   - A MUTATION that times out is an UNKNOWN outcome (TransportAmbiguousError):
+//     it may have moved money, so the caller must go verify at the gateway
+//     instead of retrying. Cutting this bound short manufactures ambiguity and
+//     buys an expensive verify round-trip, so it stays generous — a card
+//     authorization crossing issuer networks legitimately takes double-digit
+//     seconds.
+//   - A READ that times out is unambiguous: nothing happened, ask again next
+//     cycle. Here the scarce resource is the worker slot, not the answer.
+//     ProviderRefreshWorker pages through whole rosters, so N stalled pages
+//     cost 10s*N rather than 25s*N.
+//
+// These bound one round-trip. The CALLER's context still wins when it is
+// shorter or already cancelled — that is the point of the ctx plumbing: a
+// cancelled job aborts an in-flight call instead of burning the full bound.
+const (
+	nmiMutationTimeout = 25 * time.Second
+	nmiReadTimeout     = 10 * time.Second
+)
 
 type CustomerVaultError struct {
 	Message        string
@@ -190,7 +209,9 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		V5BaseURL:     DefaultV5BaseURL,
 		TestMode:      testMode,
 		httpClient: &http.Client{
-			Timeout: nmiRequestTimeout,
+			// Backstop only; the real bound is the per-request context
+			// deadline (nmiMutationTimeout / nmiReadTimeout).
+			Timeout: nmiMutationTimeout,
 			Transport: &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
 				MaxIdleConns:          20,
@@ -209,7 +230,32 @@ func (c *NMIClient) client() *http.Client {
 	if c.httpClient != nil {
 		return c.httpClient
 	}
-	return &http.Client{Timeout: nmiRequestTimeout}
+	return &http.Client{Timeout: nmiMutationTimeout}
+}
+
+// newRequest builds the ONE kind of outbound request this package makes: one
+// carrying the caller's context, bounded by a deadline chosen from the
+// mutation/read axis. Every NMI byte leaves through here (via sendDirectRequest,
+// sendQueryRequest or sendV5Request) — there is no other request constructor in
+// the package, and the `noctx` linter keeps it that way.
+//
+// The returned cancel MUST be called by the caller (defer) once the response
+// body is fully read; cancelling earlier aborts the body read.
+func (c *NMIClient) newRequest(ctx context.Context, method, url string, body io.Reader, mutating bool) (*http.Request, context.CancelFunc, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	bound := nmiReadTimeout
+	if mutating {
+		bound = nmiMutationTimeout
+	}
+	rctx, cancel := context.WithTimeout(ctx, bound)
+	req, err := http.NewRequestWithContext(rctx, method, url, body)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return req, cancel, nil
 }
 
 func (c *NMIClient) isConfigured() bool {
@@ -301,7 +347,7 @@ func responseText(output url.Values, fallback string) string {
 	return fallback
 }
 
-func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
+func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ string, err error) {
 	requestType := strings.TrimSpace(data.Get("type"))
 
 	if c.ReadOnly {
@@ -314,7 +360,14 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 
 	// Every direct-post request is a MUTATION: any failure past this point may
 	// have executed at the gateway, so it is wrapped transport-ambiguous (#674).
-	resp, err := c.client().PostForm(c.DirectPostURL, data)
+	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, strings.NewReader(data.Encode()), true)
+	if err != nil {
+		return "", fmt.Errorf("build direct request: %w", err)
+	}
+	defer cancel()
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.client().Do(req)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"provider":     c.providerName,
@@ -346,8 +399,18 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 	return string(body), nil
 }
 
-func (c *NMIClient) sendQueryRequest(data url.Values) (_ string, err error) {
-	resp, err := c.client().PostForm(c.QueryURL, data)
+// sendQueryRequest is the transaction SEARCH survivor: a POST on the wire, but
+// semantically a READ (no gateway state changes), so it takes the read bound
+// and its failures are never wrapped ambiguous.
+func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ string, err error) {
+	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.QueryURL, strings.NewReader(data.Encode()), false)
+	if err != nil {
+		return "", fmt.Errorf("build query request: %w", err)
+	}
+	defer cancel()
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.client().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send query request: %w", err)
 	}

@@ -1241,7 +1241,7 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 	// worker_health and destructive_action_switch), so the base pool genuinely
 	// answers here — unlike the sites or#824's sweep found. The cache key
 	// carries the merchant, so scope is not lost.
-	decision := nmi.CheckTestModeArm(database.GenDirectory(), client, cacheKey)
+	decision := nmi.CheckTestModeArm(ctx, database.GenDirectory(), client, cacheKey)
 	if decision.ProbeErr != nil {
 		log.WithError(decision.ProbeErr).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,

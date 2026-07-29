@@ -71,7 +71,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		return charge.Result{}, errors.New("charge amount must be positive")
 	}
 
-	sale, err := c.Client.RunSale(nmi.SaleParams{
+	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  railCustomerRef,
 		BillingID:        strings.TrimSpace(req.Instrument.MethodRef),
 		Amount:           req.AmountMinor,

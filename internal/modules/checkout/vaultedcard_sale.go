@@ -284,7 +284,7 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 		if cerr != nil {
 			return intents.Ambiguous("gateway verify client unavailable: " + cerr.Error())
 		}
-		txnID, found, verr := client.FindSuccessfulSaleByOrderID(orderID)
+		txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 		if verr != nil {
 			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -399,7 +399,7 @@ func (h *VaultedCardSaleIntentHandler) Verify(ctx context.Context, intent gen.Op
 		return intents.Ambiguous("gateway verify client unavailable: " + err.Error())
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(orderID)
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}

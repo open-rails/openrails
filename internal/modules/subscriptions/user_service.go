@@ -516,7 +516,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 					return fmt.Errorf("resolve subscription provider account: %w", err)
 				}
 				if ok {
-					if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
+					if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {
 						return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
 					}
 				}

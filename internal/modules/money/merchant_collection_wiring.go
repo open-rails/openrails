@@ -238,7 +238,7 @@ func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Co
 	default:
 		return CollectionVerifyResult{}, nil
 	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(wireOrderRef)
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, wireOrderRef)
 	if err != nil {
 		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", wireOrderRef, err)
 	}

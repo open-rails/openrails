@@ -461,7 +461,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	// Scoped by merchant + rail + environment + account so a cached verdict
 	// never answers for a different merchant's account.
 	cacheKey := id.String() + ":" + name
-	decision := nmi.CheckTestModeArm(gen.New(s.pool), client, cacheKey)
+	decision := nmi.CheckTestModeArm(ctx, gen.New(s.pool), client, cacheKey)
 	if decision.ProbeErr != nil {
 		log.WithError(decision.ProbeErr).WithFields(log.Fields{
 			"merchant_id": id.String(), "rail": rail, "account_id": accountID,

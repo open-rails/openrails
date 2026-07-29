@@ -169,7 +169,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 
 	// Read-first: already billing the new vault IS success (a prior attempt's
 	// write landed, or an interrupted finalize) — zero provider writes.
-	remote, found, err := client.GetSubscription(psid)
+	remote, found, err := client.GetSubscription(ctx, psid)
 	if err != nil {
 		return Retryable("provider read before update failed: " + err.Error())
 	}
@@ -183,7 +183,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 		return Succeeded(map[string]any{"verified_already_pointing": true, "rail_subscription_id": psid, "new_vault_id": newRailCustomerRef})
 	}
 
-	if err := client.UpdateSubscriptionPaymentSource(psid, newRailCustomerRef); err != nil {
+	if err := client.UpdateSubscriptionPaymentSource(ctx, psid, newRailCustomerRef); err != nil {
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -238,7 +238,7 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	if !ok {
 		return outcome
 	}
-	remote, found, err := client.GetSubscription(psid)
+	remote, found, err := client.GetSubscription(ctx, psid)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}

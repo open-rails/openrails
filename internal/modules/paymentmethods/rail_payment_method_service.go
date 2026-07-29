@@ -197,7 +197,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
-	nmiResponse, err := client.CreateCustomerVault(vaultData)
+	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
 		var nmiErr *nmi.CustomerVaultError
@@ -241,7 +241,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		// Best-effort direct remote cleanup — deliberately NOT intent-routed
 		// (#674 tail): the vault was created milliseconds ago and is referenced
 		// nowhere; losing this delete leaves only an inert orphan entry at NMI.
-		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
+		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		return nil, fmt.Errorf("failed to store payment method locally: %w", err)
 	}
 
@@ -529,7 +529,7 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 		upd.Address2 = *req.Address2
 	}
 
-	if err := client.UpdateCustomerVault(upd); err != nil {
+	if err := client.UpdateCustomerVault(ctx, upd); err != nil {
 		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update vault in NMI")
 		return nil, fmt.Errorf("failed to update payment method: %w", err)
 	}
@@ -684,14 +684,14 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 // shared vaults, whole-vault otherwise) followed by the local removal.
 func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
 	if shared {
-		if err := client.DeleteCustomerBillingEntry(pm.RailCustomerRef, pm.RailMethodRef); err != nil {
+		if err := client.DeleteCustomerBillingEntry(ctx, pm.RailCustomerRef, pm.RailMethodRef); err != nil {
 			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
 			return fmt.Errorf("failed to delete payment method entry: %w", err)
 		}
 		return s.PaymentMethodService.Delete(ctx, pm.ID)
 	}
 
-	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
+	if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
 		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault from NMI")
 		return fmt.Errorf("failed to delete payment method: %w", err)
 	}

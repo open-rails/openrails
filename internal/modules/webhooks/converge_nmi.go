@@ -135,7 +135,7 @@ func (s *NMIConvergeService) activatePendingFromProbe(ctx context.Context, rail 
 	}
 
 	since := sub.CreatedAt.UTC().Add(-24 * time.Hour)
-	probe, err := s.NMIClient.ProbeSalesByOrderID(sub.ID.String(), since)
+	probe, err := s.NMIClient.ProbeSalesByOrderID(ctx, sub.ID.String(), since)
 	if err != nil {
 		return fmt.Errorf("nmi converge: probe signup charge for %s: %w", sub.ID, err)
 	}

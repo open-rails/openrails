@@ -236,7 +236,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	// prior execution may have reached the gateway. Verify by reading before
 	// sending another refund.
 	if intent.Attempts > 1 {
-		refundTxnID, found, verr := h.findRefund(client, p)
+		refundTxnID, found, verr := h.findRefund(ctx, client, p)
 		if verr != nil {
 			return Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -248,7 +248,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		}
 	}
 
-	result, err := client.Refund(nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
+	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -284,7 +284,7 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	refundTxnID, found, err := h.findRefund(client, p)
+	refundTxnID, found, err := h.findRefund(ctx, client, p)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -301,8 +301,8 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 // for a successful refund/credit action matching the intent amount. The
 // returned id is the action's own transaction id when NMI reports one, else
 // the original's.
-func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (refundTransactionID string, found bool, err error) {
-	actions, txnFound, err := client.GetPaymentActions(p.ProviderTarget)
+func (h *NMIRefundHandler) findRefund(ctx context.Context, client *nmi.NMIClient, p RefundPayload) (refundTransactionID string, found bool, err error) {
+	actions, txnFound, err := client.GetPaymentActions(ctx, p.ProviderTarget)
 	if err != nil {
 		return "", false, err
 	}

@@ -166,7 +166,7 @@ func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.Openrail
 	}
 
 	// Verify-then-execute: absent at the provider IS success.
-	customer, present, err := h.vaultCustomer(client, vaultID)
+	customer, present, err := h.vaultCustomer(ctx, client, vaultID)
 	if err != nil {
 		return Retryable("provider read before delete failed: " + err.Error())
 	}
@@ -184,9 +184,9 @@ func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.Openrail
 	}
 
 	if shared {
-		err = client.DeleteCustomerBillingEntry(vaultID, pm.RailMethodRef)
+		err = client.DeleteCustomerBillingEntry(ctx, vaultID, pm.RailMethodRef)
 	} else {
-		err = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID})
+		err = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID})
 	}
 	if err != nil {
 		switch {
@@ -249,7 +249,7 @@ func (h *NMIVaultDeleteHandler) Verify(ctx context.Context, intent gen.Openrails
 	if err != nil {
 		return Ambiguous("check vault sharing: " + err.Error())
 	}
-	customer, present, err := h.vaultCustomer(client, vaultID)
+	customer, present, err := h.vaultCustomer(ctx, client, vaultID)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -303,8 +303,8 @@ func (h *NMIVaultDeleteHandler) sharedVault(ctx context.Context, pm *models.Paym
 
 // vaultCustomer reads the id-filtered v5 customer roster: absent means the
 // vault customer is gone at NMI.
-func (h *NMIVaultDeleteHandler) vaultCustomer(client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
-	page, err := client.ListCustomersPage("", 0, vaultID)
+func (h *NMIVaultDeleteHandler) vaultCustomer(ctx context.Context, client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
+	page, err := client.ListCustomersPage(ctx, "", 0, vaultID)
 	if err != nil {
 		return nil, false, err
 	}

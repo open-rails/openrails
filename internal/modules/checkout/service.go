@@ -1882,7 +1882,7 @@ func (s *CheckoutService) processUpgrade(
 			StoredCredential: nmidirect.StoredCredentialFor(recurringCtx),
 		}
 
-		created, err := client.AddRecurringSubscription(params)
+		created, err := client.AddRecurringSubscription(ctx, params)
 		switch {
 		case err == nil:
 			resp = created
@@ -1936,7 +1936,7 @@ func (s *CheckoutService) processUpgrade(
 		if retryAfterFailure {
 			// A previous attempt failed; its charge may have landed. Verify by
 			// the order id BEFORE sending another sale (#674).
-			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID); verr != nil {
+			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID); verr != nil {
 				rollbackNewSubscription()
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
@@ -1945,7 +1945,7 @@ func (s *CheckoutService) processUpgrade(
 			}
 		}
 		if prorationTransactionID == "" {
-			saleResp, err := client.RunSale(nmi.SaleParams{
+			saleResp, err := client.RunSale(ctx, nmi.SaleParams{
 				CustomerVaultID:  railCustomerRef,
 				BillingID:        railMethodRef,
 				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
@@ -1962,7 +1962,7 @@ func (s *CheckoutService) processUpgrade(
 				// by the order id; unresolved ⇒ surface "processing" so the
 				// retry (same content-derived key) re-verifies — never a blind
 				// re-charge, never an unrecorded charge treated as failed.
-				txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID)
+				txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID)
 				if verr == nil && found {
 					prorationTransactionID = txnID
 				} else {
@@ -2193,7 +2193,7 @@ func (s *CheckoutService) compensateFailedUpgrade(
 		client, cerr := s.resolveNMIClient(ctx, provider)
 		if cerr != nil || client == nil {
 			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
-		} else if _, err := client.Refund(nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
+		} else if _, err := client.Refund(ctx, nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
 			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")
 		} else {
 			logEntry.Warn("refunded proration during upgrade compensation")
@@ -2379,7 +2379,7 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
-	if err := client.DeleteRecurringSubscription(sub.RailSubscriptionID); err != nil {
+	if err := client.DeleteRecurringSubscription(ctx, sub.RailSubscriptionID); err != nil {
 		return err
 	}
 	return nil
