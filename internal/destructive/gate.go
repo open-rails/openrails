@@ -106,6 +106,25 @@ func (g *Gate) RecordFirstPull(ctx context.Context, merchantID uuid.UUID, now ti
 	})
 }
 
+// EvidenceFloor is the #835 staleness floor for a merchant: the instant this
+// deployment first completed a pull for it. A destructive decision may not rest
+// on evidence older than this — nothing older was ever corroborated by an
+// observation we made.
+//
+// Zero on a nil gate, an unreadable policy, or a merchant that has never been
+// pulled. Zero is NOT permissive: the decider then trusts only the evidence the
+// current pass observed. ctx must be merchant-scoped.
+func (g *Gate) EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time {
+	if g == nil || g.DB == nil {
+		return time.Time{}
+	}
+	row, err := g.DB.Gen(ctx).GetDestructivePolicy(ctx, merchantID)
+	if err != nil || row.FirstPullCompletedAt == nil {
+		return time.Time{}
+	}
+	return row.FirstPullCompletedAt.UTC()
+}
+
 // Arm is the #835 operator flip: bless a merchant for enforcing pulls. ctx must
 // be merchant-scoped.
 func (g *Gate) Arm(ctx context.Context, merchantID uuid.UUID, now time.Time, by, reason string) error {

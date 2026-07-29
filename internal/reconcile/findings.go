@@ -45,6 +45,18 @@ const (
 	// by migration 058). Always requires_review — the fix (cancel+refund at
 	// the rail) is remote and human.
 	FindingDuplicateSubscriptions FindingType = "pull.subscription.duplicate"
+	// FindingEvidenceStale (#835): a terminal cancel was WITHHELD because the
+	// evidence justifying it predates this deployment's first pull of the
+	// merchant (or carries no date at all) — inherited history that was never
+	// corroborated by anything we observed. The row parks as `unknown` with its
+	// access intact. Always requires_review: only an operator can say whether
+	// an imported record is true, and a withheld action must be visible rather
+	// than a silent no-op ("unchecked ≠ disappeared").
+	//
+	// Deliberately NOT in stateRosterFindingTypes: the unknown-cohort and
+	// webhook-converge planes write it too, so auto-resolving it on absence
+	// from a pull run would erase another plane's open finding.
+	FindingEvidenceStale FindingType = "pull.subscription.evidence_stale"
 	// FindingCancellationCapped (#837): one pass planned more cancellations
 	// than the merchant's per-pass budget allows, so NONE were applied and the
 	// pass halted. Always requires_review — a book-sized cancellation is a

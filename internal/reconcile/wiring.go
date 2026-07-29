@@ -3,6 +3,7 @@ package reconcile
 import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 )
 
 // Fetcher/prober construction is per merchant (#699/#788): see
@@ -21,6 +22,9 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) 
 		// deferred-delete scheduler here (CLI pulls log the wiring gap);
 		// the river provider-refresh worker injects its own.
 		Decisions: NewDecisionApplier(d, nil),
+		// #835 evidence-staleness floor, read per run from the merchant's
+		// destructive policy.
+		Policy: destructive.New(d),
 	}
 	// Third dunning-forensics evidence source (#735): imported legacy history
 	// + failed payments, read from Postgres.

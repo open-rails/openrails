@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Engine is the PULL-plane engine (#107 phase 2, #665 mirror-writer): it
@@ -47,6 +49,12 @@ type Engine struct {
 	// alerting service wired). Best-effort: a notify failure is logged, never
 	// fails the run — the finding is already durably persisted.
 	Notifier FindingNotifier
+
+	// Policy reads the merchant's destructive policy — today only the #835
+	// evidence-staleness floor. NewEngine wires it; a nil Policy means the
+	// decider falls back to trusting ONLY what this pass observed, which is
+	// stricter, never more permissive.
+	Policy EvidenceFloorReader
 
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
@@ -308,6 +316,25 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	return result, nil
 }
 
+// EvidenceFloorReader yields a merchant's #835 evidence-staleness floor.
+// internal/destructive.Gate implements it.
+type EvidenceFloorReader interface {
+	EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time
+}
+
+// evidenceFloor reads the running merchant's staleness floor off the run's own
+// merchant-scoped context, so the pull path cannot be run without it.
+func (e *Engine) evidenceFloor(ctx context.Context) time.Time {
+	if e.Policy == nil {
+		return time.Time{}
+	}
+	mid, ok := merchant.FromContext(ctx)
+	if !ok {
+		return time.Time{}
+	}
+	return e.Policy.EvidenceFloor(ctx, mid.UUID())
+}
+
 // runProvider fetches, diffs, persists, applies (enforce), and auto-resolves
 // for one provider. A returned error means the provider's reconciliation did
 // not complete (e.g. fetch failure or circuit-breaker abort) and NOTHING was
@@ -391,7 +418,10 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
-	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce && params.Mutations.allowsInsert()})
+	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{
+		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
+		EvidenceFloor: e.evidenceFloor(ctx),
+	})
 	bindApplyActions(findings, nullableRailMerchantAccountID(binding))
 
 	if snap.Capabilities.Transactions {

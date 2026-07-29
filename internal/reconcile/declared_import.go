@@ -321,7 +321,10 @@ func ImportDeclaredSubscriptions(
 			// lands the terminal transition (cancel_type 'expired' at AsOf —
 			// faithful user/chargeback fidelity applies to first import only);
 			// already-terminal rows take no transition but still backfill charges.
-			if _, err := convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, asOf, 0, declaredImportLookback); err != nil {
+			// #835: no first-pull floor here on purpose — the declared snapshot
+			// is dated at AsOf and the operator's declaration IS the
+			// observation, so AsOf itself is the floor.
+			if _, err := convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{}); err != nil {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					// Another live row already owns the customer's lifecycle slot

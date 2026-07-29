@@ -373,6 +373,10 @@ type diffOptions struct {
 	// PS-1 findings whose identity and plan both resolve unambiguously carry
 	// a materialize apply action instead of going requires_review.
 	Materialize bool
+	// EvidenceFloor (#835) is the merchant's first-pull instant, handed to
+	// every decider invocation this diff makes: a cancel resting on evidence
+	// older than it is withheld and the row parks as `unknown`.
+	EvidenceFloor time.Time
 }
 
 // diffProvider runs every capability-gated PULL-plane check for one provider
@@ -405,6 +409,12 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		findings = append(findings, diffPaymentMethods(provider, local, ridx, traits)...)
 	}
 
+	// #835: every cancel the staleness floor withheld surfaces as its own
+	// requires_review finding. Done HERE, over the finished finding set, so it
+	// covers every decider invocation this diff makes — present and future —
+	// rather than being repeated at each decideApply call site.
+	findings = append(findings, evidenceFlooredFindings(provider, findings)...)
+
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Type != findings[j].Type {
 			return findings[i].Type < findings[j].Type
@@ -412,6 +422,32 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		return findings[i].SubjectKey < findings[j].SubjectKey
 	})
 	return findings
+}
+
+// evidenceFlooredFindings raises the operator record for each decision the #835
+// staleness floor downgraded from a terminal cancel to a park.
+func evidenceFlooredFindings(provider Provider, findings []Finding) []Finding {
+	var out []Finding
+	for i := range findings {
+		a := findings[i].Apply
+		if a == nil || a.Decide == nil || !a.Decide.Decision.EvidenceFloored {
+			continue
+		}
+		out = append(out, Finding{
+			Provider:      provider,
+			Type:          FindingEvidenceStale,
+			SubjectKey:    evidenceStaleSubjectKey(provider, a.Decide.SubscriptionID.String()),
+			Severity:      SeverityHigh,
+			Status:        FindingStatusRequiresReview,
+			RequiresAdmin: true,
+			LocalEvidence: map[string]any{
+				"subscription_id": a.Decide.SubscriptionID.String(),
+				"withheld_cause":  a.Decide.Decision.Reason,
+			},
+			RecommendedAction: evidenceStaleAction(a.Decide.Decision.Reason),
+		})
+	}
+	return out
 }
 
 // diffSubscriptions covers PS-1, PS-2 and PS-3.
@@ -433,7 +469,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 		}
 
 		// Matched pair: status comparison.
-		findings = append(findings, compareStatuses(provider, snap, localSub, r, now)...)
+		findings = append(findings, compareStatuses(provider, snap, localSub, r, now, opts)...)
 	}
 
 	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
@@ -467,7 +503,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
 				// absenceMeansCancelled: the provider's live-only roster IS
 				// exhaustive for this subject — coverage-absence proof (#665).
-				Apply: decideApply(s, snap, now),
+				Apply: decideApply(s, snap, now, opts),
 			}
 			if intent := deletionIntent(s); intent != nil {
 				f.IntentEvidence = intent
@@ -700,7 +736,7 @@ func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot 
 // its per-subscription snapshot slice and wraps it as the finding's apply
 // action (#665: the pull engine invokes the decider; no applier writes domain
 // state). Nil when the decider has no evidence-justified move.
-func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time) *ApplyAction {
+func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts diffOptions) *ApplyAction {
 	state := SubscriptionState{
 		Status:             s.Status,
 		Rail:               s.Rail,
@@ -709,7 +745,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time) *App
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
-	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID)}, now, 0)
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, 0)
 	if d.Kind == TransitionNone {
 		return nil
 	}
@@ -721,7 +757,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time) *App
 
 // compareStatuses diffs one matched (local, remote) subscription pair into
 // PS-2/PS-3 findings; the enforce instruction is a decider invocation.
-func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscription, r *RemoteSubscription, now time.Time) []Finding {
+func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscription, r *RemoteSubscription, now time.Time, opts diffOptions) []Finding {
 	if r.Status == SubscriptionStatusUnknown {
 		return nil // the provider declared nothing comparable
 	}
@@ -742,7 +778,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "rail reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
-			Apply:             decideApply(s, snap, now),
+			Apply:             decideApply(s, snap, now, opts),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -789,7 +825,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: fmt.Sprintf("rail status %q vs local %q; enforce applies the evidence-gated transition", r.Status, s.Status),
-			Apply:             decideApply(s, snap, now),
+			Apply:             decideApply(s, snap, now, opts),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -813,7 +849,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
 					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", drift.Hours()),
-					Apply:             decideApply(s, snap, now),
+					Apply:             decideApply(s, snap, now, opts),
 				}}
 			}
 		}
