@@ -937,7 +937,9 @@ func TestDiffSolanaDiscoveryRouting(t *testing.T) {
 	b := fClean.Apply.BackfillPayment
 	require.Equal(t, "solana", b.Rail)
 	require.Equal(t, int64(999), b.AmountCents) // wire-pinned: money from the transfer
-	require.Equal(t, "usd", b.Currency)
+	// Canonical UPPER: migration 0020's CHECK is the only point every
+	// payments.currency write passes, and it rejects the old lowercase.
+	require.Equal(t, "USD", b.Currency)
 	require.Equal(t, customerID, b.CustomerID)
 	require.Equal(t, priceID, b.PriceID)
 	require.Equal(t, sessionID.String(), fClean.LocalEvidence["checkout_session_id"])

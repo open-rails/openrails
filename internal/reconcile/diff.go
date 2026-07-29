@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // localIndex precomputes the lookups the diff checks share.
@@ -606,7 +607,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			Rail:          link.railName,
 			TransactionID: t.TransactionID,
 			AmountCents:   t.AmountCents,
-			Currency:      strings.ToLower(t.Currency),
+			Currency:      moneyutil.NormalizeCurrency(t.Currency),
 			PurchasedAt:   t.OccurredAt,
 			PriceID:       link.price.ID,
 			CustomerID:    subjectID,
@@ -1015,7 +1016,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			Rail:           sub.Rail,
 			TransactionID:  t.TransactionID,
 			AmountCents:    t.AmountCents,
-			Currency:       strings.ToLower(t.Currency),
+			Currency:       moneyutil.NormalizeCurrency(t.Currency),
 			PurchasedAt:    t.OccurredAt,
 			PriceID:        *sub.PriceID,
 			SubscriptionID: &subID,
@@ -1141,7 +1142,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,
 		AmountCents:   t.AmountCents,
-		Currency:      strings.ToLower(t.Currency),
+		Currency:      moneyutil.NormalizeCurrency(t.Currency),
 		PurchasedAt:   t.OccurredAt,
 		PriceID:       priceID,
 		CustomerID:    customerID,
@@ -1219,7 +1220,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		Rail:              original.Rail,
 		TransactionID:     t.TransactionID,
 		AmountCents:       t.AmountCents,
-		Currency:          strings.ToLower(t.Currency),
+		Currency:          moneyutil.NormalizeCurrency(t.Currency),
 		PurchasedAt:       t.OccurredAt,
 		RefundedPaymentID: &originalID,
 		SubscriptionID:    original.SubscriptionID,
