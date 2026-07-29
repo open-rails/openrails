@@ -325,51 +325,42 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subject_key = sqlc.arg(subject_key);
 
 -- ============================================================================
--- #732 anti-credential-compromise rate ceiling (per-actor + global)
+-- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
 -- ============================================================================
 -- The durable rail_intents ledger IS the counter (#674): every destructive
 -- user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
--- created_at is the burst gauge. Scoped to origin IN ('user','admin') — the
--- credential-theft surface; origin='system' (automated dunning / decline
--- cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
--- CREATION (created_at), not execution: the ceiling stops the burst at the
--- producer chokepoint, before the write-ahead intent is even created. These run
--- cross-merchant (per-actor AND global) through migration 0021's SECURITY
--- DEFINER readers — NOT the base pool. The base pool is not privileged: it is
--- the same openrails_app role, so a GUC-less count is not cross-merchant, it is
--- EMPTY (or#824/or#860).
+-- created_at is the burst gauge. Counts by CREATION (created_at), not execution:
+-- the ceiling stops the burst at the producer chokepoint, before the write-ahead
+-- intent is even created. Both readers are migration 0021/0028 SECURITY DEFINER
+-- functions — NOT the base pool. The base pool is not privileged: it is the same
+-- openrails_app role, so a GUC-less count is not "everything", it is EMPTY
+-- (or#824/or#860).
 
 -- Destructive user/admin intents THIS actor created in the rolling window.
+-- Deliberately CROSS-MERCHANT and unchanged by or#866: one stolen credential
+-- operating across merchants is exactly the shape this leg must see, and an
+-- actor is not a tenant, so there is no cross-tenant budget to share here.
 -- name: CountDestructiveIntentsByActorSince :one
 SELECT openrails.count_destructive_intents_by_actor_since(
     sqlc.arg(actor)::text,
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
--- Destructive user/admin intents ALL actors + ALL merchants created in the
--- rolling window — the absolute frying-protection ceiling even if many actor
--- identities are forged.
---
--- or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
--- a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
--- openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
--- structurally never exceeded — a fail-OPEN safety control. The definer RAISES
--- when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
--- instead of silently permitting unlimited destructive intents.
--- name: CountDestructiveIntentsGlobalSince :one
-SELECT openrails.count_destructive_intents_since(
-    sqlc.arg(intent_types)::text[],
-    sqlc.arg(since)::timestamptz);
-
--- or#842: the AUTOMATED leg. The two counts above are deliberately blind to
--- origin='system', which left the ceiling absent for exactly the paths that
--- queue the most irreversible work with no human in the loop. System origin is
--- walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
--- survive fleet scale, a per-merchant window does, and one merchant's runaway
--- convergence is the shape this must see.
--- name: CountSystemDestructiveIntentsForMerchantSince :one
-SELECT openrails.count_system_destructive_intents_for_merchant_since(
+-- ONE merchant's destructive intents in the rolling window, for a caller-supplied
+-- origin set. Both walls of the ceiling are this same count (migration 0028):
+--   * origins {user,admin} — the anti-theft wall. It used to be DEPLOYMENT-wide,
+--     which made one merchant's ordinary customer cancellations refuse every
+--     other merchant's (or#866, cross-tenant DoS). A forged-identity burst is
+--     still walled at 15/h inside the merchant it targets.
+--   * origins {system} — the automation wall (or#842): a runaway convergence or
+--     poisoned roster inside ONE merchant, never a fleet-wide number that a
+--     thousand merchants converging their own books would legitimately exceed.
+-- System origin must never burn the anti-theft budget and vice versa: they are
+-- separate windows over disjoint origin sets, counted separately.
+-- name: CountDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_destructive_intents_for_merchant_since(
     sqlc.arg(merchant_id)::uuid,
+    sqlc.arg(origins)::text[],
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
