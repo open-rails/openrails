@@ -17,8 +17,10 @@ import (
 // usable (cozy-art ca#198 — closing the host's shared client silently broke
 // its auth ephemeral store).
 func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
-	superDSN, _ := dbtest.SharedRLSPostgres(t)
-	pool, err := pgxpool.New(context.Background(), superDSN)
+	// The app role, not the superuser: embedded boot refuses a BYPASSRLS pool in
+	// every environment (or#782), and a host that injects one is the bug.
+	appDSN := dbtest.SharedPostgresDSN(t)
+	pool, err := pgxpool.New(context.Background(), appDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
@@ -28,7 +30,7 @@ func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
 	cfg := &config.Config{
 		Env:      "development",
 		TestMode: config.CredentialPostureSandbox,
-		DB:       &config.DBConfig{URL: superDSN},
+		DB:       &config.DBConfig{URL: appDSN},
 	}
 	e, err := New(Options{Config: cfg, PGXPool: pool, Redis: rdb})
 	require.NoError(t, err)
