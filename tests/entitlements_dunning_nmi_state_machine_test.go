@@ -116,6 +116,9 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	// Monthly billing cycle -> progressive retry gaps (#359): +2d after the
@@ -217,6 +220,9 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	mock.ShouldFail = true

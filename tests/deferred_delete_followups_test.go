@@ -119,6 +119,9 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	})
 	require.NoError(t, err)
 
@@ -185,6 +188,9 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	updated := suite.GetSubscription(sub.ID)
@@ -237,6 +243,9 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	// #679 queue-always: limited mode no longer suppresses RECORDING the

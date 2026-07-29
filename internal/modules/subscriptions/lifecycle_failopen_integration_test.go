@@ -352,6 +352,9 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 		require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
 			Rail:           models.RailNMI,
 			SubscriptionID: &sub.ID,
+			// A real declined charge attempt underlies this failure (#840): that is
+			// what lets the schedule's exhaustion count as a certainty leg.
+			AttemptRecorded: true,
 		}))
 		mid := f.loadSub(t, sub.ID)
 		require.Equal(t, models.StatusPastDue, mid.Status, "attempt %d keeps dunning alive", i)
@@ -363,6 +366,9 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 	terminal := f.loadSub(t, sub.ID)
 	require.Equal(t, models.StatusCancelled, terminal.Status)
@@ -390,6 +396,9 @@ func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	terminal := f.loadSub(t, sub.ID)

@@ -580,6 +580,9 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 			SubscriptionID: &sub.ID,
 			FailureReason:  &failureReason,
 			FailureCode:    &failureCode,
+			// A real declined charge attempt underlies this failure (#840): that is
+			// what lets the schedule's exhaustion count as a certainty leg.
+			AttemptRecorded: true,
 		})
 		require.NoError(t, err)
 

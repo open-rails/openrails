@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -67,6 +68,9 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 		SubscriptionID: &subID,
 		FailureReason:  &reason,
 		Terminal:       true,
+		// #839: Terminal is a REQUEST; it needs a named certainty leg or the
+		// row parks. This scenario is dunning genuinely exhausted.
+		TerminalCertainty: collection.CertaintyDunningExhausted,
 	}))
 
 	// The decision is durable: cancelled + marker + PENDING system-origin intent.
