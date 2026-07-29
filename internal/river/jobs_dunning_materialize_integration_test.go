@@ -35,7 +35,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)

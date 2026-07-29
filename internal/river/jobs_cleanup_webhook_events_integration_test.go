@@ -18,7 +18,7 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	ctx := context.Background()
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	now := time.Now().UTC()
 	oldID := "evt_retention_old_" + uuid.NewString()

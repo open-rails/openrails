@@ -80,7 +80,7 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := dbtest.WithTestMerchant(context.Background())
 

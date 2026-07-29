@@ -21,7 +21,7 @@ import (
 func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	merchantID := dbtest.TestMerchantID.UUID()
 	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -69,7 +69,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	merchantID := dbtest.TestMerchantID.UUID()
 	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)

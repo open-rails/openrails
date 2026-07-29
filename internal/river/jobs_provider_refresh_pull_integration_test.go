@@ -132,14 +132,14 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	t.Helper()
 	ctx := context.Background()
 	id := merchant.ID(uuid.New())
-	_, err := dbi.Pool().Exec(ctx,
+	_, err := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).Exec(ctx,
 		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
 	// #836/#835: destructive convergence ships OFF and unarmed. These tests
 	// exercise an armed, reviewed deployment; the safe default has its own
 	// tests (TestKillSwitchHaltsAndResumesTheConvergeSweep).
-	dbtest.ArmDestructiveActions(ctx, t, dbi.Pool(), id.UUID())
+	dbtest.ArmDestructiveActions(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), id.UUID())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
@@ -153,7 +153,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
-			_, _ = dbi.Pool().Exec(context.Background(), stmt, id.UUID())
+			_, _ = dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).Exec(context.Background(), stmt, id.UUID())
 		}
 	})
 	return id
@@ -230,7 +230,7 @@ func newStorePullWorker(dbi *db.DB, svc *merchants.Service, nmiSrv *fakeNMIPullS
 func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider string) (time.Time, bool) {
 	t.Helper()
 	var watermark time.Time
-	err := dbi.Pool().QueryRow(context.Background(), `
+	err := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(context.Background(), `
 		SELECT watermark_at FROM openrails.rail_refresh_watermarks
 		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'
 		   AND last_succeeded_at IS NOT NULL AND last_error IS NULL`,

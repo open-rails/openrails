@@ -138,8 +138,8 @@ func alertReason(t *testing.T, dbi *db.DB, kind string) string {
 func TestWorkerHealth_MiddlewareRecordsAndCheckerAlerts(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
-	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbi.Pool())
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	cleanupWorkerHealth(t, dbi, whFailingKind, whHealthyKind, KindWorkerHealthCheck)
 
 	regs := NewWorkerRegistrations()
@@ -229,8 +229,8 @@ func TestWorkerHealth_MiddlewareRecordsAndCheckerAlerts(t *testing.T) {
 func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
-	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbi.Pool())
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	cleanupWorkerHealth(t, dbi, whNoMerchKind, KindWorkerHealthCheck)
 
 	regs := NewWorkerRegistrations()

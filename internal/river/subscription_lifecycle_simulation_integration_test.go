@@ -60,7 +60,7 @@ func TestSubscriptionLifecycleSimulation(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	mctx := dbtest.WithTestMerchant(ctx)
 	// #836/#839: terminal collection outcomes are gated on the destructive kill
@@ -121,7 +121,7 @@ type simSub struct {
 // parks as `unknown` instead of ever entering dunning.
 func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodStart time.Time, withInitialPayment bool, creditExpiryHours *int) simSub {
 	t.Helper()
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 
 	grantLabel := "sim_credits_" + uuid.New().String()
@@ -431,7 +431,7 @@ func (r *simRig) waitFor(t *testing.T, ctx context.Context, scope converge.Scope
 func creditGrantCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID) int {
 	t.Helper()
 	var n int
-	require.NoError(t, dbi.Pool().QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
 		"SELECT count(*) FROM openrails.grants WHERE source_id LIKE '%' || $1 || '%' AND kind = 'credit' AND event = 'grant'",
 		subID.String()).Scan(&n))
 	return n
@@ -440,7 +440,7 @@ func creditGrantCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.
 func paymentCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID, status string) int {
 	t.Helper()
 	var n int
-	require.NoError(t, dbi.Pool().QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
 		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND status = $2",
 		subID, status).Scan(&n))
 	return n

@@ -69,10 +69,10 @@ func newConvergeFakeStripe(t *testing.T) *convergeFakeStripe {
 func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	// ---- seed one active Stripe subscription mid-renewal --------------------
 	suffix := uuid.NewString()[:8]
@@ -346,9 +346,9 @@ func awaitConvergeCompletion(t *testing.T, events <-chan *river.Event) {
 func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "stripe", "sub_e2e_"+uuid.NewString()[:8])
 
@@ -439,9 +439,9 @@ func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "nmi", "nmi_e2e_"+uuid.NewString()[:8])
 
