@@ -55,7 +55,7 @@ func PruneRollback(ctx context.Context, opts PruneRollbackOptions) error {
 	if err != nil {
 		return fmt.Errorf("prune rollback: --run must be a destructive-run UUID (see `openrails prune list`): %w", err)
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	if limit <= 0 {
 		limit = 20
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}

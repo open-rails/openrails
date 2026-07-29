@@ -35,7 +35,7 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if out == nil {
 		out = io.Discard
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
