@@ -174,7 +174,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 func armDestructive(t *testing.T, f *dunningCertaintyFixture) {
 	t.Helper()
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
-		dbtest.ArmDestructiveActions(ctx, t, f.dbi.Qx(ctx), dbtest.TestMerchantID.UUID())
+		dbtest.ArmDestructiveActions(ctx, t, dbtest.TestMerchantID.UUID())
 		return nil
 	}))
 }

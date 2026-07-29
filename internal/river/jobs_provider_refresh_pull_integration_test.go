@@ -139,7 +139,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	// #836/#835: destructive convergence ships OFF and unarmed. These tests
 	// exercise an armed, reviewed deployment; the safe default has its own
 	// tests (TestKillSwitchHaltsAndResumesTheConvergeSweep).
-	dbtest.ArmDestructiveActions(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), id.UUID())
+	dbtest.ArmDestructiveActions(ctx, t, id.UUID())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,

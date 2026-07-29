@@ -51,7 +51,9 @@ func seedSolanaRailAccount(t *testing.T, dbi *db.DB, mid merchant.ID, accountID 
 	}
 	raw, err := json.Marshal(evidence)
 	require.NoError(t, err)
-	_, err = dbi.Pool().Exec(context.Background(), `
+	// psps is merchant-policied: seed it on a connection pinned to the merchant
+	// that owns the row, which is the production posture — not on dbi's base pool.
+	_, err = dbtest.SharedMerchantPool(t, mid.UUID()).Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'solana', 'live', $2, false, $3::jsonb)
 	`, mid.String(), accountID, raw)

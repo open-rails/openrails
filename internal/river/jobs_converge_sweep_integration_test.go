@@ -33,7 +33,7 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	// exercises it must put itself in the state a live, reviewed deployment
 	// would be in. (TestKillSwitchHaltsAndResumesTheConvergeSweep asserts the
 	// safe default itself.)
-	dbtest.ArmDestructiveActions(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), merchantID)
+	dbtest.ArmDestructiveActions(baseCtx, t, merchantID)
 
 	suffix := uuid.NewString()[:8]
 	feature := "feat_" + suffix

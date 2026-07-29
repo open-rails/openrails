@@ -47,11 +47,22 @@ func WithTestMerchant(ctx context.Context) context.Context {
 // that exercises destructive convergence must therefore put itself in the state
 // a live, reviewed deployment would be in. Tests that assert the SAFE default
 // must not call this.
-func ArmDestructiveActions(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID uuid.UUID) {
+//
+// It takes *t* and the merchant id rather than a caller-supplied handle, and
+// derives the correctly-pinned one itself. The earlier handle-taking signature
+// invited a silent mismatch — several callers passed a pool pinned to the
+// canonical test merchant while arming a DIFFERENT, freshly minted one, and the
+// merchant-scoped INSERT below was denied by RLS (42501). The two statements
+// need different handles anyway: destructive_action_switch is the deployment-wide
+// kill switch (RLS-exempt), merchant_destructive_policy is merchant-owned.
+func ArmDestructiveActions(ctx context.Context, t testing.TB, merchantID uuid.UUID) {
 	t.Helper()
-	_, err := qx.Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled = true`)
+	tt, ok := t.(*testing.T)
+	require.True(t, ok, "ArmDestructiveActions needs a *testing.T to open a merchant-pinned pool")
+	pool := SharedMerchantPool(tt, merchantID)
+	_, err := pool.Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled = true`)
 	require.NoError(t, err, "arm destructive action switch")
-	_, err = qx.Exec(ctx,
+	_, err = pool.Exec(ctx,
 		`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at)
 		 VALUES ($1, true, now())
 		 ON CONFLICT (merchant_id) DO UPDATE SET destructive_actions_enabled = true, enforce_armed_at = now()`,

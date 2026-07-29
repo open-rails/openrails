@@ -76,7 +76,7 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 		"the kill switch is OFF: the sweep must converge nothing")
 
 	// --- operator flips it on: ONE UPDATE, no deploy, no restart -------------
-	dbtest.ArmDestructiveActions(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), merchantID)
+	dbtest.ArmDestructiveActions(baseCtx, t, merchantID)
 	require.NoError(t, worker.Work(context.Background(), &river.Job[ConvergeSweepArgs]{}))
 	require.Equal(t, "expired", sessionStatus(haltedSession),
 		"armed: the same sweep converges the same drift")
@@ -88,7 +88,7 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 	require.Equal(t, "created", sessionStatus(resumedSession),
 		"an operator can halt an in-progress convergence at its next gate check")
 
-	dbtest.ArmDestructiveActions(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), merchantID)
+	dbtest.ArmDestructiveActions(baseCtx, t, merchantID)
 }
 
 // #836: readonly mode never made the converge sweep an observer — it had no
@@ -99,7 +99,7 @@ func TestConvergeSweepHonorsReadonlyMode(t *testing.T) {
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
-	dbtest.ArmDestructiveActions(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), merchantID)
+	dbtest.ArmDestructiveActions(baseCtx, t, merchantID)
 
 	suffix := uuid.NewString()[:8]
 	productID, priceID, sessionID := uuid.New(), uuid.New(), uuid.New()

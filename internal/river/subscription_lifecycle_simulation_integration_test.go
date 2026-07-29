@@ -68,7 +68,7 @@ func TestSubscriptionLifecycleSimulation(t *testing.T) {
 	// operator arms it. This simulation asserts what a live, REVIEWED deployment
 	// does, so it puts itself in that state.
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
-		dbtest.ArmDestructiveActions(sctx, t, dbi.Qx(sctx), dbtest.TestMerchantID.UUID())
+		dbtest.ArmDestructiveActions(sctx, t, dbtest.TestMerchantID.UUID())
 		return nil
 	}))
 	t.Cleanup(func() {
