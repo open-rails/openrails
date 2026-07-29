@@ -109,8 +109,8 @@ func NativeToRailMinorExact(currency string, amount int64) (Cents, error) {
 		return Cents(amount * -div), nil
 	}
 	if amount%div != 0 {
-		return 0, fmt.Errorf("amount %d %s internal units is not representable in whole %s minor units",
-			amount, NormalizeCurrency(currency), NormalizeCurrency(currency))
+		return 0, fmt.Errorf("amount %d internal units is not representable in %s %s",
+			amount, NormalizeCurrency(currency), minorUnitName(currency))
 	}
 	return Cents(amount / div), nil
 }
@@ -126,6 +126,17 @@ func RailMinorToNative(currency string, minor Cents) (int64, error) {
 		return int64(minor) / -div, nil
 	}
 	return int64(minor) * div, nil
+}
+
+// minorUnitName names a currency's rail minor unit for error messages: "whole
+// cents" for the 2-decimal majority, the generic term otherwise (whole yen is
+// not a cent, and saying so would be the same kind of small lie this issue is
+// about).
+func minorUnitName(currency string) string {
+	if cur, ok := LookupCurrency(currency); ok && cur.MinorDecimals == 2 {
+		return "whole cents"
+	}
+	return "whole minor units"
 }
 
 // nativeDivisor returns 10^shift for a registered currency, or the NEGATIVE

@@ -48,7 +48,7 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 //
 // The internal->rail direction lives in currency.go and is currency-aware
 // (NativeToRailMinor / NativeToRailMinorExact). The currency-BLIND
-// MicrosToCentsCeil/MicrosToCentsExact that 16 provider boundaries used to
+// MicrosToCentsCeil/MicrosToCentsExact that 14 provider boundaries used to
 // call are DELETED, not deprecated: an exported converter that cannot see the
 // currency is a converter that cannot refuse an amount whose currency nobody
 // established, and it is not reintroducible if it does not exist.

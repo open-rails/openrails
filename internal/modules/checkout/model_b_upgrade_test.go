@@ -200,8 +200,9 @@ func TestUpgradeWirePinning(t *testing.T) {
 		t.Fatalf("NMI sale wire amount: expected %q, got %q", "31.33", wire)
 	}
 
-	// The recurring enrollment amount is CENTS (#818): create and upgrade paths
-	// share MicrosToCentsExact, so the same price yields the same wire value.
+	// The recurring enrollment amount is rail MINOR units (#818): create and
+	// upgrade paths share NativeToRailMinorExact, so the same price yields the
+	// same wire value.
 	for micros, want := range map[int64]string{19_990_000: "19.99", 50_000_000: "50.00"} {
 		c, err := moneyutil.NativeToRailMinorExact("USD", micros)
 		if err != nil {
@@ -217,6 +218,51 @@ func TestUpgradeWirePinning(t *testing.T) {
 	subCent, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_001), timePtr(now), &cycle, now)
 	if _, err := moneyutil.NativeToRailMinorExact("USD", subCent); err == nil {
 		t.Fatalf("sub-cent proration must error, got cents for %d micros", subCent)
+	}
+}
+
+func jpy(native int64) PriceAmount { return PriceAmount{Micros: native, Currency: "JPY"} }
+
+// TestModelBUpgradeIsCurrencyScaled pins or#863 at the boundary this issue
+// touched: the Model-B unused-credit rounding is a ceil to a whole RAIL MINOR
+// unit, resolved through the currency registry — not an inline /10_000.
+//
+// JPY is registered scale-4 internal / ZERO-decimal minor, so one whole yen is
+// 10_000 internal units and the credit must land on a multiple of 10_000. The
+// arithmetic matches USD only because both currencies happen to share a native
+// shift of 4; the point is that the code no longer ASSUMES that.
+func TestModelBUpgradeIsCurrencyScaled(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	cycle := 30 * 24
+
+	// ¥2000 -> ¥5000, 28 of 30 days left. old_unused = ceilToYen(
+	// 20_000_000 * 672 / 720) = ceilToYen(18_666_666) = 18_670_000 (¥1867).
+	first, gotCycle, err := CalculateModelBUpgradeCharge(
+		jpy(20_000_000), jpy(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
+	if err != nil {
+		t.Fatalf("same-currency JPY proration must not error: %v", err)
+	}
+	if gotCycle != cycle {
+		t.Fatalf("cycle hours: expected %d, got %d", cycle, gotCycle)
+	}
+	if first != 31_330_000 {
+		t.Fatalf("JPY first charge: expected 31_330_000 internal units (¥3133), got %d", first)
+	}
+	// The credit is a whole number of YEN, so the charge is chargeable as-is.
+	yen, err := moneyutil.NativeToRailMinorExact("JPY", first)
+	if err != nil {
+		t.Fatalf("JPY first charge must be whole yen: %v", err)
+	}
+	if yen != 3133 {
+		t.Fatalf("JPY wire amount: expected 3133 yen, got %d", yen)
+	}
+
+	// An unregistered currency cannot be prorated at a guessed scale.
+	if _, _, err := CalculateModelBUpgradeCharge(
+		PriceAmount{Micros: 20_000_000, Currency: "XXX"},
+		PriceAmount{Micros: 50_000_000, Currency: "XXX"},
+		timePtr(now.Add(28*24*time.Hour)), &cycle, now); err == nil {
+		t.Fatal("an unregistered currency must not prorate")
 	}
 }
 

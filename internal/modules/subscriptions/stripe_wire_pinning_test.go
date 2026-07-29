@@ -17,7 +17,7 @@ import (
 )
 
 // #671 TEST WALL — Stripe outbound wire pinning: a known Cents amount (already
-// converted from micros upstream via MicrosToCentsExact / NativeToRailMinor,
+// converted from internal units upstream via moneyutil.NativeToRailMinor(Exact),
 // both pinned in their own suites) must appear as the EXACT integer string in
 // the outbound form body. All requests flow through the stripeapi choke point
 // to a captured httptest server.
