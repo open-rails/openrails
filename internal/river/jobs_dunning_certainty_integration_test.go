@@ -321,14 +321,17 @@ func TestDunning_ShortCycleJustLapsedIsStillCharged(t *testing.T) {
 }
 
 // #836: the operator kill switch must halt TERMINAL COLLECTION OUTCOMES, not
-// just the converge sweep. A real hard decline is the one path in dunning that
-// still legitimately terminates — with the switch off it must park instead, and
-// no vault delete may be queued.
+// just the converge sweep. or#870 bucket 3 is the one path in dunning that still
+// legitimately terminates — with the switch off it must park instead, and no
+// provider destruction may be queued.
 func TestDunning_KillSwitchHaltsTerminalCollectionOutcomes(t *testing.T) {
 	hardDecline := func(w http.ResponseWriter) {
-		// 201 Do Not Honor — collection.ClassifyNMIDecline calls this a hard
-		// decline, which terminates immediately when it is allowed to.
-		_, _ = w.Write([]byte("response=2&response_code=201&responsetext=Do Not Honor"))
+		// 261 Stop All Recurring Payments — the issuer has withdrawn the
+		// recurring mandate. or#870 bucket 3: the only class of decline that
+		// terminates, and only when the operator has armed destructive actions.
+		// (201 Do Not Honor used to sit here; it is bucket 2 now — the customer
+		// can fix that one, so it never terminates whatever the switch says.)
+		_, _ = w.Write([]byte("response=2&response_code=261&responsetext=Declined - Stop All Recurring Payments"))
 	}
 
 	// --- switch OFF (the shipped default): the decline lands, nothing dies ---
