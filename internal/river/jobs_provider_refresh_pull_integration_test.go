@@ -153,7 +153,10 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
-			_, _ = dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).Exec(context.Background(), stmt, id.UUID())
+			// Same reason as loadPullWatermark: these rows are `id`'s, so the
+			// cleanup handle must be pinned to `id` or the DELETEs match
+			// nothing and the suite stops being self-cleaning.
+			_, _ = dbtest.SharedMerchantPool(t, id.UUID()).Exec(context.Background(), stmt, id.UUID())
 		}
 	})
 	return id
@@ -230,7 +233,10 @@ func newStorePullWorker(dbi *db.DB, svc *merchants.Service, nmiSrv *fakeNMIPullS
 func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider string) (time.Time, bool) {
 	t.Helper()
 	var watermark time.Time
-	err := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(context.Background(), `
+	// The watermark belongs to `mid`, not to the canonical test merchant: read it
+	// on a handle pinned to its OWN merchant or RLS filters the row away and the
+	// helper reports "no watermark" for a watermark that exists.
+	err := dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(context.Background(), `
 		SELECT watermark_at FROM openrails.rail_refresh_watermarks
 		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'
 		   AND last_succeeded_at IS NOT NULL AND last_error IS NULL`,

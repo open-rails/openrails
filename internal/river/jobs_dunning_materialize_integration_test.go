@@ -109,9 +109,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	// or#865: the worker's self-assembled intent Runner parks every intent when
-	// no mode is stated — this fixture drives real rebills, so it says "full".
-	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
+	// No Config on purpose: these two tests call processSubscription with
+	// materialize=true, which only ENQUEUES the rebill intent (Store.Enqueue) —
+	// or#865's origin x mode gate never runs, so there is no mode to state.
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -121,10 +122,21 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	// Same shape as the production Work loop: the pass runs on a merchant-scoped
+	// connection, so both the read and the enqueue carry the GUC. On the bare
+	// context subscriptions' FORCEd RLS matched merchant_id = NULL and GetByID
+	// returned "no rows in result set" for a row that exists.
+	var outcome dunningOutcome
+	var sub *models.Subscription
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		var e error
+		sub, e = subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(mctx, subID)
+		if e != nil {
+			return e
+		}
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
@@ -155,7 +167,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
-	outcome = worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -238,9 +253,10 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	// or#865: the worker's self-assembled intent Runner parks every intent when
-	// no mode is stated — this fixture drives real rebills, so it says "full".
-	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
+	// No Config on purpose: these two tests call processSubscription with
+	// materialize=true, which only ENQUEUES the rebill intent (Store.Enqueue) —
+	// or#865's origin x mode gate never runs, so there is no mode to state.
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
