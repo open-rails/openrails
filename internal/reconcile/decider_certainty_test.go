@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"testing"
 	"time"
 )
@@ -61,8 +62,8 @@ func TestDecide_StaleRosterDateCancelsOnCertainty(t *testing.T) {
 		charge    ChargeEvidence
 		certainty string
 	}{
-		"non-retryable decline": {ChargeEvidence{NonRetryableDecline: true}, CertaintyNonRetryableDecline},
-		"dunning exhausted":     {ChargeEvidence{RetryAttempts: 5, DunningMaxAttempts: 5}, CertaintyDunningExhausted},
+		"non-retryable decline": {ChargeEvidence{NonRetryableDecline: true}, collection.CertaintyNonRetryableDecline},
+		"dunning exhausted":     {ChargeEvidence{RetryAttempts: 5, DunningMaxAttempts: 5}, collection.CertaintyDunningExhausted},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -90,12 +91,12 @@ func TestGateCancelCertainty_NoCancelWithoutALeg(t *testing.T) {
 
 	gone := base
 	gone.RemoteGone = true
-	if got := gateCancelCertainty(gone, EvidenceBundle{}); got.Kind != TransitionCancel || got.Certainty != CertaintyProviderConfirmedDead {
+	if got := gateCancelCertainty(gone, EvidenceBundle{}); got.Kind != TransitionCancel || got.Certainty != collection.CertaintyProviderConfirmedDead {
 		t.Fatalf("provider-confirmed cancel = %v/%q", got.Kind, got.Certainty)
 	}
 
 	withLeg := gateCancelCertainty(base, EvidenceBundle{Charge: ChargeEvidence{NonRetryableDecline: true}})
-	if withLeg.Kind != TransitionCancel || withLeg.Certainty != CertaintyNonRetryableDecline {
+	if withLeg.Kind != TransitionCancel || withLeg.Certainty != collection.CertaintyNonRetryableDecline {
 		t.Fatalf("first-party certainty cancel = %v/%q", withLeg.Kind, withLeg.Certainty)
 	}
 }
@@ -123,8 +124,8 @@ func TestIsNonRetryableDecline(t *testing.T) {
 		{"solana", "anything", false},
 	}
 	for _, c := range cases {
-		if got := IsNonRetryableDecline(c.rail, c.code); got != c.want {
-			t.Errorf("IsNonRetryableDecline(%q, %q) = %v, want %v", c.rail, c.code, got, c.want)
+		if got := collection.IsNonRetryableDecline(c.rail, c.code); got != c.want {
+			t.Errorf("collection.IsNonRetryableDecline(%q, %q) = %v, want %v", c.rail, c.code, got, c.want)
 		}
 	}
 }

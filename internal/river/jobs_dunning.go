@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -42,7 +43,8 @@ const (
 	dunningOutcomeFailed dunningOutcome = iota
 	dunningOutcomeSucceeded
 	// dunningOutcomeWindowExpired: the missed rebill is older than the dunning
-	// window — the subscription was cancelled + downgraded without a charge.
+	// window — the charge was skipped and the subscription PARKED as unknown
+	// for provider verification (#839; it is never cancelled here).
 	dunningOutcomeWindowExpired
 	// dunningOutcomeMaterialized (#366, mode=limited): the charge decision was
 	// recorded as a parked system-origin intent on the ledger instead of
@@ -68,12 +70,11 @@ type DunningWorker struct {
 	// handler re-resolves at charge time (no caching).
 	NMIResolver        money.NMIClientResolver
 	IdempotencyService *idempotency.IdempotencyService
-	// DeferDelete schedules the rail-side delete for terminal
-	// cancellations (#344). Threaded into the per-run lifecycle so window
-	// expiry and retry exhaustion stop the remote NMI subscription via
-	// the ONE scheduled mechanism (kill-switch governed at execution). nil in
-	// producer-less wirings/tests: cancellation still happens, the remote sub
-	// is left for reconciliation.
+	// DeferDelete schedules the rail-side delete for terminal cancellations
+	// (#344). Threaded into the per-run lifecycle so an evidence-backed terminal
+	// decline stops the remote NMI subscription via the ONE scheduled mechanism
+	// (kill-switch governed at execution). nil in producer-less wirings/tests:
+	// cancellation still happens, the remote sub is left for reconciliation.
 	DeferDelete subscriptions.DeferredDeleteScheduler
 	// Intents executes the provider-side charge through the intent ledger
 	// (#358 phase C): the worker enqueues a manual_rebill intent and runs it
@@ -127,12 +128,14 @@ func (w *DunningWorker) now() time.Time {
 func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) error {
 	// Mode handling (#345/#366). Dunning is a PROACTIVE operation, so provider
 	// charges never fire outside mode=full — but the SCAN still runs under
-	// limited and MATERIALIZES its decisions (#366): window-expired subs are
-	// cancelled + downgraded locally NOW, and in-window charges are enqueued as
-	// parked system-origin intents the ledger executor drains at mode=full. That
-	// makes a freshly migrated backlog VISIBLE in `openrails intents` instead of
-	// implicit in subscription rows. Readonly stays a pure observer: no charges,
-	// cancellations, or intents.
+	// limited and MATERIALIZES its decisions (#366): stale subs are parked as
+	// `unknown` locally NOW, and in-window charges are enqueued as parked
+	// system-origin intents the ledger executor drains at mode=full. That makes
+	// a freshly migrated backlog VISIBLE in `openrails intents` instead of
+	// implicit in subscription rows. #839: limited mode no longer performs LOCAL
+	// terminal cancellations either — nothing on this path cancels without a
+	// charge. Readonly stays a pure observer: no charges, no state moves, no
+	// intents.
 	materialize := false
 	observeOnly := false
 	if w.Config != nil {
@@ -142,7 +145,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			log.WithContext(ctx).Warn("Readonly mode: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
 		case w.Config.IsLimitedMode():
 			materialize = true
-			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — local window-expiry cancellations apply, charge intents enqueue PARKED (no provider writes until mode=full)")
+			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — stale subscriptions park as unknown (no local cancellations), charge intents enqueue PARKED (no provider writes until mode=full)")
 		}
 	}
 
@@ -260,12 +263,20 @@ func (w *DunningWorker) processSubscription(
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
-	// one day of slack — see collection.Window). Anything
-	// older (e.g. months-stale subscriptions imported from a legacy system)
-	// must never be surprise-charged — cancel + downgrade instead, and the
-	// rail-side subscription is stopped via the scheduled deferred-delete
-	// mechanism so NMI quits retrying it. A sub-4-day cycle derives a ZERO
-	// window: any past_due daily sub is immediately terminal here.
+	// one day of slack — see collection.Window). Anything older (e.g.
+	// months-stale subscriptions imported from a legacy system) must never be
+	// surprise-charged by a catch-up run.
+	//
+	// #839: expiry SKIPS THE CHARGE and PARKS. It used to cancel + revoke
+	// entitlements + queue the irreversible NMI vault delete, with a date
+	// comparison as its only evidence and zero charge attempts — and because a
+	// sub-4-day cycle derived a ZERO window, `now > periodEnd + 0` was true by
+	// construction, so a daily subscription was destroyed on its first dunning
+	// touch having never been billed once. A clock reading is not a death
+	// certificate: NMI rebills forever, so a lapsed date is the NORMAL state of
+	// a dunning customer. The row parks as `unknown` — access intact, out of the
+	// dunning queue — and the unknown-cohort provider probe resolves it against
+	// provider truth.
 	cycleHours := collection.BillingCycleHoursOf(sub.Price)
 	if cycleHours <= 0 && priceSvc != nil {
 		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
@@ -278,7 +289,7 @@ func (w *DunningWorker) processSubscription(
 	}
 	window := collection.Window(cycleHours)
 	if w.now().UTC().After(periodEnd.Add(window)) {
-		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, rail, periodEnd, window)
+		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window)
 	}
 
 	// #635: a provider-auto-billed subscription is charged by the provider itself,
@@ -354,6 +365,34 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeMaterialized
 	}
 
+	// #840: our own payment-method row is missing or incomplete. This is the
+	// ABSENCE OF OUR OWN DATA, not a provider decline — a vault-sync bug, a
+	// failed `payment_methods` write or a mis-populated RailMethodRef is
+	// indistinguishable here from a dead card. It used to run the failure
+	// policy, which counted it as a dunning failure and (DunningMaxFailures == 1
+	// for sub-4-day cycles) terminated on the FIRST observation: cancel +
+	// entitlement revoke + irreversible NMI vault delete, with no forensic
+	// `payments` row to show for it.
+	//
+	// It now PARKS, BEFORE the claim, so it never touches last_retry_at or
+	// retry_attempts. Verification against the provider is deliberately NOT
+	// attempted inline: the missing field IS the vault handle, so there is
+	// nothing to query the rail with. Parking as `unknown` routes the row to the
+	// unknown-cohort provider probe, which enumerates the merchant's roster and
+	// is the only plane that can verify a subscription whose local refs are gone.
+	pm := sub.PaymentMethod
+	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
+		if err := lifecycle.ApplyLocalUnknown(ctx, w.DB, sub); err != nil {
+			logEntry.WithError(err).Error("Dunning: failed to park subscription with unusable payment method")
+			return dunningOutcomeFailed
+		}
+		logEntry.WithFields(log.Fields{
+			"payment_method_present": pm != nil,
+			"rail":                   railName,
+		}).Error("Dunning: local payment-method data unusable for rebill (OUR row, not a provider decline); subscription PARKED as unknown — no attempt counted, no cancellation, no provider delete. Operator: reconcile the vault refs")
+		return dunningOutcomeFailed
+	}
+
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
@@ -361,22 +400,6 @@ func (w *DunningWorker) processSubscription(
 	}
 	if !claimed {
 		logEntry.Info("Dunning: subscription was already claimed or no longer due")
-		return dunningOutcomeFailed
-	}
-
-	// Validate payment method before involving the ledger: nothing chargeable
-	// exists, so no provider mutation is recorded — straight to the failure
-	// policy, exactly as before.
-	pm := sub.PaymentMethod
-	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
-		reason := "payment method unavailable for rebill"
-		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Rail:           rail,
-			SubscriptionID: &sub.ID,
-			FailureReason:  &reason,
-		}); err != nil {
-			logEntry.WithError(err).Warn("fail-membership after missing payment method")
-		}
 		return dunningOutcomeFailed
 	}
 
@@ -487,16 +510,44 @@ func (w *DunningWorker) applyDeclinedRebill(
 		failureCode = &code
 	}
 
+	// #821/#839: name the evidence leg that would justify a terminal outcome.
+	// A real gateway decline IS evidence — unlike a date or a missing local row
+	// — but the strength differs: only the tight non-retryable set means "never
+	// charge this again". Anything else the dunning classifier calls hard names
+	// the weaker CertaintyHardDecline leg rather than borrowing a stronger one.
+	// A soft decline names nothing here; FailMembership derives the
+	// dunning-exhausted leg from the recorded attempts if the schedule runs out.
+	certainty := ""
+	switch {
+	case collection.IsNonRetryableDecline(string(rail), normalize.FromPtr(failureCode)):
+		certainty = collection.CertaintyNonRetryableDecline
+	case hardDecline:
+		certainty = collection.CertaintyHardDecline
+	}
+
+	// #836: the operator kill switch, read on this merchant-scoped connection.
+	// When it is off, no terminal outcome (local cancel + entitlement revoke +
+	// the queued irreversible provider delete) executes — the row parks instead.
+	blocked := ""
+	if v := destructive.New(w.DB).Check(ctx, sub.MerchantID); !v.Allowed {
+		blocked = v.Reason
+	}
+
 	declineLog := logEntry.WithFields(log.Fields{
-		"response_code": responseCode,
-		"reason":        reason,
-		"hard_decline":  hardDecline,
+		"response_code":      responseCode,
+		"reason":             reason,
+		"hard_decline":       hardDecline,
+		"terminal_certainty": certainty,
+		"terminal_blocked":   blocked,
 	})
-	if hardDecline {
+	switch {
+	case blocked != "":
+		declineLog.Warn("Dunning: decline recorded but destructive actions are gated; no terminal cancellation will execute — " + blocked)
+	case hardDecline:
 		// Emit a high-visibility signal: a hard decline permanently terminates
 		// the subscription rather than retrying.
 		declineLog.Error("Dunning: hard decline; terminating subscription without further retries")
-	} else {
+	default:
 		declineLog.Warn("Dunning: soft decline; will retry on schedule")
 	}
 
@@ -507,6 +558,8 @@ func (w *DunningWorker) applyDeclinedRebill(
 		FailureCode:         failureCode,
 		HardDecline:         hardDecline,
 		RecordFailedAttempt: true,
+		TerminalCertainty:   certainty,
+		TerminalBlocked:     blocked,
 	}); err != nil {
 		logEntry.WithError(err).Warn("apply failure policy after declined rebill")
 	}
@@ -543,36 +596,30 @@ func manualRebillEvidenceResponseCode(intent gen.OpenrailsRailIntent) int {
 	return 0
 }
 
-// expireWindowedSubscription handles a past_due subscription whose missed rebill
-// is older than the dunning window: terminal cancellation + entitlement
-// revocation WITHOUT a charge. The rail-side delete is NOT performed
-// inline — FailMembership(Terminal) persists the deletion marker and schedules
-// the deferred NMI delete through the one shared mechanism (#344), which the
-// deletion kill switch governs at execution time.
-func (w *DunningWorker) expireWindowedSubscription(
+// parkStaleSubscription handles a past_due subscription whose missed rebill is
+// older than the dunning window (#839). The charge is SKIPPED — a rebill that
+// went stale months ago is never fired by a catch-up run — and the row is
+// PARKED as `unknown`: entitlements intact, out of the dunning queue, no
+// provider delete queued. It never terminates. The window is a clock reading,
+// and a clock reading is not evidence a subscription is dead; the
+// unknown-cohort provider probe (ProviderRefreshWorker) is what verifies it
+// against provider truth and may then resolve it either way.
+func (w *DunningWorker) parkStaleSubscription(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
-	rail models.Rail,
 	periodEnd time.Time,
 	window time.Duration,
 ) dunningOutcome {
-	reason := fmt.Sprintf("dunning window expired: rebill was due %s, window is %s", periodEnd.Format(time.RFC3339), window)
-	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           rail,
-		SubscriptionID: &sub.ID,
-		FailureReason:  &reason,
-		Terminal:       true,
-	}); err != nil {
-		logEntry.WithError(err).Error("Dunning: failed to cancel window-expired subscription")
+	if err := lifecycle.ApplyLocalUnknown(ctx, w.DB, sub); err != nil {
+		logEntry.WithError(err).Error("Dunning: failed to park stale subscription as unknown")
 		return dunningOutcomeFailed
 	}
-
 	logEntry.WithFields(log.Fields{
 		"period_end": periodEnd,
 		"window":     window.String(),
-	}).Warn("Dunning: window expired; subscription cancelled and downgraded without charge")
+	}).Warn("Dunning: rebill is older than the staleness window; charge skipped and subscription PARKED as unknown (access intact) for provider verification")
 	return dunningOutcomeWindowExpired
 }
 

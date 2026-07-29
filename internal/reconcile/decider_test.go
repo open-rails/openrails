@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			wantKind:       TransitionCancel,
 			wantBackfill:   1,
 			wantRemoteGone: false,
-			wantCertainty:  CertaintyNonRetryableDecline,
+			wantCertainty:  collection.CertaintyNonRetryableDecline,
 		},
 		{
 			name:           "stale decline + roster cancelled → cancel, remote gone",
@@ -196,7 +197,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			// structurally impossible.
 			wantCertainty := c.wantCertainty
 			if wantCertainty == "" && c.wantKind == TransitionCancel {
-				wantCertainty = CertaintyProviderConfirmedDead
+				wantCertainty = collection.CertaintyProviderConfirmedDead
 			}
 			if d.Kind != TransitionCancel {
 				wantCertainty = ""

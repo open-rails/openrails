@@ -90,14 +90,20 @@ func NextRetryIn(cycleHours, failures int) time.Duration {
 }
 
 // Window returns the DERIVED staleness window (#344, #359): how long past the
-// missed charge collection may still attempt one. Anything older is closed
-// WITHOUT a charge (the subscription consumer cancels + downgrades; a card
-// that failed months ago is never surprise-charged by a catch-up run).
-// window = last retry offset + one day of slack; a 0-retry cycle derives ZERO.
+// missed charge collection may still attempt one. Past it the charge is SKIPPED
+// — a card that failed months ago is never surprise-charged by a catch-up run —
+// and the row parks for provider verification. Expiry is NOT a terminal
+// outcome (#839): a clock reading is not evidence a subscription is dead.
+//
+// window = last retry offset + one day of slack. A 0-retry cycle (sub-4-day
+// cadence) has no offsets, so its window is the slack alone — NOT zero (#839):
+// a zero window is true by construction the moment a row lapses, which would
+// close every daily subscription on its first collection touch without ever
+// attempting the charge it is queued for.
 func Window(cycleHours int) time.Duration {
 	offsets := RetryOffsets(cycleHours)
 	if len(offsets) == 0 {
-		return 0
+		return windowSlack
 	}
 	return offsets[len(offsets)-1] + windowSlack
 }

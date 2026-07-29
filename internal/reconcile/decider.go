@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -82,30 +83,13 @@ func (c ChargeEvidence) dunningExhausted() bool {
 func (c ChargeEvidence) certaintyLeg() string {
 	switch {
 	case c.NonRetryableDecline:
-		return CertaintyNonRetryableDecline
+		return collection.CertaintyNonRetryableDecline
 	case c.dunningExhausted():
-		return CertaintyDunningExhausted
+		return collection.CertaintyDunningExhausted
 	default:
 		return ""
 	}
 }
-
-// The certainty legs that may justify TransitionCancel (#821). A terminal
-// cancel — and the irreversible provider-side delete it queues — is only ever
-// reached through one of these.
-const (
-	// CertaintyProviderConfirmedDead: the provider itself says the schedule is
-	// gone (roster cancelled/expired, or absent from a PROVEN-exhaustive
-	// roster). Mirroring provider truth, not our inference.
-	CertaintyProviderConfirmedDead = "provider_confirmed_dead"
-	// CertaintyNonRetryableDecline: a recorded decline whose rail code means
-	// the billing authorization is withdrawn / the account cannot be charged
-	// again. Retryable and unrecognized codes never qualify.
-	CertaintyNonRetryableDecline = "non_retryable_decline"
-	// CertaintyDunningExhausted: real recorded dunning attempts reached the
-	// policy max. Never "grace elapsed", never "the date is old".
-	CertaintyDunningExhausted = "dunning_exhausted"
-)
 
 // EvidenceBundle unifies what the planes produce (#665): provider snapshots
 // (pull / probe / webhook fetch — coverage-absence proof rides in
@@ -268,7 +252,7 @@ func gateCancelCertainty(d Decision, ev EvidenceBundle) Decision {
 	switch {
 	case d.Certainty != "":
 	case d.RemoteGone:
-		d.Certainty = CertaintyProviderConfirmedDead
+		d.Certainty = collection.CertaintyProviderConfirmedDead
 	default:
 		d.Certainty = ev.Charge.certaintyLeg()
 	}
@@ -377,8 +361,8 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "declined_renewal_within_window"})
 		}
 		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "declined_renewal_beyond_window"}
-		if IsNonRetryableDecline(string(snap.Provider), declineTxn.DeclineCode) {
-			d.Certainty = CertaintyNonRetryableDecline
+		if collection.IsNonRetryableDecline(string(snap.Provider), declineTxn.DeclineCode) {
+			d.Certainty = collection.CertaintyNonRetryableDecline
 		}
 		return with(d)
 	}
