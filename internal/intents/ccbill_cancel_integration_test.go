@@ -362,13 +362,13 @@ func TestCCBillCancelSupersededByReactivation(t *testing.T) {
 // exactly the budget executes, the rest park behind ONE held_bulk finding.
 func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	const over = 2
+	mid := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, mid)
 	pool := dbi.Pool()
 	store := NewStore(dbi)
 	sfx := uuid.NewString()[:8]
 
-	const over = 2
-	mid := uuid.New()
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)

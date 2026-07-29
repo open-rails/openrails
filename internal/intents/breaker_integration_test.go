@@ -30,11 +30,11 @@ type breakerMerchant struct {
 func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbi.Pool()
 	store := NewStore(dbi)
 	sfx := uuid.NewString()[:8]
 
 	m := breakerMerchant{id: uuid.New()}
+	pool := dbtest.SharedMerchantPool(t, m.id)
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)

@@ -48,7 +48,7 @@ func insertCeilingIntent(t *testing.T, dbi *db.DB, merchantID uuid.UUID, actor s
 	if actor != "" {
 		actorArg = actor
 	}
-	_, err := dbi.Pool().Exec(context.Background(),
+	_, err := dbtest.SharedMerchantPool(t, merchantID).Exec(context.Background(),
 		`INSERT INTO openrails.rail_intents
 		   (merchant_id, rail, intent_type, idempotency_key, status, origin, actor, next_attempt_at, created_at)
 		 VALUES ($1, 'mobius', $2, $3, 'pending', $4, $5, $6, $6)`,
@@ -74,8 +74,8 @@ func trippedFindingCount(t *testing.T, dbi *db.DB, merchantID uuid.UUID, finding
 // on the actor id with no role bypass, so a "root" principal trips identically.
 func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 
 	// Future window so the count sees ONLY the rows we seed.
@@ -113,8 +113,8 @@ func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 // distinct actors so the per-actor ceiling never fires; the global wall does.
 func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
 
@@ -148,8 +148,8 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 // window leave both ceilings untouched.
 func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
 
@@ -172,8 +172,8 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 // notice-and-rotate.
 func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(2 * time.Hour)
 	actor := "w-" + uuid.NewString()

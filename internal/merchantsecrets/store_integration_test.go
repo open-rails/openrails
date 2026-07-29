@@ -126,7 +126,7 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 	require.Equal(t, plaintext, got.Value)
 
 	var raw string
-	require.NoError(t, pool.QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(ctx,
 		`SELECT value FROM openrails.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
 		mid.String(), merchants.SecretStripeSecretKey).Scan(&raw))
 	require.NotEqual(t, plaintext, raw, "DB row must hold ciphertext, not plaintext")
