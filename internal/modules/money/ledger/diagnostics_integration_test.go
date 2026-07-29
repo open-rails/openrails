@@ -57,7 +57,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 
 	// Repair the log and the diagnostics go quiet again — the check is precise,
 	// not permanently red.
-	_, err = pool.Exec(ctx,
+	_, err = ledgerOwnerPool(t).Exec(ctx,
 		`DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2 AND source = '833_test_bypass'`,
 		merchantID, cur)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	// --- drift 2: a one-sided counter corruption -----------------------------
 	// A restore/COPY that rewrote one account's projection. Conservation is the
 	// cheap check that catches this class.
-	_, err = pool.Exec(ctx,
+	_, err = ledgerOwnerPool(t).Exec(ctx,
 		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 
@@ -83,7 +83,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	require.Equal(t, int64(1777), drifts[0].StoredCredits)
 	require.Equal(t, int64(1000), drifts[0].LoggedCredits)
 
-	_, err = pool.Exec(ctx,
+	_, err = ledgerOwnerPool(t).Exec(ctx,
 		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 	requireIntegrityClean(t, ctx, pool, merchantID, cur)
@@ -91,9 +91,12 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 
 // bypassTriggerInsert appends a transfer with the counter trigger disabled for
 // the duration of one transaction — the production failure mode, reproduced.
-func bypassTriggerInsert(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID, debit, credit uuid.UUID, amount int64, cur string) {
+func bypassTriggerInsert(t *testing.T, ctx context.Context, _ *pgxpool.Pool, merchantID, debit, credit uuid.UUID, amount int64, cur string) {
 	t.Helper()
-	tx, err := pool.Begin(ctx)
+	// Owner handle: DISABLE TRIGGER requires table ownership, which is the whole
+	// point — this reproduces a superuser/restore path, not anything the app role
+	// could ever do.
+	tx, err := ledgerOwnerPool(t).Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -158,7 +161,7 @@ func TestLedgerDiagnostics_ReportComposesBothChecks(t *testing.T) {
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx,
+	_, err = ledgerOwnerPool(t).Exec(ctx,
 		`UPDATE openrails.ledger_accounts SET debits_posted = debits_posted + 5 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 
@@ -166,7 +169,7 @@ func TestLedgerDiagnostics_ReportComposesBothChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, rep.OK(), "a corrupted counter must fail the report")
 
-	_, err = pool.Exec(ctx,
+	_, err = ledgerOwnerPool(t).Exec(ctx,
 		`UPDATE openrails.ledger_accounts SET debits_posted = debits_posted - 5 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 }

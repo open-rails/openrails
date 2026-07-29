@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
@@ -40,8 +41,13 @@ func TestReconcile_IgnoresLegacyPostgresHoldRows(t *testing.T) {
 // DERIVED from money_blocks + durable windows, while request holds are Redis TTL
 // state (#505), so there is no cache or Postgres request-hold state to reconcile.
 
-func resetMoneyLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
+func resetMoneyLedger(t *testing.T, _ *pgxpool.Pool, ctx context.Context) {
 	t.Helper()
+	// The ledger is append-only BY DESIGN: openrails_app holds SELECT,INSERT and
+	// nothing else on ledger_transfers/ledger_accounts (0001_schema). Wiping them
+	// is a fixture privilege no production role has, so the reset asks for the
+	// owner rather than the grant being widened to let a test DELETE.
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	// FK-safe order: invoice_payments/usage_events reference ledger_transfers
 	// (#705 ledger_transfer_id FKs), so they go first; transfers before
 	// accounts; grants after (self-FK ok in one statement).
