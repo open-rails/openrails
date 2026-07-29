@@ -423,11 +423,14 @@ func solanaStateStr(state map[string]any, key string) string {
 }
 
 func solanaStateU64(state map[string]any, key string) uint64 {
+	// or#863: NO float64 case. The canonical JSONB shape for a base-unit amount
+	// is a decimal string (session_service writes strconv.FormatUint), and a
+	// token amount that arrived as a JSON number has already been through a
+	// float64 — it cannot be trusted to equal the on-chain transfer it is about
+	// to be compared against. An unreadable amount yields 0, which parks the
+	// settlement ("carries no bound solana token quote to verify against")
+	// rather than approving a transfer against a rounded expectation.
 	switch v := state[key].(type) {
-	case float64:
-		if v > 0 {
-			return uint64(v)
-		}
 	case string:
 		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
 			return n

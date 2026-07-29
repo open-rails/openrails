@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // VaultedCardCollectionAdapter collects invoices and top-ups from vaulted_card
@@ -39,9 +40,11 @@ func (a *VaultedCardCollectionAdapter) ChargeSavedMethod(ctx context.Context, me
 	if req.AmountCents <= 0 {
 		return ChargeResult{}, fmt.Errorf("amount_cents must be positive")
 	}
+	// or#864: NO default — see NMICollectionAdapter. A charge in a guessed
+	// currency is the exact failure MONEY/CUR exist to prevent.
 	currency := normalizeCurrency(req.Currency)
-	if currency == "" {
-		currency = DefaultCurrency
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
+		return ChargeResult{}, fmt.Errorf("vaulted_card collection: refusing to charge without an established currency: %w", err)
 	}
 	description := strings.TrimSpace(req.Description)
 	if description == "" {

@@ -283,10 +283,21 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		// lower-case on the wire — and the value lands in payments.currency, so
 		// it must be canonicalised here, not left as the rail wrote it.
 		currency := money.NormalizeCurrency(t.Currency)
+		// or#864 / CUR-9: a decline or void carries no currency of its own, and
+		// the previous code borrowed the subscription's under a comment claiming
+		// it did not fabricate. Both halves of that were wrong: the borrow IS a
+		// substitution, and it was invisible on the row afterwards.
+		//
+		// The borrow stays — the roster reports transactions FOR this
+		// subscription, so its billing currency is the one this attempt was
+		// denominated in; that is a real relationship, not a guess — but it is
+		// an INFERENCE, so the row says so. Metadata carries the provenance and
+		// the log names it, which is the difference between an inference and a
+		// fabrication: a reader can tell which one they are looking at.
+		currencyInherited := false
 		if currency == "" && sub.Price != nil {
-			// #651: don't fabricate "usd". A decline/void carries no currency of its
-			// own; fall back to the subscription's real billing currency (truthful).
 			currency = money.NormalizeCurrency(sub.Price.Currency)
+			currencyInherited = currency != ""
 		}
 		if currency == "" {
 			// Genuinely unknown currency (transaction and subscription both lack one):
@@ -314,6 +325,14 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
+		}
+		if currencyInherited {
+			params.Metadata = []byte(`{"currency_provenance":"inherited_from_subscription_price"}`)
+			log.WithContext(ctx).WithFields(log.Fields{
+				"transaction_id":  t.TransactionID,
+				"subscription_id": sub.ID,
+				"currency":        currency,
+			}).Warn("reconcile backfill: transaction reported no currency; denominating the attempt in the subscription's billing currency and recording the inheritance as provenance (CUR-9)")
 		}
 		// #796: backfilled declines carry the rail's code VERBATIM so
 		// approval_rate's failure_reason dimension sees them (attempt_kind

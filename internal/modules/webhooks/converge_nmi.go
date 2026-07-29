@@ -163,7 +163,7 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		if perr != nil {
 			return fmt.Errorf("nmi converge: unparseable fetched charge amount %q: %w", raw, perr)
 		}
-		if !nmiAmountMatchesExpected(cents, moneyutil.Micros(price.Amount)) {
+		if !nmiAmountMatchesExpected(price.Currency, cents, moneyutil.Micros(price.Amount)) {
 			return fmt.Errorf("nmi converge: fetched charge amount %d cents does not match expected price %d micros", cents, price.Amount)
 		}
 		amountMicros = int64(moneyutil.CentsToMicros(cents))
@@ -295,6 +295,9 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		SubscriptionID: &sub.ID,
 		FailureReason:  failureReason,
 		FailureCode:    failureCode,
+		// The failed payments row for this decline was written above, so a real
+		// provider attempt underlies this failure (#840 certainty input).
+		AttemptRecorded: true,
 	}); err != nil {
 		return fmt.Errorf("nmi converge: fail pending membership: %w", err)
 	}

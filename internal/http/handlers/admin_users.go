@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -38,6 +38,7 @@ type adminUserBillingProfile struct {
 
 type adminCreditBalanceResponse struct {
 	Currency              string `json:"currency"`
+	TrustLevel            string `json:"trust_level,omitempty"`
 	DisplayName           string `json:"display_name"`
 	Unit                  string `json:"unit"`
 	DecimalPlaces         int    `json:"decimal_places"`
@@ -108,12 +109,20 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	if r.State.MoneyService != nil {
 		payer := identity.CustomerIDFromString(path.UserID)
 		if !payer.IsZero() {
-			currency := r.Query("currency")
-			if currency == "" {
-				currency = money.DefaultCurrency
-			}
-			if trustLevel, err := r.State.MoneyService.GetTrustLevel(ctx, payer, currency); err == nil {
-				profile.TrustLevel = trustLevel
+			// or#864: no invented currency. Trust level is per (payer,
+			// currency); an absent query param used to silently mean USD, so a
+			// EUR-only customer's profile reported a USD trust level as if it
+			// were theirs. The top-level field is now populated ONLY when the
+			// caller names a currency, and every balance carries its OWN trust
+			// level below — strictly more information, none of it guessed.
+			if currency := strings.TrimSpace(r.Query("currency")); currency != "" {
+				if err := moneyutil.ValidateCurrency(currency); err != nil {
+					r.ErrorJSON(http.StatusBadRequest, err.Error())
+					return
+				}
+				if trustLevel, err := r.State.MoneyService.GetTrustLevel(ctx, payer, currency); err == nil {
+					profile.TrustLevel = trustLevel
+				}
 			}
 			balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, payer)
 			if err != nil {
@@ -127,8 +136,13 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 					r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
 					return
 				}
+				balanceTrust := ""
+				if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
+					balanceTrust = tl
+				}
 				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
 					Currency:              bal.Currency,
+					TrustLevel:            balanceTrust,
 					DisplayName:           bal.Currency,
 					Unit:                  bal.Currency,
 					DecimalPlaces:         currencyDecimals(bal.Currency),

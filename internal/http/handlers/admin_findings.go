@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -134,9 +135,12 @@ func AdminGetFinding(r *httprequest.Request) {
 }
 
 type resolveFindingRequest struct {
-	Outcome        string         `json:"outcome"`
-	Notes          string         `json:"notes"`
-	OverrideParams map[string]any `json:"override_params,omitempty"`
+	Outcome string `json:"outcome"`
+	Notes   string `json:"notes"`
+	// RAW on purpose (or#863): plain binding decodes JSON numbers as float64,
+	// and `amount` here is a refund in MICROS heading for a real provider
+	// refund. Decoded through recommend.DecodeParams (UseNumber) instead.
+	OverrideParams json.RawMessage `json:"override_params,omitempty"`
 }
 
 type resolveFindingResponse struct {
@@ -240,7 +244,12 @@ func AdminResolveFinding(r *httprequest.Request) {
 			"finding carries no structured recommendation; approve is unavailable — resolve with outcome=ignore or fix out-of-band")
 		return
 	}
-	params := recommend.MergeParams(rec.Params, req.OverrideParams)
+	overrides, err := recommend.DecodeParams(req.OverrideParams)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid override_params: "+err.Error())
+		return
+	}
+	params := recommend.MergeParams(rec.Params, overrides)
 	execution, execErr := executeFindingAction(r, finding, rec.Action, params, notes)
 	if execErr != nil {
 		// PARTIAL FAILURE: the finding stays OPEN; the error (plus whatever

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -60,6 +61,14 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	}
 	if req.Payer.IsZero() {
 		return ChargeResult{}, fmt.Errorf("payer required")
+	}
+	// or#864: the ONE dispatch point for every off-session collection charge.
+	// A rail adapter must never have to decide what an absent currency means —
+	// the answer is always "refuse", and it is decided here, once, before any
+	// credential is resolved.
+	req.Currency = normalizeCurrency(req.Currency)
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+		return ChargeResult{}, fmt.Errorf("refusing to charge without an established currency: %w", err)
 	}
 	merchantID := req.MerchantID
 	if merchantID == uuid.Nil {
