@@ -167,8 +167,8 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	now := time.Now().UTC()
 	seedPay := func(id uuid.UUID, txn string, at time.Time) {
 		fx.exec(`INSERT INTO openrails.payments
-		          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id)
-		        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6)`,
+		          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
+		        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
 			id, fx.price, txn, at, fx.customer, fx.merchant)
 	}
 	// Two months apart: invisible to the month-scoped provider_charge check.
@@ -268,8 +268,8 @@ func TestFindingsGaugesOrphanedMembersDetectorEndToEnd(t *testing.T) {
 	_, priceID := fx.seedGrantableProduct("orph-feat-"+uuid.NewString()[:8], 720)
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5)`,
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail')`,
 		payID, priceID, "orphpay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
 
 	fx.sweep()
@@ -444,8 +444,8 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 	// c: completed one-off purchase (30-day window promised), no window -> OPEN, ~3 days.
 	_, prC := fx.seedGrantableProduct("oe-c-"+sfx, 720)
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5)`,
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail')`,
 		uuid.New(), prC, "oe-pay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
 	// d (negative): active sub fully covered by a standing window.
 	pD, prD := fx.seedGrantableProduct("oe-d-"+sfx, 720)

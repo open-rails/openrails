@@ -69,7 +69,7 @@ func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg Comple
 
 const completeRefundReservation = `-- name: CompleteRefundReservation :execrows
 UPDATE openrails.payments
-SET transaction_id = $2, status = 'completed', metadata = $3
+SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
 WHERE id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
@@ -83,6 +83,8 @@ type CompleteRefundReservationParams struct {
 	Metadata      []byte
 }
 
+// The rail confirmed the reversal and named it, so the row now records real
+// (negative) money movement (or#827).
 func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRefundReservationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeRefundReservation, arg.ID, arg.TransactionID, arg.Metadata)
 	if err != nil {

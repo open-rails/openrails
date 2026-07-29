@@ -69,8 +69,8 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, mid.String())
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx, `INSERT INTO openrails.payments
-			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status)
-			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', 'completed')`,
+			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
+			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', 'completed', 'rail')`,
 			payID, mid, custID, priceID, "psiso-"+suffix+"-"+payID.String()[:8], amount)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))

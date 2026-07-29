@@ -332,6 +332,12 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
+			// or#827: a mirrored success IS money the rail moved; a mirrored
+			// decline moved nothing and must never reach the host feed.
+			MoneyMovement: string(models.MoneyMovementNone),
+		}
+		if t.Success {
+			params.MoneyMovement = string(models.MoneyMovementRail)
 		}
 		if currencyInherited {
 			params.Metadata = []byte(`{"currency_provenance":"inherited_from_subscription_price"}`)

@@ -249,8 +249,8 @@ func (fx *findingsFixture) seedCompletedPayment(txn string, subID *uuid.UUID) uu
 	fx.t.Helper()
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6)`,
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
 		payID, fx.price, txn, subID, fx.customer, fx.merchant)
 	return payID
 }

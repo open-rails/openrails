@@ -546,6 +546,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 		ListAmount:    19_990_000,
 		Currency:      "USD",
 		Status:        payments.PaymentStatusCompletedValue,
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   now,
 		CreatedAt:     now,
 	}
