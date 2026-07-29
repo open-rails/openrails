@@ -119,7 +119,7 @@ runtime — details in `docs/rails/*.md`):
 | Rail | `account_id` |
 |---|---|
 | nmi | the dashboard **Gateway ID** (NMI's merchant account id — not the ISO/reseller) — [rails/nmi.md](rails/nmi.md) |
-| stripe | `acct_…` (the one rail that self-discovers, via `GET /v1/account`) — [rails/stripe.md](rails/stripe.md) |
+| stripe | `acct_…`, operator-declared — [rails/stripe.md](rails/stripe.md) shows the curl to read it off your own account |
 | ccbill | `clientAccnum-clientSubacc`, dash-joined (`900000-0000`) — [rails/ccbill.md](rails/ccbill.md) |
 | solana | derived from the signer public key; a declared value is ignored — [rails/solana.md](rails/solana.md) |
 | vaulted_card | the Basis Theory tenant id (`settings.gateway_account` names the NMI account it detokenizes into) |
