@@ -1,0 +1,2 @@
+DROP INDEX openrails.idx_grants_credit_customer_currency;
+DROP INDEX openrails.idx_payment_settlement_events_delivered;

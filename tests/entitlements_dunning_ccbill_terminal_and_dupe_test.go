@@ -127,6 +127,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 			},
 			DB:                  rt.DB,
 			Clock:               clock,
+			CCBillClient:        testCCBillWebhookClient(),
 			SubscriptionService: rt.SubscriptionService,
 		}
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
@@ -166,6 +167,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
+		CCBillClient:                 testCCBillWebhookClient(),
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		NotificationService:          rt.NotificationService,
@@ -301,6 +303,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
+		CCBillClient:                 testCCBillWebhookClient(),
 		DeduplicationService:         rt.DeduplicationService,
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
