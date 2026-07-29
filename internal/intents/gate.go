@@ -32,8 +32,12 @@ type ModeView interface {
 // Nothing attempts a provider write under readonly: the wire chokes are the
 // backstop, the executor checks first and parks politely.
 func GateExecution(cfg ModeView, origin Origin) (blocked bool, reason string) {
+	// A missing ModeView means we cannot tell which mode we are in. That is a
+	// wiring bug, and the ONE thing a fail-closed gate must never do is answer
+	// "go ahead" when it does not know. Parking is free (the intent is durable
+	// and re-executes once the runner is wired); executing is not.
 	if cfg == nil {
-		return false, ""
+		return true, "operating mode is unknown (no mode view wired); refusing to attempt a provider write"
 	}
 	if cfg.IsProviderReadOnly() {
 		return true, "mode=readonly blocks all provider writes"
