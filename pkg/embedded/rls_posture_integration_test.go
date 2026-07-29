@@ -24,7 +24,7 @@ import (
 
 // TestNew_EmbeddedBootRefusesBypassRLSRoleOutsideDev proves the non-dev fail
 // case: an embedded host whose injected PGXPool connects as a
-// superuser/BYPASSRLS role must NOT boot outside development.
+// superuser/BYPASSRLS role must NOT boot.
 func TestNew_EmbeddedBootRefusesBypassRLSRoleOutsideDev(t *testing.T) {
 	superDSN, _ := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), superDSN)
@@ -38,14 +38,15 @@ func TestNew_EmbeddedBootRefusesBypassRLSRoleOutsideDev(t *testing.T) {
 		DB:                &config.DBConfig{URL: superDSN},
 	}
 	_, err = New(Options{Config: cfg, PGXPool: pool})
-	require.Error(t, err, "an embedded host connected as a BYPASSRLS role must refuse to boot outside development")
+	require.Error(t, err, "an embedded host connected as a BYPASSRLS role must refuse to boot")
 	require.ErrorContains(t, err, "bypasses RLS")
 	require.ErrorContains(t, err, "openrails_app")
 }
 
-// TestNew_EmbeddedBootWarnsOnBypassRLSRoleInDev proves development stays a
-// warn, not a boot failure, exactly like the standalone path.
-func TestNew_EmbeddedBootWarnsOnBypassRLSRoleInDev(t *testing.T) {
+// TestNew_EmbeddedBootRefusesBypassRLSRoleInDev proves DEVELOPMENT is not
+// exempt (or#782). Dev used to warn and boot; that exemption is exactly what
+// made missing-merchant-scope queries invisible until production.
+func TestNew_EmbeddedBootRefusesBypassRLSRoleInDev(t *testing.T) {
 	superDSN, _ := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), superDSN)
 	require.NoError(t, err)
@@ -56,9 +57,9 @@ func TestNew_EmbeddedBootWarnsOnBypassRLSRoleInDev(t *testing.T) {
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: superDSN},
 	}
-	e, err := New(Options{Config: cfg, PGXPool: pool})
-	require.NoError(t, err, "development must only warn, never fail, on a bypass-RLS role")
-	t.Cleanup(func() { _ = e.Close(context.Background()) })
+	_, err = New(Options{Config: cfg, PGXPool: pool})
+	require.Error(t, err, "development must NOT be exempt from the RLS-posture gate")
+	require.ErrorContains(t, err, "bypasses RLS")
 }
 
 // TestNew_EmbeddedBootSucceedsAsAppRoleOutsideDev proves the positive case: a

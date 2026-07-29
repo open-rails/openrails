@@ -85,12 +85,13 @@ func (p *CredentialPosture) UnmarshalText(text []byte) error {
 
 type Config struct {
 	// Env is the deployment environment and it is REQUIRED (SEC-18). It is the
-	// switch behind RequiresRLS and RequiresSecretEncryption, so an unset value
-	// must never read as "development": a container shipped without ENV would
-	// otherwise boot with PLAINTEXT merchant secrets (NMI security_key, Stripe
-	// sk_, CCBill DataLink passwords, webhook signing secrets) after a single
-	// warning, and stop requiring the DB role to enforce RLS — silently, and in
-	// exactly the deployment least likely to be watching. Load() refuses an
+	// switch behind RequiresSecretEncryption, so an unset value must never read
+	// as "development": a container shipped without ENV would otherwise boot
+	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
+	// DataLink passwords, webhook signing secrets) after a single warning —
+	// silently, and in exactly the deployment least likely to be watching. (The
+	// DB role must enforce RLS in every environment; that one is not on this
+	// switch.) Load() refuses an
 	// empty ENV, and IsDev() reads empty as NOT development so any path that
 	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
@@ -1767,16 +1768,14 @@ func (cfg *Config) IsDev() bool {
 	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
 
-// RequiresRLS reports whether startup must fail if the connected Postgres role
-// bypasses row-level security. Development may use a privileged local DB role;
-// every non-development environment must connect as an RLS-enforcing role.
-func (cfg *Config) RequiresRLS() bool {
-	return cfg != nil && !cfg.IsDev()
-}
+// RLS enforcement is deliberately NOT a config knob (or#782). Every
+// environment, development included, must connect as an RLS-enforcing role;
+// db.EnforceRLSPosture takes no environment argument, so there is nothing here
+// to point back at a superuser.
 
 // RequiresSecretEncryption reports whether startup must fail if the DB-backed
 // merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
-// Same environment gate as RequiresRLS (#667): only development may run without.
+// Only development may run without a key (#667).
 func (cfg *Config) RequiresSecretEncryption() bool {
 	return cfg != nil && !cfg.IsDev()
 }

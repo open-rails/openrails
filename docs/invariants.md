@@ -82,7 +82,7 @@ that a merchant id is derived from the authenticated principal, never from reque
 | TEN-5 | The merchant id comes from resolved context; `merchant.Require` errors rather than defaulting. There is no default merchant and the schema seeds none. | `pkg/merchant/merchant.go:50-54,103-112`; `merchant_aware_schema_test.go:86-98` | APP + T | `grep -rn 'json:"merchant_id' --include=*.go internal pkg \| grep -v /gen/` → no API request struct |
 | TEN-6 | `MerchantTx` pins the GUC **transaction-locally** so it cannot leak onto a pooled connection; a zero merchant id is rejected. | `internal/db/db_pgx.go:144-177` | APP | `grep -rn "set_config" internal/db` |
 | TEN-7 | On release-reset failure the request connection is **closed**, not returned to the pool. | `db_pgx.go:225-243` | APP | — |
-| TEN-8 | Boot refuses, outside development, if the Postgres role bypasses RLS. | `internal/db/rls.go:59-94`; `build_runtime.go:176` | APP | boot `env=production` as superuser → must fail |
+| TEN-8 | Boot refuses, in EVERY environment (development included, or#782), if the Postgres role bypasses RLS. Migrations are the only job that runs privileged, and they never build the runtime. | `internal/db/rls.go`; `build_runtime.go:176` | APP | boot as superuser at any `env` → must fail; `go test ./internal/db -run TestRLSPostureError` |
 | TEN-9 | The app role is `NOLOGIN NOBYPASSRLS`. | `0001_schema.up.sql:24-27` | **DB** | `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname='openrails_app';` |
 | TEN-10 | **There is no privileged pool.** One pool, one role — dropping the GUC does not bypass a policy, it fails it. A genuine cross-merchant read goes through a `SECURITY DEFINER` reader (migrations 0016, 0021) that ASSERTS its definer bypasses RLS and RAISES if not; everything else runs per-merchant under `MerchantTx`/`RunInMerchantConn`. `DB.GenGlobal()` names the not-merchant-pinned connection, **not** a privilege. | `db_pgx.go:66-86`; `0016`/`0021` | APP | `grep -rn "GenGlobal()\|gen.New(.*\.pool)" --include=*.go` — every hit must resolve to a definer reader or an exempt table. §10 GAP-17 lists the ones that still do not |
 | TEN-11 | Unauthenticated webhook surfaces resolve the merchant from route slug / Host / declared PSP catalog, then verify the signature with *that merchant's* secret. An unresolvable Host is a hard 404. | `internal/http/handlers/webhook.go:78-90,99-116,126-145,272-322` | APP | — |
@@ -145,7 +145,7 @@ reads as protection.
 | # | Guard | Enforced at |
 |---|---|---|
 | FC-1 | RLS on unset GUC → zero rows. | policy text |
-| FC-2 | Boot refuses a BYPASSRLS role outside dev. | `internal/db/rls.go:73-94` |
+| FC-2 | Boot refuses a BYPASSRLS role — every environment, dev included. | `internal/db/rls.go` |
 | FC-3 | Boot refuses the DB secret store without `ENCRYPTION_MASTER_KEY` outside dev. | `merchantsecrets/store.go:297-308` |
 | FC-4 | Even in dev, Solana private keys may not be stored unencrypted. | `store.go:227-233` |
 | FC-5 | `secret_backend=vault` without a working Vault, or without KV read capability, refuses. | `store.go:191-197`; `config.go:1284-1291` |

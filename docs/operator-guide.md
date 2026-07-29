@@ -17,8 +17,11 @@ Postgres specifics worth knowing:
 - RLS is enforced for the unprivileged `openrails_app` role (`NOLOGIN NOBYPASSRLS`,
   created by the baseline migration); every merchant-scoped table has a
   `merchant_isolation` policy keyed on the `app.merchant_id` GUC. Run MIGRATIONS
-  as a superuser and the SERVER as `openrails_app`: outside development the
-  server refuses to boot on a role that bypasses RLS, and the cross-merchant
+  as a superuser and the SERVER as `openrails_app` — in EVERY environment,
+  local development included. The server refuses to boot on a role that
+  bypasses RLS, because a privileged role does not just disable isolation, it
+  hides bugs: an unscoped read of an RLS-forced table returns zero rows with no
+  error, so the component logs success and does nothing. Also, the cross-merchant
   directory functions (webhook routing by provider account, the hosted portal's
   merchant list) are `SECURITY DEFINER` — they need an owner that can read
   across merchants, and they raise rather than return an empty result if it

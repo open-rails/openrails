@@ -28,6 +28,31 @@ E2E helpers (`tunnel-webhooks`, `verify-webhook-tunnel`, `mint-jwt`,
 `e2e-nmi-live`, `nmi-query`, `e2e-dump-local`, `docker-up-e2e-sandbox`) are
 covered in [testing.md](testing.md) and [local-webhooks.md](local-webhooks.md).
 
+## Database roles in local dev
+
+Two roles, and the split is not cosmetic:
+
+| Role | Used by | Why |
+|---|---|---|
+| `admin` (superuser) | `openrails migrate up`, the compose bootstrap SQL, `scripts/sqlc-vet-db.sh` | DDL, `GRANT`s, role creation |
+| `openrails_app` (unprivileged, `NOBYPASSRLS`) | **the server, the workers, the CLI — everything else** | the role production runs as |
+
+The server refuses to boot as a superuser or any `BYPASSRLS` role, in every
+environment including development. That is deliberate and there is no dev
+opt-out. Under a privileged role, a query against an RLS-forced table that
+forgets its merchant scope still returns rows, so the bug looks fine locally
+and runs inert in production — an unscoped read has its policy predicate
+degenerate to `merchant_id = NULL`, returns **zero rows with no error**, and
+the caller logs success. Running dev as `openrails_app` makes that fail on your
+laptop instead. If a query of yours starts returning nothing after this, it is
+missing a `MerchantTx`/`RunInMerchantConn` scope — fix the scope, do not reach
+for the superuser.
+
+`0001_schema.up.sql` creates `openrails_app` `NOLOGIN` (real deployments attach
+the login credential out of band); the `openrails-app-role` one-shot compose
+service attaches a throwaway dev password after migrations run. It grants no
+privilege — the role stays `NOBYPASSRLS`.
+
 ## sqlc workflow
 
 SQL is hand-written in `internal/db/queries/*.sql` and compiled to

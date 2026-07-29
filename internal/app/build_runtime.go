@@ -165,16 +165,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
-	// Surface (and, outside development, enforce) the Row Level Security
-	// posture of the connected role (issue #227/#763): RLS policies only
-	// constrain a non-superuser, non-BYPASSRLS role. This ONE call covers BOTH
-	// construction paths above — a config-built standalone pool (createDatabase)
-	// AND a host-injected embedded pool (overrides.DB) — so an embedded host
-	// connecting as a privileged/BYPASSRLS role outside development fails boot
-	// exactly like standalone does, with no separate gate to keep in sync.
-	// Previously this ran only inside createDatabase, so embedded construction
-	// (which always supplies overrides.DB) never hit it at all.
-	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
+	// Enforce the Row Level Security posture of the connected role
+	// (#227/#763/or#782): RLS policies only constrain a non-superuser,
+	// non-BYPASSRLS role, so a privileged role makes merchant isolation inert
+	// AND hides every missing-merchant-scope bug. Unconditional — development
+	// is NOT exempt. This ONE call covers BOTH construction paths above (a
+	// config-built standalone pool and a host-injected embedded pool), so an
+	// embedded host connecting as a privileged role fails boot exactly like
+	// standalone does, with no separate gate to keep in sync.
+	if err := database.EnforceRLSPosture(context.Background()); err != nil {
 		return nil, err
 	}
 

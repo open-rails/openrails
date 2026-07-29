@@ -42,7 +42,6 @@ func TestLoad_RequiresEnv(t *testing.T) {
 		// Config without going through Load still gets the strict posture.
 		cfg := &Config{}
 		require.False(t, cfg.IsDev())
-		require.True(t, cfg.RequiresRLS())
 		require.True(t, cfg.RequiresSecretEncryption())
 	})
 
@@ -50,7 +49,6 @@ func TestLoad_RequiresEnv(t *testing.T) {
 		require.True(t, (&Config{Env: "development"}).IsDev())
 		require.True(t, (&Config{Env: "dev"}).IsDev())
 		require.False(t, (&Config{Env: "production"}).IsDev())
-		require.True(t, (&Config{Env: "production"}).RequiresRLS())
 	})
 }
 
@@ -385,26 +383,6 @@ func TestIsDev(t *testing.T) {
 	})
 }
 
-func TestRequiresRLS(t *testing.T) {
-	cases := []struct {
-		name string
-		env  string
-		want bool
-	}{
-		{"empty env is NOT development and requires RLS (SEC-18)", "", true},
-		{"dev allows local privileged DB role", "dev", false},
-		{"development allows local privileged DB role", "development", false},
-		{"prod requires RLS-enforcing DB role", "prod", true},
-		{"production requires RLS-enforcing DB role", "production", true},
-		{"unknown non-dev env requires RLS", "staging", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, (&Config{Env: tc.env}).RequiresRLS())
-		})
-	}
-}
-
 func TestProductionTestModeValidation(t *testing.T) {
 	t.Run("prod env allows test_mode=sandbox (#762: posture and environment strictness are independent axes)", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
@@ -429,7 +407,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.Auth.Issuer = "https://auth.staging.example.com"
 		require.NotNil(t, cfg.RateLimits, "GetDefaultBillingConfig seeds rate limits")
 		assert.False(t, cfg.IsDev(), "env=staging should not be dev")
-		assert.True(t, cfg.RequiresRLS(), "env=staging requires RLS enforcement")
 		assert.NoError(t, Validate(cfg), "env=staging + sandbox + every other non-dev gate satisfied must boot")
 	})
 
