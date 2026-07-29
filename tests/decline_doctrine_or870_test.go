@@ -154,7 +154,10 @@ func TestOr870Bucket2ExpiredCardKeepsAccessAndDeletesNothing(t *testing.T) {
 // two classifiers is that no code in this set is left with a different answer.
 func TestOr870Bucket2CoversEveryFixableCode(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	for _, code := range []string{"201", "204", "220", "221", "222", "223", "224", "225", "226", "240", "263", "461"} {
+	// 250/251 (pick-up/lost card) sit here by owner decision (or#870, 2026-07-29):
+	// the instrument is dead but the customer did nothing wrong and a reissued
+	// card works, so losing a wallet must not cost a subscription.
+	for _, code := range []string{"201", "204", "220", "221", "222", "223", "224", "225", "226", "240", "250", "251", "263", "461"} {
 		t.Run(code, func(t *testing.T) {
 			_, sub, pm := declineFixture(t, suite, 0)
 			failWithCode(t, suite, sub, code)
@@ -211,7 +214,7 @@ func TestOr870Bucket3CancelsAtTheRailAndDeletesNoPaymentMethod(t *testing.T) {
 
 func TestOr870Bucket3CoversEveryNonRecoverableCode(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	for _, code := range []string{"250", "251", "252", "253", "261", "262"} {
+	for _, code := range []string{"252", "253", "261", "262"} {
 		t.Run(code, func(t *testing.T) {
 			_, sub, pm := declineFixture(t, suite, 0)
 			failWithCode(t, suite, sub, code)
