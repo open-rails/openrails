@@ -98,3 +98,24 @@ FROM openrails.psp_owner_by_identity(
     COALESCE(sqlc.narg(environment)::text, 'live'),
     sqlc.arg(account_id)::text
 );
+
+-- CROSS-MERCHANT: merchants armed on one of the named rails, through migration
+-- 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
+-- used to JOIN merchants to psps on the base pool; psps FORCEs RLS, so the join
+-- yielded nothing and the managed endpoint was never registered or
+-- version-bumped. Ids only — each merchant's PSP rows are read inside its own
+-- scope.
+-- name: ListRailArmedMerchants :many
+SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
+    sqlc.arg(rails)::text[],
+    sqlc.arg(merchant_limit)::int);
+
+-- One merchant's live PSPs on a rail, read inside that merchant's scope (the
+-- second leg of the ListRailArmedMerchants fan-out).
+-- name: ListLivePSPsForRail :many
+SELECT id, merchant_id, rail, environment, account_id, key
+FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND rail = sqlc.arg(rail)::text
+  AND archived = false
+ORDER BY account_id;

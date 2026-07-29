@@ -34,12 +34,18 @@ func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg Acknowle
 
 const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM openrails.payment_settlement_events
- WHERE delivered_at IS NOT NULL
-   AND delivered_at < $1::timestamptz
+ WHERE merchant_id = $1::uuid
+   AND delivered_at IS NOT NULL
+   AND delivered_at < $2::timestamptz
 `
 
-func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, cutoff)
+type DeleteDeliveredPaymentSettlementsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+}
+
+func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, arg DeleteDeliveredPaymentSettlementsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, arg.MerchantID, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}

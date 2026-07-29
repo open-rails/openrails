@@ -15,4 +15,5 @@ ON CONFLICT (merchant_id, op, event_id) DO NOTHING;
 
 -- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM openrails.webhook_events
-WHERE completed_at < sqlc.arg(cutoff)::timestamptz;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND completed_at < sqlc.arg(cutoff)::timestamptz;

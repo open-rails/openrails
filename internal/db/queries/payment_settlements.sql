@@ -14,5 +14,6 @@ UPDATE openrails.payment_settlement_events
 
 -- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM openrails.payment_settlement_events
- WHERE delivered_at IS NOT NULL
+ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+   AND delivered_at IS NOT NULL
    AND delivered_at < sqlc.arg(cutoff)::timestamptz;

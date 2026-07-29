@@ -1030,6 +1030,45 @@ func (q *Queries) ListActiveSubscriptionsByRail(ctx context.Context, rail string
 	return items, nil
 }
 
+const listDueDunningMerchants = `-- name: ListDueDunningMerchants :many
+SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
+    $1::text[],
+    $2::timestamptz,
+    $3::int)
+`
+
+type ListDueDunningMerchantsParams struct {
+	Rails         []string
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: merchants holding a due past_due subscription on the named
+// rails, through migration 0023's SECURITY DEFINER work queue (or#877 B5). The
+// dunning worker used to run ListDueDunningSubscriptions on the bare job
+// context; subscriptions FORCEs RLS, so the scan returned an empty slice and
+// scheduled dunning has never retried, parked or terminated anything. Ids only
+// — the due rows and every charge run per-merchant under RunInMerchantScope.
+func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueDunningMerchants, arg.Rails, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = ANY($1::text[])
@@ -1043,7 +1082,8 @@ type ListDueDunningSubscriptionsParams struct {
 	Now   time.Time
 }
 
-// Dunning: past_due NMI-backed subscriptions whose next retry is due.
+// Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
+// inside one merchant's scope (see ListDueDunningMerchants above).
 func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Rails, arg.Now)
 	if err != nil {

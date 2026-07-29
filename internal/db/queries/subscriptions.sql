@@ -261,8 +261,21 @@ WHERE customer_id = $1
   AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid)
   AND deleted_at IS NULL;
 
+-- CROSS-MERCHANT: merchants holding a due past_due subscription on the named
+-- rails, through migration 0023's SECURITY DEFINER work queue (or#877 B5). The
+-- dunning worker used to run ListDueDunningSubscriptions on the bare job
+-- context; subscriptions FORCEs RLS, so the scan returned an empty slice and
+-- scheduled dunning has never retried, parked or terminated anything. Ids only
+-- — the due rows and every charge run per-merchant under RunInMerchantScope.
+-- name: ListDueDunningMerchants :many
+SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
+    sqlc.arg(rails)::text[],
+    sqlc.arg(now)::timestamptz,
+    sqlc.arg(merchant_limit)::int);
+
 -- name: ListDueDunningSubscriptions :many
--- Dunning: past_due NMI-backed subscriptions whose next retry is due.
+-- Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
+-- inside one merchant's scope (see ListDueDunningMerchants above).
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
   AND sub.status = 'past_due'

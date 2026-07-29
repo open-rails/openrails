@@ -104,11 +104,17 @@ func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, 
 
 const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE created_at < $1::timestamptz
+WHERE merchant_id = $1::uuid
+  AND created_at < $2::timestamptz
 `
 
-func (q *Queries) DeleteNotificationsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteNotificationsBefore, cutoff)
+type DeleteNotificationsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+}
+
+func (q *Queries) DeleteNotificationsBefore(ctx context.Context, arg DeleteNotificationsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNotificationsBefore, arg.MerchantID, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -117,11 +123,21 @@ func (q *Queries) DeleteNotificationsBefore(ctx context.Context, cutoff time.Tim
 
 const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE seen = true AND created_at < $1::timestamptz
+WHERE merchant_id = $1::uuid
+  AND seen = true AND created_at < $2::timestamptz
 `
 
-func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, cutoff)
+type DeleteSeenNotificationsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+}
+
+// Retention sweeps (or#877 B4). The merchant predicate is explicit, not
+// implied: the sweep walks the merchant directory and runs one pass per
+// merchant, and an unqualified DELETE would be a cross-merchant delete the
+// moment it ran on a BYPASSRLS connection (a superuser self-host, a test).
+func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteSeenNotificationsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, arg.MerchantID, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}

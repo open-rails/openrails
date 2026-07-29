@@ -72,10 +72,14 @@ WHERE cs.customer_id = $1
 ORDER BY cs.created_at DESC
 LIMIT 1;
 
+-- Retention sweep (or#877 B4): one pass per merchant off the directory walk,
+-- with the merchant predicate written out so it stays scoped on a BYPASSRLS
+-- connection too.
 -- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)
-WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
   AND status IN ('created', 'requires_action')
   AND deleted_at IS NULL;
 
