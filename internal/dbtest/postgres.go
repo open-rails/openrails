@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
@@ -404,6 +405,28 @@ func SharedSuperuserPGXPool(t *testing.T, reason string) *pgxpool.Pool {
 	t.Helper()
 	pool, err := pgxpool.New(context.Background(), SharedSuperuserDSN(t, reason))
 	require.NoError(t, err, "open privileged pgx pool on shared integration postgres")
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// SharedMerchantPool returns an RLS-ENFORCING pool whose every connection has
+// `app.merchant_id` pinned to merchantID — the production posture (MerchantTx /
+// RunInMerchantConn) in pool form.
+//
+// This, not a superuser pool, is what a test wants when it seeds or asserts on
+// ONE merchant's own rows: the policies stay live and the fixture proves the
+// merchant can actually see its own data. Reach for SharedSuperuserPGXPool only
+// when the fixture genuinely spans merchants.
+func SharedMerchantPool(t *testing.T, merchantID uuid.UUID) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err, "open merchant-pinned pgx pool")
 	t.Cleanup(pool.Close)
 	return pool
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -28,6 +29,19 @@ func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 	require.NoError(t, err)
 	t.Cleanup(rawPool.Close)
 	return db.WrapPool(rawPool, config.DefaultSchema), ctx
+}
+
+// countDEKs reads merchant_deks the way production does — inside the merchant's
+// own pinned transaction. The raw pool is RLS-enforcing with no app.merchant_id,
+// so a bare SELECT here would report 0 whether or not the row exists.
+func countDEKs(t *testing.T, ctx context.Context, pool *db.Pool, m merchant.ID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.MerchantTx(ctx, m, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, m.String()).Scan(&n)
+	}))
+	return n
 }
 
 // seedMerchant inserts a merchants row so merchant_deks_merchant_fk is satisfied.
@@ -61,17 +75,13 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	tA := seedMerchant(t, ctx, pool)
 
 	// No DEK row before first use.
-	var before int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&before))
-	require.Equal(t, 0, before)
+	require.Equal(t, 0, countDEKs(t, ctx, pool, tA))
 
 	ct, err := enc.Encrypt(ctx, tA, testAAD(tA), []byte("sk_live_db"))
 	require.NoError(t, err)
 
 	// Exactly one wrapped DEK row created lazily.
-	var after int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&after))
-	require.Equal(t, 1, after)
+	require.Equal(t, 1, countDEKs(t, ctx, pool, tA))
 
 	// Round-trip with a FRESH encryptor (cold cache) over the same store+master
 	// key: it must unwrap the persisted DEK and decrypt.
@@ -84,8 +94,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	// Re-encrypting reuses the SAME DEK row (no second row).
 	_, err = enc.Encrypt(ctx, tA, testAAD(tA), []byte("again"))
 	require.NoError(t, err)
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&after))
-	require.Equal(t, 1, after, "DEK must be reused, not recreated")
+	require.Equal(t, 1, countDEKs(t, ctx, pool, tA), "DEK must be reused, not recreated")
 }
 
 func TestDBDEKStore_CrossMerchantCiphertextIsolation(t *testing.T) {

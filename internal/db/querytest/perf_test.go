@@ -54,7 +54,7 @@ type perfSeed struct {
 // lookups are O(1) and need no gate.
 func TestQueryPerformance(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t, "querytest asserts the QUERY PREDICATE with RLS deliberately disabled (SEC-18) and TRUNCATE/ANALYZEs the perf corpus")
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	scale := queryPerfScale(t)

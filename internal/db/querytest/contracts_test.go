@@ -17,7 +17,7 @@ import (
 
 func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t, "querytest asserts the QUERY PREDICATE with RLS deliberately disabled (SEC-18) and TRUNCATE/ANALYZEs the perf corpus")
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 
@@ -356,7 +356,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 
 func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t, "querytest asserts the QUERY PREDICATE with RLS deliberately disabled (SEC-18) and TRUNCATE/ANALYZEs the perf corpus")
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 

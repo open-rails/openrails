@@ -21,7 +21,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
@@ -54,7 +54,7 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 // empty subject stays a documented no-op.
 func TestEnsureCustomerID_RejectsNonUUIDSubject(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	_, err := db.EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")

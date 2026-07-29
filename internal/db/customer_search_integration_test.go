@@ -16,13 +16,14 @@ import (
 )
 
 // TestSearchCustomersScopedToMerchant is the regression test for the console
-// customer list leaking across merchants on a BYPASSRLS connection: the shared
-// dbtest pool is exactly such a privileged handle, so before SearchCustomers/
-// CountSearchCustomers carried an explicit merchant predicate this test's
-// cross-merchant assertions failed (every merchant's customers came back).
+// customer list leaking across merchants on a BYPASSRLS connection: before
+// SearchCustomers/CountSearchCustomers carried an explicit merchant predicate,
+// this test's cross-merchant assertions failed (every merchant's customers came
+// back). It therefore needs a privileged handle ON PURPOSE — with RLS enforcing,
+// the policy would hold the line and the query's own predicate would go untested.
 func TestSearchCustomersScopedToMerchant(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t, "proves SearchCustomers' OWN merchant predicate holds with RLS disabled; also seeds a second merchant's customer")
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	otherMerchantID := uuid.New()

@@ -24,8 +24,8 @@ import (
 // openrails_app (NOBYPASSRLS) role.
 func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
-	_, appDSN := dbtest.SharedRLSPostgres(t)
-	super := dbtest.SharedPGXPool(t)
+	appDSN := dbtest.SharedPostgresDSN(t)
+	super := dbtest.SharedSuperuserPGXPool(t, "seeds two merchants and their customers/products/prices — cross-merchant fixture setup RLS correctly forbids")
 
 	appPool, err := pgxpool.New(ctx, appDSN)
 	require.NoError(t, err)
