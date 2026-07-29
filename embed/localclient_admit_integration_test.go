@@ -58,7 +58,7 @@ func TestLocalClientAdmit(t *testing.T) {
 		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 		require.NoError(t, err)
 
-		customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, "c7c7c7c7-0000-4000-8000-000000000042")
+		customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "c7c7c7c7-0000-4000-8000-000000000042")
 
 		client := rt.Client()
 		admitter, ok := client.(embed.SingleAdmitter)
@@ -150,7 +150,7 @@ func TestMerchantPinMismatch(t *testing.T) {
 	require.NoError(t, err)
 
 	otherID := openrails.MerchantID(uuid.New())
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, "e9e9e9e9-0000-4000-8000-000000000042")
+	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "e9e9e9e9-0000-4000-8000-000000000042")
 
 	client := rt.Client()
 

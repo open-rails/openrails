@@ -536,7 +536,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"
-	productAccessSvc := productaccess.NewService(dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)))
+	productAccessSvc := productaccess.NewService(dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	newPayer := func(side string) (uuid.UUID, string, uuid.UUID) {
 		id := uuid.New()
 		subject := id.String()
