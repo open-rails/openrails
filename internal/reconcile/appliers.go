@@ -60,6 +60,10 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	if currency == "" {
 		return false, fmt.Errorf("payment currency required")
 	}
+	amount := moneyutil.CentsToMicros(a.AmountCents)
+	if a.AmountMicros != nil {
+		amount = *a.AmountMicros
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -69,7 +73,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		PriceID:        a.PriceID,
 		Rail:           string(a.Rail),
 		TransactionID:  a.TransactionID,
-		Amount:         moneyutil.CentsToMicros(a.AmountCents),
+		Amount:         amount,
 		Currency:       currency,
 		SubscriptionID: a.SubscriptionID,
 		Metadata:       metadataJSON(a.Metadata),
