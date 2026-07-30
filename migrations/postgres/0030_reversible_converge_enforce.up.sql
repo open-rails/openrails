@@ -73,10 +73,13 @@ ALTER TABLE ONLY openrails.destructive_run_before_images
 -- Exactly one image per row per run: the second capture inside a run is the
 -- run's own later write, not the state it inherited, and must never displace
 -- the first (the capture is ON CONFLICT DO NOTHING for that reason).
+--
+-- Led by merchant_id (GAP-10 / SEC-24): under RLS a conflicting row belonging to
+-- another merchant is INVISIBLE, so a unique index that spans merchants lets one
+-- merchant's row block another's insert with an error naming nothing. It also
+-- serves the by-run lookups the reverse does, so no second index is needed.
 CREATE UNIQUE INDEX uq_destructive_run_before_images_identity
-    ON openrails.destructive_run_before_images USING btree (destructive_run_id, table_name, row_id);
-CREATE INDEX idx_destructive_run_before_images_merchant_run
-    ON openrails.destructive_run_before_images USING btree (merchant_id, destructive_run_id);
+    ON openrails.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id);
 
 ALTER TABLE openrails.destructive_run_before_images ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ONLY openrails.destructive_run_before_images FORCE ROW LEVEL SECURITY;
