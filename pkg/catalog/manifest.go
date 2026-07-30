@@ -14,13 +14,13 @@
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //
-// Each price declares its own `providers:` list and optional `provider_links`
+// Each price declares its own `psps:` list and optional `psp_links`
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
 // Manifest is the root of a catalog-as-code document.
 //
-// Every price declares its own `currency` and `providers` explicitly — there
+// Every price declares its own `currency` and `psps` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
 	Version        int             `json:"version" yaml:"version"`

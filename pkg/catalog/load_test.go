@@ -141,6 +141,30 @@ products:
 	}
 }
 
+func TestLoad_RejectsRetiredProviderKeysForTypedPrice(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: topup
+    display_name: Topup
+    credits: [{key: credits}]
+    prices:
+      - currency: usd
+        model: tiered
+        providers: [stripe]
+        tiered:
+          mode: graduated
+          tiers:
+            - {unit_amount: 10_000}
+credit_balances:
+  - {key: credits, unit: credit}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "providers/provider_links were renamed to psps/psp_links") {
+		t.Fatalf("want retired provider-key error, got %v", err)
+	}
+}
+
 func TestValidateRejectsTierGroupsOnly(t *testing.T) {
 	m := &Manifest{
 		Version:    SupportedVersion,

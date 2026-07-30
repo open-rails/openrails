@@ -444,6 +444,9 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if !validPriceCurrency(price.Currency) {
 		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
 	}
+	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
+		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
+	}
 	if price.Model != "" {
 		price.PSPs = normalizePSPs(price.PSPs)
 		return nil
@@ -488,9 +491,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 			return fmt.Errorf("product %q price #%d trial.unit_amount must be >= 0 (0 = free trial)", product.Key, idx+1)
 		}
 		price.Trial.Duration = formatDurationHours(*trialHours)
-	}
-	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
-		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
 	}
 	if price.PSPs != nil {
 		price.PSPs = normalizePSPs(price.PSPs)

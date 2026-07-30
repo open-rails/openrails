@@ -88,7 +88,7 @@ duplicating them:
   One-way, best-effort — OpenRails stays the source of truth; a feature-sync failure
   never fails the price link and surfaces as drift on the next reconcile.
 
-Alternatively, link an existing Stripe Price (`provider_links.stripe.price_id`);
+Alternatively, link an existing Stripe Price (`psp_links.stripe.price_id`);
 OpenRails round-trips it and rejects the link if amount, currency, recurring terms,
 or product association don't match the catalog. The pull reconciliation job is
 alert-only — it reports drift and never mutates your Stripe objects.
