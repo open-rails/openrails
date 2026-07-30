@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -742,6 +743,14 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 					template.Provider = rail
 				}
 				pending = append(pending, template)
+				// The rotation did NOT take effect. Keep the previously stored
+				// (verified) link so a ReplacePSPLinks pass never deletes it
+				// while the response only reports a pending action.
+				if prev, ok := existing.PSPLinks[psp]; ok {
+					if _, kept := next[psp]; !kept {
+						next[psp] = maps.Clone(prev)
+					}
+				}
 				continue
 			}
 			if attachErr != nil {
