@@ -191,6 +191,8 @@ ran. The rules stay armed for new migrations.
 | `0025` custodian CHECK | `constraint-missing-not-valid` | The `UPDATE` two lines above normalises the rows the CHECK then validates, in the same transaction. |
 | `0026` money_movement CHECK | `constraint-missing-not-valid` | Same as `0013`. |
 | `0027` merchant_exports→merchant_purge_inventories | `renaming-table`, `renaming-column` | Same hard-cut rationale as `0025`; breaking a client that still names `merchant_exports` is the point of or#858. |
+| `0031` vault_fingerprint→fingerprint | `renaming-column` | Same hard-cut rationale as `0025` (or#871): `vault` is reserved for HashiCorp Vault, and a caller still naming `vault_fingerprint` must fail loudly rather than read a stale alias. |
+| `0031` payments token_type CHECK | `constraint-missing-not-valid` | The two `UPDATE`s immediately above rewrite every row the re-added CHECK then validates, in the same transaction — the constraint is dropped and restored only to move `provider_vault`/`pan_via_vault` to their new names. |
 
 A new migration that genuinely needs one of these must add the constraint
 `NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction

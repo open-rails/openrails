@@ -25,6 +25,10 @@ UPDATE openrails.rail_intents
    SET intent_type = 'vaulted_card_sale'
  WHERE intent_type = 'custodian_sale';
 
+UPDATE openrails.rail_intents
+   SET idempotency_key = 'vaulted_card_sale:' || substring(idempotency_key from 16)
+ WHERE idempotency_key LIKE 'custodian_sale:%';
+
 UPDATE openrails.webhook_health       SET rail = 'vaulted_card' WHERE rail = 'basis_theory';
 UPDATE openrails.webhook_health_daily SET rail = 'vaulted_card' WHERE rail = 'basis_theory';
 

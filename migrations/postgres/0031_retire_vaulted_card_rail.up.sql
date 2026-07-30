@@ -65,20 +65,27 @@ UPDATE openrails.probe_verdicts          SET rail = 'nmi' WHERE rail = 'vaulted_
 UPDATE openrails.webhook_health       SET rail = 'basis_theory' WHERE rail = 'vaulted_card';
 UPDATE openrails.webhook_health_daily SET rail = 'basis_theory' WHERE rail = 'vaulted_card';
 
--- 4. The checkout sale intent is named after the custody arrangement now.
+-- 4. The checkout sale intent is named after the custody arrangement now. Its
+-- idempotency key carries the same prefix, and an in-flight sale whose key
+-- stopped matching would be re-posted as a NEW charge — so both move together.
 UPDATE openrails.rail_intents
    SET intent_type = 'custodian_sale'
  WHERE intent_type = 'vaulted_card_sale';
 
+UPDATE openrails.rail_intents
+   SET idempotency_key = 'custodian_sale:' || substring(idempotency_key from 19)
+ WHERE idempotency_key LIKE 'vaulted_card_sale:%';
+
 -- 5. or#871: `vault` is reserved for HashiCorp Vault in this codebase, and this
 -- column is on payment_methods — Stripe's own word for it is `fingerprint`.
+-- squawk-ignore renaming-column
 ALTER TABLE openrails.payment_methods RENAME COLUMN vault_fingerprint TO fingerprint;
 ALTER INDEX openrails.payment_methods_vault_fingerprint_idx RENAME TO payment_methods_fingerprint_idx;
 COMMENT ON COLUMN openrails.payment_methods.fingerprint IS
     'Custodian-issued stable fingerprint of the underlying PAN (Basis Theory''s default fingerprint expression), for dedup/lookup. '''' = the custodian issues none.';
 
 -- 6. token_type: same reserved word, same fix. `provider_vault` also carried
--- the retired `provider` vocabulary (a merchant''s account on a rail is a PSP).
+-- the retired `provider` vocabulary (a merchant's account on a rail is a PSP).
 --   provider_vault -> psp_token     (the PSP holds the card; we charge its token)
 --   pan_via_vault  -> pan_via_proxy (the custodian detokenizes the PAN into the gateway)
 ALTER TABLE openrails.payments DROP CONSTRAINT chk_payments_token_type;
@@ -97,7 +104,7 @@ COMMENT ON COLUMN openrails.payments.token_type IS
 -- 7. Custodian routing. An inbound Basis Theory webhook carries a TENANT id and
 -- no merchant context, exactly like an account-routed Stripe/CCBill webhook —
 -- so it needs the same indexed, cross-merchant directory lookup. The custodian
--- identity lives in the PSP''s settings, so index the expression.
+-- identity lives in the PSP's settings, so index the expression.
 CREATE UNIQUE INDEX uq_psps_custodian_identity
     ON openrails.psps ((evidence -> 'settings' ->> 'custodian'),
                        environment,
