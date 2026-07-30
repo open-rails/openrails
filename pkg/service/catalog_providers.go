@@ -340,6 +340,27 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		return ids
 	}
 
+	// deferPending parks this target's slot on a pending manual action: the
+	// declared key gets a pending state and the adapter's action template is
+	// queued for the operator. An empty message means "use the template hint";
+	// callers pass remoteWritesDisabledMessage when the block is the operating
+	// mode rather than the provider itself.
+	deferPending := func(t attachTarget, message string) {
+		template := t.adapter.PendingActionTemplate(priceID)
+		if template.Provider == "" {
+			template.Provider = t.rail
+		}
+		if message == "" {
+			message = template.Hint
+		}
+		states[t.declared] = ProviderState{
+			Status:     ProviderStatusPendingManualLink,
+			SyncStatus: SyncStatusNeverSynced,
+			Message:    message,
+		}
+		pending = append(pending, template)
+	}
+
 	for _, t := range targets {
 		link := req.PSPLinks[t.declared]
 		// Pin provider calls to THIS account's credentials; empty means the
@@ -352,32 +373,14 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		if len(normalizeLinkMap(link)) > 0 {
 			ids, attachErr := t.adapter.Attach(ctx, link, tctx)
 			if errors.Is(attachErr, errPendingManualLink) {
-				template := t.adapter.PendingActionTemplate(priceID)
-				states[t.declared] = ProviderState{
-					Status:     ProviderStatusPendingManualLink,
-					SyncStatus: SyncStatusNeverSynced,
-					Message:    template.Hint,
-				}
-				if template.Provider == "" {
-					template.Provider = t.rail
-				}
-				pending = append(pending, template)
+				deferPending(t, "")
 				continue
 			}
 			if errors.Is(attachErr, errRemoteWritesDisabled) {
 				// The link verified as MISSING remotely and creating it is blocked
 				// by the operating mode: defer, don't fail the apply. The slot
 				// converges on a later apply once writes are allowed.
-				template := t.adapter.PendingActionTemplate(priceID)
-				if template.Provider == "" {
-					template.Provider = t.rail
-				}
-				states[t.declared] = ProviderState{
-					Status:     ProviderStatusPendingManualLink,
-					SyncStatus: SyncStatusNeverSynced,
-					Message:    remoteWritesDisabledMessage,
-				}
-				pending = append(pending, template)
+				deferPending(t, remoteWritesDisabledMessage)
 				continue
 			}
 			if attachErr != nil {
@@ -398,31 +401,13 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		// the find-half of find-or-create is not worth a special case here; the
 		// slot converges on a later apply.
 		if pctx.RemoteWritesDisabled {
-			template := t.adapter.PendingActionTemplate(priceID)
-			if template.Provider == "" {
-				template.Provider = t.rail
-			}
-			states[t.declared] = ProviderState{
-				Status:     ProviderStatusPendingManualLink,
-				SyncStatus: SyncStatusNeverSynced,
-				Message:    remoteWritesDisabledMessage,
-			}
-			pending = append(pending, template)
+			deferPending(t, remoteWritesDisabledMessage)
 			continue
 		}
 		ids, createErr := t.adapter.AutoCreate(ctx, tctx)
 		switch {
 		case errors.Is(createErr, errPendingManualLink):
-			template := t.adapter.PendingActionTemplate(priceID)
-			states[t.declared] = ProviderState{
-				Status:     ProviderStatusPendingManualLink,
-				SyncStatus: SyncStatusNeverSynced,
-				Message:    template.Hint,
-			}
-			if template.Provider == "" {
-				template.Provider = t.rail
-			}
-			pending = append(pending, template)
+			deferPending(t, "")
 		case createErr != nil:
 			return nil, nil, nil, fmt.Errorf("%s: %w", t.declared, createErr)
 		default:
