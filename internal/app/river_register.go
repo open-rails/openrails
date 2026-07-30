@@ -383,8 +383,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 }
 
 // intentRunner builds a Runner over a registry. Config is attached only when
-// non-nil so the origin x mode gate's nil check (= full mode in tests) keeps
-// working — a typed-nil ModeView would panic inside the gate.
+// non-nil: since or#865 a nil ModeView fails CLOSED (everything parks), so
+// handing the gate a typed-nil interface would silently park production work.
+// It does NOT panic — (*config.Config).normalizedProviderWriteMode nil-guards
+// its receiver and a typed nil reads as readonly, which parks just the same.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
 		// #732: gate the request-path enqueue chokepoint (vault delete, admin

@@ -90,8 +90,9 @@ type DunningWorker struct {
 }
 
 // intentRunner returns the configured Runner or self-assembles one (direct
-// worker constructions in tests). Config is only attached when non-nil — a
-// typed-nil ModeView would defeat the gate's nil check.
+// worker constructions in tests). Config is only attached when non-nil: since
+// or#865 a nil ModeView fails CLOSED, and a typed-nil interface would read as
+// readonly rather than panic — either way every rebill would park silently.
 func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
