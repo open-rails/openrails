@@ -268,7 +268,7 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
 
 		Custodian:          p.Custodian,
-		VaultFingerprint:   p.VaultFingerprint,
+		Fingerprint:   p.Fingerprint,
 		NetworkTokenID:     p.NetworkTokenID,
 		NetworkTokenStatus: p.NetworkTokenStatus,
 		NetworkTokenPAR:    p.NetworkTokenPar,

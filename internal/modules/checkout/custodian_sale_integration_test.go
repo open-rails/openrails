@@ -28,7 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -264,9 +264,9 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 		`SELECT custodian, vault_fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
 		 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
 		fx.bt.tokenID).Scan(&custodian, &fingerprint, &chargeVia, &anchor, &lastFour))
-	require.Equal(t, vaultedcard.Custodian, custodian)
+	require.Equal(t, nmiproxy.Custodian, custodian)
 	require.Equal(t, fx.bt.fingerprint, fingerprint)
-	require.Equal(t, vaultedcard.ViaPANProxy, chargeVia)
+	require.Equal(t, nmiproxy.ViaPANProxy, chargeVia)
 	require.Equal(t, fx.bt.txnID, anchor)
 	require.Equal(t, "1111", lastFour)
 }
@@ -285,8 +285,8 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	charger, err := fx.svc.charger(cfg)
 	require.NoError(t, err)
 
-	res, err := charger.WithSource(vaultedcard.Source{TokenID: fx.bt.tokenID}).Charge(fx.ctx, charge.Request{
-		Instrument:  charge.Instrument{Rail: vaultedcard.Rail, MethodRef: fx.bt.tokenID},
+	res, err := charger.WithSource(nmiproxy.Source{TokenID: fx.bt.tokenID}).Charge(fx.ctx, charge.Request{
+		Instrument:  charge.Instrument{Rail: nmiproxy.Rail, MethodRef: fx.bt.tokenID},
 		AmountMinor: 199,
 		Currency:    "USD",
 		Description: "Renewal",
@@ -385,7 +385,7 @@ func TestVaultedCardSale_NTProvisioning(t *testing.T) {
 		require.Equal(t, fx.bt.ntID, ntID)
 		require.Equal(t, "active", ntStatus)
 		require.Equal(t, "Q1J4z0aBc", par)
-		require.Equal(t, vaultedcard.ViaPANProxy, chargeVia, "NT provisioning never flips charge routing on NMI")
+		require.Equal(t, nmiproxy.ViaPANProxy, chargeVia, "NT provisioning never flips charge routing on NMI")
 	})
 	t.Run("failure is never load-bearing", func(t *testing.T) {
 		fx := newVaultedCardFixture(t, true)

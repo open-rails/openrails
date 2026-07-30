@@ -198,7 +198,9 @@ func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, ke
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
-func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, rail models.Rail, payload interface{}, processingFunc func(ctx context.Context) error) error {
+// source is WHO sent the event — a rail, or a custodian that emits its own
+// instrument events (or#879); the dedup namespace is per-source either way.
+func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, source models.EventSource, payload interface{}, processingFunc func(ctx context.Context) error) error {
 	var payloadBytes []byte
 	if payload != nil {
 		if data, err := json.Marshal(payload); err == nil {
@@ -209,7 +211,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 
 	trimmedEventID := strings.TrimSpace(eventID)
-	op := fmt.Sprintf("webhook.%s.%s", rail, eventType)
+	op := fmt.Sprintf("webhook.%s.%s", source, eventType)
 
 	var shouldRecordOutcome bool
 	var mark *dedupMark
@@ -220,7 +222,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Warn("IdempotencyService is not configured; processing webhook without dedupe protection")
 			}
 		} else {
@@ -232,7 +234,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
@@ -246,21 +248,21 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 						log.WithContext(ctx).WithFields(log.Fields{
 							"eventID":   trimmedEventID,
 							"eventType": eventType,
-							"rail":      rail,
+							"source":    source,
 						}).Info("Stale pending webhook was claimed by another worker")
 						return fmt.Errorf("webhook already in progress")
 					}
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"rail":      rail,
+						"source":    source,
 					}).Warn("Taking over stale pending webhook idempotency record")
 					shouldRecordOutcome = true
 				} else {
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"rail":      rail,
+						"source":    source,
 					}).Info("Webhook already in progress, skipping concurrent duplicate")
 					return fmt.Errorf("webhook already in progress")
 				}
@@ -282,7 +284,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Info("Webhook already processed (postgres truth), skipping")
 				return nil
 			}
@@ -308,7 +310,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		log.WithContext(ctx).WithFields(log.Fields{
 			"eventID":   trimmedEventID,
 			"eventType": eventType,
-			"rail":      rail,
+			"source":    source,
 			"error":     processingErr.Error(),
 		}).Error("Webhook processing failed")
 
@@ -338,7 +340,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			log.WithContext(ctx).WithFields(log.Fields{
 				"eventID":   trimmedEventID,
 				"eventType": eventType,
-				"rail":      rail,
+				"source":    source,
 			}).Warn("Webhook failed with non-retryable error; marked complete to avoid futile retries")
 			return nil
 		}
@@ -367,7 +369,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	log.WithContext(ctx).WithFields(log.Fields{
 		"eventID":   trimmedEventID,
 		"eventType": eventType,
-		"rail":      rail,
+		"source":    source,
 	}).Info("Webhook processed successfully")
 
 	return nil

@@ -717,6 +717,45 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	return resolvePSPOwner(ctx, gen.New(s.pool), rail, environment, strings.TrimSpace(accountID))
 }
 
+// ResolvePSPByCustodianIdentity resolves the PSP a CUSTODIAN's tenant identity
+// belongs to (or#879). Custody is not a rail, so a Basis Theory webhook cannot
+// route through the rail directory — but the problem is identical (an inbound
+// event with a global provider-side id and no merchant context) and so is the
+// answer: the SECURITY DEFINER directory function, which raises rather than
+// returning empty when it cannot read across merchants.
+func (s *Service) ResolvePSPByCustodianIdentity(ctx context.Context, custodian, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
+	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
+		return RailMerchantAccountIdentity{}, false, nil
+	}
+	custodian = strings.ToLower(strings.TrimSpace(custodian))
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return RailMerchantAccountIdentity{}, false, errors.New("merchants: provider account environment must be live or test")
+	}
+	env := environment
+	row, err := gen.New(s.pool).ResolvePSPOwnerByCustodianIdentity(ctx, gen.ResolvePSPOwnerByCustodianIdentityParams{
+		Custodian:   custodian,
+		Environment: &env,
+		AccountID:   strings.TrimSpace(accountID),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RailMerchantAccountIdentity{}, false, nil
+	}
+	if err != nil {
+		return RailMerchantAccountIdentity{}, false, err
+	}
+	if row.ID == nil || row.MerchantID == nil {
+		return RailMerchantAccountIdentity{}, false, nil
+	}
+	return RailMerchantAccountIdentity{
+		ID:          *row.ID,
+		MerchantID:  merchant.ID(*row.MerchantID),
+		Rail:        derefString(row.Rail),
+		Environment: derefString(row.Environment),
+		AccountID:   derefString(row.AccountID),
+	}, true, nil
+}
+
 // resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
 // made. q may be bound to anything (pool, merchant-pinned conn, tx): the
 // definer function is what supplies cross-merchant visibility, not the handle.

@@ -21,34 +21,37 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Vaulted-card checkout collection (#795 B5): the browser tokenizes into a BT
-// token INTENT (Elements; the PAN goes browser->vault, SAQ A); the engine
-// accepts ONLY {bt_token_intent_id}. The CIT charges the INTENT (CVC present),
-// converts to a durable token in-request on approval, writes the instrument
-// row, and persists the stored-credential anchor exactly like the nmidirect
-// paths. NT provisioning rides behind the merchant flag and is never
-// load-bearing.
+// Custodian-held card checkout collection (#795 B5): the browser tokenizes
+// into a Basis Theory token INTENT (Elements; the PAN goes browser->custodian,
+// SAQ A); the engine accepts ONLY {bt_token_intent_id}. The CIT charges the
+// INTENT (CVC present), converts to a durable token in-request on approval,
+// writes the instrument row, and persists the stored-credential anchor exactly
+// like the nmidirect paths. NT provisioning rides behind the merchant flag and
+// is never load-bearing.
+//
+// The RAIL here is NMI (or#879): the custodian holds the card, the PSP's own
+// gateway charges it.
 
-// TypeVaultedCardSale is the write-through checkout sale intent (#674) for the
-// vaulted_card rail. The NMI order id derives from the intent id, so the
-// verify leg answers "did THIS sale charge?" against the GATEWAY (the BT proxy
+// TypeCustodianSale is the write-through checkout sale intent (#674) for a
+// custodian-held card. The NMI order id derives from the intent id, so the
+// verify leg answers "did THIS sale charge?" against the GATEWAY (the proxy
 // has no idempotency — the intents log + NMI dup detection are the safety).
-const TypeVaultedCardSale = "vaulted_card_sale"
+const TypeCustodianSale = "custodian_sale"
 
-func VaultedCardSaleIdempotencyKey(checkoutIdempotencyKey string) string {
-	return TypeVaultedCardSale + ":" + strings.TrimSpace(checkoutIdempotencyKey)
+func CustodianSaleIdempotencyKey(checkoutIdempotencyKey string) string {
+	return TypeCustodianSale + ":" + strings.TrimSpace(checkoutIdempotencyKey)
 }
 
-// VaultedCardSalePayload carries everything Execute/Verify need without the
+// CustodianSalePayload carries everything Execute/Verify need without the
 // originating request. NEVER a PAN — the intent id is the only card handle.
-type VaultedCardSalePayload struct {
+type CustodianSalePayload struct {
 	TokenIntentID string    `json:"bt_token_intent_id"`
 	AmountMicros  int64     `json:"amount_micros"`
 	Currency      string    `json:"currency"`
@@ -58,11 +61,11 @@ type VaultedCardSalePayload struct {
 	E2ERunID      string    `json:"e2e_run_id,omitempty"`
 }
 
-// CheckoutVaultedCardService runs vaulted_card one-time sales.
-type CheckoutVaultedCardService struct {
+// CheckoutCustodianSaleService runs one-time sales on custodian-held cards.
+type CheckoutCustodianSaleService struct {
 	DB                   *db.DB
 	PurchaseService      *CheckoutPurchaseService
-	PaymentMethodService vaultedCardInstrumentStore
+	PaymentMethodService custodianInstrumentStore
 	IdempotencyStore     checkoutIdempotencyStore
 	Rails                railresolve.Source
 	Config               *config.Config
@@ -76,60 +79,73 @@ type CheckoutVaultedCardService struct {
 	DisableGatewayVerify bool
 }
 
-type vaultedCardInstrumentStore interface {
+type custodianInstrumentStore interface {
 	Create(ctx context.Context, method *models.PaymentMethod) error
 	GetByRailMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error)
 }
 
-// resolveConfig arms the ctx merchant's vaulted_card credentials (#788).
-func (s *CheckoutVaultedCardService) resolveConfig(ctx context.Context) (*config.VaultedCardRailConfig, error) {
+// custodialPSP is the resolved arrangement one custodian sale charges through:
+// the PSP's own gateway credentials plus the custodian that holds the card.
+type custodialPSP struct {
+	Custody            *config.CustodyConfig
+	GatewaySecurityKey string
+	// GatewayDirectPostURL: "" = the NMI client default.
+	GatewayDirectPostURL string
+}
+
+// resolveConfig arms the ctx merchant's custodian-held-card credentials (#788):
+// the NMI PSP that charges, and the custody block declared on it (or#879).
+func (s *CheckoutCustodianSaleService) resolveConfig(ctx context.Context) (*custodialPSP, error) {
 	if s.Rails == nil {
-		return nil, errors.New("vaulted_card rail resolution not configured")
+		return nil, errors.New("rail resolution not configured")
 	}
-	rc, err := s.Rails.RailConfig(ctx, string(models.RailVaultedCard), "")
+	rc, err := s.Rails.RailConfig(ctx, string(models.RailNMI), "")
 	if err != nil {
 		return nil, err
 	}
-	if rc.VaultedCard == nil {
-		return nil, errors.New("vaulted_card account resolved without credentials")
+	if rc.Custody == nil || rc.Custody.Custodian == "" || rc.Custody.Custodian == models.CustodianPSP {
+		return nil, errors.New("nmi psp declares no third-party custodian; custodian checkout is not armed")
 	}
-	return rc.VaultedCard, nil
+	if rc.NMI == nil || strings.TrimSpace(rc.NMI.SecurityKey) == "" {
+		return nil, errors.New("nmi psp resolved without a gateway security key")
+	}
+	return &custodialPSP{Custody: rc.Custody, GatewaySecurityKey: rc.NMI.SecurityKey}, nil
 }
 
-func (s *CheckoutVaultedCardService) btClient(cfg *config.VaultedCardRailConfig) (*basistheory.Client, error) {
+func (s *CheckoutCustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
 	baseURL := s.BTBaseURLOverride
 	if baseURL == "" {
-		baseURL = cfg.APIBaseURL
+		baseURL = cfg.Custody.APIBaseURL
 	}
 	return basistheory.New(basistheory.Config{
-		APIKey:        cfg.APIKey,
+		APIKey:        cfg.Custody.APIKey,
 		BaseURL:       baseURL,
-		WebhookKeyURL: cfg.WebhookKeyURL,
+		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
 		ReadOnly:      s.Config != nil && s.Config.IsProviderReadOnly(),
 	})
 }
 
-func (s *CheckoutVaultedCardService) charger(cfg *config.VaultedCardRailConfig) (*vaultedcard.Charger, error) {
+func (s *CheckoutCustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Charger, error) {
 	bt, err := s.btClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-	gw := vaultedcard.GatewayConfig{
+	gw := nmiproxy.GatewayConfig{
 		SecurityKey:   cfg.GatewaySecurityKey,
 		DirectPostURL: cfg.GatewayDirectPostURL,
 	}
 	if s.GatewayDirectPostURLOverride != "" {
 		gw.DirectPostURL = s.GatewayDirectPostURLOverride
 	}
-	return vaultedcard.New(bt, gw), nil
+	return nmiproxy.New(bt, gw), nil
 }
 
 // Process runs the vaulted_card one-time sale as a write-through intent,
 // mirroring CheckoutNMISaleService.Process.
-func (s *CheckoutVaultedCardService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
-	const idempOp = "vaulted_card_sale"
+func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
+	const idempOp = "custodian_sale"
 	if s == nil || s.Intents == nil {
-		return nil, errors.New("vaulted_card checkout not wired")
+		return nil, errors.New("custodian checkout not wired")
 	}
 	// PAN firewall (SAQ A): the engine accepts ONLY the token-intent handle.
 	if err := RejectPANShapedFields(req); err != nil {
@@ -137,10 +153,10 @@ func (s *CheckoutVaultedCardService) Process(ctx context.Context, req *CheckoutR
 	}
 	intentID := strings.TrimSpace(req.BTTokenIntentID)
 	if intentID == "" {
-		return nil, errors.New("bt_token_intent_id is required for vaulted_card checkout (collect via BT Elements)")
+		return nil, errors.New("bt_token_intent_id is required for custodian-held card checkout (collect via BT Elements)")
 	}
 	if _, err := s.resolveConfig(ctx); err != nil {
-		return nil, fmt.Errorf("vaulted_card rail is not configured: %w", err)
+		return nil, fmt.Errorf("custodian checkout is not configured: %w", err)
 	}
 	if _, err := customerIDFromUser(user.ID); err != nil {
 		return nil, err
@@ -172,10 +188,10 @@ func (s *CheckoutVaultedCardService) Process(ctx context.Context, req *CheckoutR
 	}
 	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID: tid.UUID(),
-		Provider:   string(models.RailVaultedCard),
-		IntentType: TypeVaultedCardSale,
+		Provider:   string(models.RailNMI),
+		IntentType: TypeCustodianSale,
 		PriceID:    &price.ID,
-		Payload: VaultedCardSalePayload{
+		Payload: CustodianSalePayload{
 			TokenIntentID: intentID,
 			AmountMicros:  price.Amount,
 			Currency:      price.Currency,
@@ -184,14 +200,14 @@ func (s *CheckoutVaultedCardService) Process(ctx context.Context, req *CheckoutR
 			PriceID:       price.ID,
 			E2ERunID:      strings.TrimSpace(req.Metadata["e2e_run_id"]),
 		},
-		IdempotencyKey: VaultedCardSaleIdempotencyKey(idempotencyKey),
+		IdempotencyKey: CustodianSaleIdempotencyKey(idempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
-		OriginReason:   "checkout one-time sale (vaulted_card)",
+		OriginReason:   "checkout one-time sale (custodian-held card)",
 	})
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("post vaulted_card sale intent: %w", err)
+		return nil, fmt.Errorf("post custodian sale intent: %w", err)
 	}
 
 	switch intent.Status {
@@ -219,62 +235,62 @@ func (s *CheckoutVaultedCardService) Process(ctx context.Context, req *CheckoutR
 
 // --- intent handler ----------------------------------------------------------
 
-// VaultedCardSaleIntentHandler: money-mover semantics mirror the NMI sale
+// CustodianSaleIntentHandler: money-mover semantics mirror the NMI sale
 // handler — re-executions verify at the GATEWAY first (the BT proxy has no
 // idempotency), transport-ambiguous outcomes park as unknown_needs_verify,
 // parsed declines are terminal with the verbatim code as evidence.
-type VaultedCardSaleIntentHandler struct {
-	Sale   *CheckoutVaultedCardService
+type CustodianSaleIntentHandler struct {
+	Sale   *CheckoutCustodianSaleService
 	Policy intents.BackoffPolicy
 }
 
-func NewVaultedCardSaleIntentHandler(sale *CheckoutVaultedCardService) *VaultedCardSaleIntentHandler {
-	return &VaultedCardSaleIntentHandler{Sale: sale, Policy: intents.DefaultBackoff}
+func NewCustodianSaleIntentHandler(sale *CheckoutCustodianSaleService) *CustodianSaleIntentHandler {
+	return &CustodianSaleIntentHandler{Sale: sale, Policy: intents.DefaultBackoff}
 }
 
-func (h *VaultedCardSaleIntentHandler) Type() string { return TypeVaultedCardSale }
-func (h *VaultedCardSaleIntentHandler) Backoff(attempts int32) time.Duration {
+func (h *CustodianSaleIntentHandler) Type() string { return TypeCustodianSale }
+func (h *CustodianSaleIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
-func (h *VaultedCardSaleIntentHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
+func (h *CustodianSaleIntentHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
 	return false, true
 }
 
-func (h *VaultedCardSaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+func (h *CustodianSaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func decodeVaultedCardSalePayload(intent gen.OpenrailsRailIntent) (VaultedCardSalePayload, error) {
-	var p VaultedCardSalePayload
+func decodeCustodianSalePayload(intent gen.OpenrailsRailIntent) (CustodianSalePayload, error) {
+	var p CustodianSalePayload
 	if len(intent.Payload) == 0 {
-		return p, errors.New("vaulted_card sale intent has no payload")
+		return p, errors.New("custodian sale intent has no payload")
 	}
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
-		return p, fmt.Errorf("decode vaulted_card sale payload: %w", err)
+		return p, fmt.Errorf("decode custodian sale payload: %w", err)
 	}
 	if p.TokenIntentID == "" || p.AmountMicros <= 0 || p.Currency == "" || p.UserID == "" || p.PriceID == uuid.Nil {
-		return p, errors.New("vaulted_card sale payload is incomplete")
+		return p, errors.New("custodian sale payload is incomplete")
 	}
 	return p, nil
 }
 
 // gatewayQueryClient builds the NMI query-leg client for verify-by-orderid.
-func (h *VaultedCardSaleIntentHandler) gatewayQueryClient(cfg *config.VaultedCardRailConfig) (*nmi.NMIClient, error) {
+func (h *CustodianSaleIntentHandler) gatewayQueryClient(cfg *custodialPSP) (*nmi.NMIClient, error) {
 	testMode := h.Sale.Config != nil && h.Sale.Config.IsTestMode()
-	return nmi.NewClient(string(models.RailVaultedCard), &config.NMIProviderSettings{SecurityKey: cfg.GatewaySecurityKey}, testMode)
+	return nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: cfg.GatewaySecurityKey}, testMode)
 }
 
-func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
-		return intents.Parked("vaulted_card checkout service not wired")
+		return intents.Parked("custodian checkout service not wired")
 	}
-	p, err := decodeVaultedCardSalePayload(intent)
+	p, err := decodeCustodianSalePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
 	cfg, err := h.Sale.resolveConfig(ctx)
 	if err != nil {
-		return intents.Parked(fmt.Sprintf("vaulted_card rail not armed: %v", err))
+		return intents.Parked(fmt.Sprintf("custodian checkout not armed: %v", err))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 
@@ -299,7 +315,7 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 	}
 	charger, err := h.Sale.charger(cfg)
 	if err != nil {
-		return intents.Parked("vaulted_card client build failed: " + err.Error())
+		return intents.Parked("custodian client build failed: " + err.Error())
 	}
 
 	// Prior anchor: an instrument with the intent's fingerprint may already be
@@ -307,7 +323,7 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 	// intent read (loud not-found = expired intent, #651).
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
-		return intents.Parked("vaulted_card client build failed: " + err.Error())
+		return intents.Parked("custodian client build failed: " + err.Error())
 	}
 	tokenIntent, err := bt.GetTokenIntent(ctx, p.TokenIntentID)
 	if err != nil {
@@ -322,8 +338,8 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 	if priorRef != "" {
 		citContext = charge.OneTimeReuse(priorRef)
 	}
-	res, err := charger.WithSource(vaultedcard.Source{TokenIntentID: p.TokenIntentID}).Charge(ctx, charge.Request{
-		Instrument:  charge.Instrument{Rail: string(models.RailVaultedCard)},
+	res, err := charger.WithSource(nmiproxy.Source{TokenIntentID: p.TokenIntentID}).Charge(ctx, charge.Request{
+		Instrument:  charge.Instrument{Rail: nmiproxy.Rail},
 		AmountMinor: moneyutil.Cents(amountCents),
 		Currency:    p.Currency,
 		Description: p.Description,
@@ -361,8 +377,8 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 		recordDeclinedAttempt(ctx, h.Sale.PurchaseService.PaymentService, DeclinedAttempt{
 			UserID:                 p.UserID,
 			PriceID:                p.PriceID,
-			Rail:                   string(models.RailVaultedCard),
-			SyntheticTransactionID: "vaulted_card_sale_declined:" + intent.ID.String(),
+			Rail:                   nmiproxy.Rail,
+			SyntheticTransactionID: "custodian_sale_declined:" + intent.ID.String(),
 			AmountMicros:           p.AmountMicros,
 			Currency:               p.Currency,
 			FailureCode:            code,
@@ -382,14 +398,14 @@ func (h *VaultedCardSaleIntentHandler) Execute(ctx context.Context, intent gen.O
 }
 
 // Verify resolves an ambiguous sale via the gateway query leg.
-func (h *VaultedCardSaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
-	p, err := decodeVaultedCardSalePayload(intent)
+func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	p, err := decodeCustodianSalePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
 	cfg, err := h.Sale.resolveConfig(ctx)
 	if err != nil {
-		return intents.Ambiguous("vaulted_card rail not armed; cannot verify")
+		return intents.Ambiguous("custodian checkout not armed; cannot verify")
 	}
 	if h.Sale.DisableGatewayVerify {
 		return intents.Ambiguous("gateway verify disabled; manual resolution required")
@@ -409,20 +425,20 @@ func (h *VaultedCardSaleIntentHandler) Verify(ctx context.Context, intent gen.Op
 	return h.finalize(ctx, intent.MerchantID, cfg, p, orderID, txnID, true)
 }
 
-// priorAnchor finds an existing instrument by vault fingerprint and returns
-// its unscheduled stored-credential anchor (+ the instrument row).
-func (h *VaultedCardSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.OpenrailsPaymentMethod) {
+// priorAnchor finds an existing instrument by the custodian's PAN fingerprint
+// and returns its unscheduled stored-credential anchor (+ the instrument row).
+func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.OpenrailsPaymentMethod) {
 	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" {
 		return "", nil
 	}
-	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByVaultFingerprint(ctx, gen.GetPaymentMethodByVaultFingerprintParams{
-		MerchantID:       merchantID,
-		Rail:             string(models.RailVaultedCard),
-		VaultFingerprint: fingerprint,
+	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{
+		MerchantID:  merchantID,
+		Custodian:   nmiproxy.Custodian,
+		Fingerprint: fingerprint,
 	})
 	if err != nil {
 		if !db.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).Warn("vaulted_card: fingerprint dedup lookup failed")
+			log.WithContext(ctx).WithError(err).Warn("custodian sale: fingerprint dedup lookup failed")
 		}
 		return "", nil
 	}
@@ -431,7 +447,7 @@ func (h *VaultedCardSaleIntentHandler) priorAnchor(ctx context.Context, merchant
 
 // finalize is the verified-existing leg (no fresh charge result): the charge
 // landed at the gateway; conversion may still be pending.
-func (h *VaultedCardSaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, cfg *config.VaultedCardRailConfig, p VaultedCardSalePayload, orderID, transactionID string, _ bool) intents.Outcome {
+func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) intents.Outcome {
 	res := charge.Result{
 		TransactionID: transactionID,
 		TokenType:     charge.TokenTypePANViaVault,
@@ -439,7 +455,7 @@ func (h *VaultedCardSaleIntentHandler) finalize(ctx context.Context, merchantID 
 	}
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
-		return intents.Parked("vaulted_card client build failed: " + err.Error())
+		return intents.Parked("custodian client build failed: " + err.Error())
 	}
 	tokenIntent, err := bt.GetTokenIntent(ctx, p.TokenIntentID)
 	if err != nil && !basistheory.IsNotFound(err) {
@@ -451,10 +467,10 @@ func (h *VaultedCardSaleIntentHandler) finalize(ctx context.Context, merchantID 
 // finalizeApproved converts the intent to a durable token, writes/reuses the
 // instrument row, persists the stored-credential anchor write-once, provisions
 // an NT when armed (never load-bearing), and registers the purchase.
-func (h *VaultedCardSaleIntentHandler) finalizeApproved(ctx context.Context, merchantID uuid.UUID, cfg *config.VaultedCardRailConfig, p VaultedCardSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) intents.Outcome {
+func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) intents.Outcome {
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
-		return intents.Parked("vaulted_card client build failed: " + err.Error())
+		return intents.Parked("custodian client build failed: " + err.Error())
 	}
 
 	var token *basistheory.CardToken
@@ -469,7 +485,7 @@ func (h *VaultedCardSaleIntentHandler) finalizeApproved(ctx context.Context, mer
 				// register the money; the instrument needs re-collection (#657).
 				log.WithContext(ctx).WithFields(log.Fields{
 					"bt_token_intent_id": p.TokenIntentID, "order_id": orderID,
-				}).Error("vaulted_card: token intent expired before conversion; purchase recorded WITHOUT a stored instrument (re-collect card)")
+				}).Error("custodian sale: token intent expired before conversion; purchase recorded WITHOUT a stored instrument (re-collect card)")
 				token = nil
 			} else if errors.Is(err, basistheory.ErrProviderReadOnly) {
 				return intents.Parked("basistheory provider writes blocked (mode=readonly)")
@@ -495,12 +511,12 @@ func (h *VaultedCardSaleIntentHandler) finalizeApproved(ctx context.Context, mer
 				Agreement:  string(charge.AgreementUnscheduled),
 				Ref:        ref,
 			}); cerr != nil {
-				log.WithContext(ctx).WithError(cerr).Warn("vaulted_card: failed to persist stored-credential anchor (#297); next charge re-captures")
+				log.WithContext(ctx).WithError(cerr).Warn("custodian sale: failed to persist stored-credential anchor (#297); next charge re-captures")
 			}
 		}
 		// NT provisioning (B8): armed by config, idempotent per PAN, and never
 		// load-bearing — any failure warns and the instrument stays pan_proxy.
-		if cfg.NetworkTokens {
+		if cfg.Custody.NetworkTokens {
 			h.provisionNetworkToken(ctx, bt, merchantID, *id, token.ID, orderID)
 		}
 	}
@@ -515,7 +531,7 @@ func (h *VaultedCardSaleIntentHandler) finalizeApproved(ctx context.Context, mer
 	result, err := h.Sale.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        p.UserID,
 		PriceID:       p.PriceID,
-		Rail:          string(models.RailVaultedCard),
+		Rail:          nmiproxy.Rail,
 		TransactionID: res.TransactionID,
 		Amount:        p.AmountMicros,
 		Currency:      p.Currency,
@@ -541,11 +557,11 @@ func (h *VaultedCardSaleIntentHandler) finalizeApproved(ctx context.Context, mer
 
 // ensureInstrument writes (or reuses) the payment_methods row for a converted
 // durable token.
-func (h *VaultedCardSaleIntentHandler) ensureInstrument(ctx context.Context, merchantID uuid.UUID, p VaultedCardSalePayload, token *basistheory.CardToken) (*uuid.UUID, error) {
+func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merchantID uuid.UUID, p CustodianSalePayload, token *basistheory.CardToken) (*uuid.UUID, error) {
 	if h.Sale.PaymentMethodService == nil {
 		return nil, errors.New("payment method service not wired")
 	}
-	if existing, err := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, string(models.RailVaultedCard), token.ID); err == nil && existing != nil {
+	if existing, err := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, nmiproxy.Rail, token.ID); err == nil && existing != nil {
 		return &existing.ID, nil
 	} else if err != nil && !db.IsNotFound(err) && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return nil, err
@@ -558,12 +574,12 @@ func (h *VaultedCardSaleIntentHandler) ensureInstrument(ctx context.Context, mer
 	method := &models.PaymentMethod{
 		ID:               uuidutil.NewV7(),
 		CustomerID:       customerID,
-		Rail:             models.RailVaultedCard,
+		Rail:             models.RailNMI,
 		RailMethodRef:    token.ID,
 		RebillDriver:     models.RebillDriverOpenRails,
-		Custodian:        vaultedcard.Custodian,
-		VaultFingerprint: token.Fingerprint,
-		ChargeVia:        vaultedcard.ViaPANProxy,
+		Custodian:        nmiproxy.Custodian,
+		Fingerprint: token.Fingerprint,
+		ChargeVia:        nmiproxy.ViaPANProxy,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -577,7 +593,7 @@ func (h *VaultedCardSaleIntentHandler) ensureInstrument(ctx context.Context, mer
 	}
 	if err := h.Sale.PaymentMethodService.Create(ctx, method); err != nil {
 		// Concurrent write of the same token: reuse the surviving row.
-		if existing, gerr := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, string(models.RailVaultedCard), token.ID); gerr == nil && existing != nil {
+		if existing, gerr := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, nmiproxy.Rail, token.ID); gerr == nil && existing != nil {
 			return &existing.ID, nil
 		}
 		return nil, err
@@ -587,14 +603,14 @@ func (h *VaultedCardSaleIntentHandler) ensureInstrument(ctx context.Context, mer
 
 // provisionNetworkToken creates (or dedups onto) the card's network token and
 // persists id/status/PAR. Failures warn — NT is never load-bearing on NMI.
-func (h *VaultedCardSaleIntentHandler) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, orderID string) {
+func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, orderID string) {
 	nt, err := bt.CreateNetworkToken(ctx, basistheory.NetworkTokenRequest{
 		TokenID:        tokenID,
 		IdempotencyKey: "btnt:" + orderID,
 	})
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("bt_token_id", tokenID).
-			Warn("vaulted_card: network token provisioning failed; instrument stays pan_proxy (never load-bearing)")
+			Warn("custodian sale: network token provisioning failed; instrument stays pan_proxy (never load-bearing)")
 		return
 	}
 	if h.Sale.DB == nil {
@@ -607,7 +623,7 @@ func (h *VaultedCardSaleIntentHandler) provisionNetworkToken(ctx context.Context
 		NetworkTokenStatus: nt.Status,
 		NetworkTokenPar:    nt.PAR,
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("vaulted_card: failed to persist network token on instrument")
+		log.WithContext(ctx).WithError(err).Warn("custodian sale: failed to persist network token on instrument")
 	}
 }
 

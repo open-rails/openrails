@@ -53,10 +53,12 @@ type PaymentMethod struct {
 	// absence of a payment_methods row, not a custodian value.
 	Custodian string `json:"-"`
 
-	// Neutral-vault instrument fields (#795, rail='vaulted_card'). ChargeVia
-	// routes pan_proxy|network_token; ParkReason non-empty = instrument parked
-	// (vault-side problem; cancellation-last-resort, never a terminal cancel).
-	VaultFingerprint   string     `json:"-"`
+	// Custodian-held instrument fields (#795, custodian='basis_theory').
+	// Fingerprint is the custodian's stable PAN fingerprint (dedup/lookup);
+	// ChargeVia routes pan_proxy|network_token; ParkReason non-empty =
+	// instrument parked (custody-side problem; cancellation-last-resort,
+	// never a terminal cancel).
+	Fingerprint        string     `json:"-"`
 	NetworkTokenID     string     `json:"-"`
 	NetworkTokenStatus string     `json:"-"`
 	NetworkTokenPAR    string     `json:"-"`

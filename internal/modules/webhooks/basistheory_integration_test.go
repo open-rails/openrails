@@ -76,7 +76,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
 		Custodian:            models.CustodianBasisTheory,
-		VaultFingerprint:     "fp_" + uuid.NewString()[:10],
+		Fingerprint:     "fp_" + uuid.NewString()[:10],
 		NetworkTokenID:       fx.ntID,
 		NetworkTokenStatus:   "active",
 		NetworkTokenPar:      "par_x",
@@ -205,7 +205,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		row := fx.methodRow(t)
 		require.Equal(t, newToken, row.RailMethodRef, "rail_method_ref rotates to new_token")
-		require.Equal(t, "fp_rotated", row.VaultFingerprint)
+		require.Equal(t, "fp_rotated", row.Fingerprint)
 		require.Equal(t, "4444", *row.LastFour)
 		require.Equal(t, "mastercard", *row.CardType)
 		require.Equal(t, "07/33", *row.ExpiryDate)
@@ -219,7 +219,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		after := fx.methodRow(t)
 		require.Equal(t, before.RailMethodRef, after.RailMethodRef)
-		require.Equal(t, before.VaultFingerprint, after.VaultFingerprint)
+		require.Equal(t, before.Fingerprint, after.Fingerprint)
 	})
 
 	t.Run("WRN_CLOSED_ACCOUNT parks", func(t *testing.T) {

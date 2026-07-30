@@ -421,7 +421,7 @@ func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
 			ctx,
 			s.stableDedupeEventKey(),
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			s.Data,
 			s.handleCCBillWebhookDispatch,
 		)
@@ -512,7 +512,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			data,
 			process,
 		)
@@ -1909,7 +1909,7 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			data,
 			process,
 		)

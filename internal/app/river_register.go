@@ -348,8 +348,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		if r.CheckoutService.NMISaleService != nil {
 			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
 		}
-		if r.CheckoutService.VaultedCardService != nil {
-			registry.Register(checkout.NewVaultedCardSaleIntentHandler(r.CheckoutService.VaultedCardService))
+		if r.CheckoutService.CustodianSaleService != nil {
+			registry.Register(checkout.NewCustodianSaleIntentHandler(r.CheckoutService.CustodianSaleService))
 		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
 	}

@@ -239,7 +239,7 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	}
 
 	if s.DeduplicationService != nil {
-		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe, evt, func(ctx context.Context) error {
+		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe.EventSource(), evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt)
 		})
 	}

@@ -1,4 +1,4 @@
-package vaultedcard
+package nmiproxy
 
 import (
 	"errors"
@@ -84,17 +84,17 @@ func networkTokenExpExpr(ntID string) string {
 // required for network-token CITs (nil otherwise).
 func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basistheory.Cryptogram) (url.Values, error) {
 	if strings.TrimSpace(gw.SecurityKey) == "" {
-		return nil, errors.New("vaultedcard: gateway security_key is required")
+		return nil, errors.New("nmiproxy: gateway security_key is required")
 	}
 	if req.AmountMinor <= 0 {
-		return nil, errors.New("vaultedcard: charge amount must be positive")
+		return nil, errors.New("nmiproxy: charge amount must be positive")
 	}
 	currency := strings.TrimSpace(req.Currency)
 	if currency == "" {
-		return nil, errors.New("vaultedcard: currency is required")
+		return nil, errors.New("nmiproxy: currency is required")
 	}
 	if len(req.OrderRef) > 50 {
-		return nil, fmt.Errorf("vaultedcard: order id %q exceeds NMI's 50-character limit", req.OrderRef)
+		return nil, fmt.Errorf("nmiproxy: order id %q exceeds NMI's 50-character limit", req.OrderRef)
 	}
 	sc := nmidirect.StoredCredentialFor(req.Context)
 	if err := sc.Validate(); err != nil {
@@ -120,7 +120,7 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 	case ViaNetworkToken:
 		ntID := strings.TrimSpace(src.NetworkTokenID)
 		if ntID == "" {
-			return nil, errors.New("vaultedcard: charge_via=network_token requires a network token id")
+			return nil, errors.New("nmiproxy: charge_via=network_token requires a network token id")
 		}
 		values.Set("ccnumber", networkTokenNumberExpr(ntID))
 		values.Set("ccexp", networkTokenExpExpr(ntID))
@@ -128,7 +128,7 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 		// stored-credential initial_transaction_id with no cryptogram.
 		if req.Context.Initiator == charge.InitiatorCustomer {
 			if cryptogram == nil || strings.TrimSpace(cryptogram.Cryptogram) == "" {
-				return nil, errors.New("vaultedcard: network-token CIT requires a cryptogram")
+				return nil, errors.New("nmiproxy: network-token CIT requires a cryptogram")
 			}
 			values.Set("cavv", cryptogram.Cryptogram)
 			if eci := strings.TrimSpace(cryptogram.ECI); eci != "" {
@@ -139,7 +139,7 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 		switch {
 		case intentID != "":
 			if req.Context.Initiator != charge.InitiatorCustomer {
-				return nil, errors.New("vaultedcard: token intents are checkout CIT sources; MITs charge the stored token")
+				return nil, errors.New("nmiproxy: token intents are checkout CIT sources; MITs charge the stored token")
 			}
 			values.Set("ccnumber", intentNumberExpr(intentID))
 			values.Set("ccexp", intentExpExpr(intentID))
@@ -150,10 +150,10 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 			// No cvv: card-token CVC auto-deletes (~1h retention); MITs and
 			// token reuses are CVC-less by design.
 		default:
-			return nil, errors.New("vaultedcard: charge source requires a token or token intent id")
+			return nil, errors.New("nmiproxy: charge source requires a token or token intent id")
 		}
 	default:
-		return nil, fmt.Errorf("vaultedcard: unknown charge_via %q", src.Via)
+		return nil, fmt.Errorf("nmiproxy: unknown charge_via %q", src.Via)
 	}
 
 	sc.ApplyToForm(values)

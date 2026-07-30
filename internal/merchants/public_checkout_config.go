@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -56,8 +57,8 @@ type railPublicProfile struct {
 //
 // Two live examples of why this is a whitelist and not a denylist: solana's
 // settings carry rpc_api_key (a paid Helius key that #352 says must never
-// reach a browser) and vaulted_card's carry gateway_account. Both are in the
-// same map as the public keys below.
+// reach a browser) and a custody block carries the custodian's tenant id. Both
+// are in the same map as the public keys below.
 var publicRailProfiles = map[string]railPublicProfile{
 	string(models.RailNMI): {
 		Flow: FlowTokenize,
@@ -69,14 +70,6 @@ var publicRailProfiles = map[string]railPublicProfile{
 			{Setting: "tokenization_url", Field: "tokenization_url", Default: DefaultNMICollectJSURL},
 		},
 	},
-	string(models.RailVaultedCard): {
-		Flow: FlowTokenize,
-		Settings: []publicSetting{
-			// The Basis Theory PUBLIC application key (#795). The private
-			// application key is secrets.api_key.
-			{Setting: "public_api_key", Field: "public_api_key", Required: true},
-		},
-	},
 	// Hosted-redirect rails: OpenRails builds the URL server-side, so the
 	// browser needs no key at all.
 	string(models.RailStripe): {Flow: FlowRedirect},
@@ -84,6 +77,21 @@ var publicRailProfiles = map[string]railPublicProfile{
 	// Solana's browser config (network, chain, mints) is already served, fully
 	// derived, by GET /solana/config; nothing on the PSP row is public.
 	string(models.RailSolana): {Flow: FlowWallet},
+}
+
+// custodianPublicProfiles OVERRIDE the rail profile when a third-party
+// custodian holds the instruments (or#879). Custody changes the browser
+// contract, not the gateway: the PAN goes browser -> custodian, so the page
+// needs the CUSTODIAN's public key and never the rail's tokenizer key.
+var custodianPublicProfiles = map[string]railPublicProfile{
+	models.CustodianBasisTheory: {
+		Flow: FlowTokenize,
+		Settings: []publicSetting{
+			// The Basis Theory PUBLIC application key (#795). The private
+			// application key is the custodian_api_key secret.
+			{Setting: config.PSPSettingCustodianPublicAPIKey, Field: "public_api_key", Required: true},
+		},
+	},
 }
 
 // PublicPSPConfig is the browser-facing description of one ARMED PSP: the
@@ -94,8 +102,12 @@ type PublicPSPConfig struct {
 	// to the rail kind for accounts declared without a key — the same value
 	// checkout's resolveRailTarget accepts for a single-account rail.
 	Key string `json:"key"`
-	// Rail is the gateway kind: nmi, ccbill, stripe, solana, vaulted_card.
+	// Rail is the gateway kind: nmi, ccbill, stripe, solana.
 	Rail string `json:"rail"`
+	// Custodian is WHO HOLDS the card (or#880): "psp" when the gateway does,
+	// else the third party whose page tokenizes it. Orthogonal to Rail — a
+	// browser drives the CUSTODIAN's tokenizer, then we charge the Rail.
+	Custodian string `json:"custodian"`
 	// DisplayName is the buyer-facing rail name ("Credit Card", "Stripe").
 	DisplayName string `json:"display_name"`
 	// Flow is how a browser drives this rail: tokenize | redirect | wallet.
@@ -122,6 +134,16 @@ func PublicPSPConfigFor(scope PSPScope) (PublicPSPConfig, string, bool) {
 	if !known {
 		return PublicPSPConfig{}, "rail has no browser checkout profile", false
 	}
+	custody, err := config.ParseCustodySettings(scope.Settings)
+	if err != nil {
+		return PublicPSPConfig{}, "custody settings are invalid: " + err.Error(), false
+	}
+	if custody.ThirdParty() {
+		profile, known = custodianPublicProfiles[custody.Custodian]
+		if !known {
+			return PublicPSPConfig{}, "custodian " + custody.Custodian + " has no browser checkout profile", false
+		}
+	}
 
 	key := strings.ToLower(strings.TrimSpace(scope.Key))
 	if key == "" {
@@ -131,6 +153,7 @@ func PublicPSPConfigFor(scope PSPScope) (PublicPSPConfig, string, bool) {
 	out := PublicPSPConfig{
 		Key:         key,
 		Rail:        rail,
+		Custodian:   custody.Custodian,
 		DisplayName: rails.DisplayName(models.Rail(rail)),
 		Flow:        profile.Flow,
 	}

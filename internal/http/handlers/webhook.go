@@ -194,7 +194,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 		return
 	}
-	if provider == string(models.RailVaultedCard) {
+	if provider == string(models.EventSourceBasisTheory) {
 		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -358,7 +358,7 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		}
 		defer release()
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
-	case rail == string(models.RailVaultedCard):
+	case rail == string(models.EventSourceBasisTheory):
 		body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 		if !ok {
 			return true, false
@@ -368,7 +368,10 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "Basis Theory webhook payload is missing tenant identity")
 			return true, false
 		}
-		account, release, ok := resolveWebhookRailMerchantAccount(r, string(models.RailVaultedCard), environment, tenantID)
+		// or#879: a custodian event routes by the CUSTODIAN's tenant identity,
+		// not by a rail account id — the PSP it lands on is the NMI account
+		// whose gateway the proxy charges.
+		account, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
 		if !ok {
 			return true, false
 		}
@@ -422,8 +425,23 @@ var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 // merchant's DB connection. The returned release must be deferred by the caller —
 // see pinWebhookMerchantConn for why the pin cannot live in middleware.
 func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	return pinWebhookAccount(r, rail, environment, accountID,
+		r.State.Merchants.ResolveRailMerchantAccountByIdentity)
+}
+
+// resolveWebhookCustodianAccount is the custody sibling: it resolves the PSP a
+// CUSTODIAN's tenant identity belongs to (or#879), then pins it exactly like a
+// rail-routed webhook.
+func resolveWebhookCustodianAccount(r *httprequest.Request, custodian, environment, tenantID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	return pinWebhookAccount(r, custodian, environment, tenantID,
+		r.State.Merchants.ResolvePSPByCustodianIdentity)
+}
+
+func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
+	resolve func(context.Context, string, string, string) (merchants.RailMerchantAccountIdentity, bool, error),
+) (merchants.RailMerchantAccountIdentity, func(), bool) {
 	noop := func() {}
-	account, ok, err := r.State.Merchants.ResolveRailMerchantAccountByIdentity(r.Request.Context(), rail, environment, accountID)
+	account, ok, err := resolve(r.Request.Context(), rail, environment, accountID)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")

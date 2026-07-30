@@ -1,4 +1,4 @@
-package vaultedcard
+package nmiproxy
 
 import (
 	"context"
