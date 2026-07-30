@@ -527,7 +527,10 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
 	for _, provider := range price.PSPs {
-		if provider == "solana" && price.AutoRenew {
+		if provider != "solana" {
+			continue
+		}
+		if price.AutoRenew {
 			if price.Currency != "usd" {
 				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q",
 					product.Key, PriceLabel(product.Key, *price), price.Currency)
@@ -538,6 +541,15 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 					product.Key, PriceLabel(product.Key, *price), symbol)
 			}
 			price.PSPLinks[provider]["mint_symbol"] = symbol
+			continue
+		}
+		// One-off Solana settles as a direct transfer quoted at checkout: it
+		// has no plan and consumes no link keys. Silently accepting (and then
+		// dropping) a declared link would leave the plan flagging the same
+		// "drift" on every run — reject it loudly instead.
+		if len(price.PSPLinks[provider]) > 0 {
+			return fmt.Errorf("product %q price %s: one-off solana prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana",
+				product.Key, PriceLabel(product.Key, *price))
 		}
 	}
 	return nil

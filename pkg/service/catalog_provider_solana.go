@@ -207,7 +207,12 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	}
 	if pda == "" {
 		if in.BillingCycleDays == nil {
-			return map[string]string{"provider": "solana"}, nil
+			// A one-off price consumes no link keys (it settles as a direct
+			// transfer quoted at checkout). Callers only reach Attach with a
+			// non-empty link, so silently returning the bare rail marker would
+			// drop the operator's declared values and leave catalog plans
+			// re-flagging the same drift forever — reject loudly instead.
+			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana")
 		}
 		if symbol == "" {
 			return nil, fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
