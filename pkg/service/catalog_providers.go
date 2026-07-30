@@ -547,6 +547,10 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 		Currency:            price.Currency,
 		BillingCycleDays:    price.RecurringCycleDays(),
 		AccessDurationHours: price.AccessDurationHours,
+		// Attach can publish (e.g. a Solana plan from mint_symbol), so the
+		// link-rotation path must carry the same write gate resolveProviders
+		// does — otherwise limited/readonly deployments submit provider writes.
+		RemoteWritesDisabled: s.catalogRemoteWritesDisabled(),
 	}
 	if products, err := s.requireProductService(); err == nil {
 		if product, err := products.GetByID(ctx, price.ProductID); err == nil && product != nil {
