@@ -130,8 +130,14 @@ func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig
 	if s.RPCAPIKey != "" {
 		out.RPCAPIKey = s.RPCAPIKey
 	}
+	// or#881: declared tokens EXTEND/OVERRIDE the base set per symbol; they do
+	// not replace it. Replacement meant adding one custom token forced the
+	// merchant to re-type every canonical mint they still wanted — a paste
+	// hazard manufactured by the config shape, on a money path.
 	if len(s.Tokens) > 0 {
-		out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
+		if out.Tokens == nil {
+			out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
+		}
 		for k, v := range s.Tokens {
 			out.Tokens[k] = v
 		}

@@ -90,7 +90,9 @@ func TestSolanaAccountSettingsApplyTo(t *testing.T) {
 	// Store-wins on declared knobs (#699); undeclared knobs keep the boot value.
 	require.Equal(t, "helius", out.RPCProvider)
 	require.Equal(t, "store-key", out.RPCAPIKey)
-	require.Equal(t, map[string]TokenConfig{"USDC": {Mint: "EPj"}}, out.Tokens)
+	// or#881: tokens merge PER SYMBOL. Declaring USDC must not delete SOL —
+	// replacement forced merchants to re-type canonical mints to keep them.
+	require.Equal(t, map[string]TokenConfig{"SOL": {Mint: "So1"}, "USDC": {Mint: "EPj"}}, out.Tokens)
 	require.Equal(t, "devnet", out.Network)
 
 	// base is never mutated.
@@ -100,6 +102,12 @@ func TestSolanaAccountSettingsApplyTo(t *testing.T) {
 	// nil base: standalone, where the store is the only plane.
 	out = overlay.ApplyTo(nil)
 	require.Equal(t, "store-key", out.RPCAPIKey)
+	require.Equal(t, map[string]TokenConfig{"USDC": {Mint: "EPj"}}, out.Tokens)
+
+	// A token declaration overrides that one symbol and nothing else.
+	out = SolanaAccountSettings{Tokens: map[string]TokenConfig{"SOL": {Mint: "Other"}}}.ApplyTo(base)
+	require.Equal(t, map[string]TokenConfig{"SOL": {Mint: "Other"}}, out.Tokens)
+	require.Equal(t, "So1", base.Tokens["SOL"].Mint) // base untouched
 
 	// empty overlay returns an unchanged copy.
 	out = (SolanaAccountSettings{}).ApplyTo(base)

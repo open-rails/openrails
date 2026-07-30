@@ -131,13 +131,19 @@ merchants:
             # embedded boot plane also sets them, these settings win (#699).
             rpc_provider: helius # helius | public; empty defaults to helius
             rpc_api_key: replace-with-helius-api-key
-            # CLIENT HINT: echoed to browsers so frontends only offer Solana Pay
-            # (transaction-request) recurring flows after the deployment validated
-            # its target wallets accept co-signed transactions. Not enforced
-            # server-side.
-            tokens:
-              SOL: { name: Solana, mint: So11111111111111111111111111111111111111112 }
-              USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v }
+            # `tokens` is OPTIONAL and additive (or#881). The curated registry
+            # (SOL, USDC, PYUSD, USD1, USDG on mainnet; SOL, USDC, PYUSD on
+            # devnet) is always available — declare a token ONLY to add one the
+            # registry does not carry. Do not restate a canonical mint: a
+            # re-typed mint address is a money-path paste error waiting to
+            # happen, and it is the one value here you cannot get wrong by
+            # omitting it. Declaring a registry symbol overrides that ONE entry
+            # and leaves the rest of the registry intact.
+            # `decimals` is not accepted (or#817): they are read from the SPL
+            # mint on-chain, never from config.
+            #
+            # tokens:
+            #   MYTK: { name: My Token, mint: replace-with-spl-mint-address }
           secrets:
             private_key: replace-with-base58-ed25519-keypair
 

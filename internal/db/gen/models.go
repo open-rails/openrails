@@ -797,7 +797,7 @@ type OpenrailsPayment struct {
 	FailureReason *string
 	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
 	ReversalKind *string
-	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
+	// #796 credential form presented to the network: network_token | pan_via_vault | provider_vault. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
 	DeletedAt        *time.Time
@@ -833,8 +833,8 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialUnscheduledRef string
 	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
 	Custodian string
-	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
-	Fingerprint string
+	// #795 vault card fingerprint (BT default expression over the PAN) for dedup/lookup.
+	VaultFingerprint string
 	// #795 BT network-token uuid; '' = not provisioned.
 	NetworkTokenID string
 	// #795 NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
