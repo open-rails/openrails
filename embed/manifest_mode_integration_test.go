@@ -94,6 +94,8 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug string, ma
 	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
+	require.NotNil(t, rt.Embedded().App().Runtime.SolanaPlanService,
+		"embedded provisioning arms recurring Solana services")
 	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
 		Runtime:  rt.Embedded(),
 		Manifest: catalogRaw,

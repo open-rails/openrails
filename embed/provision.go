@@ -82,6 +82,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		Merchant: m,
 		Options:  boot.MerchantManifestReconcileOptions{Insert: true},
 	}
+	var secretBackend *merchantsecrets.Store
 	switch {
 	case conf.IsManifestMerchantSource():
 		// MODE 1 (#723): this call IS the manifest. Identity/config/account rows
@@ -97,6 +98,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: %w", err)
 		}
+		secretBackend = backend
 		req.SolanaTransit = backend.SolanaTransit
 		// Write routes stay mounted so mode-1 mutation calls receive the pointed
 		// 405 rejection (not a bare 404); Solana signing keys can live in memory.
@@ -127,6 +129,9 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 			return merchant.ID{}, fmt.Errorf("openrails embed: build merchants service: %w", err)
 		}
 		a.Runtime.ArmMerchantsService(svc, a.Runtime.ManifestSecrets)
+	}
+	if conf.IsManifestMerchantSource() {
+		a.Runtime.ArmSolanaRecurringServices(secretBackend.Secrets, secretBackend.SolanaTransit)
 	}
 	return tn.ID, nil
 }
