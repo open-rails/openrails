@@ -64,7 +64,7 @@ func TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals(t *testing.T) {
 			ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
 
 			out, err := a.Attach(ctx, map[string]string{
-				solanaKeyMintSymbol: "USDC",
+				solanaKeyToken: "USDC",
 			}, autoCreateContext{
 				PriceID:             uuid.New(),
 				ProductKey:          "premium",
@@ -100,7 +100,7 @@ func TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
 
 	if _, err := a.Attach(ctx, map[string]string{
-		solanaKeyMintSymbol: "USDC",
+		solanaKeyToken: "USDC",
 	}, autoCreateContext{
 		PriceID:             uuid.New(),
 		ProductKey:          "premium",

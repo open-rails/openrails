@@ -347,7 +347,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			}
 			// Never plan link work for a price this run is archiving: syncing
 			// links drives adapter.Attach, which can PUBLISH (e.g. a Solana
-			// plan from mint_symbol) — minting a live provider object for a
+			// plan from token) — minting a live provider object for a
 			// dead price. The declared links converge if it is ever unarchived.
 			if !price.Archived {
 				if links := pspLinksNeedingSync(match.Providers, price.PSPLinks); len(links) > 0 {

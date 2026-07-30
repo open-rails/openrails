@@ -223,8 +223,6 @@ products:
         duration: 30d
         auto_renew: true
         psps: [solana]
-        psp_links:
-          solana: {mint_symbol: USDC}
         archived: true
 `)
 	f := newFakeApplier()
@@ -326,8 +324,6 @@ products:
         duration: 30d
         auto_renew: true
         psps: [solana]
-        psp_links:
-          solana: {mint_symbol: USDC}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)
@@ -342,7 +338,7 @@ products:
 	if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceUpdate {
 		t.Fatalf("provider drift must update the existing price: %+v", pp.Prices)
 	}
-	if got := pp.Prices[0].UpdateReq.PSPLinks["solana"]["mint_symbol"]; got != "USDC" {
+	if got := pp.Prices[0].UpdateReq.PSPLinks["solana"]["token"]; got != "USDC" {
 		t.Fatalf("Solana settlement token update = %q, want USDC", got)
 	}
 	if !plan.HasChanges() {
@@ -371,7 +367,7 @@ products:
         auto_renew: true
         psps: [solana]
         psp_links:
-          solana: {mint_symbol: usdc}
+          solana: {token: usdc}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)
@@ -381,6 +377,7 @@ products:
 	prices[0].Providers["solana"] = billingservice.ProviderState{
 		Status: billingservice.ProviderStatusLinked,
 		IDs: map[string]string{
+			"token":       "USDC",
 			"mint_symbol": "USDC",
 			"plan_pda":    "existing-plan",
 		},

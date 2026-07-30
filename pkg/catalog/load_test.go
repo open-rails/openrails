@@ -337,11 +337,10 @@ func TestLoad_SolanaSettlementToken(t *testing.T) {
 `,
 		},
 		{
-			name: "recurring requires a settlement token",
+			name: "recurring defaults to USDC",
 			price: `
       - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
 `,
-			wantErr: "recurring solana requires psp_links.solana.mint_symbol",
 		},
 		{
 			name: "recurring rejects an ineligible settlement token",
@@ -352,7 +351,7 @@ func TestLoad_SolanaSettlementToken(t *testing.T) {
         auto_renew: true
         psps: [solana]
         psp_links:
-          solana: {mint_symbol: SOL}
+          solana: {token: SOL}
 `,
 			wantErr: `got "SOL"`,
 		},
@@ -365,7 +364,7 @@ func TestLoad_SolanaSettlementToken(t *testing.T) {
         auto_renew: true
         psps: [solana]
         psp_links:
-          solana: {mint_symbol: USDC}
+          solana: {token: USDC}
 `,
 			wantErr: "recurring solana currently requires USD billing currency",
 		},
@@ -378,8 +377,57 @@ func TestLoad_SolanaSettlementToken(t *testing.T) {
         auto_renew: true
         psps: [solana]
         psp_links:
+          solana: {token: USDC}
+`,
+		},
+		{
+			name: "recurring existing plan resolves its token on-chain",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {plan_pda: 7XyPdA}
+`,
+		},
+		{
+			name: "recurring existing plan rejects duplicate token input",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {plan_pda: 7XyPdA, token: USD1}
+`,
+			wantErr: "token selects a new plan; omit it when plan_pda is supplied",
+		},
+		{
+			name: "mint symbol is output only",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
           solana: {mint_symbol: USDC}
 `,
+			wantErr: "mint_symbol is output metadata",
+		},
+		{
+			name: "legacy stablecoin currency gets a migration hint",
+			price: `
+      - currency: usdc
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+`,
+			wantErr: "redeclare as currency: usd with psp_links.solana.token: USDC",
 		},
 	}
 
@@ -645,6 +693,32 @@ products:
 	}
 }
 
+func TestLoad_SolanaSharedUSDPriceDefaultsToUSDC(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: premium
+    display_name: Premium
+    prices:
+      - currency: usd
+        unit_amount: 23000000
+        duration: 30d
+        auto_renew: true
+        psps: [nmi, ccbill, solana]
+`
+	manifest, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("shared USD price should be accepted: %v", err)
+	}
+	price := manifest.TierGroups[0].Products[0].Prices[0]
+	if price.Currency != "usd" {
+		t.Fatalf("shared price currency = %q, want usd", price.Currency)
+	}
+	if got := price.PSPLinks["solana"]["token"]; got != "USDC" {
+		t.Fatalf("default Solana token = %q, want USDC", got)
+	}
+}
+
 func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
@@ -660,10 +734,14 @@ products:
         auto_renew: true
         psps: [solana]
         psp_links:
-          solana: {mint_symbol: USDC}
+          solana: {token: usd1}
 `
-	if _, err := Load(writeManifest(t, body)); err != nil {
-		t.Fatalf("usd billed + usdc settled should be accepted, got %v", err)
+	manifest, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("usd billed + usd1 settled should be accepted, got %v", err)
+	}
+	if got := manifest.Products[0].Prices[0].PSPLinks["solana"]["token"]; got != "USD1" {
+		t.Fatalf("normalized Solana token = %q, want USD1", got)
 	}
 }
 

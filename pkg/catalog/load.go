@@ -521,8 +521,8 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 
 	// Per-provider eligibility (shape-only; no chain calls). One-off Solana
 	// checkout quotes the selected token at payment time. A recurring plan is
-	// mint-specific, so it must declare its settlement token independently from
-	// the price's billing currency.
+	// mint-specific: USDC is the default settlement token, while token selects
+	// another supported stablecoin and plan_pda resolves its token on-chain.
 	if price.Metered != nil && len(price.PSPs) > 0 {
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
@@ -536,17 +536,39 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 				if _, legacy := stablecoinCurrencies[price.Currency]; legacy {
 					// Pre-#745 manifests declared the settlement token AS the
 					// billing currency; point the operator at the new shape.
-					hint = fmt.Sprintf("; pre-#745 manifests billed in the token — redeclare as currency: usd with psp_links.solana.mint_symbol: %s", strings.ToUpper(price.Currency))
+					hint = fmt.Sprintf("; pre-#745 manifests billed in the token — redeclare as currency: usd with psp_links.solana.token: %s", strings.ToUpper(price.Currency))
 				}
 				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q%s",
 					product.Key, PriceLabel(product.Key, *price), price.Currency, hint)
 			}
-			symbol := strings.ToUpper(strings.TrimSpace(price.PSPLinks[provider]["mint_symbol"]))
-			if _, ok := recurringSolanaTokenSymbols[symbol]; !ok {
-				return fmt.Errorf("product %q price %s: recurring solana requires psp_links.solana.mint_symbol (USDC/USD1), got %q",
-					product.Key, PriceLabel(product.Key, *price), symbol)
+			link := price.PSPLinks[provider]
+			if link == nil {
+				link = map[string]string{}
+				if price.PSPLinks == nil {
+					price.PSPLinks = map[string]map[string]string{}
+				}
+				price.PSPLinks[provider] = link
 			}
-			price.PSPLinks[provider]["mint_symbol"] = symbol
+			if _, retired := link["mint_symbol"]; retired {
+				return fmt.Errorf("product %q price %s: psp_links.solana.mint_symbol is output metadata; use psp_links.solana.token",
+					product.Key, PriceLabel(product.Key, *price))
+			}
+			symbol := strings.ToUpper(strings.TrimSpace(link["token"]))
+			planPDA := strings.TrimSpace(link["plan_pda"])
+			if symbol != "" && planPDA != "" {
+				return fmt.Errorf("product %q price %s: psp_links.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain",
+					product.Key, PriceLabel(product.Key, *price))
+			}
+			if symbol == "" && planPDA == "" {
+				symbol = "USDC"
+			}
+			if symbol != "" {
+				if _, ok := recurringSolanaTokenSymbols[symbol]; !ok {
+					return fmt.Errorf("product %q price %s: psp_links.solana.token must be USDC or USD1, got %q",
+						product.Key, PriceLabel(product.Key, *price), symbol)
+				}
+				link["token"] = symbol
+			}
 			continue
 		}
 		// One-off Solana settles as a direct transfer quoted at checkout: it
