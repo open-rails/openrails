@@ -202,10 +202,14 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	link = normalizeLinkMap(link)
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyMintSymbol]))
-	if in.BillingCycleDays != nil && !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
-		return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
-	}
 	if pda == "" {
+		// Publishing a NEW plan is the #745 model: bill in USD, settle in the
+		// declared token. The guard lives here — not on the plan_pda path — so
+		// pre-#745 rows (billed in usdc/usdg with the mint derived from the
+		// currency) stay operable for link verification and rotation.
+		if in.BillingCycleDays != nil && !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
+			return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
+		}
 		if in.BillingCycleDays == nil {
 			// A one-off price consumes no link keys (it settles as a direct
 			// transfer quoted at checkout). Callers only reach Attach with a
@@ -222,9 +226,10 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		return a.createRecurringPlan(ctx, in, symbol)
 	}
-	if in.BillingCycleDays != nil && symbol == "" {
-		return nil, fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
-	}
+	// Attaching an EXISTING plan handle does not require mint_symbol: pre-#745
+	// rows derived the token from the billing currency and must stay operable.
+	// Without a symbol the mint/amount verification below is skipped (the old
+	// soft behavior); period and merchant are still verified when possible.
 	out := map[string]string{solanaKeyPlanPDA: pda}
 	for _, k := range []string{
 		solanaKeyPlanID, solanaKeyMint, solanaKeyMintSymbol,
@@ -233,6 +238,12 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		if v := strings.TrimSpace(link[k]); v != "" {
 			out[k] = v
 		}
+	}
+	// Store the canonical uppercase symbol: manifests normalize it at Load, so
+	// a verbatim lowercase copy from the direct API would read as permanent
+	// case-only "drift" to every future catalog plan.
+	if symbol != "" {
+		out[solanaKeyMintSymbol] = symbol
 	}
 
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {

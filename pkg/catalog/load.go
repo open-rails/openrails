@@ -532,8 +532,14 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		}
 		if price.AutoRenew {
 			if price.Currency != "usd" {
-				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q",
-					product.Key, PriceLabel(product.Key, *price), price.Currency)
+				hint := ""
+				if _, legacy := stablecoinCurrencies[price.Currency]; legacy {
+					// Pre-#745 manifests declared the settlement token AS the
+					// billing currency; point the operator at the new shape.
+					hint = fmt.Sprintf("; pre-#745 manifests billed in the token — redeclare as currency: usd with psp_links.solana.mint_symbol: %s", strings.ToUpper(price.Currency))
+				}
+				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q%s",
+					product.Key, PriceLabel(product.Key, *price), price.Currency, hint)
 			}
 			symbol := strings.ToUpper(strings.TrimSpace(price.PSPLinks[provider]["mint_symbol"]))
 			if _, ok := recurringSolanaTokenSymbols[symbol]; !ok {
