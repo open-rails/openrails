@@ -95,7 +95,7 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug string, ma
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
-		Config:   cfg,
+		Runtime:  rt.Embedded(),
 		Manifest: catalogRaw,
 		Insert:   true, Overwrite: true, Prune: true,
 	}))
