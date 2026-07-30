@@ -140,7 +140,7 @@ func (s *CheckoutCustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Cha
 	return nmiproxy.New(bt, gw), nil
 }
 
-// Process runs the vaulted_card one-time sale as a write-through intent,
+// Process runs the custodian-held-card one-time sale as a write-through intent,
 // mirroring CheckoutNMISaleService.Process.
 func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
 	const idempOp = "custodian_sale"

@@ -163,7 +163,6 @@ func TestReconcileEngineIntegration(t *testing.T) {
 			Local:     &PGLocalStateLoader{DB: appDB},
 			Writer:    &PGLocalWriter{DB: appDB},
 			Decisions: NewDecisionApplier(appDB, nil),
-			Runs:      &PGDestructiveRunRecorder{DB: appDB},
 		}
 	}
 
@@ -426,7 +425,6 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			Local:     &PGLocalStateLoader{DB: appDB},
 			Writer:    &PGLocalWriter{DB: appDB},
 			Decisions: NewDecisionApplier(appDB, nil),
-			Runs:      &PGDestructiveRunRecorder{DB: appDB},
 		}
 	}
 

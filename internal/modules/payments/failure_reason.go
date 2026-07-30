@@ -173,10 +173,16 @@ var ccbillFailureReasons = map[string]string{}
 func DefaultTokenType(rail, custodian string) string {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
 	case "nmi", "mobius":
-		if strings.TrimSpace(custodian) == models.CustodianBasisTheory {
+		switch strings.TrimSpace(custodian) {
+		case models.CustodianBasisTheory:
 			return charge.TokenTypePANViaProxy
+		case models.CustodianPSP:
+			return charge.TokenTypePSPToken
+		default:
+			// Custody unstated: stamp nothing. A guessed form would skew the
+			// approval_rate dimension token_type exists to measure.
+			return ""
 		}
-		return charge.TokenTypePSPToken
 	default:
 		return ""
 	}
