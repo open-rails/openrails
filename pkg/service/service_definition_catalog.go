@@ -422,7 +422,7 @@ type CreatePriceRequest struct {
 	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
 	//   ccbill : {"form_name": "...", "flex_id": "..."}
 	//   nmi : {"plan_id": "..."}
-	//   solana : {"mint_symbol": "USDC"} or {"plan_pda": "...", "mint_symbol": "USDC"}
+	//   solana : {"token": "USD1"} or {"plan_pda": "..."}; omitted token defaults to USDC
 	// Any provider with a non-empty link here is implicitly added to the
 	// attach set even if absent from Providers.
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`

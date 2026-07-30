@@ -221,7 +221,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	}
 }
 
-func TestResolveProviders_SolanaSettlementTokenPendingWhenUnconfigured(t *testing.T) {
+func TestResolveProviders_SolanaDefaultTokenPendingWhenUnconfigured(t *testing.T) {
 	s := newUnconfiguredService()
 	hours := 30 * 24
 	req := CreatePriceRequest{
@@ -231,9 +231,6 @@ func TestResolveProviders_SolanaSettlementTokenPendingWhenUnconfigured(t *testin
 		AccessDurationHours: &hours,
 		AutoRenew:           true,
 		PSPs:                []string{"solana"},
-		PSPLinks: map[string]map[string]string{
-			"solana": {solanaKeyMintSymbol: "USDC"},
-		},
 	}
 
 	rails, states, pending, err := s.resolveProviders(

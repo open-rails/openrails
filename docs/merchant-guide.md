@@ -19,7 +19,8 @@ declared state:
 
 - **Push** creates provider objects: Stripe Products/Prices/Features are auto-created;
   NMI recurring plans are found-or-created by `plan_id`; CCBill form links are stored
-  as operator-owned identifiers; Solana plan accounts must already exist on-chain.
+  as operator-owned identifiers; Solana recurring plans are found-or-created in USDC
+  by default, or attached by `plan_pda`.
 - **Pull** (the scheduled reconciliation job) is **alert-only**: it detects drift and
   orphans and records events for you to review. It never mutates providers.
 - Identity is content-addressed: a product's identity is its `key`; a price's identity
@@ -131,16 +132,17 @@ accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Us
 products declare no billing cadence — the invoice period is the window. See the
 `digital-ocean` example in `config/catalog.example.yaml` for the full pattern.
 
-**psp_links** — pre-supply provider-side ids per PSP key. Supplied links are validated
-against the provider (object exists + money terms match) and never duplicated; a
-mismatch fails the apply loudly:
+**psp_links** — supply provider-side ids or declarative provider config per PSP key.
+Supplied links are validated against the provider (object exists + money terms match)
+and never duplicated; a mismatch fails the apply loudly:
 
 ```yaml
             psp_links:
               stripe: {lookup_key: premium}         # find-or-create at a chosen key
               mobius: {plan_id: premium}            # NMI recurring plan; find-or-create
               ccbill: {form_name: premium, flex_id: abc-123}  # operator-owned, unvalidated
-              solana: {plan_pda: "..."}             # must already exist on-chain
+              solana: {token: USD1}                 # optional override; recurring defaults to USDC
+              # solana: {plan_pda: "..."}           # alternatively attach and resolve the token on-chain
 ```
 
 ### Pushing and verifying
@@ -170,7 +172,7 @@ Provider side per rail:
 | stripe | auto-creates Products, Prices, and entitlement Features (`lookup_key` = the entitlement string); financial terms are immutable, so amount changes re-mint a new price and archive the old |
 | nmi PSPs | recurring `plan_id` found-or-created; otherwise link-only |
 | ccbill | link-only: you supply `form_name` + `flex_id` from the CCBill admin |
-| solana | link-only: `plan_pda` must reference an existing on-chain plan |
+| solana | recurring plans default to USDC and are found-or-created; `token: USD1` selects USD1; `plan_pda` attaches an existing plan and resolves its token on-chain |
 
 A link-only price pushed without its ids is still created in OpenRails and recorded as
 `pending_manual_link`, with a `pending_manual_actions` entry telling you what to PATCH

@@ -35,6 +35,34 @@ func TestSolanaAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 	}
 }
 
+func TestSolanaAdapter_AutoCreateRecurringDefaultsToUSDC(t *testing.T) {
+	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+	hours := 30 * 24
+	days := 30
+	plan := recurring.NewPlanServiceWithReader(
+		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
+		nil,
+		"mainnet",
+		map[string]config.TokenConfig{"USDC": {Mint: usdcMint, Decimals: 6}},
+	)
+	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
+	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+
+	got, err := a.AutoCreate(ctx, autoCreateContext{
+		ProductKey:          "premium",
+		Currency:            "usd",
+		UnitAmount:          29_000_000,
+		AccessDurationHours: &hours,
+		BillingCycleDays:    &days,
+	})
+	if err != nil {
+		t.Fatalf("AutoCreate recurring: %v", err)
+	}
+	if got[solanaKeyMintSymbol] != "USDC" {
+		t.Fatalf("AutoCreate recurring mint_symbol = %q, want USDC", got[solanaKeyMintSymbol])
+	}
+}
+
 func TestSolanaAdapter_AutoCreateOneOffNeedsNoPlan(t *testing.T) {
 	a := &solanaAdapter{}
 	hours := 30 * 24
@@ -51,80 +79,100 @@ func TestSolanaAdapter_AutoCreateOneOffNeedsNoPlan(t *testing.T) {
 	}
 }
 
-func TestSolanaAdapter_AttachRequiresRecurringSettlementToken(t *testing.T) {
+func TestSolanaAdapter_AttachUsesTokenInput(t *testing.T) {
 	a := &solanaAdapter{}
 	days := 30
 	if _, err := a.Attach(
 		context.Background(),
-		map[string]string{"mint": "x"},
+		map[string]string{solanaKeyMintSymbol: "USDC"},
 		autoCreateContext{BillingCycleDays: &days, Currency: "usd"},
 	); err == nil {
-		t.Error("Attach recurring plan without mint_symbol should error")
+		t.Error("Attach should reject mint_symbol as input")
 	}
-	got, err := a.Attach(context.Background(), map[string]string{
+	if _, err := a.Attach(
+		context.Background(),
+		map[string]string{solanaKeyToken: "SOL"},
+		autoCreateContext{BillingCycleDays: &days, Currency: "usd"},
+	); err == nil {
+		t.Error("Attach should reject a non-recurring token")
+	}
+	if _, err := a.Attach(
+		context.Background(),
+		map[string]string{solanaKeyPlanPDA: "PdA111", solanaKeyToken: "USDC"},
+		autoCreateContext{BillingCycleDays: &days, Currency: "usd"},
+	); err == nil {
+		t.Error("Attach should reject token beside plan_pda")
+	}
+	if _, err := a.Attach(context.Background(), map[string]string{
 		solanaKeyPlanPDA:         "PdA111",
-		solanaKeyMintSymbol:      "USDC",
 		solanaKeyAmountBaseUnits: "29000000",
 		"junk":                   "", // empty values are dropped
-	}, autoCreateContext{BillingCycleDays: &days, Currency: "usd"})
-	if err != nil {
-		t.Fatalf("Attach: %v", err)
-	}
-	if got[solanaKeyPlanPDA] != "PdA111" || got[solanaKeyMintSymbol] != "USDC" || got[solanaKeyAmountBaseUnits] != "29000000" {
-		t.Errorf("Attach passthrough wrong: %v", got)
-	}
-	if _, ok := got["junk"]; ok {
-		t.Errorf("empty link values should be dropped, got %v", got)
-	}
-
-	legacy, err := a.Attach(context.Background(), map[string]string{
-		solanaKeyPlanPDA: "LegacyPdA111",
-	}, autoCreateContext{BillingCycleDays: &days, Currency: "usdc"})
-	if err != nil {
-		t.Fatalf("Attach legacy USDC plan: %v", err)
-	}
-	if got := legacy[solanaKeyMintSymbol]; got != "USDC" {
-		t.Fatalf("legacy USDC mint_symbol = %q, want USDC", got)
+	}, autoCreateContext{BillingCycleDays: &days, Currency: "usdc"}); err == nil {
+		t.Error("Attach should not accept a legacy plan_pda without on-chain verification")
 	}
 
 	if _, err := a.Attach(context.Background(), map[string]string{
 		solanaKeyPlanPDA: "PdAWithoutToken111",
 	}, autoCreateContext{BillingCycleDays: &days, Currency: "usd"}); err == nil {
-		t.Fatal("new USD existing-plan link without mint_symbol should error")
+		t.Fatal("existing-plan link without RPC should error")
 	}
 }
 
-func TestExistingSolanaSettlementSymbol(t *testing.T) {
+func TestExistingSolanaSettlementToken(t *testing.T) {
 	tests := []struct {
 		name     string
 		currency string
-		declared string
 		want     string
 		wantErr  bool
 	}{
-		{name: "new USD price requires symbol", currency: "usd", wantErr: true},
-		{name: "new USD price accepts USDC", currency: "usd", declared: "usdc", want: "USDC"},
+		{name: "new USD price may infer token", currency: "usd"},
 		{name: "legacy USDC derives symbol", currency: " USDC ", want: "USDC"},
-		{name: "legacy USDC cannot change token", currency: "usdc", declared: "USD1", wantErr: true},
 		{name: "unsupported legacy currency fails", currency: "usdg", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := existingSolanaSettlementSymbol(tt.currency, tt.declared)
+			got, err := existingSolanaSettlementToken(tt.currency)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("existingSolanaSettlementSymbol(%q, %q) = %q, want error", tt.currency, tt.declared, got)
+					t.Fatalf("existingSolanaSettlementToken(%q) = %q, want error", tt.currency, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("existingSolanaSettlementSymbol(%q, %q): %v", tt.currency, tt.declared, err)
+				t.Fatalf("existingSolanaSettlementToken(%q): %v", tt.currency, err)
 			}
 			if got != tt.want {
-				t.Fatalf("existingSolanaSettlementSymbol(%q, %q) = %q, want %q", tt.currency, tt.declared, got, tt.want)
+				t.Fatalf("existingSolanaSettlementToken(%q) = %q, want %q", tt.currency, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveSolanaTokenFromMint(t *testing.T) {
+	const (
+		usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+		usd1Mint = "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD"
+	)
+	plan := recurring.NewPlanServiceWithReader(
+		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
+		nil,
+		"mainnet",
+		map[string]config.TokenConfig{
+			"USDC": {Mint: usdcMint, Decimals: 6},
+			"USD1": {Mint: usd1Mint, Decimals: 6},
+		},
+	)
+
+	got, err := resolveSolanaTokenFromMint(plan, usd1Mint)
+	if err != nil {
+		t.Fatalf("resolveSolanaTokenFromMint: %v", err)
+	}
+	if got != "USD1" {
+		t.Fatalf("resolveSolanaTokenFromMint = %q, want USD1", got)
+	}
+	if _, err := resolveSolanaTokenFromMint(plan, solanago.NewWallet().PublicKey().String()); err == nil {
+		t.Fatal("unconfigured recurring mint should fail")
 	}
 }
 
@@ -142,7 +190,7 @@ func TestSolanaAdapter_RemoteWritesDisabledDefersPublish(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
 
 	_, err := a.Attach(ctx, map[string]string{
-		solanaKeyMintSymbol: "USDC",
+		solanaKeyToken: "USDC",
 	}, autoCreateContext{
 		ProductKey:           "premium",
 		Currency:             "usd",

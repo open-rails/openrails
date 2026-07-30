@@ -369,7 +369,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		tctx.TargetAccountID = t.accountID
 		// Try the user-supplied link/config path first. Attach verifies an exact
 		// remote id or find-or-creates from a declarative key such as lookup_key,
-		// plan_id, or Solana mint_symbol.
+		// plan_id, or a Solana token.
 		if len(normalizeLinkMap(link)) > 0 {
 			ids, attachErr := t.adapter.Attach(ctx, link, tctx)
 			if errors.Is(attachErr, errPendingManualLink) {
@@ -532,7 +532,7 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 		Currency:            price.Currency,
 		BillingCycleDays:    price.RecurringCycleDays(),
 		AccessDurationHours: price.AccessDurationHours,
-		// Attach can publish (e.g. a Solana plan from mint_symbol), so the
+		// Attach can publish (e.g. a Solana plan from token), so the
 		// link-rotation path must carry the same write gate resolveProviders
 		// does — otherwise limited/readonly deployments submit provider writes.
 		RemoteWritesDisabled: s.catalogRemoteWritesDisabled(),
