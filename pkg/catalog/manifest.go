@@ -105,12 +105,22 @@ type CreditBalance struct {
 // nowhere — and "nowhere" means the granted balance never expires (#857).
 type CreditGrant struct {
 	Key         string `json:"key" yaml:"key"`
-	Unit        string `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Currency    string `json:"currency,omitempty" yaml:"currency,omitempty"`
 	Amount      *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
 	ExpiryHours *int   `json:"expiry_hours,omitempty" yaml:"expiry_hours,omitempty"`
 	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
 	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
+
+	// Unit is COMPUTED at load, never declared: it is the unit of the credit
+	// balance this grant names via Key. It is what selects the money account at
+	// deposit (models.CreditGrantSpec.UnitCode), so a declared copy that
+	// disagreed with the balance deposited into a different account with no
+	// error at all (or#883).
+	Unit string `json:"-" yaml:"-"`
+
+	// Removed manifest spellings, kept only to fail loudly (the
+	// providers/provider_links precedent). Pre-launch: no aliases.
+	LegacyUnit     string `json:"unit,omitempty" yaml:"unit,omitempty"`
+	LegacyCurrency string `json:"currency,omitempty" yaml:"currency,omitempty"`
 }
 
 func (p Product) tierRank() int {

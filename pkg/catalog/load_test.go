@@ -364,12 +364,10 @@ products:
     usage_limits: [starter-spend]
     credits:
       - key: monthly-usd
-        currency: usd
         amount: 25_000_000
         expires: 30d
         cadence: per_renewal
       - key: ai-images
-        unit: local-stack/ai-image-credit
         amount: 100
     prices:
       - currency: usd
@@ -388,11 +386,12 @@ products:
 	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
+	// or#883: a grant's unit is always the named balance's unit — never declared.
 	if got := p.Credits[0].Unit; got != "USD" {
-		t.Fatalf("credit currency alias did not populate unit: %q", got)
+		t.Fatalf("credit unit not derived from the usd balance: %q", got)
 	}
 	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
-		t.Fatalf("qualified custom credit unit not preserved: %q", got)
+		t.Fatalf("qualified custom credit unit not derived from balance: %q", got)
 	}
 	// #707: the metered: sugar translates into a rate card; the pure-usage
 	// (unit_amount 0) price row disappears.

@@ -356,16 +356,22 @@ func validateCredits(productKey string, credits []CreditGrant, balances map[stri
 		if !ok {
 			return fmt.Errorf("product %q credit %q references unknown credit balance", productKey, credit.Key)
 		}
-		if strings.TrimSpace(credit.Unit) == "" && strings.TrimSpace(credit.Currency) != "" {
-			credit.Unit = credit.Currency
+		// or#883: the grant's unit is the unit of the balance it names. It was
+		// declarable two ways (`unit`, `currency`) and neither was checked
+		// against the balance, so a typo deposited into a DIFFERENT money
+		// account silently. The field is removed, not validated.
+		if declared := strings.TrimSpace(credit.LegacyUnit); declared != "" {
+			return fmt.Errorf("product %q credit %q: `unit` was removed — a grant deposits into the credit balance it names, "+
+				"and that balance already declares the unit (%q); delete `unit: %s`",
+				productKey, credit.Key, balance.Unit, declared)
 		}
-		if strings.TrimSpace(credit.Unit) == "" {
-			credit.Unit = balance.Unit
+		if declared := strings.TrimSpace(credit.LegacyCurrency); declared != "" {
+			return fmt.Errorf("product %q credit %q: `currency` was removed — a grant deposits into the credit balance it names, "+
+				"and that balance already declares the unit (%q); delete `currency: %s`",
+				productKey, credit.Key, balance.Unit, declared)
 		}
-		if strings.TrimSpace(credit.Unit) != "" && !validCreditUnit(credit.Unit) {
-			return fmt.Errorf("product %q credit %q has invalid unit %q", productKey, credit.Key, credit.Unit)
-		}
-		credit.Unit = normalizeCreditUnit(credit.Unit)
+		// balance.Unit is already validated and normalized by validateCreditBalances.
+		credit.Unit = balance.Unit
 		if credit.Amount != nil && *credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productKey, credit.Key)
 		}
