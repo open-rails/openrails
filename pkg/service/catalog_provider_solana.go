@@ -25,10 +25,10 @@ import (
 // stores the plan handle in rails["solana"]. Verify reads the Plan account
 // back and diffs its immutable terms (amount / period / mint) for drift.
 //
-//   - AutoCreate: publish (or idempotently attach to) the on-chain plan. Requires a
-//     merchant-scoped context, a configured SolanaPlanService, a recurring interval,
-//     and a stablecoin currency (USDC/USD1). Unconfigured -> pending_manual_link.
-//   - Attach: store an operator-supplied existing plan handle (plan_pda required).
+//   - AutoCreate: one-off prices need no plan; recurring prices without a declared
+//     settlement token remain pending_manual_link.
+//   - Attach: mint_symbol without plan_pda publishes (or idempotently attaches to)
+//     a plan; plan_pda + mint_symbol attaches an existing plan.
 //   - Verify: GetAccountData(plan_pda) -> DecodePlanAccount -> diff vs the stored
 //     snapshot. RPC unavailable -> sync_disabled.
 //   - Update: no-op. Plan core terms are immutable on-chain; an amount/period change
@@ -54,7 +54,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana provider-account signer and set this price's currency to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
+		Hint:     "Configure the merchant's Solana provider-account signer and set psp_links.solana.mint_symbol to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
 	}
 }
 
@@ -88,9 +88,19 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	// A one-off Solana price (no recurring cadence, #622) needs no on-chain Plan
 	// PDA — it settles as a direct transfer validated at payment time. Mark the
 	// rail present so checkout offers Solana; publish nothing on-chain.
-	if in.AccessDurationHours == nil || *in.AccessDurationHours <= 0 {
+	if in.BillingCycleDays == nil {
 		return map[string]string{"provider": "solana"}, nil
 	}
+	if !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
+		return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
+	}
+	// A recurring plan is mint-specific. The billing currency cannot identify
+	// its settlement token, so require psp_links.solana.mint_symbol through the
+	// Attach path instead of guessing from in.Currency.
+	return nil, errPendingManualLink
+}
+
+func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateContext, symbol string) (map[string]string, error) {
 	plan, ok := a.planService()
 	if !ok {
 		// Solana recurring not configured here: defer to a manual/late publish.
@@ -103,8 +113,11 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if in.UnitAmount <= 0 {
 		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (micros)")
 	}
+	if in.AccessDurationHours == nil || *in.AccessDurationHours <= 0 {
+		return nil, fmt.Errorf("solana create-mode requires a positive recurring interval")
+	}
 
-	symbol := strings.ToUpper(strings.TrimSpace(in.Currency))
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	mint, decimals, err := plan.ResolveMint(symbol)
 	if err != nil {
 		return nil, err
@@ -176,19 +189,36 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 	return handle.ToRailConfig(), true
 }
 
-// Attach stores an operator-supplied existing on-chain plan handle. When the
-// Solana RPC is available the plan account is read back and its IMMUTABLE terms
-// are verified against the OpenRails price: the account must exist and match
-// amount (base units), period (billing cycle * 24h), mint (resolved from the
-// price currency), and — when a merchant is in context — the merchant/owner. A
+// Attach publishes a plan from a declarative mint_symbol or stores an
+// operator-supplied existing plan handle. When the Solana RPC is available the
+// plan account is read back and its IMMUTABLE terms are verified against the
+// OpenRails price: the account must exist and match
+// amount (base units), period (billing cycle * 24h), mint (resolved from
+// mint_symbol), and — when a merchant is in context — the merchant/owner. A
 // missing or mismatched plan is a loud error. On a successful read the verified
 // on-chain terms are stamped onto the stored ids so Verify has a snapshot. When
 // RPC is unavailable the operator-supplied fields are stored as-is.
 func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
+	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyMintSymbol]))
+	if in.BillingCycleDays != nil && !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
+		return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
+	}
 	if pda == "" {
-		return nil, fmt.Errorf("solana link requires provider_links.solana.plan_pda")
+		if in.BillingCycleDays == nil {
+			return map[string]string{"provider": "solana"}, nil
+		}
+		if symbol == "" {
+			return nil, fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
+		}
+		if in.RemoteWritesDisabled {
+			return nil, errRemoteWritesDisabled
+		}
+		return a.createRecurringPlan(ctx, in, symbol)
+	}
+	if in.BillingCycleDays != nil && symbol == "" {
+		return nil, fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
 	}
 	out := map[string]string{solanaKeyPlanPDA: pda}
 	for _, k := range []string{
@@ -210,7 +240,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	}
 	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pubkey)
 	if err != nil || len(data) == 0 {
-		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix provider_links.solana.plan_pda", pda)
+		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix psp_links.solana.plan_pda", pda)
 	}
 	acct, err := subscriptions.DecodePlanAccount(data)
 	if err != nil {
@@ -227,19 +257,21 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	// unconfigured — the price is in MICROS and only the token's decimals turn
 	// that into the plan's base units (#817).
 	if plan, ok := a.planService(); ok {
-		if symbol := strings.ToUpper(strings.TrimSpace(in.Currency)); symbol != "" {
-			if mint, decimals, err := plan.ResolveMint(symbol); err == nil {
-				if !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
-					return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
+		if symbol != "" {
+			mint, decimals, err := plan.ResolveMint(symbol)
+			if err != nil {
+				return nil, err
+			}
+			if !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
+				return nil, fmt.Errorf("solana plan %q mint (%s) does not match settlement token %s mint (%s)", pda, acct.Mint, symbol, mint)
+			}
+			if in.UnitAmount > 0 {
+				want, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
+				if err != nil {
+					return nil, err
 				}
-				if in.UnitAmount > 0 {
-					want, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
-					if err != nil {
-						return nil, err
-					}
-					if acct.Amount != want {
-						return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d micros = %d base units)", pda, acct.Amount, in.UnitAmount, want)
-					}
+				if acct.Amount != want {
+					return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d micros = %d base units)", pda, acct.Amount, in.UnitAmount, want)
 				}
 			}
 		}

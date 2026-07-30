@@ -85,10 +85,11 @@ type providerAdapter interface {
 	// providerAdapters is the source of truth.
 	Name() string
 
-	// Attach validates and stores caller-supplied link ids on a freshly created
-	// OpenRails price. Returns the canonical IDs that should be written to the
-	// rails[provider] map. Called when the caller provided
-	// provider_links[provider] in the create/update request.
+	// Attach interprets caller-supplied provider link/config on a freshly created
+	// OpenRails price. It validates an existing remote object or find-or-creates
+	// one from a client-declarative key, then returns the canonical IDs to write
+	// to rails[provider]. Called when the caller provided psp_links[provider] in
+	// the create/update request.
 	//
 	// in carries the OpenRails price substance (product key + immutable money terms) so
 	// the adapter can VERIFY the linked remote object actually exists AND matches
@@ -345,12 +346,24 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		// rail's armed default.
 		tctx := pctx
 		tctx.TargetAccountID = t.accountID
-		// Try the user-supplied attach path first. Attach VERIFIES the linked
-		// remote object exists and matches the price substance (pctx) — a wrong
-		// or missing link is a loud error, never a silent accept — and no provider
-		// object is created when a valid link is supplied.
+		// Try the user-supplied link/config path first. Attach verifies an exact
+		// remote id or find-or-creates from a declarative key such as lookup_key,
+		// plan_id, or Solana mint_symbol.
 		if len(normalizeLinkMap(link)) > 0 {
 			ids, attachErr := t.adapter.Attach(ctx, link, tctx)
+			if errors.Is(attachErr, errPendingManualLink) {
+				template := t.adapter.PendingActionTemplate(priceID)
+				states[t.declared] = ProviderState{
+					Status:     ProviderStatusPendingManualLink,
+					SyncStatus: SyncStatusNeverSynced,
+					Message:    template.Hint,
+				}
+				if template.Provider == "" {
+					template.Provider = t.rail
+				}
+				pending = append(pending, template)
+				continue
+			}
 			if errors.Is(attachErr, errRemoteWritesDisabled) {
 				// The link verified as MISSING remotely and creating it is blocked
 				// by the operating mode: defer, don't fail the apply. The slot
@@ -528,11 +541,12 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 		return autoCreateContext{}, fmt.Errorf("price required")
 	}
 	pctx := autoCreateContext{
-		PriceID:          price.ID,
-		ProductID:        price.ProductID,
-		UnitAmount:       price.Amount,
-		Currency:         price.Currency,
-		BillingCycleDays: price.RecurringCycleDays(),
+		PriceID:             price.ID,
+		ProductID:           price.ProductID,
+		UnitAmount:          price.Amount,
+		Currency:            price.Currency,
+		BillingCycleDays:    price.RecurringCycleDays(),
+		AccessDurationHours: price.AccessDurationHours,
 	}
 	if products, err := s.requireProductService(); err == nil {
 		if product, err := products.GetByID(ctx, price.ProductID); err == nil && product != nil {

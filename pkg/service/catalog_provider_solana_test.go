@@ -16,28 +16,51 @@ import (
 func TestSolanaAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 	a := &solanaAdapter{svc: &Service{}} // no runtime -> SolanaPlanService nil
 	hours := 30 * 24
+	days := 30
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{
 		PriceID:             uuid.New(),
-		Currency:            "USDC",
+		Currency:            "usd",
 		UnitAmount:          29_000_000,
 		AccessDurationHours: &hours,
+		BillingCycleDays:    &days,
 	})
 	if !errors.Is(err, errPendingManualLink) {
 		t.Fatalf("unconfigured Solana AutoCreate = %v, want errPendingManualLink", err)
 	}
 }
 
-func TestSolanaAdapter_AttachRequiresPlanPDA(t *testing.T) {
+func TestSolanaAdapter_AutoCreateOneOffNeedsNoPlan(t *testing.T) {
 	a := &solanaAdapter{}
-	if _, err := a.Attach(context.Background(), map[string]string{"mint": "x"}, autoCreateContext{}); err == nil {
-		t.Error("Attach without plan_pda should error")
+	hours := 30 * 24
+	got, err := a.AutoCreate(context.Background(), autoCreateContext{
+		Currency:            "eur",
+		UnitAmount:          29_000_000,
+		AccessDurationHours: &hours,
+	})
+	if err != nil {
+		t.Fatalf("AutoCreate one-off: %v", err)
+	}
+	if got["provider"] != "solana" {
+		t.Fatalf("AutoCreate one-off = %v, want Solana provider marker", got)
+	}
+}
+
+func TestSolanaAdapter_AttachRequiresRecurringSettlementToken(t *testing.T) {
+	a := &solanaAdapter{}
+	days := 30
+	if _, err := a.Attach(
+		context.Background(),
+		map[string]string{"mint": "x"},
+		autoCreateContext{BillingCycleDays: &days, Currency: "usd"},
+	); err == nil {
+		t.Error("Attach recurring plan without mint_symbol should error")
 	}
 	got, err := a.Attach(context.Background(), map[string]string{
 		solanaKeyPlanPDA:         "PdA111",
 		solanaKeyMintSymbol:      "USDC",
 		solanaKeyAmountBaseUnits: "29000000",
 		"junk":                   "", // empty values are dropped
-	}, autoCreateContext{})
+	}, autoCreateContext{BillingCycleDays: &days, Currency: "usd"})
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}

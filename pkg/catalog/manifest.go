@@ -151,19 +151,21 @@ type Price struct {
 	// only: no external provider sync.
 	PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
 
-	// PSPLinks pre-supplies PSP-specific link ids, mapping
+	// PSPLinks supplies PSP-specific link/config values, mapping
 	// PSP key -> key/value pairs. Maps straight onto
 	// service.CreatePriceRequest.PSPLinks. A supplied link is VALIDATED
 	// against the provider (object exists + matches the price's money terms)
 	// before it is accepted; a mismatch fails the apply loudly. An existing
-	// object is never duplicated. A MISSING object is created where the linked id
-	// is client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
-	// provider-generated (Stripe price_id, Solana plan_pda). Canonical keys:
+	// object is never duplicated. A MISSING object is created where the supplied
+	// value is declarative (NMI plan_id, Stripe lookup_key, Solana mint_symbol)
+	// and errors where it is provider-generated (Stripe price_id, Solana
+	// plan_pda). Canonical keys:
 	//   psp_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
 	//     mobius: {plan_id: premium}                           # NMI recurring plan on the "mobius" PSP; find-or-create
-	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
+	//     solana: {mint_symbol: USDC}                          # publish/find a recurring plan in USDC
+	//     solana: {plan_pda: 7Xy...PdA, mint_symbol: USDC}     # attach an existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
 

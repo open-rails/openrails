@@ -28,6 +28,7 @@ type PriceAction string
 
 const (
 	PriceCreate    PriceAction = "create"
+	PriceUpdate    PriceAction = "update"
 	PriceActivate  PriceAction = "activate"
 	PriceArchive   PriceAction = "archive"
 	PriceUnchanged PriceAction = "unchanged"
@@ -82,6 +83,7 @@ type PricePlan struct {
 	// ExistingID is the matched OpenRails price (uuid.Nil when creating).
 	ExistingID uuid.UUID                         `json:"existing_id,omitempty"`
 	CreateReq  billingservice.CreatePriceRequest `json:"create_req,omitempty"`
+	UpdateReq  billingservice.UpdatePriceRequest `json:"update_req,omitempty"`
 
 	// Key (#774) is this declared price's resolved key (explicit or
 	// auto-defaulted). For Action==PriceCreate it rides CreateReq.Key; for a
@@ -343,6 +345,12 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			default: // active desired but currently archived
 				plp.Action = PriceActivate
 			}
+			if links := pspLinksNeedingSync(match.Providers, price.PSPLinks); len(links) > 0 {
+				plp.UpdateReq.PSPLinks = links
+				if plp.Action == PriceUnchanged {
+					plp.Action = PriceUpdate
+				}
+			}
 			// #774: a substance-unchanged price declared under a DIFFERENT key
 			// is a plain rename — signal apply to relabel via SetPriceKey. Never
 			// set for an unchanged key (nothing to do).
@@ -394,6 +402,44 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		}
 	}
 	return nil
+}
+
+// pspLinksNeedingSync returns the desired provider link/config values that are
+// not already present in the stored provider state. Generated provider fields
+// may coexist with the desired subset and do not count as drift.
+func pspLinksNeedingSync(
+	current map[string]billingservice.ProviderState,
+	desired map[string]map[string]string,
+) map[string]map[string]string {
+	var out map[string]map[string]string
+	for rawPSP, rawLink := range desired {
+		psp := strings.ToLower(strings.TrimSpace(rawPSP))
+		if psp == "" {
+			continue
+		}
+		link := make(map[string]string, len(rawLink))
+		state := current[psp]
+		needsSync := false
+		for rawKey, rawValue := range rawLink {
+			key := strings.TrimSpace(rawKey)
+			value := strings.TrimSpace(rawValue)
+			if key == "" || value == "" {
+				continue
+			}
+			link[key] = value
+			if strings.TrimSpace(state.IDs[key]) != value {
+				needsSync = true
+			}
+		}
+		if !needsSync || len(link) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string]map[string]string{}
+		}
+		out[psp] = link
+	}
+	return out
 }
 
 // matchPrice finds an existing OpenRails price with the same financial identity

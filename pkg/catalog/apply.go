@@ -18,6 +18,7 @@ type ApplyResult struct {
 	ProductsUpdated  int                `json:"products_updated"`
 	ProductsArchived int                `json:"products_archived"`
 	PricesCreated    int                `json:"prices_created"`
+	PricesUpdated    int                `json:"prices_updated"`
 	PricesActivated  int                `json:"prices_activated"`
 	PricesArchived   int                `json:"prices_archived"`
 	PendingActions   []PendingActionFor `json:"pending_actions,omitempty"`
@@ -155,8 +156,30 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 				return fmt.Errorf("archive price %s: %w", plp.Label, err)
 			}
 			res.PricesArchived++
+		case PriceUpdate:
+			// Provider link/config convergence runs below.
 		case PriceUnchanged:
 			// nothing to do beyond a possible key relabel below.
+		}
+		if plp.Action != PriceCreate && len(plp.UpdateReq.PSPLinks) > 0 && opts.Overwrite {
+			updater, ok := applier.(interface {
+				UpdatePrice(context.Context, uuid.UUID, billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error)
+			})
+			if !ok {
+				return fmt.Errorf("update price %s: applier does not support price updates", plp.Label)
+			}
+			out, err := updater.UpdatePrice(ctx, plp.ExistingID, plp.UpdateReq)
+			if err != nil {
+				return fmt.Errorf("update price %s: %w", plp.Label, err)
+			}
+			res.PricesUpdated++
+			for _, pa := range out.PendingManualActions {
+				res.PendingActions = append(res.PendingActions, PendingActionFor{
+					ProductKey: pp.Key,
+					PriceLabel: plp.Label,
+					Action:     pa,
+				})
+			}
 		}
 		// #774: a substance-matched price declared under a renamed key (plp.Key
 		// set only when it differs from the matched row's current key) gets
@@ -174,9 +197,9 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 // Print writes a human summary of the apply result, including any pending
 // manual actions, to out.
 func (r *ApplyResult) Print(out io.Writer) {
-	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d activated %d archived %d\n",
+	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d updated %d activated %d archived %d\n",
 		r.ProductsCreated, r.ProductsUpdated, r.ProductsArchived,
-		r.PricesCreated, r.PricesActivated, r.PricesArchived)
+		r.PricesCreated, r.PricesUpdated, r.PricesActivated, r.PricesArchived)
 	if len(r.PendingActions) == 0 {
 		return
 	}

@@ -53,13 +53,17 @@ func normalizeCurrency(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-// stablecoinCurrencies are the currencies eligible for the Solana provider.
-// Solana settles on-chain in stablecoins pegged $1; a recurring fiat price is
-// only Solana-eligible if its currency is one of these.
+// stablecoinCurrencies are explicit ledger currency identifiers accepted
+// alongside generic three-letter currency codes.
 var stablecoinCurrencies = map[string]struct{}{
-	"usd":  {}, // priced in USD, settled in a $1-pegged stablecoin
+	"usd":  {},
 	"usdc": {},
 	"usdg": {},
+}
+
+var recurringSolanaTokenSymbols = map[string]struct{}{
+	"USDC": {},
+	"USD1": {},
 }
 
 // Load reads, parses and validates a manifest from disk. Validation normalizes
@@ -504,18 +508,25 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		}
 	}
 
-	// Per-provider eligibility (shape-only; no chain calls). Solana settles
-	// on-chain in $1-pegged stablecoins, so a Solana price must be priced in a
-	// stablecoin currency (one-off finite windows and recurring are both allowed).
+	// Per-provider eligibility (shape-only; no chain calls). One-off Solana
+	// checkout quotes the selected token at payment time. A recurring plan is
+	// mint-specific, so it must declare its settlement token independently from
+	// the price's billing currency.
 	if price.Metered != nil && len(price.PSPs) > 0 {
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
 	for _, provider := range price.PSPs {
-		if provider == "solana" {
-			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
-				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (usd/usdc/usdg), got %q",
+		if provider == "solana" && price.AutoRenew {
+			if price.Currency != "usd" {
+				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q",
 					product.Key, PriceLabel(product.Key, *price), price.Currency)
 			}
+			symbol := strings.ToUpper(strings.TrimSpace(price.PSPLinks[provider]["mint_symbol"]))
+			if _, ok := recurringSolanaTokenSymbols[symbol]; !ok {
+				return fmt.Errorf("product %q price %s: recurring solana requires psp_links.solana.mint_symbol (USDC/USD1), got %q",
+					product.Key, PriceLabel(product.Key, *price), symbol)
+			}
+			price.PSPLinks[provider]["mint_symbol"] = symbol
 		}
 	}
 	return nil

@@ -25,14 +25,15 @@ func (s *planSubmitterStub) Submit(context.Context, merchant.ID, []solanago.Inst
 	return solanago.Signature{1}, nil
 }
 
-// TestSolanaAdapter_AutoCreateHonoursTokenDecimals pins #817 on the plan-PUBLISH
-// path: the catalog price is MICROS, the on-chain plan amount is token BASE
-// UNITS, and the merchant's configured decimals is the only thing that converts
-// between them. Shipping micros verbatim (the old bug) was a 1000x undercharge
-// on a 9-decimal mint.
-func TestSolanaAdapter_AutoCreateHonoursTokenDecimals(t *testing.T) {
+// TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals pins #817 on the
+// plan-publish path: the catalog price is MICROS, the on-chain plan amount is
+// token BASE UNITS, and the merchant's configured decimals is the only thing
+// that converts between them. Shipping micros verbatim (the old bug) was a
+// 1000x undercharge on a 9-decimal mint.
+func TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals(t *testing.T) {
 	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	hours := 30 * 24
+	days := 30
 
 	cases := []struct {
 		decimals int
@@ -62,28 +63,35 @@ func TestSolanaAdapter_AutoCreateHonoursTokenDecimals(t *testing.T) {
 			a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 			ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
 
-			out, err := a.AutoCreate(ctx, autoCreateContext{
+			out, err := a.Attach(ctx, map[string]string{
+				solanaKeyMintSymbol: "USDC",
+			}, autoCreateContext{
 				PriceID:             uuid.New(),
 				ProductKey:          "premium",
-				Currency:            "USDC",
+				Currency:            "usd",
 				UnitAmount:          tc.micros,
 				AccessDurationHours: &hours,
+				BillingCycleDays:    &days,
 			})
 			if err != nil {
-				t.Fatalf("AutoCreate: %v", err)
+				t.Fatalf("Attach: %v", err)
 			}
 			if got := out[solanaKeyAmountBaseUnits]; got != strconv.FormatUint(tc.want, 10) {
 				t.Fatalf("%d micros @%d decimals: plan amount_base_units = %s, want %d", tc.micros, tc.decimals, got, tc.want)
+			}
+			if got := out[solanaKeyMintSymbol]; got != "USDC" {
+				t.Fatalf("plan mint_symbol = %q, want USDC", got)
 			}
 		})
 	}
 }
 
-// TestSolanaAdapter_AutoCreateRejectsMissingDecimals: an omitted `decimals`
+// TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals: an omitted `decimals`
 // decodes as 0 and must fail loudly rather than publish a 10^6-off plan.
-func TestSolanaAdapter_AutoCreateRejectsMissingDecimals(t *testing.T) {
+func TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals(t *testing.T) {
 	key, _ := solanago.NewRandomPrivateKey()
 	hours := 30 * 24
+	days := 30
 	plan := recurring.NewPlanServiceWithReader(
 		&planSubmitterStub{merchantPub: key.PublicKey()}, nil, "mainnet",
 		map[string]config.TokenConfig{"USDC": {Mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"}},
@@ -91,13 +99,16 @@ func TestSolanaAdapter_AutoCreateRejectsMissingDecimals(t *testing.T) {
 	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
 
-	if _, err := a.AutoCreate(ctx, autoCreateContext{
+	if _, err := a.Attach(ctx, map[string]string{
+		solanaKeyMintSymbol: "USDC",
+	}, autoCreateContext{
 		PriceID:             uuid.New(),
 		ProductKey:          "premium",
-		Currency:            "USDC",
+		Currency:            "usd",
 		UnitAmount:          10_000_000,
 		AccessDurationHours: &hours,
+		BillingCycleDays:    &days,
 	}); err == nil {
-		t.Fatal("expected AutoCreate to reject a token with no configured decimals")
+		t.Fatal("expected Attach to reject a token with no configured decimals")
 	}
 }

@@ -416,11 +416,12 @@ type CreatePriceRequest struct {
 	// links" — useful for testing or for prices that are not sold externally.
 	PSPs []string `json:"psps,omitempty"`
 
-	// PSPLinks maps PSP key -> pre-existing link key/value pairs.
+	// PSPLinks maps PSP key -> provider-specific link/config key/value pairs.
 	// Schema is per-provider:
 	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
 	//   ccbill : {"form_name": "...", "flex_id": "..."}
 	//   nmi : {"plan_id": "..."}
+	//   solana : {"mint_symbol": "USDC"} or {"plan_pda": "...", "mint_symbol": "USDC"}
 	// Any provider with a non-empty link here is implicitly added to the
 	// attach set even if absent from Providers.
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
@@ -686,6 +687,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
 	// entire psp_links map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
+	var pending []PendingAction
 	if req.PSPLinks != nil {
 		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
@@ -734,6 +736,14 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 				return nil, fmt.Errorf("unknown PSP %q: not a rail or a declared PSP key", psp)
 			}
 			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
+			if errors.Is(attachErr, errPendingManualLink) || errors.Is(attachErr, errRemoteWritesDisabled) {
+				template := adapter.PendingActionTemplate(priceID)
+				if template.Provider == "" {
+					template.Provider = rail
+				}
+				pending = append(pending, template)
+				continue
+			}
 			if attachErr != nil {
 				return nil, fmt.Errorf("%s: %w", psp, attachErr)
 			}
@@ -776,7 +786,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		}
 	}
 
-	return priceToCatalogPrice(updated), nil
+	out := priceToCatalogPrice(updated)
+	out.PendingManualActions = pending
+	return out, nil
 }
 
 // priceToCatalogPrice maps the DB row into the response shape, including the

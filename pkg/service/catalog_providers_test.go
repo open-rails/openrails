@@ -221,6 +221,41 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	}
 }
 
+func TestResolveProviders_SolanaSettlementTokenPendingWhenUnconfigured(t *testing.T) {
+	s := newUnconfiguredService()
+	hours := 30 * 24
+	req := CreatePriceRequest{
+		ProductID:           uuid.New(),
+		UnitAmount:          23_000_000,
+		Currency:            "usd",
+		AccessDurationHours: &hours,
+		AutoRenew:           true,
+		PSPs:                []string{"solana"},
+		PSPLinks: map[string]map[string]string{
+			"solana": {solanaKeyMintSymbol: "USDC"},
+		},
+	}
+
+	rails, states, pending, err := s.resolveProviders(
+		context.Background(),
+		&models.Product{ID: req.ProductID, Key: "premium"},
+		req,
+		uuid.New(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(rails) != 0 {
+		t.Fatalf("unconfigured Solana should not have a rails entry, got %v", rails)
+	}
+	if states["solana"].Status != ProviderStatusPendingManualLink {
+		t.Fatalf("expected pending_manual_link, got %+v", states["solana"])
+	}
+	if len(pending) != 1 || pending[0].Provider != "solana" {
+		t.Fatalf("expected one Solana pending action, got %v", pending)
+	}
+}
+
 func TestResolveProviders_AllPending(t *testing.T) {
 	s := newUnconfiguredService()
 	productID := uuid.New()
