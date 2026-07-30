@@ -368,6 +368,15 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		}
 
 		// No financial match -> create.
+		psps := price.PSPs
+		pspLinks := price.PSPLinks
+		if price.Archived {
+			// Historical prices are local records only. Do not let CreatePrice
+			// publish provider objects for a price that starts archived; the
+			// declarations converge if the price is later activated.
+			psps = nil
+			pspLinks = nil
+		}
 		createReq := billingservice.CreatePriceRequest{
 			// ProductID is filled at apply time once the product exists.
 			ProductID:           productID(existing),
@@ -378,8 +387,8 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			AutoRenew:           price.AutoRenew,
 			TrialUnitAmount:     trialAmount,
 			TrialDurationHours:  trialHours,
-			PSPs:                price.PSPs,
-			PSPLinks:            price.PSPLinks,
+			PSPs:                psps,
+			PSPLinks:            pspLinks,
 			Archived:            price.Archived,
 		}
 		pp.Prices = append(pp.Prices, PricePlan{

@@ -115,6 +115,9 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	plan, ok := a.planService()
 	if !ok {
 		// Solana recurring not configured here: defer to a manual/late publish.
+		if in.RemoteWritesDisabled {
+			return nil, errRemoteWritesDisabled
+		}
 		return nil, errPendingManualLink
 	}
 	tid, ok := merchant.FromContext(ctx)
@@ -146,6 +149,11 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	// on re-apply we attach to the existing on-chain plan instead of republishing.
 	if existing, found := a.findExistingPlan(ctx, plan, tid, planID, symbol); found {
 		return existing, nil
+	}
+	if in.RemoteWritesDisabled {
+		// Existing-plan discovery above is read-only and remains available in
+		// limited/readonly mode. Gate only the actual publish boundary.
+		return nil, errRemoteWritesDisabled
 	}
 
 	handle, err := plan.PublishPlan(ctx, recurring.PublishPlanInput{
@@ -214,8 +222,8 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyMintSymbol]))
 	if pda == "" {
-		// The guard lives here — not on the plan_pda path — so pre-#745 rows
-		// (billed in usdc/usdg with the mint derived from the currency) stay
+		// The guard lives here — not on the plan_pda path — so eligible
+		// pre-#745 USDC rows can derive the token from their currency and stay
 		// operable for link verification and rotation.
 		if in.BillingCycleDays != nil {
 			if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
@@ -233,15 +241,15 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		if symbol == "" {
 			return nil, fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
 		}
-		if in.RemoteWritesDisabled {
-			return nil, errRemoteWritesDisabled
-		}
 		return a.createRecurringPlan(ctx, in, symbol)
 	}
-	// Attaching an EXISTING plan handle does not require mint_symbol: pre-#745
-	// rows derived the token from the billing currency and must stay operable.
-	// Without a symbol the mint/amount verification below is skipped (the old
-	// soft behavior); period and merchant are still verified when possible.
+	if in.BillingCycleDays != nil {
+		var err error
+		symbol, err = existingSolanaSettlementSymbol(in.Currency, symbol)
+		if err != nil {
+			return nil, err
+		}
+	}
 	out := map[string]string{solanaKeyPlanPDA: pda}
 	for _, k := range []string{
 		solanaKeyPlanID, solanaKeyMint, solanaKeyMintSymbol,
@@ -318,6 +326,31 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	out[solanaKeyCreatedAt] = strconv.FormatInt(acct.CreatedAt, 10)
 	out[solanaKeyMerchant] = acct.Owner.String()
 	return out, nil
+}
+
+// existingSolanaSettlementSymbol keeps safely translatable pre-#745 USDC
+// prices operable while preserving strict validation for the #745 model.
+// Before #745, currency=usdc identified both the billing denomination and the
+// settlement token. New prices bill in USD and must declare their token.
+func existingSolanaSettlementSymbol(currency, declared string) (string, error) {
+	currency = strings.ToLower(strings.TrimSpace(currency))
+	declared = strings.ToUpper(strings.TrimSpace(declared))
+	switch currency {
+	case "usd":
+		if declared == "" {
+			return "", fmt.Errorf("solana recurring link requires psp_links.solana.mint_symbol")
+		}
+	case "usdc":
+		if declared == "" {
+			return "USDC", nil
+		}
+		if declared != "USDC" {
+			return "", fmt.Errorf("legacy solana price billed in USDC cannot settle in %s", declared)
+		}
+	default:
+		return "", fmt.Errorf("solana recurring existing-plan links require USD billing currency or a legacy USDC price, got %q", currency)
+	}
+	return declared, nil
 }
 
 // Verify reads the on-chain Plan account and diffs its immutable terms against the

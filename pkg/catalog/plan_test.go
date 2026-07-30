@@ -220,6 +220,11 @@ products:
     prices:
       - currency: usd
         unit_amount: 1200
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {mint_symbol: USDC}
         archived: true
 `)
 	f := newFakeApplier()
@@ -234,6 +239,9 @@ products:
 	}
 	if !pp.Prices[0].CreateReq.Archived {
 		t.Fatal("price create must be archived")
+	}
+	if len(pp.Prices[0].CreateReq.PSPs) != 0 || len(pp.Prices[0].CreateReq.PSPLinks) != 0 {
+		t.Fatalf("archived price create must not publish provider objects: %+v", pp.Prices[0].CreateReq)
 	}
 }
 
