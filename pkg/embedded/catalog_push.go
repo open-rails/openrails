@@ -26,8 +26,13 @@ import (
 
 // CatalogPushOptions configures PushMerchantCatalog.
 type CatalogPushOptions struct {
-	Config   *config.Config
-	PGXPool  *pgxpool.Pool
+	Config  *config.Config
+	PGXPool *pgxpool.Pool
+	// Runtime lends an already-bootstrapped embedded engine's Solana plan/RPC
+	// services to the otherwise isolated catalog helper. This lets a host's
+	// configured signer publish recurring plans without activating unrelated
+	// provider clients in the helper runtime. Its config is authoritative.
+	Runtime  *Embedded
 	File     string
 	Manifest []byte
 	Out      io.Writer
@@ -68,7 +73,8 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	if err != nil {
 		return err
 	}
-	if opts.Config == nil {
+	cfg := catalogPushConfig(opts)
+	if cfg == nil {
 		return fmt.Errorf("config not loaded; in-process mode requires config")
 	}
 	// #723 two-mode doctrine. MODE 2 (api): the catalog is API-owned DB data —
@@ -77,7 +83,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	// a mutating push always runs the full converge (Insert+Overwrite+Prune),
 	// so partial flags cannot leave the DB projection drifted from the file.
 	if !opts.planOnly() {
-		if !opts.Config.IsManifestMerchantSource() {
+		if !cfg.IsManifestMerchantSource() {
 			return fmt.Errorf("merchant_source=api refuses a mutating catalog push (two truths, #723/#724): mutate the catalog via the API, or run merchant_source=manifest; plan-only remains available")
 		}
 		if !opts.Insert || !opts.Overwrite || !opts.Prune {
@@ -90,7 +96,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	for _, target := range targets {
 		manifests = append(manifests, target.Manifest)
 	}
-	rt, svc, cleanup, err := newCatalogPushRuntime(opts.Config, opts.PGXPool, manifests...)
+	rt, svc, cleanup, err := catalogPushRuntime(opts, manifests...)
 	if err != nil {
 		return err
 	}
@@ -144,6 +150,36 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 
 func (o CatalogPushOptions) planOnly() bool {
 	return o.DryRun || (!o.Insert && !o.Overwrite && !o.Prune)
+}
+
+func catalogPushConfig(opts CatalogPushOptions) *config.Config {
+	if opts.Runtime != nil {
+		return opts.Runtime.Config()
+	}
+	return opts.Config
+}
+
+func catalogPushRuntime(
+	opts CatalogPushOptions,
+	manifests ...*catalog.Manifest,
+) (*app.Runtime, *billingservice.Service, func(), error) {
+	if opts.Runtime != nil && (opts.Runtime.app == nil || opts.Runtime.app.Runtime == nil) {
+		return nil, nil, nil, fmt.Errorf("catalog runtime is not initialized")
+	}
+	rt, svc, cleanup, err := newCatalogPushRuntime(
+		catalogPushConfig(opts),
+		opts.PGXPool,
+		manifests...,
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if opts.Runtime != nil {
+		source := opts.Runtime.app.Runtime
+		rt.SolanaPlanService = source.SolanaPlanService
+		rt.SolanaRPCResolver = source.SolanaRPCResolver
+	}
+	return rt, svc, cleanup, nil
 }
 
 func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error) {

@@ -18,9 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -267,103 +264,8 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		}
 
-		// Recurring Solana services (#254/#255/#256): build one per-merchant
-		// Submitter (Transit when configured so the key never leaves Vault, else a
-		// keypair signer over the secret store) and share it across the cranker,
-		// plan-publish, and enroll services. The cranker MUST be injected BEFORE
-		// workers start (InitRiver). The Submitter's RPC resolves PER MERCHANT at
-		// submit time (#728: store settings win, boot client fallback), so the
-		// cranker arms even for store-only merchants (no boot Solana rail).
 		if deps.Runtime != nil {
-			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
-			// tier-change prepare service (#272) co-signs the merchant/cranker slot
-			// with it directly, so it MUST be the same key as the cranker.
-			solanaSigner := recurring.NewSignerFromRailMerchantAccounts(secretStore, solanaTransit, deps.Runtime.DB, 0, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
-			submitter := recurring.NewSignerSubmitterWithResolver(solanaSigner, deps.Runtime.SolanaRPCResolver.Resolve)
-			// #788: network derives from test_mode alone (#349); the token set
-			// is the network's curated default (a merchant's rail-account
-			// settings refine tokens at request-time resolution seams).
-			network := "mainnet"
-			if s.cfg.IsTestMode() {
-				network = "devnet"
-			}
-			solanaTokens := solanatokens.ForNetwork(network)
-			cranker := recurring.NewCrankService(submitter)
-			deps.Runtime.SetSolanaCranker(cranker)
-			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Chain
-			// reads arm PER MERCHANT through the #728 resolver at request time.
-			chainReader := deps.Runtime.SolanaRPCResolver.ChainReader()
-			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
-				planSvc := recurring.NewPlanServiceWithReader(submitter, chainReader, network, solanaTokens)
-				enrollSvc := recurring.NewEnrollService(
-					deps.Runtime.SubscriptionLifecycleService,
-					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
-					chainReader,
-					submitter,
-					network,
-					solanaTokens,
-				)
-				deps.Runtime.SetSolanaRecurringServices(planSvc, enrollSvc)
-
-				// App-driven on-chain cancel (#266): builds the unsigned
-				// cancel_subscription tx the subscriber signs to trustlessly revoke a
-				// recurring subscription on-chain (additive to the soft cancel #264).
-				deps.Runtime.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
-					solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB),
-					chainReader,
-				))
-
-				// App-driven on-chain tier change (#272): the prepare/confirm pair.
-				// PrepareTierChangeService builds the SINGLE ATOMIC tx (cancel-old +
-				// subscribe-new [+ prorated transfer for an upgrade]); for an upgrade it
-				// co-signs the merchant/cranker slot with the SAME signer + RPC + network
-				// as the cranker, so the slot it pre-signs is the merchant's own key.
-				deps.Runtime.SetSolanaPrepareTierChangeService(recurring.NewPrepareTierChangeService(
-					solanaSigner,
-					chainReader,
-					network,
-					solanaTokens,
-				))
-
-				// Subscribe-via-checkout (#261/#262): the prepare service builds the
-				// unsigned init/subscribe txns; enroll confirms. Wire both into the
-				// checkout session service so /v1/me/checkout(+confirm) drives the
-				// recurring Solana subscription flow.
-				if deps.Runtime.CheckoutSessionService != nil {
-					// The subscribe step is now an ATOMIC co-signed bundle (#286):
-					// [subscribe + transfer(first period)]. The cranker pre-signs the
-					// transfer slot, so the prepare service takes the SAME signer + RPC +
-					// network as the cranker (the slot it pre-signs is the merchant's key).
-					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, chainReader, network, solanaTokens)
-					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
-
-					// Cancel + tier-change as Solana Pay checkout modes: reuse the same
-					// prepare services as the auth-gated #271/#272 handlers, and build the
-					// confirm services (mirrors) for the reference poller to invoke on
-					// confirmation. This extends the existing Solana Pay machinery to the
-					// solana_cancel / solana_tier_change modes — no parallel protocol.
-					solanaSubRepo := solanasubs.NewSolanaSubscriptionRepo(deps.Runtime.DB)
-					confirmCancelSvc := recurring.NewConfirmCancelService(
-						chainReader,
-						deps.Runtime.SubscriptionLifecycleService,
-					)
-					confirmTierChangeSvc := recurring.NewConfirmTierChangeService(
-						chainReader,
-						deps.Runtime.SubscriptionLifecycleService,
-						solanaSubRepo,
-						network,
-						solanaTokens,
-					)
-					deps.Runtime.CheckoutSessionService.SetSolanaLifecycle(
-						deps.Runtime.SolanaPrepareCancelService,
-						deps.Runtime.SolanaPrepareTierChangeService,
-						confirmCancelSvc,
-						confirmTierChangeSvc,
-						deps.Runtime.SubscriptionService,
-						solanaSubRepo,
-					)
-				}
-			}
+			deps.Runtime.ArmSolanaRecurringServices(secretStore, solanaTransit)
 		}
 
 	}
