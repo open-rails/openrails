@@ -165,13 +165,7 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 		// braces): link sync must never publish provider objects for a price
 		// this run is retiring.
 		if plp.Action != PriceCreate && plp.Action != PriceArchive && len(plp.UpdateReq.PSPLinks) > 0 && opts.Overwrite {
-			updater, ok := applier.(interface {
-				UpdatePrice(context.Context, uuid.UUID, billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error)
-			})
-			if !ok {
-				return fmt.Errorf("update price %s: applier does not support price updates", plp.Label)
-			}
-			out, err := updater.UpdatePrice(ctx, plp.ExistingID, plp.UpdateReq)
+			out, err := applier.UpdatePrice(ctx, plp.ExistingID, plp.UpdateReq)
 			if err != nil {
 				return fmt.Errorf("update price %s: %w", plp.Label, err)
 			}
