@@ -161,7 +161,10 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 		case PriceUnchanged:
 			// nothing to do beyond a possible key relabel below.
 		}
-		if plp.Action != PriceCreate && len(plp.UpdateReq.PSPLinks) > 0 && opts.Overwrite {
+		// PriceArchive is excluded on top of plan.go's own gate (belt and
+		// braces): link sync must never publish provider objects for a price
+		// this run is retiring.
+		if plp.Action != PriceCreate && plp.Action != PriceArchive && len(plp.UpdateReq.PSPLinks) > 0 && opts.Overwrite {
 			updater, ok := applier.(interface {
 				UpdatePrice(context.Context, uuid.UUID, billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error)
 			})
