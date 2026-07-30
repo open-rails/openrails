@@ -101,6 +101,19 @@ ALTER TABLE openrails.payments
 COMMENT ON COLUMN openrails.payments.token_type IS
     '#796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.';
 
+-- 6b. The custodian webhook folds (park / rotate / refresh / NT status) used to
+-- key on `rail`, which was only ever a proxy for custody and now matches every
+-- NMI instrument. They key on `custodian` instead — correct, but it needs the
+-- index the rail column had. Partial: only custodian-held rows are ever read
+-- this way, and they are a small minority of the table.
+CREATE INDEX idx_payment_methods_custodian_method_ref
+    ON openrails.payment_methods USING btree (custodian, rail_method_ref)
+ WHERE custodian <> 'psp';
+
+CREATE INDEX idx_payment_methods_custodian_network_token
+    ON openrails.payment_methods USING btree (custodian, network_token_id)
+ WHERE custodian <> 'psp' AND network_token_id <> ''::text;
+
 -- 7. Custodian routing. An inbound Basis Theory webhook carries a TENANT id and
 -- no merchant context, exactly like an account-routed Stripe/CCBill webhook —
 -- so it needs the same indexed, cross-merchant directory lookup. The custodian

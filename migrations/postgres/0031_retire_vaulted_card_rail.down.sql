@@ -8,6 +8,8 @@ SET LOCAL lock_timeout = '10s';
 
 DROP FUNCTION IF EXISTS openrails.psp_owner_by_custodian_identity(text, text, text);
 DROP INDEX IF EXISTS openrails.uq_psps_custodian_identity;
+DROP INDEX IF EXISTS openrails.idx_payment_methods_custodian_method_ref;
+DROP INDEX IF EXISTS openrails.idx_payment_methods_custodian_network_token;
 
 ALTER TABLE openrails.payments DROP CONSTRAINT chk_payments_token_type;
 UPDATE openrails.payments SET token_type = 'provider_vault' WHERE token_type = 'psp_token';
