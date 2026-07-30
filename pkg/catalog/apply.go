@@ -169,7 +169,13 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 			if err != nil {
 				return fmt.Errorf("update price %s: %w", plp.Label, err)
 			}
-			res.PricesUpdated++
+			// Count an update only when at least one requested provider link
+			// actually applied. When every requested slot deferred to a pending
+			// action nothing was stored, and reporting "updated" would claim
+			// convergence an unconfigured deployment never made.
+			if len(out.PendingManualActions) < len(plp.UpdateReq.PSPLinks) {
+				res.PricesUpdated++
+			}
 			for _, pa := range out.PendingManualActions {
 				res.PendingActions = append(res.PendingActions, PendingActionFor{
 					ProductKey: pp.Key,
