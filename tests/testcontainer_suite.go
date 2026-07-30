@@ -463,7 +463,7 @@ func (suite *TestContainerSuite) RearmIntentPlumbing() {
 		}
 	}
 	if rt.RailPaymentMethodService != nil {
-		rt.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
+		rt.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: runner}
 	}
 }
 

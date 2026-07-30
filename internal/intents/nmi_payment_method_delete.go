@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TypeNMIVaultDelete is the durable NMI customer-vault delete (#674 tail): a
+// TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete (#674 tail): a
 // user-initiated payment-method delete posts this write-ahead intent and
 // executes it inline. Once accepted, the delete can never be lost — a crash or
 // transport-ambiguous response routes through the verifier, whose read answers
@@ -28,7 +28,7 @@ import (
 // or#870 — THE STANDING RULE, and why this type is USER-ONLY.
 // OpenRails never deletes a stored payment method. Not on expiry, not on a
 // stolen card, not on cancellation, not ever. Only the end user does. This
-// intent has exactly ONE producer — VaultDeleteThrough, reached only from the
+// intent has exactly ONE producer — PaymentMethodDeleteThrough, reached only from the
 // authenticated DELETE /payment-methods/:id route after an ownership check —
 // and it must keep exactly one. If you are adding a caller because a
 // subscription died, you are looking for TypeNMIDeleteSubscription, which
@@ -40,31 +40,34 @@ import (
 // locally, or a checkout whose very first charge was declined. They are gated
 // on `createdVault` and can never reach an instrument the customer has saved.
 // See paymentmethods.CleanupPaymentMethodBestEffort.
-const TypeNMIVaultDelete = "nmi_vault_delete"
+// The VALUE is deliberately unchanged: it is persisted in
+// rail_intents.intent_type, and renaming a symbol must never rewrite history
+// (or#871 — `vault` is reserved for HashiCorp, but a stored row is evidence).
+const TypeNMIPaymentMethodDelete = "nmi_vault_delete"
 
-// NMIVaultDeleteIdempotencyKey is the logical identity of "the delete of this
+// NMIPaymentMethodDeleteIdempotencyKey is the logical identity of "the delete of this
 // stored payment method": repeated delete requests map onto one intent.
-func NMIVaultDeleteIdempotencyKey(paymentMethodID uuid.UUID) string {
-	return TypeNMIVaultDelete + ":" + paymentMethodID.String()
+func NMIPaymentMethodDeleteIdempotencyKey(paymentMethodID uuid.UUID) string {
+	return TypeNMIPaymentMethodDelete + ":" + paymentMethodID.String()
 }
 
-// NMIVaultDeletePayload is the stored payload. The payment-method row is
+// NMIPaymentMethodDeletePayload is the stored payload. The payment-method row is
 // re-read at execution time when it still exists; the ref copies let the
 // handler finish the remote delete even if the local row vanished out-of-band.
-type NMIVaultDeletePayload struct {
+type NMIPaymentMethodDeletePayload struct {
 	UserID          string    `json:"user_id"`
 	PaymentMethodID uuid.UUID `json:"payment_method_id"`
 	RailCustomerRef string    `json:"rail_customer_ref,omitempty"`
 	RailMethodRef   string    `json:"rail_method_ref,omitempty"`
 }
 
-// VaultClientResolver resolves the per-merchant NMI client for a payment
+// RailClientResolver resolves the per-merchant NMI client for a payment
 // method (implemented by paymentmethods.RailPaymentMethodService).
-type VaultClientResolver interface {
+type RailClientResolver interface {
 	ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error)
 }
 
-// NMIVaultDeleteHandler implements verify-then-execute deletion of an NMI
+// NMIPaymentMethodDeleteHandler implements verify-then-execute deletion of an NMI
 // customer vault (or, for #682 shared vaults, of ONE billing entry):
 //
 //   - relevance: superseded only when the payment method is back in use by an
@@ -75,23 +78,23 @@ type VaultClientResolver interface {
 //     idempotent by observation); present -> delete. Transport-ambiguous
 //     outcomes go to the verifier; parsed clean rejections retry.
 //   - finalize: remove the local row (idempotent — already-gone is fine).
-type NMIVaultDeleteHandler struct {
+type NMIPaymentMethodDeleteHandler struct {
 	DB     *db.DB
-	Vault  VaultClientResolver
+	Rails  RailClientResolver
 	Policy BackoffPolicy
 }
 
-func NewNMIVaultDeleteHandler(d *db.DB, vault VaultClientResolver) *NMIVaultDeleteHandler {
-	return &NMIVaultDeleteHandler{DB: d, Vault: vault, Policy: DefaultBackoff}
+func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails RailClientResolver) *NMIPaymentMethodDeleteHandler {
+	return &NMIPaymentMethodDeleteHandler{DB: d, Rails: rails, Policy: DefaultBackoff}
 }
 
-func (h *NMIVaultDeleteHandler) Type() string { return TypeNMIVaultDelete }
-func (h *NMIVaultDeleteHandler) Backoff(attempts int32) time.Duration {
+func (h *NMIPaymentMethodDeleteHandler) Type() string { return TypeNMIPaymentMethodDelete }
+func (h *NMIPaymentMethodDeleteHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
 
-func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIVaultDeletePayload, error) {
-	var p NMIVaultDeletePayload
+func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMethodDeletePayload, error) {
+	var p NMIPaymentMethodDeletePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("nmi vault delete intent has no payload")
 	}
@@ -108,7 +111,7 @@ func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIVaultDelete
 // back in use by a live subscription (enqueue-to-execute race with a new
 // checkout picking the stored card). Missing rows stay relevant — Execute
 // resolves them off the payload refs.
-func (h *NMIVaultDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
@@ -126,7 +129,7 @@ func (h *NMIVaultDeleteHandler) CheckRelevance(ctx context.Context, intent gen.O
 	return StillRelevant(), nil
 }
 
-func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -135,10 +138,10 @@ func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.Openrail
 	if err != nil {
 		return Retryable("load payment method: " + err.Error())
 	}
-	if h.Vault == nil {
-		return Parked("vault client resolver not wired")
+	if h.Rails == nil {
+		return Parked("rail client resolver not wired")
 	}
-	client, err := h.Vault.ResolveClientForPaymentMethod(ctx, pm)
+	client, err := h.Rails.ResolveClientForPaymentMethod(ctx, pm)
 	if err != nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
@@ -222,7 +225,7 @@ func (h *NMIVaultDeleteHandler) Execute(ctx context.Context, intent gen.Openrail
 // Verify resolves an ambiguous delete via provider READS: vault (or billing
 // entry) absent means the delete is done; present means it verifiably did not
 // happen and the executor may retry.
-func (h *NMIVaultDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -231,10 +234,10 @@ func (h *NMIVaultDeleteHandler) Verify(ctx context.Context, intent gen.Openrails
 	if err != nil {
 		return Ambiguous("load payment method: " + err.Error())
 	}
-	if h.Vault == nil {
+	if h.Rails == nil {
 		return Ambiguous("vault client resolver not wired; cannot verify")
 	}
-	client, err := h.Vault.ResolveClientForPaymentMethod(ctx, pm)
+	client, err := h.Rails.ResolveClientForPaymentMethod(ctx, pm)
 	if err != nil {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
@@ -271,7 +274,7 @@ func (h *NMIVaultDeleteHandler) Verify(ctx context.Context, intent gen.Openrails
 // loadPaymentMethod re-reads the row when it exists; a row deleted out-of-band
 // falls back to a synthetic method built from the immutable payload refs so
 // the remote delete can still be finished.
-func (h *NMIVaultDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIVaultDeletePayload) (*models.PaymentMethod, error) {
+func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
 	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, p.PaymentMethodID)
 	if err == nil {
 		return pm, nil
@@ -290,7 +293,7 @@ func (h *NMIVaultDeleteHandler) loadPaymentMethod(ctx context.Context, intent ge
 
 // sharedVault reports whether OTHER local payment-method rows still share the
 // vault id (#682) — recomputed at execution time, never trusted from enqueue.
-func (h *NMIVaultDeleteHandler) sharedVault(ctx context.Context, pm *models.PaymentMethod) (bool, error) {
+func (h *NMIPaymentMethodDeleteHandler) sharedVault(ctx context.Context, pm *models.PaymentMethod) (bool, error) {
 	if strings.TrimSpace(pm.RailCustomerRef) == "" {
 		return false, nil
 	}
@@ -303,7 +306,7 @@ func (h *NMIVaultDeleteHandler) sharedVault(ctx context.Context, pm *models.Paym
 
 // vaultCustomer reads the id-filtered v5 customer roster: absent means the
 // vault customer is gone at NMI.
-func (h *NMIVaultDeleteHandler) vaultCustomer(ctx context.Context, client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
+func (h *NMIPaymentMethodDeleteHandler) vaultCustomer(ctx context.Context, client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
 	page, err := client.ListCustomersPage(ctx, "", 0, vaultID)
 	if err != nil {
 		return nil, false, err
@@ -331,7 +334,7 @@ func billingEntryPresent(customer *nmi.V5Customer, billingID string) bool {
 
 // finalize removes the local payment-method row. Idempotent — already-gone is
 // success.
-func (h *NMIVaultDeleteHandler) finalize(ctx context.Context, paymentMethodID uuid.UUID) error {
+func (h *NMIPaymentMethodDeleteHandler) finalize(ctx context.Context, paymentMethodID uuid.UUID) error {
 	err := paymentmethods.NewPaymentMethodRepo(h.DB).Delete(ctx, paymentMethodID)
 	if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return nil
@@ -339,41 +342,41 @@ func (h *NMIVaultDeleteHandler) finalize(ctx context.Context, paymentMethodID uu
 	return err
 }
 
-// VaultDeleteThrough adapts the write-through Runner to the producer surface
-// paymentmethods.VaultDeleteExecutor (paymentmethods cannot import intents —
+// PaymentMethodDeleteThrough adapts the write-through Runner to the producer surface
+// paymentmethods.PaymentMethodDeleteExecutor (paymentmethods cannot import intents —
 // import cycle via subscriptions — so the adapter lives here).
-type VaultDeleteThrough struct {
+type PaymentMethodDeleteThrough struct {
 	Runner *Runner
 }
 
-func (t *VaultDeleteThrough) ExecuteVaultDelete(ctx context.Context, pm *models.PaymentMethod) (paymentmethods.VaultDeleteOutcome, error) {
+func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (paymentmethods.PaymentMethodDeleteOutcome, error) {
 	if t == nil || t.Runner == nil {
-		return paymentmethods.VaultDeleteOutcome{}, errors.New("vault delete intent runner not wired")
+		return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("vault delete intent runner not wired")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return paymentmethods.VaultDeleteOutcome{}, err
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
 	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   strings.ToLower(string(pm.Rail)),
-		IntentType: TypeNMIVaultDelete,
+		IntentType: TypeNMIPaymentMethodDelete,
 		PspID:      pm.PspID,
-		Payload: NMIVaultDeletePayload{
+		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          pm.CustomerID.String(),
 			PaymentMethodID: pm.ID,
 			RailCustomerRef: pm.RailCustomerRef,
 			RailMethodRef:   pm.RailMethodRef,
 		},
-		IdempotencyKey: NMIVaultDeleteIdempotencyKey(pm.ID),
+		IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(pm.ID),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         OriginUser,
 		OriginReason:   "user payment-method delete",
 	})
 	if err != nil {
-		return paymentmethods.VaultDeleteOutcome{}, err
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
-	out := paymentmethods.VaultDeleteOutcome{}
+	out := paymentmethods.PaymentMethodDeleteOutcome{}
 	if row.LastFailureReason != nil {
 		out.Reason = *row.LastFailureReason
 	}

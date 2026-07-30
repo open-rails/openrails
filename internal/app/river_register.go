@@ -356,7 +356,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// #674 tail: durable user-initiated vault deletes (an unwired RailPaymentMethodService
 	// resolves no client, so the handler parks — never fails).
 	if r.RailPaymentMethodService != nil {
-		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.RailPaymentMethodService))
+		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService))
 	}
 	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.CollectionResolver, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine

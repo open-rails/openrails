@@ -109,7 +109,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/refund.go:Execute":                           "nmi_refund intent handler",
 	"internal/intents/nmi_delete.go:Execute":                       "nmi_delete_subscription intent handler",
 	"internal/intents/nmi_payment_source_update.go:Execute":        "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
-	"internal/intents/nmi_vault_delete.go:Execute":                 "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
+	"internal/intents/nmi_payment_method_delete.go:Execute":                 "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
 
 	// --- the checkout upgrade saga: reactive, compensating ----------------
 	"internal/modules/checkout/service.go:processUpgrade":          "upgrade proration sale + successor create: order ids content-derived, pre/post verify, ambiguity ⇒ roster-scan adopt-or-processing (#674 tail); full saga assessed and declined (completed.md #674)",

@@ -32,7 +32,7 @@ var destructiveIntentTypes = map[string]struct{}{
 	// reconcile path produces it. It stays gated anyway: the breaker exists for
 	// the case where something starts producing these in bulk, which under the
 	// standing rule would itself be the incident.
-	TypeNMIVaultDelete: {},
+	TypeNMIPaymentMethodDelete: {},
 	// TypeNMIPaymentSourceUpdate is deliberately NOT listed: repointing which
 	// vaulted card a subscription bills destroys nothing (both vaults survive;
 	// swap back any time), so it doesn't fit the #679 mass-destruction threat

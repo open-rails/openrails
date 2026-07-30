@@ -19,7 +19,7 @@ import (
 
 // destructiveType is a stable destructive intent type for seeding (the ceiling
 // consumes the WHOLE DestructiveIntentTypes() set, not any one member).
-const ceilingTestType = TypeNMIVaultDelete
+const ceilingTestType = TypeNMIPaymentMethodDelete
 
 // seedCeilingMerchant inserts a bare merchant and registers cleanup of its
 // rail_intents + findings + row.

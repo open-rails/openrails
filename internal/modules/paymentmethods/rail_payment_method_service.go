@@ -36,7 +36,7 @@ type RailPaymentMethodService struct {
 	DB                  *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
-	DeleteIntents VaultDeleteExecutor
+	DeleteIntents PaymentMethodDeleteExecutor
 	clock         clockwork.Clock
 	newNMIClient  func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
@@ -565,10 +565,10 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 // intent. Never a lost delete.
 var ErrPaymentMethodDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
 
-// VaultDeleteOutcome mirrors the durable intent's post-execution state without
+// PaymentMethodDeleteOutcome mirrors the durable intent's post-execution state without
 // importing the intents package (import cycle: intents → subscriptions →
 // paymentmethods). Neither Done nor Terminal = still resolving out-of-band.
-type VaultDeleteOutcome struct {
+type PaymentMethodDeleteOutcome struct {
 	// Done: the remote delete is confirmed and the local row is gone.
 	Done bool
 	// Terminal: the delete failed permanently; Reason says why.
@@ -576,10 +576,10 @@ type VaultDeleteOutcome struct {
 	Reason   string
 }
 
-// VaultDeleteExecutor posts the durable nmi_vault_delete intent and executes
-// it inline (#674 write-through). Implemented by intents.VaultDeleteThrough.
-type VaultDeleteExecutor interface {
-	ExecuteVaultDelete(ctx context.Context, pm *models.PaymentMethod) (VaultDeleteOutcome, error)
+// PaymentMethodDeleteExecutor posts the durable nmi_vault_delete intent and executes
+// it inline (#674 write-through). Implemented by intents.PaymentMethodDeleteThrough.
+type PaymentMethodDeleteExecutor interface {
+	ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (PaymentMethodDeleteOutcome, error)
 }
 
 // DeletePaymentMethod deletes a stored payment method the DURABLE way (#674 tail):
@@ -594,7 +594,7 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	if s.DeleteIntents == nil {
 		return errors.New("vault delete intent executor not wired")
 	}
-	out, err := s.DeleteIntents.ExecuteVaultDelete(ctx, pm)
+	out, err := s.DeleteIntents.ExecutePaymentMethodDelete(ctx, pm)
 	if err != nil {
 		return fmt.Errorf("post vault delete intent: %w", err)
 	}

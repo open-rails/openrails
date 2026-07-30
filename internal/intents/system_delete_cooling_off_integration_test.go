@@ -163,7 +163,7 @@ func TestSystemOriginDeleteIsCountedByTheRateCeiling(t *testing.T) {
 			`INSERT INTO openrails.rail_intents
 			   (id, merchant_id, rail, intent_type, idempotency_key, status, origin, next_attempt_at, created_at)
 			 VALUES ($1, $2, 'mobius', $3, $4, 'pending', 'system', now(), now())`,
-			id, f.merchant, TypeNMIVaultDelete, TypeNMIVaultDelete+":ceil:"+uuid.NewString())
+			id, f.merchant, TypeNMIPaymentMethodDelete, TypeNMIPaymentMethodDelete+":ceil:"+uuid.NewString())
 		require.NoError(t, err)
 		seeded = append(seeded, id)
 	}

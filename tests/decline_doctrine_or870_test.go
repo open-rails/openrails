@@ -38,7 +38,7 @@ func storedPaymentMethodDestruction(t *testing.T, suite *TestContainerSuite, pmI
 		pmID).Scan(&rowPresent))
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
-		intents.TypeNMIVaultDelete).Scan(&vaultDeleteIntents))
+		intents.TypeNMIPaymentMethodDelete).Scan(&vaultDeleteIntents))
 	return rowPresent, vaultDeleteIntents
 }
 
@@ -291,7 +291,7 @@ func TestOr870UnknownCodeIsBucket1(t *testing.T) {
 
 // The invariant that outranks every bucket: no automated path — dunning,
 // cancellation, reconcile — produces a stored-payment-method delete. The ONLY
-// producer of TypeNMIVaultDelete is the authenticated user route.
+// producer of TypeNMIPaymentMethodDelete is the authenticated user route.
 func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
@@ -306,7 +306,7 @@ func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 	var vaultDeletes int
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
 		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
-		intents.TypeNMIVaultDelete).Scan(&vaultDeletes))
+		intents.TypeNMIPaymentMethodDelete).Scan(&vaultDeletes))
 	assert.Zero(t, vaultDeletes,
 		"no decline outcome, and no dunning exhaustion, may ever queue a stored-payment-method delete")
 }

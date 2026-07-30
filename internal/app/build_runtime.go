@@ -425,7 +425,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
 	if runtime.RailPaymentMethodService != nil {
-		runtime.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
