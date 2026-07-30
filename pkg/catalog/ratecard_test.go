@@ -210,7 +210,7 @@ products:
       - key: ai-image-gen
     prices:
       - currency: usd
-        providers: [stripe]
+        psps: [stripe]
         input_min: 5_000_000
         round: down
         model: tiered
