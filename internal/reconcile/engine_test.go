@@ -536,36 +536,6 @@ func tp(t time.Time) *time.Time { return &t }
 
 var testNow = time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 
-// stubDestructiveRunRecorder stands in for the DB-backed recorder in the
-// engine's unit tests: it satisfies the or#859 no-bypass gate (an enforce pass
-// that overwrites subscription state and cannot record its undo refuses to run)
-// without needing Postgres. The reversibility itself is proven in
-// converge_rollback_integration_test.go, against the real tables.
-type stubDestructiveRunRecorder struct {
-	opened   int
-	captured []uuid.UUID
-	finished int
-}
-
-func (r *stubDestructiveRunRecorder) Open(context.Context, OpenDestructiveRunParams) (uuid.UUID, error) {
-	r.opened++
-	return uuid.New(), nil
-}
-
-func (r *stubDestructiveRunRecorder) CaptureSubscription(_ context.Context, _, subscriptionID uuid.UUID) (time.Time, error) {
-	r.captured = append(r.captured, subscriptionID)
-	return time.Now().UTC(), nil
-}
-
-func (r *stubDestructiveRunRecorder) StampIntents(context.Context, uuid.UUID, uuid.UUID, time.Time) (int, error) {
-	return 0, nil
-}
-
-func (r *stubDestructiveRunRecorder) Finish(context.Context, uuid.UUID, string, map[string]int) error {
-	r.finished++
-	return nil
-}
-
 func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*Engine, *memStore, *fakeWriter) {
 	store := newMemStore()
 	writer := newFakeWriter(local)
@@ -575,7 +545,6 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 		Local:     local,
 		Writer:    writer,
 		Decisions: &fakeDecisions{local: local, calls: writer.calls},
-		Runs:      &stubDestructiveRunRecorder{},
 		Now:       func() time.Time { return testNow },
 	}
 	return eng, store, writer

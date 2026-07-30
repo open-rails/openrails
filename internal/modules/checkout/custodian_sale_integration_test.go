@@ -218,24 +218,24 @@ func (fx *custodianSaleFixture) enqueueAndExecute(t *testing.T, key string) gen.
 			TokenIntentID: fx.bt.intentID,
 			AmountMicros:  1_990_000,
 			Currency:      "USD",
-			Description:   "Purchase: VaultedCard Test",
+			Description:   "Purchase: Custodian Sale Test",
 			UserID:        fx.userID,
 			PriceID:       fx.priceID,
 		},
 		IdempotencyKey: CustodianSaleIdempotencyKey(key),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
-		OriginReason:   "test vaulted_card sale",
+		OriginReason:   "test custodian-held card sale",
 	})
 	require.NoError(t, err)
 	return intent
 }
 
-// TestVaultedCardSale_CollectChargeConvert is spec C5 (fake BT leg): CIT
+// TestCustodianSale_CollectChargeConvert is spec C5 (fake BT leg): CIT
 // charges the INTENT with CVC + indicator=stored, converts in-request, writes
 // the instrument row, anchors the unscheduled sequence, and registers the
 // purchase with token_type=pan_via_proxy.
-func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
+func TestCustodianSale_CollectChargeConvert(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
@@ -255,7 +255,7 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	// Payments row: completed, token_type pan_via_proxy, attempt initial.
 	var tokenType, attemptKind string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='vaulted_card' AND transaction_id=$1 AND status='completed'",
+		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
 		fx.bt.txnID).Scan(&tokenType, &attemptKind))
 	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
@@ -265,7 +265,7 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	var custodian, fingerprint, chargeVia, anchor, lastFour string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT custodian, fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
-		 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
+		 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 		fx.bt.tokenID).Scan(&custodian, &fingerprint, &chargeVia, &anchor, &lastFour))
 	require.Equal(t, nmiproxy.Custodian, custodian)
 	require.Equal(t, fx.bt.fingerprint, fingerprint)
@@ -274,11 +274,11 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	require.Equal(t, "1111", lastFour)
 }
 
-// TestVaultedCardSale_MITRenewalRidesAnchor is the spec-C6 shape against the
+// TestCustodianSale_MITRenewalRidesAnchor is the spec-C6 shape against the
 // fake wire: after collection, a merchant-initiated charge on the STORED token
 // replays the anchor as initial_transaction_id with no CVC — stored-credential
 // reuse over the proxy.
-func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
+func TestCustodianSale_MITRenewalRidesAnchor(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
@@ -310,10 +310,10 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	require.Equal(t, "recurring", form.Get("billing_method"))
 }
 
-// TestVaultedCardSale_DeclineWritesFailedRow is spec C7 + #796: a parsed
+// TestCustodianSale_DeclineWritesFailedRow is spec C7 + #796: a parsed
 // decline is terminal AND lands as a failed payments row with the verbatim
 // code and token_type.
-func TestVaultedCardSale_DeclineWritesFailedRow(t *testing.T) {
+func TestCustodianSale_DeclineWritesFailedRow(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("decline")
 
@@ -323,16 +323,16 @@ func TestVaultedCardSale_DeclineWritesFailedRow(t *testing.T) {
 	var failureCode, failureReason, tokenType string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT COALESCE(failure_code,''), COALESCE(failure_reason,''), COALESCE(token_type,'')
-		 FROM openrails.payments WHERE rail='vaulted_card' AND status='failed' AND transaction_id=$1`,
-		"vaulted_card_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
+		 FROM openrails.payments WHERE rail='nmi' AND status='failed' AND transaction_id=$1`,
+		"custodian_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
 	require.Equal(t, "insufficient_funds", failureCode) // NMI 202, verbatim localization id
 	require.Equal(t, payments.FailureInsufficientFunds, failureReason)
 	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 }
 
-// TestVaultedCardSale_BTFailureIsNotADecline is spec C8: a BT pre-forward
+// TestCustodianSale_BTFailureIsNotADecline is spec C8: a BT pre-forward
 // failure parks the intent — no decline, no failed payments row.
-func TestVaultedCardSale_BTFailureIsNotADecline(t *testing.T) {
+func TestCustodianSale_BTFailureIsNotADecline(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("bt401")
 
@@ -341,13 +341,13 @@ func TestVaultedCardSale_BTFailureIsNotADecline(t *testing.T) {
 
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='vaulted_card' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n)
 }
 
-// TestVaultedCardSale_AmbiguousNeverDeclines: a 408 (BT may have forwarded)
+// TestCustodianSale_AmbiguousNeverDeclines: a 408 (BT may have forwarded)
 // parks the intent as unknown_needs_verify.
-func TestVaultedCardSale_AmbiguousNeverDeclines(t *testing.T) {
+func TestCustodianSale_AmbiguousNeverDeclines(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("ambiguous408")
 
@@ -355,13 +355,13 @@ func TestVaultedCardSale_AmbiguousNeverDeclines(t *testing.T) {
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status)
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='vaulted_card' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n, "ambiguity is never recorded as an outcome")
 }
 
-// TestVaultedCardSale_ExpiredIntentIsLoud is spec C9: a >24h-old intent is a
+// TestCustodianSale_ExpiredIntentIsLoud is spec C9: a >24h-old intent is a
 // terminal, fabrication-free error.
-func TestVaultedCardSale_ExpiredIntentIsLoud(t *testing.T) {
+func TestCustodianSale_ExpiredIntentIsLoud(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	fx.bt.intentGone.Store(true)
 
@@ -371,10 +371,10 @@ func TestVaultedCardSale_ExpiredIntentIsLoud(t *testing.T) {
 	require.Contains(t, *intent.LastFailureReason, "expire")
 }
 
-// TestVaultedCardSale_NTProvisioning is spec C10 (fake leg): with the flag
+// TestCustodianSale_NTProvisioning is spec C10 (fake leg): with the flag
 // armed, a successful checkout provisions an NT and persists id/status/PAR;
 // an NT failure warns and the instrument stays pan_proxy.
-func TestVaultedCardSale_NTProvisioning(t *testing.T) {
+func TestCustodianSale_NTProvisioning(t *testing.T) {
 	t.Run("provisioned", func(t *testing.T) {
 		fx := newCustodianSaleFixture(t, true)
 		intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
@@ -383,7 +383,7 @@ func TestVaultedCardSale_NTProvisioning(t *testing.T) {
 		var ntID, ntStatus, par, chargeVia string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 			`SELECT network_token_id, network_token_status, network_token_par, charge_via
-			 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
+			 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 			fx.bt.tokenID).Scan(&ntID, &ntStatus, &par, &chargeVia))
 		require.Equal(t, fx.bt.ntID, ntID)
 		require.Equal(t, "active", ntStatus)
@@ -398,20 +398,20 @@ func TestVaultedCardSale_NTProvisioning(t *testing.T) {
 
 		var ntID string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-			"SELECT network_token_id FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1",
+			"SELECT network_token_id FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 			fx.bt.tokenID).Scan(&ntID))
 		require.Empty(t, ntID)
 	})
 }
 
-// TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed: a parked
+// TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed: a parked
 // instrument refuses MIT collection loudly.
-func TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) {
+func TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) {
 	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		"UPDATE openrails.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='vaulted_card' AND rail_method_ref=$1",
+		"UPDATE openrails.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 		fx.bt.tokenID)
 	require.NoError(t, err)
 
@@ -425,7 +425,7 @@ func TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) 
 		RailMethodRef: fx.bt.tokenID,
 	})
 	require.NoError(t, err)
-	adapter := money.NewVaultedCardCollectionAdapter(charger)
+	adapter := money.NewCustodianProxyCollectionAdapter(charger)
 	_, err = adapter.ChargeSavedMethod(fx.ctx, method, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: method.ID,

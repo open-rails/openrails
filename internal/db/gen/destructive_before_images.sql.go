@@ -22,8 +22,7 @@ SELECT s.merchant_id, $1::uuid, 'subscriptions', s.id, to_jsonb(s), $2::timestam
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $3::uuid
   AND s.id = $4::uuid
-  AND s.deleted_at IS NULL
-ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING
+ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING
 `
 
 type CaptureSubscriptionBeforeImageParams struct {
@@ -67,7 +66,7 @@ WHERE e.merchant_id = $3::uuid
   AND e.source_id = $4::uuid
   AND e.revoked_at IS NULL
   AND e.deleted_at IS NULL
-ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING
+ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING
 `
 
 type CaptureSubscriptionEntitlementBeforeImagesParams struct {
@@ -324,9 +323,6 @@ WHERE b.merchant_id = $2::uuid
   AND b.restored_at IS NULL
   AND s.merchant_id = b.merchant_id
   AND s.id = b.row_id
-  -- A row a later prune tombstoned belongs to THAT run's reverse, not this one:
-  -- rewriting its values here would edit a row nobody can see.
-  AND s.deleted_at IS NULL
 `
 
 type RestoreSubscriptionsFromBeforeImagesParams struct {
