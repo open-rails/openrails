@@ -109,11 +109,15 @@ catalog.
 {
   "object": "checkout_config",
   "psps": [
-    { "key": "mobius", "rail": "nmi", "display_name": "Credit Card", "flow": "tokenize",
+    { "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
+      "flow": "tokenize",
       "config": { "tokenization_key": "<public Collect.js key>",
                   "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js" } },
-    { "key": "ccbill", "rail": "ccbill", "display_name": "Credit Card", "flow": "redirect" },
-    { "key": "solana", "rail": "solana", "display_name": "Solana", "flow": "wallet" }
+    { "key": "mobius-bt", "rail": "nmi", "custodian": "basis_theory", "display_name": "Credit Card",
+      "flow": "tokenize",
+      "config": { "public_api_key": "<public Basis Theory application key>" } },
+    { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
+    { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
   ]
 }
 ```
@@ -126,6 +130,10 @@ catalog.
   - `wallet` — the buyer's wallet signs; chain/token detail comes from
     `GET /v1/solana/config` and `GET /v1/solana/tokens`.
 - `key` is the value to send as checkout's `payment.rail`.
+- `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
+  it). `psp` means the gateway itself; anything else is a third party whose SDK your page
+  tokenizes against — same rail, different script and different public key. Read `flow` and
+  `config` and you never have to care; read `rail` alone and you will get this wrong.
 - Every value here is public by nature. Secrets (an NMI `security_key`, a Stripe
   `sk_`, a CCBill DataLink password, a Solana signer) are structurally unreachable
   from this endpoint: it serves a fixed whitelist of per-rail public fields, so a new

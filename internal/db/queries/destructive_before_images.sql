@@ -18,8 +18,7 @@ SELECT s.merchant_id, sqlc.arg(run_id)::uuid, 'subscriptions', s.id, to_jsonb(s)
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.id = sqlc.arg(subscription_id)::uuid
-  AND s.deleted_at IS NULL
-ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
+ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- name: CaptureSubscriptionEntitlementBeforeImages :execrows
 -- Every LIVE entitlement window the transition is about to revoke or bound.
@@ -38,7 +37,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.source_id = sqlc.arg(subscription_id)::uuid
   AND e.revoked_at IS NULL
   AND e.deleted_at IS NULL
-ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
+ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- --- intent attribution -------------------------------------------------------
 
@@ -129,10 +128,7 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND b.table_name = 'subscriptions'
   AND b.restored_at IS NULL
   AND s.merchant_id = b.merchant_id
-  AND s.id = b.row_id
-  -- A row a later prune tombstoned belongs to THAT run's reverse, not this one:
-  -- rewriting its values here would edit a row nobody can see.
-  AND s.deleted_at IS NULL;
+  AND s.id = b.row_id;
 
 -- name: InvalidateEntitlementsFromBeforeImages :execrows
 -- Class D is INVALIDATED, never restored (or#859 §3.3, §4).

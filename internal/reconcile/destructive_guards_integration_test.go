@@ -299,7 +299,6 @@ func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 		Local:     &PGLocalStateLoader{DB: appDB},
 		Writer:    &PGLocalWriter{DB: appDB},
 		Decisions: NewDecisionApplier(appDB, nil),
-		Runs:      &PGDestructiveRunRecorder{DB: appDB},
 		Now:       func() time.Time { return now },
 	}
 
