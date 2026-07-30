@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -62,10 +63,12 @@ func newConvergeCmd() *cobra.Command {
 			"spent elsewhere is a millisecond it can be lost. Only then are the subscriptions restored from their\n" +
 			"before-images, in one transaction.\n\n" +
 			"What it will NOT do, on purpose:\n" +
-			"  * restore entitlements — Converge recomputes them from the append-only grant log, which no rollback touches\n" +
+			"  * restore entitlements — the windows the run closed are INVALIDATED and Converge rebuilds them from the\n" +
+			"    append-only grant log, which no rollback touches. A restored effect can silently disagree with its grant\n" +
 			"  * touch the ledger, grants, or the intent/webhook/findings logs\n" +
 			"  * pretend a provider write that already fired was undone; those are reported as irreversible divergence\n\n" +
-			"A rollback is not a complete operation. `rollback -> pull -> converge` is; the command prints the follow-up.",
+			"A rollback is not a complete operation. `rollback -> pull -> converge` is. The re-derivation runs inside this\n" +
+			"command; the provider pull is the operator's next step and it runs ADVISORY until enforcement is re-armed.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -162,7 +165,14 @@ func runConvergeRollback(cmd *cobra.Command, merchantSlug, runIDStr, format stri
 	ctx := merchant.WithID(cmd.Context(), mid)
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		res, e = reconcile.RollbackConvergeEnforceRun(ctx, database, runID, cliActor())
+		// Class D is invalidated by the reversal, so the re-derivation is part of
+		// the SAME command, not a follow-up the operator might forget: until it
+		// runs, the restored subscriptions carry no access.
+		recompute := func(ctx context.Context) error {
+			_, cerr := converge.NewConvergeEngine(database).Converge(ctx, converge.Scope{Merchant: mid})
+			return cerr
+		}
+		res, e = reconcile.RollbackConvergeEnforceRun(ctx, database, runID, cliActor(), recompute)
 		return e
 	}); err != nil {
 		return err
@@ -177,7 +187,12 @@ func runConvergeRollback(cmd *cobra.Command, merchantSlug, runIDStr, format stri
 	fmt.Printf("reversed run %s\n", res.RunID)
 	fmt.Printf("  subscriptions restored : %d\n", res.SubscriptionsRestored)
 	fmt.Printf("  unfired intents superseded: %d\n", res.IntentsSuperseded)
-	fmt.Printf("  entitlement windows closed by the run: %d (NOT restored — Converge recomputes them from the grant log)\n", res.EntitlementsCaptured)
+	fmt.Printf("  entitlement windows closed by the run: %d, invalidated for re-derivation: %d\n", res.EntitlementsCaptured, res.EntitlementsInvalidated)
+	if res.Recomputed {
+		fmt.Println("  grant effects re-derived from the (untouched) grant log — access is rebuilt, not restored")
+	} else {
+		fmt.Println("  WARNING: grant effects were NOT re-derived; the restored subscriptions have no access until Converge runs")
+	}
 	fmt.Printf("  proven source domains reset to unproven: %d\n", res.ProvenDomainsReset)
 	if res.EnforcementDisarmed {
 		fmt.Println("  enforcement disarmed: the next pull for this merchant runs ADVISORY until an operator re-arms it")

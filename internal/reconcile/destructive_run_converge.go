@@ -169,9 +169,13 @@ type ConvergeRollbackResult struct {
 	RunID uuid.UUID `json:"run_id"`
 	// SubscriptionsRestored is how many rows were re-asserted from before-images.
 	SubscriptionsRestored int64 `json:"subscriptions_restored"`
-	// EntitlementsCaptured is how many entitlement windows the run closed. They
-	// are NOT restored — Converge recomputes them from the untouched grant log.
+	// EntitlementsCaptured is how many entitlement windows the run closed.
 	EntitlementsCaptured int64 `json:"entitlements_captured"`
+	// EntitlementsInvalidated is how many of those the reverse soft-deleted so
+	// Converge REBUILDS them from the grant log. Class D is invalidated and
+	// re-derived, never restored — a restored effect can silently disagree with
+	// its grant, a re-derived one cannot.
+	EntitlementsInvalidated int64 `json:"entitlements_invalidated"`
 	// IntentsSuperseded is the unfired provider writes this reverse neutralised.
 	IntentsSuperseded int `json:"intents_superseded"`
 	// IntentsIrreversible already reached the provider. Operator work.
@@ -185,7 +189,20 @@ type ConvergeRollbackResult struct {
 	// EnforcementDisarmed records that the merchant's first-enforce arming was
 	// cleared, so the next pull runs advisory.
 	EnforcementDisarmed bool `json:"enforcement_disarmed"`
+	// Recomputed records that the derive plane re-ran and rebuilt the
+	// invalidated grant effects. False means access for the restored
+	// subscriptions is still DOWN and `Converge` must be run now.
+	Recomputed bool `json:"recomputed"`
 }
+
+// Recomputer re-derives grant effects after a reversal. It exists as a callback
+// because `converge` imports `reconcile`, not the other way round — and because
+// the ordering is load-bearing: invalidation happens inside the reversal's
+// transaction, recomputation strictly after it commits.
+//
+// Passing nil is allowed and leaves the restored subscriptions WITHOUT access
+// until a Converge runs. Callers that can wire it should.
+type Recomputer func(ctx context.Context) error
 
 // Complete reports whether the reversal restored everything it touched — i.e.
 // nothing reached the provider before the reverse got there.
@@ -218,7 +235,7 @@ func (r ConvergeRollbackResult) Complete() bool {
 // converge` is. Entitlements come back through that Converge, recomputed from
 // the append-only grant log; they are never restored here. Must run
 // merchant-scoped.
-func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string) (ConvergeRollbackResult, error) {
+func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string, recompute Recomputer) (ConvergeRollbackResult, error) {
 	res := ConvergeRollbackResult{RunID: runID}
 	mid, err := requireMerchantUUID(ctx)
 	if err != nil {
@@ -283,6 +300,13 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 			return fmt.Errorf("count before-images: %w", e)
 		}
 		res.EntitlementsCaptured = counts.Entitlements
+		// Class D: invalidate, do not restore. The follow-up Converge rebuilds
+		// each window from the grant that justifies it.
+		if res.EntitlementsInvalidated, e = tq.InvalidateEntitlementsFromBeforeImages(ctx, gen.InvalidateEntitlementsFromBeforeImagesParams{
+			MerchantID: mid, RunID: runID, Now: now,
+		}); e != nil {
+			return fmt.Errorf("invalidate derived entitlements: %w", e)
+		}
 
 		// --- step 4: close the confirmed-absence gate --------------------------
 		if res.ProvenDomainsReset, e = tq.ResetReconciliationStateUnproven(ctx, mid); e != nil {
@@ -302,6 +326,20 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 		return nil
 	}); err != nil {
 		return ConvergeRollbackResult{RunID: runID, EnforcementDisarmed: res.EnforcementDisarmed}, err
+	}
+
+	// --- step 4b: re-derive ----------------------------------------------------
+	// Strictly after the commit: Converge reads the restored rows. Until it
+	// runs, the invalidated access windows are gone — which is why a nil
+	// Recomputer is reported loudly rather than passed over.
+	if recompute != nil {
+		if rerr := recompute(ctx); rerr != nil {
+			return res, fmt.Errorf("rows restored and intents superseded, but re-derivation failed — run `openrails pull-provider` and Converge now, access for the restored subscriptions is still down: %w", rerr)
+		}
+		res.Recomputed = true
+	} else {
+		log.WithContext(ctx).WithField("run_id", runID).
+			Warn("destructive-run reversal did not re-derive: the restored subscriptions have no access until Converge runs")
 	}
 
 	// --- step 5: report --------------------------------------------------------

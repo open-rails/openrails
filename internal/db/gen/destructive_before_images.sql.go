@@ -148,6 +148,50 @@ func (q *Queries) DisarmMerchantEnforcement(ctx context.Context, arg DisarmMerch
 	return err
 }
 
+const invalidateEntitlementsFromBeforeImages = `-- name: InvalidateEntitlementsFromBeforeImages :execrows
+UPDATE openrails.entitlements e
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid,
+    updated_at = $1::timestamptz
+FROM openrails.destructive_run_before_images b
+WHERE b.merchant_id = $3::uuid
+  AND b.destructive_run_id = $2::uuid
+  AND b.table_name = 'entitlements'
+  AND e.merchant_id = b.merchant_id
+  AND e.id = b.row_id
+  AND e.deleted_at IS NULL
+`
+
+type InvalidateEntitlementsFromBeforeImagesParams struct {
+	Now        time.Time
+	RunID      uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Class D is INVALIDATED, never restored (or#859 §3.3, §4).
+//
+// The measured damage to entitlements is not a delete and not always a revoke:
+// a terminal cancel BOUNDS the access window (end_at pulled back to the
+// cancellation instant, revoked_at often still NULL). Leaving those rows in
+// place would defeat the recomputation, because derive-2 treats an existing
+// unrevoked row as the effect already being present — the subscription would
+// come back and the customer's runway would not.
+//
+// So the reverse soft-deletes exactly the rows this run touched and stamps them
+// with it. That is the invalidate half of "invalidate and re-derive": Converge
+// then rebuilds the window from the append-only grant log, which no rollback
+// touches. A re-derived effect cannot silently disagree with its grant; a
+// restored one can. The stamp keeps the invalidation itself attributable to one
+// run, and or#858's uniques/exclusion already ignore soft-deleted rows so the
+// rebuilt window does not collide with the invalidated one.
+func (q *Queries) InvalidateEntitlementsFromBeforeImages(ctx context.Context, arg InvalidateEntitlementsFromBeforeImagesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, invalidateEntitlementsFromBeforeImages, arg.Now, arg.RunID, arg.MerchantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listRailIntentsForRun = `-- name: ListRailIntentsForRun :many
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
 FROM openrails.rail_intents

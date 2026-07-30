@@ -38,7 +38,10 @@ type convergeRunFixture struct {
 // seedConvergeCohort creates n account-bound NMI subscriptions in `active`,
 // each with a live entitlement window, all attributed to one PSP so the pass —
 // and therefore the run it opens — is account-bound.
-func seedConvergeCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, periodStart, periodEnd time.Time) convergeRunFixture {
+// entEnd is the access window's end, deliberately in the FUTURE while the
+// billing period has lapsed: the paid runway a customer still holds when a bad
+// pass cancels them. That runway is what the incident took away.
+func seedConvergeCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, periodStart, periodEnd, entEnd time.Time) convergeRunFixture {
 	t.Helper()
 	merchantID := dbtest.TestMerchantID.UUID()
 	f := convergeRunFixture{pspID: uuid.New(), suffix: uuid.NewString()[:8]}
@@ -66,7 +69,7 @@ func seedConvergeCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n i
 				sub, merchantID, cust, prod, price, rs, f.pspID, periodStart, periodEnd)
 			exec(`INSERT INTO openrails.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
 			      VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`,
-				merchantID, cust, periodStart, periodEnd, sub)
+				merchantID, cust, periodStart, entEnd, sub)
 			f.subs = append(f.subs, sub)
 			f.railSubs = append(f.railSubs, rs)
 			f.customer = append(f.customer, cust)
@@ -136,9 +139,13 @@ func badRosterSnapshot(f convergeRunFixture, kept, stalled []int, now, futureEnd
 			Success:        false,
 			AmountCents:    5000,
 			Currency:       "USD",
-			OccurredAt:     now.Add(-40 * 24 * time.Hour),
-			DeclineReason:  "pick up card",
-			DeclineCode:    "204",
+			// Dated at the pass's own observation: the #835 floor refuses to
+			// cancel on evidence older than this deployment's first pull.
+			OccurredAt:     now,
+			// 261 is bucket 3: the issuer withdrew the recurring mandate outright.
+			// A soft decline would park as `unknown` instead — no certainty, no cancel.
+			DeclineReason:  "declined - stop all recurring payments",
+			DeclineCode:    "261",
 		})
 	}
 	return snap
@@ -265,7 +272,7 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 	// Every subscription's period lapsed 60 days ago: beyond the dunning window,
 	// so the roster's verdict is terminal.
 	periodEnd := now.Add(-60 * 24 * time.Hour)
-	f := seedConvergeCohort(t, appDB, baseCtx, 6, periodEnd.Add(-30*24*time.Hour), periodEnd)
+	f := seedConvergeCohort(t, appDB, baseCtx, 6, periodEnd.Add(-30*24*time.Hour), periodEnd, now.Add(30*24*time.Hour))
 
 	before := readSubStates(t, appDB, baseCtx, f.subs)
 	require.Len(t, before, 6)
@@ -360,7 +367,7 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 	var rollback ConvergeRollbackResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var e error
-		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator")
+		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator", nil)
 		return e
 	}))
 
@@ -381,7 +388,10 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 	require.Equal(t, "superseded", after[f.subs[3]].Status)
 	require.Equal(t, stalledIntent.ID, after[f.subs[3]].ID, "the intent row must be transitioned, never deleted")
 
-	// (c) entitlements are NOT restored — the images stay unreplayed on purpose.
+	// (c) entitlements are INVALIDATED, never restored: no image is replayed, and
+	// the rows the run closed are soft-deleted so Converge rebuilds them from the
+	// grant log. (The rebuild itself is proven in the external-package test,
+	// which can import `converge`.)
 	var unreplayed int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
@@ -389,6 +399,14 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 			  WHERE destructive_run_id=$1 AND table_name='entitlements' AND restored_at IS NULL`, destRunID).Scan(&unreplayed)
 	}))
 	require.Equal(t, imgEnts, unreplayed, "entitlement before-images must be evidence only; restoring one directly could make it disagree with its grant")
+	require.Equal(t, int64(imgEnts), rollback.EntitlementsInvalidated)
+	require.False(t, rollback.Recomputed, "no Recomputer was wired, so the reverse must not claim it re-derived")
+	var invalidatedStamped int
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		return appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.entitlements WHERE destructive_run_id=$1 AND deleted_at IS NOT NULL`, destRunID).Scan(&invalidatedStamped)
+	}))
+	require.Equal(t, imgEnts, invalidatedStamped, "an invalidation must itself be attributable to exactly one run")
 
 	// (d) the append-only spine is untouched. rail_intents included: a status
 	// transition is not a row loss.
@@ -417,7 +435,7 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 
 	// The run is marked reversed, and reversing twice is refused.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, e := RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator")
+		_, e := RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator", nil)
 		require.ErrorContains(t, e, "already reversed")
 		return nil
 	}))
@@ -433,7 +451,7 @@ func TestConvergeEnforceRollback_ReportsFiredIntentsAsIrreversibleDivergence(t *
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(-60 * 24 * time.Hour)
-	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd)
+	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd, now.Add(30*24*time.Hour))
 
 	// Two stalled subscriptions, so two deferred vault deletes are queued.
 	snap := badRosterSnapshot(f, []int{0, 1}, []int{2, 3}, now, now.Add(30*24*time.Hour))
@@ -470,7 +488,7 @@ func TestConvergeEnforceRollback_ReportsFiredIntentsAsIrreversibleDivergence(t *
 	var rollback ConvergeRollbackResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var e error
-		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator")
+		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator", nil)
 		return e
 	}))
 
@@ -498,7 +516,7 @@ func TestConvergeEnforceRollback_InFlightIntentIsAmbiguousNotUndone(t *testing.T
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(-60 * 24 * time.Hour)
-	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd)
+	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd, now.Add(30*24*time.Hour))
 
 	snap := badRosterSnapshot(f, []int{0, 1}, []int{2, 3}, now, now.Add(30*24*time.Hour))
 	eng := convergeEngine(appDB, snap, now, true)
@@ -529,7 +547,7 @@ func TestConvergeEnforceRollback_InFlightIntentIsAmbiguousNotUndone(t *testing.T
 	var rollback ConvergeRollbackResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var e error
-		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator")
+		rollback, e = RollbackConvergeEnforceRun(ctx, appDB, destRunID, "operator", nil)
 		return e
 	}))
 
@@ -553,7 +571,7 @@ func TestConvergeEnforce_RefusesWithoutARunRecorder(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(-60 * 24 * time.Hour)
-	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd)
+	f := seedConvergeCohort(t, appDB, baseCtx, 4, periodEnd.Add(-30*24*time.Hour), periodEnd, now.Add(30*24*time.Hour))
 
 	before := readSubStates(t, appDB, baseCtx, f.subs)
 	snap := badRosterSnapshot(f, []int{0, 1}, []int{2}, now, now.Add(30*24*time.Hour))
