@@ -75,21 +75,27 @@ merchants:
             security_key: replace-with-paykings-nmi-security-key
             webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
 
-      # #795 vaulted_card: Basis Theory neutral card vault detokenizing through
-      # the BT proxy into the NMI gateway account referenced by gateway_account
-      # (an NMI account_id declared above). account_id = the BT tenant id.
-      # The ONLY custodial secret is the PRIVATE application key; the public
-      # key is checkout-page config. nt_charges must stay false on NMI gateways.
-      bt-vault:
-        vaulted_card:
+      # or#879 CUSTODY: an ordinary NMI PSP whose cards are held by a
+      # third-party custodian (Basis Theory) instead of in NMI's own vault.
+      # Custody is a MODIFIER on the rail, never a rail of its own: NMI still
+      # charges, the custodian just detokenizes the PAN into this gateway.
+      #
+      # The browser tokenizes against the CUSTODIAN, so this PSP declares no
+      # NMI tokenization_key — custodian_public_api_key replaces it. The ONLY
+      # custodial secret is the custodian's PRIVATE application key.
+      mobius-bt:
+        nmi:
           environment: test
-          account_id: replace-with-bt-tenant-id
+          account_id: "7654322"
           settings:
-            gateway_account: "7654321"
-            network_tokens: false
-            public_api_key: replace-with-bt-public-application-key
+            custodian: basis_theory
+            custodian_account_id: replace-with-bt-tenant-id
+            custodian_public_api_key: replace-with-bt-public-application-key
+            custodian_network_tokens: false
           secrets:
-            api_key: replace-with-bt-private-application-key
+            security_key: replace-with-test-nmi-security-key
+            webhook_signing_secret: replace-with-test-nmi-webhook-secret
+            custodian_api_key: replace-with-bt-private-application-key
 
       ccbill:
         ccbill:

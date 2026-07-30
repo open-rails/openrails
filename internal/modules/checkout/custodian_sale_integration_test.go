@@ -254,7 +254,7 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='vaulted_card' AND transaction_id=$1 AND status='completed'",
 		fx.bt.txnID).Scan(&tokenType, &attemptKind))
-	require.Equal(t, charge.TokenTypePANViaVault, tokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
 
 	// Instrument row: BT token id, custodian, fingerprint, pan_proxy,
@@ -295,7 +295,7 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, res.Declined)
-	require.Equal(t, charge.TokenTypePANViaVault, res.TokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, res.TokenType)
 	require.Empty(t, res.CapturedRef, "MIT with a prior ref never re-anchors")
 
 	form := fx.bt.lastProxyForm(t)
@@ -324,7 +324,7 @@ func TestVaultedCardSale_DeclineWritesFailedRow(t *testing.T) {
 		"vaulted_card_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
 	require.Equal(t, "insufficient_funds", failureCode) // NMI 202, verbatim localization id
 	require.Equal(t, payments.FailureInsufficientFunds, failureReason)
-	require.Equal(t, charge.TokenTypePANViaVault, tokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 }
 
 // TestVaultedCardSale_BTFailureIsNotADecline is spec C8: a BT pre-forward

@@ -139,7 +139,7 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 		return charge.Result{}, err
 	}
 
-	tokenType := charge.TokenTypePANViaVault
+	tokenType := charge.TokenTypePANViaProxy
 	if src.via() == ViaNetworkToken {
 		tokenType = charge.TokenTypeNetworkToken
 	}

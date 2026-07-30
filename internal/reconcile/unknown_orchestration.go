@@ -357,7 +357,9 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 				params.FailureReason = &reason
 			}
 		}
-		if tt := payments.DefaultTokenTypeForRail(string(sub.Rail)); tt != "" {
+		// Provider-driven: NMI can only rebill a card IT holds, so the custody
+		// fact here is stated, not guessed (or#879).
+		if tt := payments.DefaultTokenType(string(sub.Rail), models.CustodianPSP); tt != "" {
 			params.TokenType = &tt
 		}
 		n, err := q.CreatePaymentIfNotExists(ctx, params)

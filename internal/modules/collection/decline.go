@@ -202,9 +202,11 @@ func ClassifyDecline(rail, code string) DeclineOutcome {
 		return DeclineRetry
 	}
 	switch strings.ToLower(strings.TrimSpace(rail)) {
-	case "nmi", "mobius", "vaulted_card":
-		// vaulted_card parses NMI classic responses through the same taxonomy
-		// (#795: one decline vocabulary, two transports).
+	case "nmi", "mobius":
+		// A custodian-proxied charge lands on the SAME NMI gateway and returns
+		// the SAME classic response, so it classifies here too — the rail is
+		// nmi either way (or#879: custody is not a rail). #795: one decline
+		// vocabulary, two transports.
 		if n, err := strconv.Atoi(code); err == nil {
 			return nmiDeclineOutcomes[n]
 		}

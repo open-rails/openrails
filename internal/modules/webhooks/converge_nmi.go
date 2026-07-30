@@ -276,7 +276,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
-			if tt := payments.DefaultTokenTypeForRail(rail); tt != "" {
+			if tt := payments.DefaultTokenType(rail, models.CustodianPSP); tt != "" {
 				failed.TokenType = &tt
 			}
 			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {

@@ -51,7 +51,7 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	cleanupDedupMark(t, ctx, dbi, eventID)
 	applies := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(context.Context) error { applies++; return nil })
 	}
 
@@ -90,8 +90,8 @@ func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
 	applies := 0
 	handler := func(context.Context) error { applies++; return nil }
 
-	require.NoError(t, replicaA.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI, nil, handler))
-	require.NoError(t, replicaB.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI, nil, handler))
+	require.NoError(t, replicaA.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI.EventSource(), nil, handler))
+	require.NoError(t, replicaB.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI.EventSource(), nil, handler))
 	require.Equal(t, 1, applies, "exactly one replica may apply the delivery")
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.nmi.TestEvent", eventID))
 }
@@ -126,13 +126,13 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 	require.Equal(t, 0, dedupMarkRows(t, ctx, dbi, "webhook.stripe.TestEvent", eventID))
 
 	// Redelivery: handler runs again (no mark), effect converges, mark lands.
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe, nil, handler))
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe.EventSource(), nil, handler))
 	require.Equal(t, 2, runs, "post-crash redelivery must run the handler")
 	require.Equal(t, 1, effects[eventID], "replay-safe effect applied exactly once")
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.stripe.TestEvent", eventID))
 
 	// Further redeliveries are skipped outright.
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe, nil, handler))
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe.EventSource(), nil, handler))
 	require.Equal(t, 2, runs)
 }
 
@@ -153,7 +153,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 
 	// Effects tx rolls back AFTER writing the mark: the mark must be gone too.
 	boom := errors.New("boom")
-	err := svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	err := svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(ctx context.Context) error {
 			return dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				if err := MarkWebhookProcessedInTx(ctx, tx); err != nil {
@@ -168,7 +168,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 	// Success: mark written inside the effect tx; wrapper verify is a no-op.
 	runs := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(ctx context.Context) error {
 				runs++
 				return dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -197,7 +197,7 @@ func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
 	eventID := "evt_nomerchant_" + uuid.NewString()
 	applies := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(context.Context) error { applies++; return nil })
 	}
 	require.NoError(t, deliver())
@@ -219,7 +219,7 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	eventID := "evt_nonretry_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
 	attempts := 0
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error {
 			attempts++
 			return MarkWebhookErrorNonRetryable(fmt.Errorf("bad payload"))
@@ -231,7 +231,7 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	idem2 := idempotency.NewIdempotencyService(nil)
 	defer idem2.Close()
 	svc2 := NewDeduplicationService(idem2, dbi)
-	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error { attempts++; return nil }))
 	require.Equal(t, 1, attempts)
 }

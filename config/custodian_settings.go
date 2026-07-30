@@ -135,8 +135,20 @@ func ParseCustodySettings(settings map[string]any) (CustodySettings, error) {
 	if out.AccountID == "" {
 		return CustodySettings{}, fmt.Errorf("psp settings: custodian %q requires %s (the custodian-native tenant id)", out.Custodian, PSPSettingCustodianAccountID)
 	}
+	// The browser tokenizes against the CUSTODIAN, so the rail's own browser
+	// tokenizer key is dead config here — and dead config on a checkout path
+	// reads as "this works" to the next operator.
+	for _, key := range custodianDisplacedRailSettingKeys {
+		if _, ok := settings[key]; ok {
+			return CustodySettings{}, fmt.Errorf("psp settings: %s is meaningless when custodian %q holds the cards — the browser tokenizes against the custodian (%s), not the rail", key, out.Custodian, PSPSettingCustodianPublicAPIKey)
+		}
+	}
 	return out, nil
 }
+
+// custodianDisplacedRailSettingKeys are rail settings a third-party custodian
+// takes over. Declaring both is a contradiction, not a preference.
+var custodianDisplacedRailSettingKeys = []string{"tokenization_key", "tokenization_url"}
 
 func isDeclaredCustodian(v string) bool {
 	for _, c := range models.Custodians() {

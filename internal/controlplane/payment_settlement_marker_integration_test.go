@@ -21,7 +21,7 @@ import (
 // 0005 enqueued every completed positive payment whose transaction_id was not
 // one of three known synthetic prefixes. That denylist is open at the top: #796
 // added three more synthetic shapes ('nmi_sale_declined:', 'nmi_sub_declined:',
-// 'vaulted_card_sale_declined:') and #733 a fourth ('renewal_declined:'), none
+// 'custodian_sale_declined:') and #733 a fourth ('renewal_declined:'), none
 // of them in the trigger. Only their status kept them out. The first synthetic
 // shape that is COMPLETED and positive would have told a host that money
 // arrived for a payment that never moved a cent.
@@ -107,7 +107,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	// 4. The attempt row that BECOMES the charge takes the rail's own
 	//    transaction id, declares movement, and publishes exactly once.
 	attempt := uuid.New()
-	insertPayment(attempt, "vaulted_card_sale_attempt:"+suffix, "pending", "none", 7_000_000)
+	insertPayment(attempt, "custodian_sale_attempt:"+suffix, "pending", "none", 7_000_000)
 	require.Zero(t, published(attempt))
 	inMerchantTx(func(tx gen.DBTX) {
 		n, err := gen.New(tx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{

@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -63,13 +63,13 @@ func TestNMICollectionRefusesUnestablishedCurrency(t *testing.T) {
 	}
 }
 
-func TestVaultedCardCollectionRefusesUnestablishedCurrency(t *testing.T) {
+func TestCustodianProxyCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	t.Parallel()
 
-	adapter := &VaultedCardCollectionAdapter{Charger: vaultedcard.New(nil, vaultedcard.GatewayConfig{})}
+	adapter := &CustodianProxyCollectionAdapter{Charger: nmiproxy.New(nil, nmiproxy.GatewayConfig{})}
 	method := gen.OpenrailsPaymentMethod{
 		ID:            uuid.New(),
-		Rail:          vaultedcard.Rail,
+		Rail:          nmiproxy.Rail,
 		RailMethodRef: "bt-token-123",
 	}
 

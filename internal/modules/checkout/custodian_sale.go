@@ -450,7 +450,7 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) intents.Outcome {
 	res := charge.Result{
 		TransactionID: transactionID,
-		TokenType:     charge.TokenTypePANViaVault,
+		TokenType:     charge.TokenTypePANViaProxy,
 		CapturedRef:   transactionID,
 	}
 	bt, err := h.Sale.btClient(cfg)

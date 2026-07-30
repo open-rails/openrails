@@ -212,7 +212,7 @@ func TestChargerOutcomes(t *testing.T) {
 		if res.TransactionID != "424242" || res.Declined {
 			t.Fatalf("unexpected result: %+v", res)
 		}
-		if res.TokenType != charge.TokenTypePANViaVault {
+		if res.TokenType != charge.TokenTypePANViaProxy {
 			t.Fatalf("token type: %q", res.TokenType)
 		}
 		if res.CapturedRef != "" {
@@ -312,7 +312,7 @@ func TestChargerOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.TransactionID != "606" || res.TokenType != charge.TokenTypePANViaVault {
+		if res.TransactionID != "606" || res.TokenType != charge.TokenTypePANViaProxy {
 			t.Fatalf("fallback result: %+v", res)
 		}
 		if calls != 2 {

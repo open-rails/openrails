@@ -76,7 +76,7 @@ type Payment struct {
 	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal (#733).
 	ReversalKind *string `json:"reversal_kind,omitempty"`
 	// TokenType is the credential form presented at charge time (#796):
-	// network_token|pan_via_vault|provider_vault. Nil = unknown/legacy.
+	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`
 
 	// MoneyMovement declares whether this row records money that actually

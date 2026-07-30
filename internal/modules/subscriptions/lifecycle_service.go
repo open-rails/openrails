@@ -763,7 +763,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
-			if tt := payments.DefaultTokenTypeForRail(string(params.Rail)); tt != "" {
+			if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
 				payment.TokenType = &tt
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
@@ -1764,7 +1764,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
 	}
-	if tt := payments.DefaultTokenTypeForRail(string(subscription.Rail)); tt != "" {
+	if tt := payments.DefaultTokenType(string(subscription.Rail), models.CustodianPSP); tt != "" {
 		failed.TokenType = &tt
 	}
 	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {

@@ -72,10 +72,12 @@ var privateSettingKeys = []string{
 	config.SolanaSettingRPCProvider,
 	config.SolanaSettingRPCAPIKey,
 	config.SolanaSettingRecipientWallet,
-	config.VaultedCardSettingGatewayAccount,
-	config.VaultedCardSettingNetworkTokens,
-	config.VaultedCardSettingNTCharges,
 }
+
+// Custody keys are deliberately NOT in the list above: they are structurally
+// validated (or#879), so a sentinel string is not a value they can ever hold.
+// The custody case in the test below poisons custodian_account_id inside a
+// VALID custody block, which is the leak that actually needs proving.
 
 // TestPublicPSPConfigForServesOnlyWhitelistedSettings poisons a PSP's settings
 // blob with every credential-key name, every known private settings key, and a
@@ -84,11 +86,35 @@ var privateSettingKeys = []string{
 func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 	const poison = "LEAKED-SENTINEL-VALUE"
 
+	type projectionCase struct {
+		name    string
+		rail    models.Rail
+		profile railPublicProfile
+		// custody is the valid custody block to declare, if any (or#879):
+		// custody OVERRIDES the rail profile, so it gets its own case.
+		custody map[string]any
+	}
+	var cases []projectionCase
 	for _, d := range rails.All() {
-		profile, armable := publicRailProfiles[string(d.Rail)]
-		if !armable {
-			continue
+		if profile, armable := publicRailProfiles[string(d.Rail)]; armable {
+			cases = append(cases, projectionCase{string(d.Rail), d.Rail, profile, nil})
 		}
+	}
+	// A custodian-held NMI PSP: the browser tokenizes against the CUSTODIAN, so
+	// the projection must serve the custodian's public key and nothing else.
+	cases = append(cases, projectionCase{
+		name:    "nmi+basis_theory",
+		rail:    models.RailNMI,
+		profile: custodianPublicProfiles[models.CustodianBasisTheory],
+		custody: map[string]any{
+			config.PSPSettingCustodian:              models.CustodianBasisTheory,
+			config.PSPSettingCustodianAccountID:     poison,
+			config.PSPSettingCustodianNetworkTokens: true,
+		},
+	})
+
+	for _, tc := range cases {
+		d, profile := tc, tc.profile
 		settings := map[string]any{}
 		// Every credential slot ANY rail declares, as if an operator had
 		// mistakenly stuffed a secret into the settings blob.
@@ -101,42 +127,51 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 			settings[k] = poison
 		}
 		settings["a_key_invented_next_year"] = poison
+		for k, v := range tc.custody {
+			settings[k] = v
+		}
 		// The legitimately public ones get a recognizable value.
 		want := map[string]string{}
 		for _, s := range profile.Settings {
 			settings[s.Setting] = "public-" + s.Setting
 			want[s.Field] = "public-" + s.Setting
 		}
+		// A custodian displaces the rail's own tokenizer keys; declaring both
+		// is refused, so drop them from the poison set in that case.
+		if tc.custody != nil {
+			delete(settings, "tokenization_key")
+			delete(settings, "tokenization_url")
+		}
 
 		cfg, reason, ok := PublicPSPConfigFor(PSPScope{
-			Rail:      string(d.Rail),
+			Rail:      string(tc.rail),
 			Key:       "acct-key",
 			AccountID: "operator-declared-account-id",
 			Settings:  settings,
 		})
 		if !ok {
-			t.Errorf("rail %q: fully-configured PSP was withheld (%s)", d.Rail, reason)
+			t.Errorf("%s: fully-configured PSP was withheld (%s)", d.name, reason)
 			continue
 		}
 		if len(cfg.Config) != len(want) {
-			t.Errorf("rail %q: config has %d fields, whitelist declares %d: %v", d.Rail, len(cfg.Config), len(want), cfg.Config)
+			t.Errorf("%s: config has %d fields, whitelist declares %d: %v", d.name, len(cfg.Config), len(want), cfg.Config)
 		}
 		for field, value := range cfg.Config {
 			if want[field] != value {
-				t.Errorf("rail %q: config[%q] = %q, not a whitelisted public value", d.Rail, field, value)
+				t.Errorf("%s: config[%q] = %q, not a whitelisted public value", d.name, field, value)
 			}
 		}
 		// Whole-document check: nothing anywhere in the projection may carry a
 		// poisoned value, nor the operator-declared account id.
 		encoded, err := json.Marshal(cfg)
 		if err != nil {
-			t.Fatalf("rail %q: marshal: %v", d.Rail, err)
+			t.Fatalf("%s: marshal: %v", d.name, err)
 		}
 		if strings.Contains(string(encoded), poison) {
-			t.Errorf("rail %q: projection leaked a poisoned value: %s", d.Rail, encoded)
+			t.Errorf("%s: projection leaked a poisoned value: %s", d.name, encoded)
 		}
 		if strings.Contains(string(encoded), "operator-declared-account-id") {
-			t.Errorf("rail %q: projection leaked the account id: %s", d.Rail, encoded)
+			t.Errorf("%s: projection leaked the account id: %s", d.name, encoded)
 		}
 	}
 }

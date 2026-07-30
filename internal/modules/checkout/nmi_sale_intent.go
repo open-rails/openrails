@@ -192,7 +192,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 				Currency:               p.Currency,
 				FailureCode:            nmidirect.FailureCode(pmErr),
 				AttemptKind:            payments.AttemptInitial,
-				TokenType:              charge.TokenTypeProviderVault,
+				TokenType:              charge.TokenTypePSPToken,
 			})
 			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
 				"declined":        true,
@@ -254,7 +254,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 		Currency:      p.Currency,
 		Metadata:      metadata,
 		AttemptKind:   payments.AttemptInitial,
-		TokenType:     charge.TokenTypeProviderVault,
+		TokenType:     charge.TokenTypePSPToken,
 	})
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the

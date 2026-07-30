@@ -220,7 +220,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 					Currency:               p.Currency,
 					FailureCode:            nmidirect.FailureCode(pmErr),
 					AttemptKind:            payments.AttemptInitial,
-					TokenType:              charge.TokenTypeProviderVault,
+					TokenType:              charge.TokenTypePSPToken,
 				})
 			}
 			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
