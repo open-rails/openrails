@@ -32,7 +32,7 @@ SET status = 'in_flight',
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimDueRailIntentsParams struct {
@@ -82,6 +82,7 @@ func (q *Queries) ClaimDueRailIntents(ctx context.Context, arg ClaimDueRailInten
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -108,7 +109,7 @@ SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimDueVerifyRailIntentsParams struct {
@@ -153,6 +154,7 @@ func (q *Queries) ClaimDueVerifyRailIntents(ctx context.Context, arg ClaimDueVer
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -176,7 +178,7 @@ WHERE pi.id = $2
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
   AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimRailIntentByIDParams struct {
@@ -218,6 +220,7 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -428,7 +431,7 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         ELSE openrails.rail_intents.last_failure_reason
     END,
     updated_at = now()
-RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id
 `
 
 type EnqueueRailIntentParams struct {
@@ -513,6 +516,7 @@ func (q *Queries) EnqueueRailIntent(ctx context.Context, arg EnqueueRailIntentPa
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -555,7 +559,7 @@ func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdu
 
 const getRailIntent = `-- name: GetRailIntent :one
 
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents WHERE id = $1
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents WHERE id = $1
 `
 
 // ============================================================================
@@ -588,6 +592,7 @@ func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRai
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -710,7 +715,7 @@ func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg List
 }
 
 const listRailIntents = `-- name: ListRailIntents :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -768,6 +773,7 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -781,7 +787,7 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
 ORDER BY created_at, id
@@ -834,6 +840,7 @@ func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailInt
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}

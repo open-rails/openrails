@@ -325,7 +325,7 @@ type OpenrailsDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. Rows a run destroyed carry its id (destructive_run_id); `openrails prune rollback --run <id>` reverses one. kind=prune is the first user; converge_enforce / declared_import / plan_migration / catalog_push / merchant_delete follow.
+// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails prune rollback --run <id>`, which dispatches on kind. declared_import / plan_migration / catalog_push / merchant_delete are declared and not yet converted.
 type OpenrailsDestructiveRun struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -345,6 +345,20 @@ type OpenrailsDestructiveRun struct {
 	// running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.
 	Status string
 	Note   *string
+}
+
+// or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858's soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.
+type OpenrailsDestructiveRunBeforeImage struct {
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	DestructiveRunID uuid.UUID
+	TableName        string
+	RowID            uuid.UUID
+	// to_jsonb(row) verbatim, captured server-side inside the run. Complete evidence; the restore reads an explicit typed column projection out of it rather than rewriting the whole row.
+	Before     []byte
+	CapturedAt time.Time
+	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored (or#859 §3.3 / Class D). Restoring one directly could make it disagree with its grant, which recomputation cannot.
+	RestoredAt *time.Time
 }
 
 type OpenrailsEntitlement struct {
@@ -783,7 +797,7 @@ type OpenrailsPayment struct {
 	FailureReason *string
 	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
 	ReversalKind *string
-	// #796 credential form presented to the network: network_token | pan_via_vault | provider_vault. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
+	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
 	DeletedAt        *time.Time
@@ -819,8 +833,8 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialUnscheduledRef string
 	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
 	Custodian string
-	// #795 vault card fingerprint (BT default expression over the PAN) for dedup/lookup.
-	VaultFingerprint string
+	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
+	Fingerprint string
 	// #795 BT network-token uuid; '' = not provisioned.
 	NetworkTokenID string
 	// #795 NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
@@ -1014,6 +1028,8 @@ type OpenrailsRailIntent struct {
 	UpdatedAt      time.Time
 	// PSP row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
 	PspID *uuid.UUID
+	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
+	DestructiveRunID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533).

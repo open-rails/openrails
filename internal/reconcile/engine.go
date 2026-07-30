@@ -56,6 +56,15 @@ type Engine struct {
 	// stricter, never more permissive.
 	Policy EvidenceFloorReader
 
+	// Runs makes an enforce pass REVERSIBLE (or#859): it opens a
+	// destructive_runs record carrying the coverage proof that authorised the
+	// pass, captures a before-image of every subscription the pass is about to
+	// overwrite, and attributes the provider intents it queues. Enforce passes
+	// that would overwrite subscription state REFUSE when it is nil — an
+	// unrecorded destructive pass has no undo, and the empty-roster incident is
+	// exactly why that is not an acceptable default.
+	Runs DestructiveRunRecorder
+
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
 
@@ -65,6 +74,11 @@ type Engine struct {
 	// Defaults: MinLocal 1 (#837 — no small-merchant blind spot), Ratio 0.10.
 	CircuitBreakerMinLocal int
 	CircuitBreakerRatio    float64
+
+	// Actor attributes this engine's destructive runs (the operator who ran the
+	// CLI, or the worker that scheduled the pass). Empty defaults to
+	// "converge-enforce" — an audit trail, not authentication.
+	Actor string
 
 	// CancelBudget (#837) caps how many subscriptions ONE pass may cancel for
 	// this merchant. Over the cap, the pass applies NOTHING, raises a
@@ -133,8 +147,12 @@ type RailMerchantAccountBinding struct {
 
 // ProviderReport is one provider's section of the run summary.
 type ProviderReport struct {
-	Provider             Provider          `json:"provider"`
-	PspID                string            `json:"psp_id,omitempty"`
+	Provider Provider `json:"provider"`
+	PspID    string   `json:"psp_id,omitempty"`
+	// DestructiveRunID is set when this provider's enforce pass overwrote
+	// subscription state: the handle `openrails converge rollback --run <id>`
+	// reverses (or#859).
+	DestructiveRunID string `json:"destructive_run_id,omitempty"`
 	Aborted              bool              `json:"aborted,omitempty"`
 	Error                string            `json:"error,omitempty"`
 	Coverage             SnapshotCoverage  `json:"coverage"`
@@ -204,6 +222,13 @@ func (e *Engine) now() time.Time {
 		return e.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (e *Engine) actor() string {
+	if e.Actor != "" {
+		return e.Actor
+	}
+	return "converge-enforce"
 }
 
 func (e *Engine) rosterBreaker() RosterBreaker {
@@ -492,11 +517,39 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// design decision 2). Apply failures don't abort the provider — each is
 	// reported and the finding stays reconcile_required for the next run.
 	if params.Mode == ModeEnforce {
+		// or#859 tier 1: a pass that OVERWRITES subscription state opens a
+		// destructive run BEFORE it writes anything, carrying the coverage proof
+		// that authorised it and the row count it predicted. The empty-roster
+		// incident cancelled 40/40 subscriptions with no record of what the rows
+		// looked like beforehand and no handle to undo it by; a run id plus a
+		// before-image per row is precisely that missing pair.
+		destRunID, runErr := e.openDestructiveRun(ctx, provider, binding, snap, countStateOverwrites(applyByID))
+		if runErr != nil {
+			return rep, records, planned, appliedChanges, runErr
+		}
+		runAffected := map[string]int{}
+		if destRunID != uuid.Nil {
+			rep.DestructiveRunID = destRunID.String()
+		}
+
 		for i := range records {
 			rec := &records[i]
 			f, ok := applyByID[rec.ID]
 			if !ok {
 				continue
+			}
+			// Capture the row as it stands BEFORE the transition overwrites it.
+			// A capture failure means this write would be irreversible, so it is
+			// not made: better a finding that stays reconcile_required for the
+			// next pass than damage with no undo.
+			var capturedAt time.Time
+			if destRunID != uuid.Nil && f.Apply.Decide != nil {
+				var cerr error
+				if capturedAt, cerr = e.Runs.CaptureSubscription(ctx, destRunID, f.Apply.Decide.SubscriptionID); cerr != nil {
+					rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: before-image capture failed, transition NOT applied: %v", f.Type, f.SubjectKey, cerr))
+					rep.ApplySkipped++
+					continue
+				}
 			}
 			evidence, didApply, err := e.applyFinding(ctx, f)
 			if err != nil {
@@ -506,6 +559,17 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			if !didApply {
 				rep.ApplySkipped++
 				continue
+			}
+			// Attribute the provider writes the transition queued (a deferred NMI
+			// vault delete) to this run, so the reverse can supersede the ones
+			// that have not fired and manifest the ones that have.
+			if destRunID != uuid.Nil && f.Apply.Decide != nil {
+				runAffected["subscriptions"]++
+				n, serr := e.Runs.StampIntents(ctx, destRunID, f.Apply.Decide.SubscriptionID, capturedAt)
+				if serr != nil {
+					rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: %v", f.Type, f.SubjectKey, serr))
+				}
+				runAffected["rail_intents"] += n
 			}
 			appliedChanges = append(appliedChanges, mutationRecordsForFinding(provider, rec.ID, f, evidence, "applied")...)
 			log.WithFields(log.Fields{
@@ -521,6 +585,20 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			}
 			rec.Status = FindingStatusAutoFixed
 			rep.AutoFixed++
+		}
+
+		// Close the run with what it actually did. A run left `running` is still
+		// reversible (rows are captured before they are written, not after), so
+		// a crash here loses the tally, never the undo.
+		if destRunID != uuid.Nil {
+			status := "completed"
+			if len(rep.ApplyErrors) > 0 {
+				status = "failed"
+			}
+			if ferr := e.Runs.Finish(ctx, destRunID, status, runAffected); ferr != nil {
+				log.WithContext(ctx).WithError(ferr).WithField("destructive_run_id", destRunID).
+					Error("reconcile: could not close the destructive run; it stays reversible by id")
+			}
 		}
 	}
 
@@ -562,6 +640,50 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	return rep, records, planned, appliedChanges, nil
+}
+
+// countStateOverwrites is how many of this pass's applies would OVERWRITE
+// existing subscription state — the decider transitions. The other apply kinds
+// (backfill a payment, record a refund, adopt a vault entry, materialize a
+// missing subscription) are additive inserts: they destroy nothing, so they
+// need no before-image and do not by themselves make a pass destructive.
+func countStateOverwrites(applyByID map[uuid.UUID]*Finding) int {
+	n := 0
+	for _, f := range applyByID {
+		if f.Apply != nil && f.Apply.Decide != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// openDestructiveRun opens the run for a converge-enforce pass that is about to
+// overwrite subscription state, or returns uuid.Nil when the pass overwrites
+// nothing. It is the no-bypass gate (or#859 §5.1 obligation 4): an enforce pass
+// with state transitions and no recorder is refused outright rather than run
+// without an undo.
+func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, binding RailMerchantAccountBinding, snap *RemoteSnapshot, plannedOverwrites int) (uuid.UUID, error) {
+	if plannedOverwrites == 0 {
+		return uuid.Nil, nil
+	}
+	if e.Runs == nil {
+		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a DestructiveRunRecorder (or#859: a destructive pass with no run record has no undo)", plannedOverwrites)
+	}
+	var pspID *uuid.UUID
+	note := fmt.Sprintf("converge-enforce pull %s", provider)
+	if binding.ID != uuid.Nil {
+		id := binding.ID
+		pspID = &id
+		note = fmt.Sprintf("converge-enforce pull %s account %s", provider, binding.AccountID)
+	}
+	var coverage any
+	if snap != nil {
+		coverage = snap.Coverage
+	}
+	return e.Runs.Open(ctx, OpenDestructiveRunParams{
+		PspID: pspID, Kind: DestructiveRunKindConvergeEnforce, Actor: e.actor(),
+		Coverage: coverage, ExpectedRows: plannedOverwrites, Note: note,
+	})
 }
 
 // fetchHistory pulls the third dunning evidence source (Postgres history,

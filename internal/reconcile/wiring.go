@@ -25,6 +25,10 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) 
 		// #835 evidence-staleness floor, read per run from the merchant's
 		// destructive policy.
 		Policy: destructive.New(d),
+		// or#859: every enforce pass that overwrites subscription state opens a
+		// destructive run and captures before-images, so `openrails converge
+		// rollback --run <id>` can put the book back.
+		Runs: &PGDestructiveRunRecorder{DB: d},
 	}
 	// Third dunning-forensics evidence source (#735): imported legacy history
 	// + failed payments, read from Postgres.
