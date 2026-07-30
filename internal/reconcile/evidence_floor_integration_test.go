@@ -76,6 +76,7 @@ func enforcingPullEngine(appDB *db.DB, snap *RemoteSnapshot, now time.Time) *Eng
 		Local:     &PGLocalStateLoader{DB: appDB},
 		Writer:    &PGLocalWriter{DB: appDB},
 		Decisions: NewDecisionApplier(appDB, nil),
+		Runs:      &PGDestructiveRunRecorder{DB: appDB},
 		Policy:    destructive.New(appDB),
 		Now:       func() time.Time { return now },
 	}
