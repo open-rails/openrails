@@ -45,6 +45,7 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	// Genuinely global identifiers, unique across the install by construction.
 	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",
 	"uq_psps_identity":                          "one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide",
+	"uq_psps_custodian_identity":                "the custody sibling (or#879): one (custodian, environment, custodian_account_id) tenant belongs to exactly one merchant, for the same reason and by the same operator declaration — and inbound custodian webhooks route by it before any merchant context exists",
 }
 
 // UniqueScopeExempt reports whether a unique index that lacks merchant_id is a

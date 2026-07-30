@@ -59,3 +59,50 @@ func TestCustodianColumnIsStated(t *testing.T) {
 		}
 	}
 }
+
+// TestVaultedCardRailIsRetired (or#879) guards the rail enum in the migration
+// set. `vaulted_card` was never a gateway kind — it was NMI with the card held
+// at Basis Theory — and the whole cost of the mistake was that every
+// rail-dispatching switch had to remember to alias it. A migration that writes
+// the value back would reintroduce rows no switch handles.
+func TestVaultedCardRailIsRetired(t *testing.T) {
+	retiring, err := fs.Glob(FS, "0031_*.up.sql")
+	if err != nil || len(retiring) != 1 {
+		t.Fatalf("expected exactly one 0031 up migration, got %v (err %v)", retiring, err)
+	}
+	content, err := fs.ReadFile(FS, retiring[0])
+	if err != nil {
+		t.Fatalf("read %s: %v", retiring[0], err)
+	}
+	sql := collapseWS(string(content))
+	for _, want := range []string{
+		"set rail = 'nmi', custodian = 'basis_theory'",
+		"rename column vault_fingerprint to fingerprint",
+		"psp_owner_by_custodian_identity",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("%s: expected %q", retiring[0], want)
+		}
+	}
+
+	all, err := fs.Glob(FS, "*.up.sql")
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	for _, f := range all {
+		if f <= retiring[0] {
+			continue
+		}
+		body, err := fs.ReadFile(FS, f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		s := collapseWS(string(body))
+		if strings.Contains(s, "'vaulted_card'") {
+			t.Errorf("%s: 'vaulted_card' is retired (or#879) — the rail is nmi and the custodian is basis_theory", f)
+		}
+		if strings.Contains(s, "payment_methods") && strings.Contains(s, "vault_fingerprint") {
+			t.Errorf("%s: vault_fingerprint is retired (or#871) — the column is fingerprint", f)
+		}
+	}
+}

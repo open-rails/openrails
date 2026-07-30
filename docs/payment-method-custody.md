@@ -22,7 +22,7 @@ value `psp`, not an absence — a DB CHECK enforces the vocabulary.
 |---|---|---|---|
 | `psp` | `stripe` | `pm_…` on a Stripe Customer (`rail_method_ref`) | yes |
 | `psp` | `nmi` | `customer_vault_id` (`rail_customer_ref`) | yes |
-| `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes — currently carried as `rail='vaulted_card'` |
+| `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | third-party (HyperSwitch, JusPay, Spreedly) | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
@@ -52,15 +52,52 @@ is presented to the network* at charge time:
 
 A Basis-Theory-held card can be charged either way, so the two fields stay
 separate. `payments.token_type` records which form actually went out
-(`pan_via_vault` / `network_token` / `provider_vault`).
+(`pan_via_proxy` / `network_token` / `psp_token`).
 
-## Known wrinkle: `rail = 'vaulted_card'`
+## Declaring a custodian
 
-A Basis-Theory-held card currently also carries `rail = 'vaulted_card'`, even
-though the gateway charging it is NMI. That value is a second, weaker encoding
-of `custodian = 'basis_theory'` and every rail-dispatching switch has to alias
-it back to NMI. Retiring it — `rail` becomes `nmi`, custody carries the rest —
-is tracked separately; `custodian` is already the field to read.
+Custody is a modifier on a PSP, not a PSP of its own. The merchant manifest
+declares it in the settings of the PSP whose gateway the proxy charges land on:
+
+```yaml
+merchants:
+  acme:
+    psps:
+      mobius-bt:
+        nmi:
+          account_id: "7654322"          # the NMI gateway id — the PSP still charges
+          settings:
+            custodian: basis_theory
+            custodian_account_id: <BT tenant id>
+            custodian_public_api_key: <BT public application key>   # checkout-page config
+            custodian_network_tokens: false
+          secrets:
+            security_key: <NMI security key>
+            custodian_api_key: <BT private application key>         # the only custodial secret
+```
+
+Consequences, all enforced rather than documented:
+
+* Only `nmi` may declare a custodian today — it is the one rail with a
+  detokenizing-proxy charge path. Any other rail refuses the push.
+* The PSP must not also declare `tokenization_key` / `tokenization_url`: the
+  browser tokenizes against the **custodian**, so the rail's own tokenizer key
+  would be dead config on a checkout path.
+* `GET /checkout/config` reports `custodian` alongside `rail` and serves the
+  custodian's public key — a frontend drives whoever holds the card.
+* The retired `vaulted_card` keys (`gateway_account`, `nt_charges`, `api_key`,
+  `public_api_key`, `network_tokens`) fail the push with a rename error. There
+  are no aliases.
+
+### Why `vaulted_card` was not a rail (or#879)
+
+Until or#879 a Basis-Theory-held card also carried `rail = 'vaulted_card'`,
+even though the gateway charging it was NMI — the charge path literally built
+an NMI client, and the "rail"'s own `gateway_account` setting pointed at an NMI
+PSP. It was a second, weaker encoding of `custodian = 'basis_theory'`, and it
+forced every rail-dispatching switch to alias `vaulted_card` back to NMI.
+Forgetting the alias was silent and landed on money paths. The value is gone;
+`custodian` is the field to read.
 
 ## Adding a custodian
 

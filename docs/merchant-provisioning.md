@@ -122,7 +122,12 @@ runtime — details in `docs/rails/*.md`):
 | stripe | `acct_…`, operator-declared — [rails/stripe.md](rails/stripe.md) shows the curl to read it off your own account |
 | ccbill | `clientAccnum-clientSubacc`, dash-joined (`900000-0000`) — [rails/ccbill.md](rails/ccbill.md) |
 | solana | derived from the signer public key; a declared value is ignored — [rails/solana.md](rails/solana.md) |
-| vaulted_card | the Basis Theory tenant id (`settings.gateway_account` names the NMI account it detokenizes into) |
+
+A PSP may additionally declare a **custodian** — a third party that holds the
+cards it charges (`settings.custodian`, today `basis_theory` on `nmi` only).
+That is a modifier on the rail, not a rail: the `account_id` above is still the
+gateway's, and the custodian's own tenant id is `settings.custodian_account_id`.
+See [payment-method-custody.md](payment-method-custody.md).
 
 ### Env and secret-file overlays
 
