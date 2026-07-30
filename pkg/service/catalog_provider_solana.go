@@ -91,13 +91,24 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if in.BillingCycleDays == nil {
 		return map[string]string{"provider": "solana"}, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
-		return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
+	if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
+		return nil, err
 	}
 	// A recurring plan is mint-specific. The billing currency cannot identify
 	// its settlement token, so require psp_links.solana.mint_symbol through the
 	// Attach path instead of guessing from in.Currency.
 	return nil, errPendingManualLink
+}
+
+// requireUSDBillingForSolanaPublish gates publishing a NEW recurring plan on
+// the #745 model: the price bills in USD and the settlement token is declared
+// separately via psp_links.solana.mint_symbol. Pre-#745 rows attached by
+// plan_pda are exempt (see Attach).
+func requireUSDBillingForSolanaPublish(currency string) error {
+	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
+		return fmt.Errorf("solana recurring currently requires USD billing currency, got %q", currency)
+	}
+	return nil
 }
 
 func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateContext, symbol string) (map[string]string, error) {
@@ -117,7 +128,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 		return nil, fmt.Errorf("solana create-mode requires a positive recurring interval")
 	}
 
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	// symbol arrives already normalized (uppercased/trimmed) by Attach.
 	mint, decimals, err := plan.ResolveMint(symbol)
 	if err != nil {
 		return nil, err
@@ -203,12 +214,13 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyMintSymbol]))
 	if pda == "" {
-		// Publishing a NEW plan is the #745 model: bill in USD, settle in the
-		// declared token. The guard lives here — not on the plan_pda path — so
-		// pre-#745 rows (billed in usdc/usdg with the mint derived from the
-		// currency) stay operable for link verification and rotation.
-		if in.BillingCycleDays != nil && !strings.EqualFold(strings.TrimSpace(in.Currency), "usd") {
-			return nil, fmt.Errorf("solana recurring currently requires USD billing currency, got %q", in.Currency)
+		// The guard lives here — not on the plan_pda path — so pre-#745 rows
+		// (billed in usdc/usdg with the mint derived from the currency) stay
+		// operable for link verification and rotation.
+		if in.BillingCycleDays != nil {
+			if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
+				return nil, err
+			}
 		}
 		if in.BillingCycleDays == nil {
 			// A one-off price consumes no link keys (it settles as a direct
