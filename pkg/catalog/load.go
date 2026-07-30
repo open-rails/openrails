@@ -500,12 +500,23 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		for _, provider := range price.PSPs {
 			declared[provider] = struct{}{}
 		}
-		for provider := range price.PSPLinks {
+		// Normalize the psp_links keys IN PLACE (psps above are already
+		// normalized): every later lookup — the eligibility checks below,
+		// plan-time drift detection — reads by the canonical lowercase key, so
+		// a cased manifest key like "Solana:" must not survive as a distinct,
+		// invisible entry.
+		normalizedLinks := make(map[string]map[string]string, len(price.PSPLinks))
+		for provider, link := range price.PSPLinks {
 			key := strings.ToLower(strings.TrimSpace(provider))
 			if _, ok := declared[key]; !ok {
 				return fmt.Errorf("product %q price %s: psp_links.%s requires psps to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
 			}
+			if _, dup := normalizedLinks[key]; dup {
+				return fmt.Errorf("product %q price %s: psp_links declares %q more than once (differing only in case)", product.Key, PriceLabel(product.Key, *price), key)
+			}
+			normalizedLinks[key] = link
 		}
+		price.PSPLinks = normalizedLinks
 	}
 
 	// Per-provider eligibility (shape-only; no chain calls). One-off Solana
