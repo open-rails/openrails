@@ -102,7 +102,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
-		log.WithError(err).Error("Failed to create checkout session")
+		log.WithError(err).WithField("request_id", r.RequestID()).Error("Failed to create checkout session")
 		// Card-abuse tracking (#371): a vault/card decline is a failed charge
 		// attempt. Record it against this request's rate-limit subjects so
 		// repeated failures escalate to captcha/block (and feed site-wide
@@ -218,11 +218,7 @@ type checkoutSessionErrorContext struct {
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
 	var vaultErr *paymentmethods.VaultError
 	if errors.As(err, &vaultErr) {
-		code := api.CodePaymentFailed
-		if strings.TrimSpace(vaultErr.LocalizationID) != "" {
-			code = vaultErr.LocalizationID
-		}
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+		writeVaultError(r, vaultErr)
 		return
 	}
 	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an
