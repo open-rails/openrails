@@ -28,10 +28,10 @@ import (
 type CatalogPushOptions struct {
 	Config  *config.Config
 	PGXPool *pgxpool.Pool
-	// Runtime lends an already-bootstrapped embedded engine's Solana plan/RPC
-	// services to the otherwise isolated catalog helper. This lets a host's
-	// configured signer publish recurring plans without activating unrelated
-	// provider clients in the helper runtime. Its config is authoritative.
+	// Runtime applies the catalog through an already-bootstrapped embedded
+	// engine. This preserves its armed per-merchant provider accounts and
+	// signers; without it the helper builds an isolated runtime from Config.
+	// The supplied runtime's config is authoritative.
 	Runtime  *Embedded
 	File     string
 	Manifest []byte
@@ -166,6 +166,13 @@ func catalogPushRuntime(
 	if opts.Runtime != nil && (opts.Runtime.app == nil || opts.Runtime.app.Runtime == nil) {
 		return nil, nil, nil, fmt.Errorf("catalog runtime is not initialized")
 	}
+	if opts.Runtime != nil {
+		svc, err := opts.Runtime.Service()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("construct catalog service from embedded runtime: %w", err)
+		}
+		return opts.Runtime.app.Runtime, svc, func() {}, nil
+	}
 	rt, svc, cleanup, err := newCatalogPushRuntime(
 		catalogPushConfig(opts),
 		opts.PGXPool,
@@ -173,11 +180,6 @@ func catalogPushRuntime(
 	)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	if opts.Runtime != nil {
-		source := opts.Runtime.app.Runtime
-		rt.SolanaPlanService = source.SolanaPlanService
-		rt.SolanaRPCResolver = source.SolanaRPCResolver
 	}
 	return rt, svc, cleanup, nil
 }
