@@ -55,6 +55,36 @@ func TestWorkerAlertDue(t *testing.T) {
 	require.True(t, workerAlertDue(gen.OpenrailsWorkerHealth{LastAlertedAt: agoAt(2 * time.Hour), LastSuccessAt: agoAt(time.Hour)}, now, every))
 }
 
+func TestWorkerHealthAlertIdempotencyKey(t *testing.T) {
+	lastErrorAt := healthNow().Add(-time.Minute)
+	row := gen.OpenrailsWorkerHealth{
+		WorkerKind:          "test.worker",
+		RegisteredAt:        healthNow().Add(-48 * time.Hour),
+		LastSuccessAt:       agoAt(4 * time.Hour),
+		LastErrorAt:         &lastErrorAt,
+		ConsecutiveFailures: 3,
+	}
+
+	key := workerHealthAlertIdempotencyKey(row, "consecutive_failures")
+	retryRow := row
+	retryRow.ConsecutiveFailures = 4
+	retryErrorAt := healthNow()
+	retryRow.LastErrorAt = &retryErrorAt
+	require.Equal(t, key, workerHealthAlertIdempotencyKey(retryRow, "consecutive_failures"),
+		"retry-volatile health details must not mint a duplicate alert")
+
+	newSuccessAt := healthNow().Add(time.Hour)
+	retryRow.LastSuccessAt = &newSuccessAt
+	require.NotEqual(t, key, workerHealthAlertIdempotencyKey(retryRow, "consecutive_failures"),
+		"a recovery followed by a fresh incident must mint a new alert")
+
+	realertRow := row
+	realertAt := healthNow()
+	realertRow.LastAlertedAt = &realertAt
+	require.NotEqual(t, key, workerHealthAlertIdempotencyKey(realertRow, "consecutive_failures"),
+		"a paced re-alert must mint a new alert")
+}
+
 func TestWorkerRegistrations(t *testing.T) {
 	regs := NewWorkerRegistrations()
 	regs.NoteKind("a")

@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -71,6 +73,14 @@ func (whNoMerchWorker) Work(ctx context.Context, _ *river.Job[whNoMerchArgs]) er
 
 func cleanupWorkerHealth(t *testing.T, dbi *db.DB, kinds ...string) {
 	t.Helper()
+	mctx := dbtest.WithTestMerchant(context.Background())
+	systemCustomerID := db.SystemCustomerID(dbtest.TestMerchantID.UUID())
+	var systemCustomerExisted bool
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		return dbi.Qx(ctx).QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM openrails.customers WHERE id = $1)`, systemCustomerID,
+		).Scan(&systemCustomerExisted)
+	}))
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, kind := range kinds {
@@ -79,8 +89,58 @@ func cleanupWorkerHealth(t *testing.T, dbi *db.DB, kinds ...string) {
 		mctx := dbtest.WithTestMerchant(ctx)
 		_ = dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE event_type = 'system_alert' AND data->>'operation' = 'worker_health'`)
+			if !systemCustomerExisted {
+				_, _ = dbi.Qx(ctx).Exec(ctx,
+					`DELETE FROM openrails.customers c
+					 WHERE c.id = $1
+					   AND NOT EXISTS (SELECT 1 FROM openrails.notification_queue nq WHERE nq.customer_id = c.id)`,
+					systemCustomerID,
+				)
+			}
 			return nil
 		})
+	})
+}
+
+// cleanupNewFanoutSystemCustomers removes system subjects created for active
+// merchants that predated this test. Per-test merchants are removed by each
+// test's primary cleanup; this helper prevents shared fixture pollution.
+func cleanupNewFanoutSystemCustomers(t *testing.T, super *db.DB, kind string) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := super.Pool().Query(ctx,
+		`SELECT id FROM openrails.merchants WHERE status = 'active'`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var createdCandidates []uuid.UUID
+	for rows.Next() {
+		var merchantID uuid.UUID
+		require.NoError(t, rows.Scan(&merchantID))
+		systemCustomerID := db.SystemCustomerID(merchantID)
+		var existed bool
+		require.NoError(t, super.Pool().QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM openrails.customers WHERE id = $1)`, systemCustomerID,
+		).Scan(&existed))
+		if !existed {
+			createdCandidates = append(createdCandidates, systemCustomerID)
+		}
+	}
+	require.NoError(t, rows.Err())
+
+	t.Cleanup(func() {
+		_, err := super.Pool().Exec(ctx,
+			`DELETE FROM openrails.notification_queue WHERE data->>'worker_kind' = $1`, kind)
+		require.NoError(t, err)
+		for _, customerID := range createdCandidates {
+			_, err = super.Pool().Exec(ctx,
+				`DELETE FROM openrails.customers c
+				 WHERE c.id = $1
+				   AND NOT EXISTS (SELECT 1 FROM openrails.notification_queue nq WHERE nq.customer_id = c.id)`,
+				customerID,
+			)
+			require.NoError(t, err)
+		}
 	})
 }
 
@@ -108,14 +168,19 @@ func workerHealthRow(t *testing.T, dbi *db.DB, kind string) (lastSuccess, lastEr
 
 func countWorkerHealthAlerts(t *testing.T, dbi *db.DB, kind string) int {
 	t.Helper()
-	mctx := dbtest.WithTestMerchant(context.Background())
+	return countWorkerHealthAlertsForMerchant(t, dbi, dbtest.TestMerchantID, kind)
+}
+
+func countWorkerHealthAlertsForMerchant(t *testing.T, dbi *db.DB, merchantID merchant.ID, kind string) int {
+	t.Helper()
+	mctx := merchant.WithID(context.Background(), merchantID)
 	var n int
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		return dbi.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.notification_queue
 			 WHERE merchant_id = $1 AND event_type = 'system_alert'
 			   AND data->>'operation' = 'worker_health' AND data->>'worker_kind' = $2`,
-			dbtest.TestMerchantID.UUID(), kind).Scan(&n)
+			merchantID.UUID(), kind).Scan(&n)
 	}))
 	return n
 }
@@ -296,4 +361,130 @@ func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 
 	require.Equal(t, 1, countWorkerHealthAlerts(t, dbi, whNoMerchKind))
 	require.Equal(t, "never_succeeded", alertReason(t, dbi, whNoMerchKind))
+}
+
+func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
+	ctx := context.Background()
+	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
+	super := dbtest.OpenAppDB(t, superDSN)
+	appDB := dbtest.OpenAppDB(t, appDSN)
+
+	posture, err := appDB.CheckRLSPosture(ctx)
+	require.NoError(t, err)
+	require.True(t, posture.Enforcing, "test must use the RLS-enforcing app role")
+
+	suffix := uuid.NewString()[:8]
+	merchantA := merchant.ID(uuid.New())
+	merchantB := merchant.ID(uuid.New())
+	kind := "test.wh_multi_merchant_" + suffix
+	t.Cleanup(func() {
+		_, err := super.Pool().Exec(ctx,
+			`DELETE FROM openrails.notification_queue WHERE data->>'worker_kind' = $1`, kind)
+		require.NoError(t, err)
+		_, err = super.Pool().Exec(ctx,
+			`DELETE FROM openrails.customers WHERE merchant_id IN ($1, $2)`,
+			merchantA.UUID(), merchantB.UUID(),
+		)
+		require.NoError(t, err)
+		_, err = super.Pool().Exec(ctx,
+			`DELETE FROM openrails.merchants WHERE id IN ($1, $2)`,
+			merchantA.UUID(), merchantB.UUID(),
+		)
+		require.NoError(t, err)
+	})
+	for label, merchantID := range map[string]merchant.ID{"a": merchantA, "b": merchantB} {
+		_, err := super.Pool().Exec(ctx,
+			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+			merchantID.UUID(), "wh-"+suffix+"-"+label,
+		)
+		require.NoError(t, err)
+	}
+	cleanupNewFanoutSystemCustomers(t, super, kind)
+
+	checker := &WorkerHealthCheckWorker{DB: appDB}
+	err = checker.raiseAlert(ctx, gen.OpenrailsWorkerHealth{WorkerKind: kind}, "stale", time.Now().UTC())
+	require.NoError(t, err)
+
+	for _, merchantID := range []merchant.ID{merchantA, merchantB} {
+		require.Equal(t, 1, countWorkerHealthAlertsForMerchant(t, appDB, merchantID, kind))
+
+		mctx := merchant.WithID(ctx, merchantID)
+		require.NoError(t, appDB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+			var customerID uuid.UUID
+			err := appDB.Qx(ctx).QueryRow(ctx,
+				`SELECT customer_id FROM openrails.notification_queue
+				 WHERE data->>'worker_kind' = $1`, kind,
+			).Scan(&customerID)
+			if err != nil {
+				return err
+			}
+			require.Equal(t, db.SystemCustomerID(merchantID.UUID()), customerID)
+			return nil
+		}))
+	}
+	require.NotEqual(t, db.SystemCustomerID(merchantA.UUID()), db.SystemCustomerID(merchantB.UUID()))
+}
+
+func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
+	ctx := context.Background()
+	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
+	super := dbtest.OpenAppDB(t, superDSN)
+	appDB := dbtest.OpenAppDB(t, appDSN)
+
+	suffix := uuid.NewString()[:8]
+	merchantA := merchant.ID(uuid.New())
+	merchantB := merchant.ID(uuid.New())
+	kind := "test.wh_partial_failure_" + suffix
+	t.Cleanup(func() {
+		_, err := super.Pool().Exec(ctx,
+			`DELETE FROM openrails.notification_queue WHERE data->>'worker_kind' = $1`, kind)
+		require.NoError(t, err)
+		_, err = super.Pool().Exec(ctx,
+			`DELETE FROM openrails.customers WHERE merchant_id IN ($1, $2)`,
+			merchantA.UUID(), merchantB.UUID(),
+		)
+		require.NoError(t, err)
+		_, err = super.Pool().Exec(ctx,
+			`DELETE FROM openrails.merchants WHERE id IN ($1, $2)`,
+			merchantA.UUID(), merchantB.UUID(),
+		)
+		require.NoError(t, err)
+	})
+	for label, merchantID := range map[string]merchant.ID{"a": merchantA, "b": merchantB} {
+		_, err := super.Pool().Exec(ctx,
+			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+			merchantID.UUID(), "wh-partial-"+suffix+"-"+label,
+		)
+		require.NoError(t, err)
+	}
+	cleanupNewFanoutSystemCustomers(t, super, kind)
+
+	// Corrupt B's derived system-customer identity by assigning it to A. The
+	// RLS-enforcing B connection cannot see or update that conflicting row.
+	conflictingID := db.SystemCustomerID(merchantB.UUID())
+	_, err := super.Pool().Exec(ctx,
+		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
+		conflictingID, merchantA.UUID(), conflictingID.String(),
+	)
+	require.NoError(t, err)
+
+	checker := &WorkerHealthCheckWorker{DB: appDB}
+	row := gen.OpenrailsWorkerHealth{WorkerKind: kind, RegisteredAt: time.Now().Add(-time.Hour).UTC()}
+	now := time.Now().UTC()
+	err = checker.raiseAlert(ctx, row, "stale", now)
+	require.Error(t, err)
+	require.ErrorContains(t, err, merchantB.String())
+	require.Equal(t, 1, countWorkerHealthAlertsForMerchant(t, appDB, merchantA, kind),
+		"successful merchant delivery remains durable")
+	require.Equal(t, 0, countWorkerHealthAlertsForMerchant(t, appDB, merchantB, kind),
+		"failed merchant delivery must not be reported as successful")
+
+	// River retries the entire checker job after a partial fan-out failure. The
+	// successful merchant must not receive another copy of the same incident.
+	err = checker.raiseAlert(ctx, row, "stale", now.Add(time.Minute))
+	require.Error(t, err)
+	require.ErrorContains(t, err, merchantB.String())
+	require.Equal(t, 1, countWorkerHealthAlertsForMerchant(t, appDB, merchantA, kind),
+		"retry must reuse the incident ID for deliveries that already succeeded")
+	require.Equal(t, 0, countWorkerHealthAlertsForMerchant(t, appDB, merchantB, kind))
 }

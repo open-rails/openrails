@@ -8,6 +8,15 @@ INSERT INTO openrails.notification_queue (
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 
+-- name: CreateNotificationIfAbsent :exec
+INSERT INTO openrails.notification_queue (
+    id, merchant_id, customer_id, event_type, data, seen, created_at
+) VALUES (
+    $1, sqlc.arg(merchant_id)::uuid, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
+    COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- name: GetNotificationByID :one
 SELECT * FROM openrails.notification_queue WHERE id = $1;
 

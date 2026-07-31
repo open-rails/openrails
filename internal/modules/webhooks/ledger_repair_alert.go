@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // LedgerRepairAlert describes a durable system alert for operator-led billing repair.
@@ -19,6 +20,7 @@ type LedgerRepairAlert struct {
 	Operation         string
 	TransactionID     string
 	UserID            string
+	IdempotencyKey    string
 	OriginalPaymentID *uuid.UUID
 	SubscriptionID    *uuid.UUID
 	Err               error
@@ -69,23 +71,50 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 	if now.IsZero() {
 		now = time.Now()
 	}
+	idempotencyKey := strings.TrimSpace(alert.IdempotencyKey)
+	notificationID := uuidutil.NewV7()
 	notification := &models.NotificationQueue{
-		ID:        uuidutil.NewV7(),
+		ID:        notificationID,
 		EventType: models.NotificationSystemAlert,
 		Data:      data,
 		CreatedAt: now.UTC(),
 	}
-	// The alert is owned by the well-known system merchant subject
-	// (db.SystemCustomerID) — materialize its row through the normal
-	// self-issuer path like any other UUID subject (#364).
+	// The alert is owned by this merchant's well-known system subject. Its ID is
+	// merchant-derived because customers.id is globally unique under RLS (#889).
 	if database != nil {
-		sysTSID, err := db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, db.SystemCustomerID.String())
+		merchantID, err := merchant.Require(ctx)
+		if err != nil {
+			return fmt.Errorf("resolve merchant for ledger repair alert: %w", err)
+		}
+		systemCustomerID := db.SystemCustomerID(merchantID.UUID())
+		sysTSID, err := db.EnsureCustomerID(
+			ctx,
+			database.Qx(ctx),
+			merchantID.UUID(),
+			systemCustomerID.String(),
+		)
 		if err != nil {
 			return fmt.Errorf("resolve system merchant subject for ledger repair alert: %w", err)
 		}
 		notification.CustomerID = sysTSID
+		if idempotencyKey != "" {
+			notification.ID = uuidutil.DeterministicID(
+				uuidutil.DeterministicNamespace,
+				"ledger_repair_alert",
+				merchantID.String(),
+				idempotencyKey,
+			)
+		}
+	} else if idempotencyKey != "" {
+		return fmt.Errorf("database is required for idempotent ledger repair alert")
 	}
-	if err := notificationService.Create(ctx, notification); err != nil {
+	var err error
+	if idempotencyKey != "" {
+		err = notificationService.CreateIfAbsent(ctx, notification)
+	} else {
+		err = notificationService.Create(ctx, notification)
+	}
+	if err != nil {
 		return fmt.Errorf("create ledger repair alert: %w", err)
 	}
 	return nil

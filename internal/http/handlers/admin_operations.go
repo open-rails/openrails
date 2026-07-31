@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const defaultAdminOperationsLimit = 50
@@ -32,7 +33,12 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	tsid := db.SystemCustomerID
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")
+		return
+	}
+	tsid := db.SystemCustomerID(merchantID.UUID())
 
 	var seen *bool
 	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))
