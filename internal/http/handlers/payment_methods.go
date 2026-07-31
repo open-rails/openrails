@@ -229,18 +229,17 @@ func CreatePaymentMethod(r *httprequest.Request) {
 
 	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
 	if err != nil {
-		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
+		log.WithError(err).WithFields(log.Fields{
+			"request_id": r.RequestID(),
+			"user_id":    user.ID,
+		}).Error("Failed to create payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
 		var vaultErr *paymentmethods.VaultError
 		if errors.As(err, &vaultErr) {
-			code := api.CodePaymentFailed
-			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
-				code = vaultErr.LocalizationID
-			}
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+			writeVaultError(r, vaultErr)
 			return
 		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")

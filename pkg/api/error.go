@@ -57,12 +57,13 @@ const (
 
 // ErrorDetails contains the detailed error information (nested under "error" key)
 type ErrorDetails struct {
-	Type     string         `json:"type"`               // Error type category
-	Code     string         `json:"code"`               // Machine-readable error code
-	Message  string         `json:"message"`            // Human-readable message
-	Param    *string        `json:"param,omitempty"`    // Parameter that caused the error (if applicable)
-	DocURL   *string        `json:"doc_url,omitempty"`  // URL to documentation (optional)
-	Metadata map[string]any `json:"metadata,omitempty"` // Machine-readable context for actionable errors.
+	Type      string         `json:"type"`                 // Error type category
+	Code      string         `json:"code"`                 // Machine-readable error code
+	Message   string         `json:"message"`              // Human-readable message
+	RequestID string         `json:"request_id,omitempty"` // Correlates the response with server-side logs.
+	Param     *string        `json:"param,omitempty"`      // Parameter that caused the error (if applicable)
+	DocURL    *string        `json:"doc_url,omitempty"`    // URL to documentation (optional)
+	Metadata  map[string]any `json:"metadata,omitempty"`   // Machine-readable context for actionable errors.
 }
 
 // ErrorResponse is the top-level error response wrapper
@@ -76,6 +77,7 @@ type APIError struct {
 	Type       string
 	Code       string
 	Message    string
+	RequestID  string
 	Param      *string
 	Metadata   map[string]any
 }
@@ -92,11 +94,12 @@ func (e *APIError) Error() string {
 func (e *APIError) ToResponse() ErrorResponse {
 	return ErrorResponse{
 		Error: ErrorDetails{
-			Type:     e.Type,
-			Code:     e.Code,
-			Message:  e.Message,
-			Param:    e.Param,
-			Metadata: e.Metadata,
+			Type:      e.Type,
+			Code:      e.Code,
+			Message:   e.Message,
+			RequestID: e.RequestID,
+			Param:     e.Param,
+			Metadata:  e.Metadata,
 		},
 	}
 }
@@ -160,6 +163,12 @@ func (e *APIError) WithParam(param string) *APIError {
 // WithMetadata adds machine-readable context to the error response.
 func (e *APIError) WithMetadata(metadata map[string]any) *APIError {
 	e.Metadata = metadata
+	return e
+}
+
+// WithRequestID adds the request correlation identifier to the error response.
+func (e *APIError) WithRequestID(requestID string) *APIError {
+	e.RequestID = requestID
 	return e
 }
 

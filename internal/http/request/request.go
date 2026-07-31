@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -62,6 +63,8 @@ type Request struct {
 	// UserContext stored only on a re-wrapped request context.
 	uc    billingauth.UserContext
 	ucSet bool
+
+	requestID string
 }
 
 // NewWithTransport builds a Request over an arbitrary Transport (test seam);
@@ -95,13 +98,35 @@ func (r *Request) ErrorJSON(code int, msg string) {
 }
 
 func (r *Request) APIError(err *api.APIError) {
+	requestID := r.RequestID()
+	err.WithRequestID(requestID)
 	logrus.WithFields(logrus.Fields{
-		"type":   err.Type,
-		"code":   err.Code,
-		"param":  err.Param,
-		"status": err.HTTPStatus,
+		"type":       err.Type,
+		"code":       err.Code,
+		"param":      err.Param,
+		"request_id": requestID,
+		"status":     err.HTTPStatus,
 	}).Error(err.Message)
 	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
+}
+
+const maxErrorRequestIDLength = 128
+
+// RequestID returns the request's correlation identifier, generating one when
+// the caller did not supply a usable value. The same value is propagated to
+// the request and response headers so handler logs and API errors correlate.
+func (r *Request) RequestID() string {
+	if r.requestID != "" {
+		return r.requestID
+	}
+	requestID := strings.TrimSpace(r.Request.Header.Get("X-Request-ID"))
+	if requestID == "" || len(requestID) > maxErrorRequestIDLength {
+		requestID = uuid.NewString()
+	}
+	r.requestID = requestID
+	r.Request.Header.Set("X-Request-ID", requestID)
+	r.SetHeader("X-Request-ID", requestID)
+	return requestID
 }
 
 func (r *Request) SuccessJSON(data any) {
