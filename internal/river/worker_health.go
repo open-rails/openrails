@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -303,6 +304,29 @@ func workerAlertDue(row gen.OpenrailsWorkerHealth, now time.Time, reAlertEvery t
 	return now.Sub(*row.LastAlertedAt) >= reAlertEvery
 }
 
+// workerHealthAlertIdempotencyKey identifies one alerting incident. Retry-
+// volatile health details are deliberately excluded so a partial merchant
+// fan-out retries only the deliveries that did not already persist.
+func workerHealthAlertIdempotencyKey(row gen.OpenrailsWorkerHealth, reason string) string {
+	lastSuccessAt := ""
+	if row.LastSuccessAt != nil {
+		lastSuccessAt = row.LastSuccessAt.UTC().Format(time.RFC3339Nano)
+	}
+	lastAlertedAt := ""
+	if row.LastAlertedAt != nil {
+		lastAlertedAt = row.LastAlertedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuidutil.DeterministicID(
+		uuidutil.DeterministicNamespace,
+		"worker_health_alert",
+		row.WorkerKind,
+		reason,
+		row.RegisteredAt.UTC().Format(time.RFC3339Nano),
+		lastSuccessAt,
+		lastAlertedAt,
+	).String()
+}
+
 // raiseAlert routes one unhealthy kind to the existing repair-alert channel.
 // Worker health is operator-global but the channel is merchant-scoped, so the
 // alert fans out to every active merchant (embedded deployments have exactly
@@ -333,25 +357,24 @@ func (w *WorkerHealthCheckWorker) raiseAlert(ctx context.Context, row gen.Openra
 	if row.LastError != nil && *row.LastError != "" {
 		alertErr = fmt.Errorf("worker %s unhealthy (%s): %s", row.WorkerKind, reason, *row.LastError)
 	}
-	var lastErr error
-	var wrote int
+	alertErrors := make([]error, 0)
+	idempotencyKey := workerHealthAlertIdempotencyKey(row, reason)
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			return webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, now, webhooks.LedgerRepairAlert{
-				Provider:  "openrails",
-				Operation: "worker_health",
-				Err:       alertErr,
-				Metadata:  metadata,
+				Provider:       "openrails",
+				Operation:      "worker_health",
+				IdempotencyKey: idempotencyKey,
+				Err:            alertErr,
+				Metadata:       metadata,
 			})
 		}); err != nil {
-			lastErr = err
-			continue
+			alertErrors = append(alertErrors, fmt.Errorf("merchant %s: %w", mid, err))
 		}
-		wrote++
 	}
-	if wrote == 0 {
-		return fmt.Errorf("record repair alert: %w", lastErr)
+	if err := errors.Join(alertErrors...); err != nil {
+		return fmt.Errorf("record repair alerts: %w", err)
 	}
 	return nil
 }

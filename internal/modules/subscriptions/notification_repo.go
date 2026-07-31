@@ -39,26 +39,11 @@ func notificationsFromGen(rows []gen.OpenrailsNotificationQueue) ([]*models.Noti
 }
 
 func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
-		return err
-	}
-	data, err := models.ToJSONB(notification.Data)
+	params, err := r.createParams(ctx, notification)
 	if err != nil {
 		return err
 	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := r.db.Gen(ctx).CreateNotification(ctx, gen.CreateNotificationParams{
-		ID:         notification.ID,
-		MerchantID: tid.UUID(),
-		CustomerID: notification.CustomerID,
-		EventType:  string(notification.EventType),
-		Data:       data,
-		Seen:       notification.Seen,
-		CreatedAt:  notification.CreatedAt,
-	})
+	rows, err := r.db.Gen(ctx).CreateNotification(ctx, params)
 	if err != nil {
 		return err
 	}
@@ -66,6 +51,48 @@ func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models
 		return errors.New("no rows affected")
 	}
 	return nil
+}
+
+// CreateIfAbsent inserts notification once by its caller-supplied ID. An
+// existing ID is success, which lets retrying fan-out jobs converge without
+// duplicating deliveries that already succeeded.
+func (r *NotificationQueueRepo) CreateIfAbsent(ctx context.Context, notification *models.NotificationQueue) error {
+	params, err := r.createParams(ctx, notification)
+	if err != nil {
+		return err
+	}
+	return r.db.Gen(ctx).CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+		ID:         params.ID,
+		MerchantID: params.MerchantID,
+		CustomerID: params.CustomerID,
+		EventType:  params.EventType,
+		Data:       params.Data,
+		Seen:       params.Seen,
+		CreatedAt:  params.CreatedAt,
+	})
+}
+
+func (r *NotificationQueueRepo) createParams(ctx context.Context, notification *models.NotificationQueue) (gen.CreateNotificationParams, error) {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	data, err := models.ToJSONB(notification.Data)
+	if err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	return gen.CreateNotificationParams{
+		ID:         notification.ID,
+		MerchantID: tid.UUID(),
+		CustomerID: notification.CustomerID,
+		EventType:  string(notification.EventType),
+		Data:       data,
+		Seen:       notification.Seen,
+		CreatedAt:  notification.CreatedAt,
+	}, nil
 }
 
 func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.NotificationQueue, error) {

@@ -42,6 +42,11 @@ func (s *NotificationService) Create(ctx context.Context, notification *models.N
 	return s.repo.Create(ctx, notification)
 }
 
+// CreateIfAbsent stores a notification once by its caller-supplied ID.
+func (s *NotificationService) CreateIfAbsent(ctx context.Context, notification *models.NotificationQueue) error {
+	return s.repo.CreateIfAbsent(ctx, notification)
+}
+
 func (s *NotificationService) GetByID(ctx context.Context, id uuid.UUID) (*models.NotificationQueue, error) {
 	return s.repo.GetByID(ctx, id)
 }

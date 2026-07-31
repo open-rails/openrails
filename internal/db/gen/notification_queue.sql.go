@@ -110,6 +110,39 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 	return result.RowsAffected(), nil
 }
 
+const createNotificationIfAbsent = `-- name: CreateNotificationIfAbsent :exec
+INSERT INTO openrails.notification_queue (
+    id, merchant_id, customer_id, event_type, data, seen, created_at
+) VALUES (
+    $1, $5::uuid, $2, $3, COALESCE($6, '{}'::jsonb), $4,
+    COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+)
+ON CONFLICT (id) DO NOTHING
+`
+
+type CreateNotificationIfAbsentParams struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	EventType  string
+	Seen       bool
+	MerchantID uuid.UUID
+	Data       []byte
+	CreatedAt  time.Time
+}
+
+func (q *Queries) CreateNotificationIfAbsent(ctx context.Context, arg CreateNotificationIfAbsentParams) error {
+	_, err := q.db.Exec(ctx, createNotificationIfAbsent,
+		arg.ID,
+		arg.CustomerID,
+		arg.EventType,
+		arg.Seen,
+		arg.MerchantID,
+		arg.Data,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const deleteNotification = `-- name: DeleteNotification :execrows
 DELETE FROM openrails.notification_queue WHERE id = $1
 `
