@@ -85,6 +85,8 @@ catalogs:
 	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
 		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &firstDump,
 	}))
+	require.Contains(t, firstDump.String(), "expires: 30d")
+	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
 	require.NoError(t, err, "dump should parse as push-catalog YAML")
 	require.Len(t, targets, 1)

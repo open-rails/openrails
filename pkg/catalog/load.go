@@ -356,18 +356,11 @@ func validateCredits(productKey string, credits []CreditGrant, balances map[stri
 		if !ok {
 			return fmt.Errorf("product %q credit %q references unknown credit balance", productKey, credit.Key)
 		}
-		if strings.TrimSpace(credit.Unit) == "" && strings.TrimSpace(credit.Currency) != "" {
-			credit.Unit = credit.Currency
-		}
-		if strings.TrimSpace(credit.Unit) == "" {
-			credit.Unit = balance.Unit
-		}
-		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
-			return fmt.Errorf("product %q credit %q has invalid unit %q", productKey, credit.Key, credit.Unit)
-		}
+		credit.Unit = balance.Unit
 		if credit.Amount != nil && *credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productKey, credit.Key)
 		}
+		credit.ExpiryHours = nil
 		expires := strings.TrimSpace(credit.Expires)
 		if expires == "" {
 			expires = strings.TrimSpace(balance.ExpiresDefault)

@@ -447,7 +447,18 @@ func creditGrants(raw []byte) []catalog.CreditGrant {
 	for _, k := range keys {
 		v := m[k]
 		amount := v.Amount
-		out = append(out, catalog.CreditGrant{Key: k, Unit: v.Unit, Amount: &amount, ExpiryHours: v.ExpiryHours, Cadence: v.Cadence})
+		expires := ""
+		if v.ExpiryHours != nil {
+			expires = hoursSpec(*v.ExpiryHours)
+		}
+		out = append(out, catalog.CreditGrant{
+			Key:         k,
+			Unit:        v.Unit,
+			Amount:      &amount,
+			ExpiryHours: v.ExpiryHours,
+			Expires:     expires,
+			Cadence:     v.Cadence,
+		})
 	}
 	return out
 }
