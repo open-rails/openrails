@@ -64,6 +64,7 @@ type Server struct {
 	controlPlane           *controlplane.ControlPlane
 	delegatedResolver      middleware.DelegatedResolver
 	captchaStore           *captcha.ChallengeStore
+	adminLimiter           *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 
@@ -208,6 +209,7 @@ func New(deps Dependencies) (*Server, error) {
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
+		adminLimiter:           middleware.NewAdminOperationLimiter(deps.Redis),
 		consoleAssets:          deps.ConsoleAssets,
 		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
 	}

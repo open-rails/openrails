@@ -75,6 +75,7 @@ type Assembler struct {
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
 	RDB           *redis.Client
+	AdminLimiter  *middleware.AdminOperationLimiter
 	Authenticator billingauth.Authenticator
 	Gate          billingauth.Gate
 	// DelegatedAuthenticator is the in-process host identity seam (#565). When set
@@ -147,6 +148,7 @@ func FromApp(a *app.App) *Assembler {
 		APIKeys:                   apiKeys,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
+		AdminLimiter:              middleware.NewAdminOperationLimiter(a.RedisClient),
 		HostResolve:               hostResolve,
 	}
 	if checker != nil || resolver != nil {
@@ -216,8 +218,9 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
-			Gate:    s.Gate,
-			APIKeys: s.APIKeys,
+			Gate:         s.Gate,
+			APIKeys:      s.APIKeys,
+			AdminLimiter: s.AdminLimiter,
 		}
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted
 		// via embgin.SelfHandler (issuer→owner), not the base handler.
