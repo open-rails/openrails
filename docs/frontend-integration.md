@@ -191,6 +191,12 @@ card. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 
+Send `Idempotency-Key` on the create request and retain the key, payment token, and
+exact JSON body for an exact-request retry. A different token is a new attempt and
+must use a new key. If create returns `provider_outcome_unknown`, refresh the payment
+method list before starting another attempt because the provider mutation may have
+completed.
+
 ### Shared-customer treasury: `/v1/customers/:customer_id/*`
 
 `/v1/me/*` needs no grants. Acting on a *shared* customer balance (an org/team wallet
