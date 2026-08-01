@@ -18,6 +18,11 @@
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 // Manifest is the root of a catalog-as-code document.
 //
 // Every price declares its own `currency` and `psps` explicitly — there
@@ -97,13 +102,30 @@ type CreditBalance struct {
 }
 
 type CreditGrant struct {
-	Key         string `json:"key" yaml:"key"`
-	Unit        string `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Currency    string `json:"currency,omitempty" yaml:"currency,omitempty"`
-	Amount      *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
-	ExpiryHours *int   `json:"expiry_hours,omitempty" yaml:"expiry_hours,omitempty"`
+	Key string `json:"key" yaml:"key"`
+	// Unit is resolved from the referenced CreditBalance during validation.
+	Unit string `json:"-" yaml:"-"`
+	// Currency is internal state; catalog v1 does not declare it on grants.
+	Currency string `json:"-" yaml:"-"`
+	Amount   *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+	// ExpiryHours is resolved from Expires or the balance default.
+	ExpiryHours *int   `json:"-" yaml:"-"`
 	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
 	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
+}
+
+// UnmarshalJSON keeps the HTTP catalog manifest as strict as the YAML parser.
+func (g *CreditGrant) UnmarshalJSON(raw []byte) error {
+	type manifestCreditGrant CreditGrant
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var declared manifestCreditGrant
+	if err := decoder.Decode(&declared); err != nil {
+		return err
+	}
+	*g = CreditGrant(declared)
+	return nil
 }
 
 func (p Product) tierRank() int {
