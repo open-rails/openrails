@@ -8,6 +8,7 @@ DELETE /v1/merchant/payment-providers/{provider}
 DELETE /v1/merchant/team/invites/{id}
 DELETE /v1/merchant/team/{user_id}
 DELETE /v1/merchant/webhooks/{id}
+DELETE /v1/platform/admin-rate-limit-lockouts/{user_id}
 DELETE /v1/platform/merchants/{id}
 GET /health/live
 GET /health/ready

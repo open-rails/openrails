@@ -41,7 +41,7 @@ func adminPaymentsReader(t *testing.T, suite *TestContainerSuite) http.Handler {
 // adminPaymentsWriter mounts the delegated merchant surface with refund access
 // and payments:read, which a refund operator naturally also holds.
 func adminPaymentsWriter(t *testing.T, suite *TestContainerSuite) http.Handler {
-	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000002",
+	return newHostSeamAdminRouter(t, suite, uuid.NewString(),
 		[]string{controlplane.PermMerchantPaymentsRead, controlplane.PermMerchantPaymentsRefund})
 }
 
@@ -477,7 +477,6 @@ func TestAdminRefund_RequiresPaymentsWrite(t *testing.T) {
 // TestAdminRefundPayment tests POST /v1/merchant/payments/:id/refunds
 func TestAdminRefundPayment(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	admin := adminPaymentsWriter(t, suite)
 
 	// Seed test data
 	products := suite.SeedProducts()
@@ -485,6 +484,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	userID := uuid.New().String()
 
 	t.Run("returns 404 for non-existent payment", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		nonExistentID := uuid.New()
 
 		w := httptest.NewRecorder()
@@ -499,6 +499,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns 400 for invalid payment ID", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
 		req, _ := http.NewRequest("POST", "/v1/merchant/payments/not-a-uuid/refunds", strings.NewReader(body))
@@ -510,6 +511,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns 400 for missing amount", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:  userID,
 			PriceID: priceID,
@@ -529,6 +531,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns 400 for zero amount", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:  userID,
 			PriceID: priceID,
@@ -548,6 +551,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns 400 for sub-cent refund micros", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		// #671: RefundPayload.AmountCents is true cents; a refund amount with a
 		// sub-cent micros remainder is rejected, never rounded.
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
@@ -575,6 +579,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns actionable 400 for stripe historical non-refundable id", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:        userID,
 			PriceID:       priceID,
@@ -603,6 +608,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 
 	t.Run("returns 400 for CCBill payments without a linked subscription", func(t *testing.T) {
+		admin := adminPaymentsWriter(t, suite)
 		// #696: CCBill refunds ride the DataLink intent path keyed off the linked
 		// subscription's CCBill subscription id. Without that link the API path
 		// can't resolve its refund coordinates — the 400 must say why and direct

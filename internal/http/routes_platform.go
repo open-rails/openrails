@@ -16,6 +16,7 @@ func (s *Server) registerPlatformRoutes(mux *http.ServeMux) {
 	opts := httproutes.PlatformOptions{
 		Authenticator: s.authenticator,
 		Root:          s.controlPlane,
+		AdminLimiter:  s.adminLimiter,
 	}
 	httproutes.RegisterPlatformRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+"/platform", s.runtime, s.recordRoute),
