@@ -10,14 +10,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #511 Phase D (LIFE): a `pending` subscription that never confirmed within the
-// threshold is cleaned up (cancelled). Idempotent.
-func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
+// #511/#842 Phase D (LIFE): a `pending` subscription that never confirmed
+// within the threshold waits for authoritative subscription coverage. Time
+// alone cannot prove the remote subscription is absent.
+func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -44,6 +46,7 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1 AND source_domain='subscriptions'`, merchantID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
@@ -55,7 +58,28 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 1, res.AutoFixed)
+		require.Equal(t, 0, res.AutoFixed)
+		require.Equal(t, 1, res.ReconcileRequired)
+		var status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.Equal(t, "pending", status, "a timeout alone cannot retract a subscription")
+		var findingStatus string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			merchantID, "subscription:"+subID.String()).Scan(&findingStatus))
+		require.Equal(t, "reconcile_required", findingStatus)
+
+		_, err = appDB.Gen(ctx).UpsertReconciliationState(ctx, gen.UpsertReconciliationStateParams{
+			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: true,
+		})
+		require.NoError(t, err)
+		return nil
+	}))
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Findings)
+		require.Equal(t, 1, res.AutoFixed, "proven provider coverage releases the held repair")
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
 		require.Equal(t, "cancelled", status)
@@ -64,7 +88,7 @@ func TestConverge_LifeSubscriptionPendingStale(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
-		require.Equal(t, 0, res.Findings, "cancelled → no longer pending → converged")
+		require.Equal(t, 0, res.Findings, "cancelled subscription is converged")
 		return nil
 	}))
 }

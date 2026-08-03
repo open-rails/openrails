@@ -11,8 +11,19 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/destructive"
 )
+
+func enableInstanceDestructiveActionsForTest(t *testing.T, dbi *db.DB) {
+	t.Helper()
+	gate := destructive.New(dbi)
+	require.NoError(t, gate.SetSwitch(context.Background(), true, "integration-test", "exercise destructive worker path"))
+	t.Cleanup(func() {
+		require.NoError(t, gate.SetSwitch(context.Background(), false, "integration-test", "restore safe default"))
+	})
+}
 
 // #511 Phase E (end-to-end): the ConvergeSweepWorker is the background invocation
 // of the Convergence Engine. This test seeds two unrelated kinds of internal-plane
@@ -25,6 +36,7 @@ import (
 func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	enableInstanceDestructiveActionsForTest(t, dbi)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())

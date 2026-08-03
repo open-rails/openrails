@@ -141,6 +141,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
@@ -243,6 +244,7 @@ func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider strin
 func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	enableInstanceDestructiveActionsForTest(t, dbi)
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 
@@ -309,6 +311,7 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 func TestProviderRefresh_MissingSecret_RailAbsentWithWarn(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	enableInstanceDestructiveActionsForTest(t, dbi)
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 

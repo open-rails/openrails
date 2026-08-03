@@ -341,17 +341,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		return nil
 	}))
 
-	// 10) #737 Task 2: incremental re-import terminal cancel. Import #1 landed
-	// "incremental" active with runway (adopted, like "runway"); a pre-existing
+	// 10) #737/#821: incremental re-import with uncertain stale evidence. Import
+	// #1 landed "incremental" active with runway (adopted, like "runway"); a pre-existing
 	// open entitlement window stands in for the access a real legacy customer
 	// would already carry. Import #2, at a NEWER AsOf, re-declares the SAME
 	// rail_subscription_id now stalled at the provider (roster past_due, still
-	// no explicit cancel evidence) far beyond the dunning window — the
-	// decider's "roster_past_due_beyond_window" law lands TransitionCancel with
-	// RemoteGone=false (the remote NMI schedule may still be retrying), so
-	// ResolveCancelledRemoteAlive fires: terminal cancel dated at the NEW AsOf,
-	// entitlement window closed, the DeletionScheduledAt marker stamped, and
-	// the real nmi_delete_subscription ledger intent enqueued inline.
+	// no explicit cancel evidence) far beyond the dunning window. Date comparison
+	// alone is not a certainty leg, so the row parks unknown with access intact
+	// and no remote-delete intent.
 	var subIncrID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if err := appDB.Qx(ctx).QueryRow(ctx,
@@ -383,31 +380,25 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		r := load(ctx, "sub-incr-"+sfx)
-		require.Equal(t, "cancelled", r.status)
-		require.Equal(t, "expired", r.cancelType)
-		require.NotNil(t, r.endedAt)
-		require.True(t, r.endedAt.Equal(asOf2), "ended_at = the NEW import's AsOf, not the first")
-		require.NotNil(t, r.deletionScheduledAt, "NMI terminal cancel with remote possibly still alive arms the deferred-delete marker (#737 Task 1)")
-		require.True(t, r.deletionScheduledAt.Equal(asOf2))
+		require.Equal(t, "unknown", r.status)
+		require.Empty(t, r.cancelType)
+		require.Nil(t, r.endedAt)
+		require.Nil(t, r.deletionScheduledAt, "uncertain evidence must not arm a remote delete")
 
-		// The import enqueues the real nmi_delete_subscription ledger intent
-		// inline (no reliance on the boot marker sweep).
-		var intentStatus, intentOrigin string
+		var intents int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, origin FROM openrails.rail_intents
+			`SELECT count(*) FROM openrails.rail_intents
 			 WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, subIncrID).
-			Scan(&intentStatus, &intentOrigin))
-		require.Equal(t, "pending", intentStatus)
-		require.Equal(t, "user", intentOrigin)
+			Scan(&intents))
+		require.Zero(t, intents)
 
 		var revokedAt *time.Time
 		var revokeReason *string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT revoked_at, revoke_reason FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
 			subIncrID).Scan(&revokedAt, &revokeReason))
-		require.NotNil(t, revokedAt, "entitlement window closed on terminal cancel")
-		require.NotNil(t, revokeReason)
-		require.Equal(t, "dunning_failed", *revokeReason)
+		require.Nil(t, revokedAt, "entitlement stays live while the subscription awaits verification")
+		require.Nil(t, revokeReason)
 		return nil
 	}))
 }
