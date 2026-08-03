@@ -22,6 +22,10 @@ func nmiProbeArmTestServer(t *testing.T, authCode string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/":
+			require.NoError(t, r.ParseForm())
+			require.NotEmpty(t, r.Form.Get("security_key"))
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
 		case r.Method == http.MethodPost && r.URL.Path == "/payments/auth":
 			var req struct {
 				PaymentDetails struct {
@@ -59,6 +63,7 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
 	defer server.Close()
 	svc.nmiProbeV5BaseURL = server.URL
+	svc.nmiCredentialProbeQueryURL = server.URL
 
 	ctx := context.Background()
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-live-348", PermissionGroupID: "group-probe-live-348"})
@@ -86,6 +91,7 @@ func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) 
 	server := nmiProbeArmTestServer(t, "1") // approved -> simulating
 	defer server.Close()
 	svc.nmiProbeV5BaseURL = server.URL
+	svc.nmiCredentialProbeQueryURL = server.URL
 
 	ctx := context.Background()
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-sim-348", PermissionGroupID: "group-probe-sim-348"})
@@ -111,6 +117,7 @@ func TestUpsertPaymentProviderConfigProbeIndeterminateNeverRefuses(t *testing.T)
 	server := nmiProbeArmTestServer(t, "3") // gateway-level error -> indeterminate
 	defer server.Close()
 	svc.nmiProbeV5BaseURL = server.URL
+	svc.nmiCredentialProbeQueryURL = server.URL
 
 	ctx := context.Background()
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-indeterminate-348", PermissionGroupID: "group-probe-indeterminate-348"})
@@ -156,17 +163,21 @@ func TestUpsertPaymentProviderConfigCooldownRespected(t *testing.T) {
 	require.Contains(t, err.Error(), "cached probe verdict")
 }
 
-// TestUpsertPaymentProviderConfigSkipsProbeOutsideTestMode proves production
-// deployments (providerEnvironment == "live") never probe-charge on arm.
-func TestUpsertPaymentProviderConfigSkipsProbeOutsideTestMode(t *testing.T) {
+// TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode proves
+// production deployments never run the v5 test-card arm probe. The read-only
+// credential-validation query still runs.
+func TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode(t *testing.T) {
 	pool := newTestPool(t)
 	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "live")
 	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("production (providerEnvironment=live) must never probe an NMI account on arm, got %s %s", r.Method, r.URL.Path)
+		require.Equal(t, "/", r.URL.Path, "production must skip the v5 test-mode probe")
+		require.NoError(t, r.ParseForm())
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
 	}))
 	defer server.Close()
 	svc.nmiProbeV5BaseURL = server.URL
+	svc.nmiCredentialProbeQueryURL = server.URL
 
 	ctx := context.Background()
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-prod-348", PermissionGroupID: "group-probe-prod-348"})
@@ -193,6 +204,7 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	require.NoError(t, err)
 	simServer := nmiProbeArmTestServer(t, "1") // first arm: simulating
 	svc.nmiProbeV5BaseURL = simServer.URL
+	svc.nmiCredentialProbeQueryURL = simServer.URL
 
 	ctx := context.Background()
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-existing-348", PermissionGroupID: "group-probe-existing-348"})

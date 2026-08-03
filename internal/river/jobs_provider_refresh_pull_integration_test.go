@@ -195,6 +195,13 @@ func pullTestMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 	t.Helper()
 	svc, err := merchants.NewService(dbi.DataPool(), merchants.NewMemorySecretStore(), "live")
 	require.NoError(t, err)
+	nmiProbeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+	}))
+	t.Cleanup(nmiProbeServer.Close)
+	ccbillProbeServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(ccbillProbeServer.Close)
+	svc.SetCredentialProbeEndpointsForIntegration(nmiProbeServer.URL, ccbillProbeServer.URL)
 	return svc
 }
 

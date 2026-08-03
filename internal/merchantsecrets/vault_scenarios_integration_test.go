@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path"
 	"strings"
 	"testing"
@@ -167,6 +169,11 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 
 	svc, err := merchants.NewService(pool, store.Secrets, "live")
 	require.NoError(t, err)
+	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+	}))
+	t.Cleanup(probeServer.Close)
+	svc.SetCredentialProbeEndpointsForIntegration(probeServer.URL, "")
 
 	midA, slugA := registerMerchant(t, ctx, pool, "vfs-a")
 	midB, slugB := registerMerchant(t, ctx, pool, "vfs-b")
