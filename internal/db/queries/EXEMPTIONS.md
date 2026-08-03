@@ -135,9 +135,11 @@ squashed baseline (creates the schema from nothing, so lock-safety rules are
 vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
 excluded and must pass clean.
 
-`0011_query_audit_indexes.up.sql` has one file-specific exception:
-`require-concurrent-index-creation`. PostgreSQL forbids `CREATE INDEX
-CONCURRENTLY` inside the transaction migratekit always opens, so these two
-narrow partial indexes use regular creation bounded by a five-second lock
-timeout and five-minute statement timeout. The lint script still applies every
-other Squawk rule to that file.
+`0011_query_audit_indexes.up.sql` through
+`0013_total_rail_transaction_uniques.up.sql`, plus
+`0015_merchant_permission_group_unique.up.sql`, have file-specific exceptions
+for concurrent index creation (and deletion where an old index is replaced).
+PostgreSQL forbids those concurrent forms inside the transaction migratekit
+always opens, so these indexes use regular operations bounded by a five-second
+lock timeout and five-minute statement timeout. The lint script still applies
+every other Squawk rule to these files.

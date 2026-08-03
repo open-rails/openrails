@@ -24,12 +24,26 @@ if [ ! -x "$BIN" ]; then
 fi
 
 # migratekit wraps every migration in a transaction, so PostgreSQL cannot build
-# 0011's two indexes CONCURRENTLY. Lint that file separately with only that
+# these indexes CONCURRENTLY. Lint those files separately with only that
 # incompatible rule disabled; every other rule remains enforcing.
-TRANSACTIONAL_INDEX_MIGRATION="migrations/postgres/0011_query_audit_indexes.up.sql"
+TRANSACTIONAL_INDEX_CREATE_MIGRATIONS=(
+    "migrations/postgres/0011_query_audit_indexes.up.sql"
+    "migrations/postgres/0012_rls_index_coverage.up.sql"
+)
+TRANSACTIONAL_INDEX_REPLACE_MIGRATIONS=(
+    "migrations/postgres/0013_total_rail_transaction_uniques.up.sql"
+    "migrations/postgres/0015_merchant_permission_group_unique.up.sql"
+)
 migration_files=()
 for file in migrations/postgres/*.up.sql; do
-    if [ "$file" != "$TRANSACTIONAL_INDEX_MIGRATION" ]; then
+    transactional_index=0
+    for indexed_file in "${TRANSACTIONAL_INDEX_CREATE_MIGRATIONS[@]}" "${TRANSACTIONAL_INDEX_REPLACE_MIGRATIONS[@]}"; do
+        if [ "$file" = "$indexed_file" ]; then
+            transactional_index=1
+            break
+        fi
+    done
+    if [ "$transactional_index" -eq 0 ]; then
         migration_files+=("$file")
     fi
 done
@@ -37,11 +51,21 @@ done
 # squawk exits 0 even when it reports issues; count them instead.
 count="$({
     "$BIN" --reporter json "${migration_files[@]}"
-    "$BIN" --reporter json --exclude require-concurrent-index-creation "$TRANSACTIONAL_INDEX_MIGRATION"
+    for file in "${TRANSACTIONAL_INDEX_CREATE_MIGRATIONS[@]}"; do
+        "$BIN" --reporter json --exclude require-concurrent-index-creation "$file"
+    done
+    for file in "${TRANSACTIONAL_INDEX_REPLACE_MIGRATIONS[@]}"; do
+        "$BIN" --reporter json --exclude require-concurrent-index-creation --exclude require-concurrent-index-deletion "$file"
+    done
 } 2>/dev/null | tr ',' '\n' | grep -c '"rule_name"' || true)"
 if [ "$count" -gt 0 ]; then
     "$BIN" "${migration_files[@]}" 1>&2
-    "$BIN" --exclude require-concurrent-index-creation "$TRANSACTIONAL_INDEX_MIGRATION" 1>&2
+    for file in "${TRANSACTIONAL_INDEX_CREATE_MIGRATIONS[@]}"; do
+        "$BIN" --exclude require-concurrent-index-creation "$file" 1>&2
+    done
+    for file in "${TRANSACTIONAL_INDEX_REPLACE_MIGRATIONS[@]}"; do
+        "$BIN" --exclude require-concurrent-index-creation --exclude require-concurrent-index-deletion "$file" 1>&2
+    done
     echo "" 1>&2
     echo "migration-lint: $count issue(s) in new migrations. Fix them, or — if the" 1>&2
     echo "operation is genuinely safe here — record why in" 1>&2

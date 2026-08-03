@@ -5,6 +5,9 @@
 -- the duplicate posted. Close the vocabulary. Kept in lockstep with the Go
 -- constants by TestTransferTypeVocabularyMatchesSchema.
 
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 ALTER TABLE openrails.ledger_transfers
     ADD CONSTRAINT ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY[
         'deposit'::text,
@@ -14,4 +17,4 @@ ALTER TABLE openrails.ledger_transfers
         'credit_reinstate'::text,
         'owed_accrual'::text,
         'owed_payment'::text
-    ])));
+    ]))) NOT VALID;

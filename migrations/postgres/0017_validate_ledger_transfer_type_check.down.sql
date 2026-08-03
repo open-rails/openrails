@@ -1,0 +1,2 @@
+-- Validation changes no accepted values and PostgreSQL cannot mark an existing
+-- constraint NOT VALID again. Migration 0014 removes it on the next down step.
