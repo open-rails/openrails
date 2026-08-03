@@ -4,6 +4,8 @@ package reconcile
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -42,6 +44,11 @@ func newWiringService(t *testing.T, dbi *db.DB) *merchants.Service {
 	t.Helper()
 	svc, err := merchants.NewService(dbi.DataPool(), merchants.NewMemorySecretStore(), "live")
 	require.NoError(t, err)
+	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+	}))
+	t.Cleanup(probeServer.Close)
+	svc.SetCredentialProbeEndpointsForIntegration(probeServer.URL, "")
 	return svc
 }
 

@@ -46,6 +46,14 @@ type PaymentProviderConfig struct {
 	UpdatedAt       time.Time                                  `json:"updated_at"`
 }
 
+// PaymentProviderDefinition describes one merchant-configurable provider from
+// the rail registry. CredentialKeys contains only merchant-writable secrets.
+type PaymentProviderDefinition struct {
+	Rail           string   `json:"rail"`
+	DisplayName    string   `json:"display_name"`
+	CredentialKeys []string `json:"credential_keys"`
+}
+
 // UpsertPaymentProviderConfigRequest creates or replaces one provider account.
 type UpsertPaymentProviderConfigRequest struct {
 	Environment  string            `json:"environment"`
@@ -56,7 +64,30 @@ type UpsertPaymentProviderConfigRequest struct {
 }
 
 type railMerchantAccountEvidence struct {
-	PublicConfig map[string]string `json:"public_config,omitempty"`
+	PublicConfig         map[string]string `json:"public_config,omitempty"`
+	CredentialsValidated bool              `json:"credentials_validated,omitempty"`
+}
+
+// PaymentProviderDefinitions returns every merchant-configurable provider in
+// registry order.
+func PaymentProviderDefinitions() []PaymentProviderDefinition {
+	descriptors := rails.All()
+	definitions := make([]PaymentProviderDefinition, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if !descriptor.HasRailMerchantAccounts {
+			continue
+		}
+		credentialKeys := rails.MerchantCredentialKeyNames(descriptor.Rail)
+		if credentialKeys == nil {
+			credentialKeys = []string{}
+		}
+		definitions = append(definitions, PaymentProviderDefinition{
+			Rail:           string(descriptor.Rail),
+			DisplayName:    descriptor.DisplayName,
+			CredentialKeys: credentialKeys,
+		})
+	}
+	return definitions
 }
 
 // ListPaymentProviderConfigs returns provider-account configs for a merchant.
@@ -162,7 +193,13 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	}
 
 	secretNames := make(map[string]string, len(req.Credentials))
+	probeCredentials := make(map[string]string, len(req.Credentials))
+	credentialsValidated := false
 	for key, value := range req.Credentials {
+		normalizedKey, err := NormalizePSPSecretKey(rail, key)
+		if err != nil {
+			return PaymentProviderConfig{}, err
+		}
 		name, err := PSPSecretName(rail, environment, accountID, key)
 		if err != nil {
 			return PaymentProviderConfig{}, err
@@ -170,10 +207,24 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		if err := s.ValidateCredential(ctx, id, name, value, nil); err != nil {
 			return PaymentProviderConfig{}, err
 		}
+		if rail == "stripe" && normalizedKey == "secret_key" {
+			credentialsValidated = true
+		}
 		secretNames[name] = value
+		probeCredentials[normalizedKey] = value
+	}
+	probed, err := s.probePaymentProviderCredentials(ctx, id, rail, environment, accountID, probeCredentials)
+	if err != nil {
+		return PaymentProviderConfig{}, err
+	}
+	credentialsValidated = credentialsValidated || probed
+	var lastVerifiedAt *time.Time
+	if credentialsValidated {
+		now := time.Now().UTC()
+		lastVerifiedAt = &now
 	}
 
-	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig)
+	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -222,14 +273,11 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return cfg, nil
 }
 
-func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string) (gen.OpenrailsPsp, error) {
-	evidence, err := marshalProviderEvidence(publicConfig)
-	if err != nil {
-		return gen.OpenrailsPsp{}, err
-	}
+func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time) (gen.OpenrailsPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation under RLS).
-	if err := AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
+	queries := gen.New(s.pool)
+	if err := AssertPSPUnowned(ctx, queries, id.UUID(), rail, environment, accountID); err != nil {
 		return gen.OpenrailsPsp{}, err
 	}
 	archived := !enabled
@@ -237,17 +285,42 @@ func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID,
 	// normalized (rail, environment, account_id) the id is hashed from, so the
 	// id corresponds 1:1 to the unique index.
 	railAcctID, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, accountID)
+	if len(publicConfig) == 0 || !credentialsValidated {
+		existing, err := queries.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+			Rail:        nRail,
+			Environment: &nEnv,
+			AccountID:   nAccount,
+		})
+		switch {
+		case err == nil:
+			existingEvidence := unmarshalProviderEvidence(existing.Evidence)
+			if len(publicConfig) == 0 {
+				publicConfig = existingEvidence.PublicConfig
+			}
+			if !credentialsValidated && existingEvidence.CredentialsValidated {
+				credentialsValidated = true
+				lastVerifiedAt = existing.LastVerifiedAt
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return gen.OpenrailsPsp{}, fmt.Errorf("merchants: load existing provider config: %w", err)
+		}
+	}
+	evidence, err := marshalProviderEvidence(publicConfig, credentialsValidated)
+	if err != nil {
+		return gen.OpenrailsPsp{}, err
+	}
 	var row gen.OpenrailsPsp
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).UpsertPSP(ctx, gen.UpsertPSPParams{
-			ID:          railAcctID,
-			MerchantID:  id.UUID(),
-			Rail:        nRail,
-			Environment: &nEnv,
-			AccountID:   nAccount,
-			Archived:    &archived,
-			Evidence:    evidence,
+			ID:             railAcctID,
+			MerchantID:     id.UUID(),
+			Rail:           nRail,
+			Environment:    &nEnv,
+			AccountID:      nAccount,
+			Archived:       &archived,
+			Evidence:       evidence,
+			LastVerifiedAt: lastVerifiedAt,
 		})
 		return err
 	})
@@ -337,11 +410,16 @@ func isUndefinedTable(err error) bool {
 }
 
 func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecretStatus) PaymentProviderConfig {
+	evidence := unmarshalProviderEvidence(row.Evidence)
 	configured := map[string]struct{}{}
 	for _, st := range statuses {
 		if st.Configured {
 			configured[cleanSecretName(st.Name)] = struct{}{}
 		}
+	}
+	lastVerifiedAt := row.LastVerifiedAt
+	if !evidence.CredentialsValidated || !providerValidationCredentialsConfigured(row, configured) {
+		lastVerifiedAt = nil
 	}
 	credentials := make(map[string]PaymentProviderCredentialStatus)
 	for _, key := range paymentProviderCredentialKeys(row.Rail) {
@@ -350,9 +428,13 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 			continue
 		}
 		_, ok := configured[name]
+		var validatedAt *time.Time
+		if ok {
+			validatedAt = credentialValidatedAt(row.Rail, key, lastVerifiedAt)
+		}
 		credentials[key] = PaymentProviderCredentialStatus{
 			Configured:      ok,
-			LastValidatedAt: row.LastVerifiedAt,
+			LastValidatedAt: validatedAt,
 		}
 	}
 	return PaymentProviderConfig{
@@ -361,14 +443,38 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 		Environment:    row.Environment,
 		AccountID:      row.AccountID,
 		Archived:       row.Archived,
-		PublicConfig:   unmarshalProviderEvidence(row.Evidence).PublicConfig,
+		PublicConfig:   evidence.PublicConfig,
 		Credentials:    credentials,
 		FirstSeenAt:    row.FirstSeenAt,
-		LastVerifiedAt: row.LastVerifiedAt,
+		LastVerifiedAt: lastVerifiedAt,
 		ReplacedAt:     row.ReplacedAt,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured map[string]struct{}) bool {
+	requiredKeys := []string{}
+	switch row.Rail {
+	case "stripe":
+		requiredKeys = []string{"secret_key"}
+	case "nmi":
+		requiredKeys = []string{"security_key"}
+	case "ccbill":
+		requiredKeys = []string{"datalink_username", "datalink_password"}
+	default:
+		return false
+	}
+	for _, key := range requiredKeys {
+		name, err := PSPSecretName(row.Rail, row.Environment, row.AccountID, key)
+		if err != nil {
+			return false
+		}
+		if _, ok := configured[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func pspLifecycleMatches(archived bool, status string) bool {
@@ -395,11 +501,35 @@ func paymentProviderCredentialKeys(provider string) []string {
 	return rails.MerchantCredentialKeyNames(models.Rail(provider))
 }
 
-func marshalProviderEvidence(publicConfig map[string]string) ([]byte, error) {
-	if len(publicConfig) == 0 {
+func credentialValidatedAt(rail, key string, validatedAt *time.Time) *time.Time {
+	if validatedAt == nil {
+		return nil
+	}
+	switch rail {
+	case "stripe":
+		if key == "secret_key" {
+			return validatedAt
+		}
+	case "nmi":
+		if key == "security_key" {
+			return validatedAt
+		}
+	case "ccbill":
+		if key == "datalink_username" || key == "datalink_password" {
+			return validatedAt
+		}
+	}
+	return nil
+}
+
+func marshalProviderEvidence(publicConfig map[string]string, credentialsValidated bool) ([]byte, error) {
+	if len(publicConfig) == 0 && !credentialsValidated {
 		return nil, nil
 	}
-	b, err := json.Marshal(railMerchantAccountEvidence{PublicConfig: publicConfig})
+	b, err := json.Marshal(railMerchantAccountEvidence{
+		PublicConfig:         publicConfig,
+		CredentialsValidated: credentialsValidated,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider config evidence: %w", err)
 	}

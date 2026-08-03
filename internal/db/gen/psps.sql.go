@@ -262,7 +262,7 @@ INSERT INTO openrails.psps (
     $6,
     COALESCE($7::boolean, false),
     $8,
-    COALESCE($9::timestamptz, now())
+    $9::timestamptz
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     key = COALESCE(EXCLUDED.key, openrails.psps.key),
@@ -272,7 +272,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
         ELSE NULL
     END,
     evidence = COALESCE(EXCLUDED.evidence, openrails.psps.evidence),
-    last_verified_at = EXCLUDED.last_verified_at,
+    last_verified_at = COALESCE(EXCLUDED.last_verified_at, openrails.psps.last_verified_at),
     updated_at = now()
 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
 RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived
