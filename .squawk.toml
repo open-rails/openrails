@@ -4,6 +4,34 @@
 # per-statement rerunnability rules do not apply.
 assume_in_transaction = true
 
+# STRUCTURALLY UNSATISFIABLE RULES — excluded repo-wide, not per-path.
+#
+# migratekit's only Postgres apply path (postgres.go applyOne) opens BeginTx and
+# runs the whole file inside it; there is no per-file opt-out, no directive, and
+# no second path. PostgreSQL refuses both operations there — measured on
+# postgres:18-alpine, not assumed:
+#
+#   BEGIN; CREATE INDEX CONCURRENTLY ... ;
+#     ERROR: CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+#   BEGIN; DROP INDEX CONCURRENTLY ... ;
+#     ERROR: DROP INDEX CONCURRENTLY cannot run inside a transaction block
+#
+# So NO migration in this repo can ever satisfy these two rules. They are not a
+# standard being relaxed for one file — they are unreachable for every file, and
+# a rule nobody can satisfy is noise that blocks every future index. Precedent:
+# 0011 carried a bespoke per-file exclusion inside migration-lint.sh, and
+# 0016_cross_merchant_directory.up.sql:103-106 states the same constraint in a
+# comment (it passes only because the linter checks changed files, so it was
+# never re-linted). Rationale in internal/db/queries/EXEMPTIONS.md.
+#
+# Reversing this is a migratekit change (a non-transactional apply mode), not a
+# .squawk.toml change. Nothing else is relaxed: require-lock-timeout,
+# require-statement-timeout, ban-drop-column and the rest stay enforcing.
+excluded_rules = [
+    "require-concurrent-index-creation",
+    "require-concurrent-index-deletion",
+]
+
 # BASELINE: migrations already applied everywhere. They are frozen history —
 # 0001 is the squashed baseline (creates the schema from nothing, so lock-safety
 # rules are vacuous), 0002-0009 predate this gate. Rationale in
