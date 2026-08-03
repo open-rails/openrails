@@ -97,8 +97,20 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			EventType: params.EventType, Source: params.Source, SourceID: params.SourceID,
 		})
 		if gerr == nil {
+			// or#891 item 3: the replay used to be returned unconditionally, so a
+			// retry that corrected Amount was answered with the first event and the
+			// first charge. Same key, different charging term = refusal.
 			ev, gerr = usageEventFromGen(existingRow)
-			return gerr
+			if gerr != nil {
+				return gerr
+			}
+			if ev.Amount != params.Amount {
+				return &IdempotencyConflict{
+					Operation: "record_usage", Source: params.Source, SourceID: params.SourceID,
+					Field: "amount", Committed: ev.Amount, Retried: params.Amount,
+				}
+			}
+			return nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr

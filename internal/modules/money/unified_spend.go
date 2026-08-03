@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -30,8 +29,10 @@ type SpendParams struct {
 
 // SpendCredits debits an account balance-first-then-owed in one transaction,
 // gated by the credit line. Idempotent on (merchant, payer, currency, source,
-// source_id). Returns ErrInsufficientCredits when balance + remaining credit
-// line cannot cover the amount.
+// source_id) — the key is REQUIRED, and a replay carrying a different Amount is
+// refused with ErrIdempotencyKeyReused rather than answered with the first
+// result (see idempotency.go). Returns ErrInsufficientCredits when balance +
+// remaining credit line cannot cover the amount.
 func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -41,6 +42,13 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 	}
 	params.Source = strings.TrimSpace(params.Source)
 	params.SourceID = strings.TrimSpace(params.SourceID)
+	// or#891 item 1: this used to be `if params.SourceID != ""` around the dedupe
+	// read only, so a keyless spend posted unconditionally and every retry
+	// double-debited — while CaptureAuthorized, off this SAME struct, hard-required
+	// both halves. That asymmetry was the defect, not caller sloppiness.
+	if err := requireIdempotencyKey("spend", params.Source, params.SourceID); err != nil {
+		return err
+	}
 	cur := normalizeCurrency(params.Currency)
 	if err := ValidateCurrency(cur); err != nil {
 		return err
@@ -57,22 +65,26 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
 		}
-		if params.SourceID != "" {
-			tid, terr := merchant.Require(ctx)
-			if terr != nil {
-				return terr
+		tid, terr := merchant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
+		committed, cerr := q.SumLedgerSpendByCoords(ctx, gen.SumLedgerSpendByCoordsParams{
+			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
+			Source: params.Source, SourceID: params.SourceID,
+		})
+		if cerr != nil {
+			return cerr
+		}
+		if committed.Transfers > 0 {
+			if committed.Total != params.Amount {
+				return &IdempotencyConflict{
+					Operation: "spend", Source: params.Source, SourceID: params.SourceID,
+					Field: "amount", Committed: committed.Total, Retried: params.Amount,
+				}
 			}
-			tenantID := tid.UUID()
-			existing, cerr := q.CountLedgerSpendByCoords(ctx, gen.CountLedgerSpendByCoordsParams{
-				MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
-				Source: params.Source, SourceID: params.SourceID,
-			})
-			if cerr != nil {
-				return cerr
-			}
-			if existing > 0 {
-				return nil // already spent; idempotent no-op
-			}
+			return nil // already spent, same body; idempotent no-op
 		}
 
 		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount, false)
@@ -124,6 +136,24 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
+		}
+		// or#891 item 3: a key hit used to return the first transfer WITHOUT
+		// comparing Amount, so a retry that corrected the amount was told it
+		// succeeded while the ledger kept the original number. Compare the total
+		// already posted at these coordinates — not the first transfer's amount,
+		// which is only one FIFO lot's take — and refuse a changed body.
+		committed, cerr := q.SumLedgerSpendByCoords(ctx, gen.SumLedgerSpendByCoordsParams{
+			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
+			Source: params.Source, SourceID: params.SourceID,
+		})
+		if cerr != nil {
+			return cerr
+		}
+		if committed.Transfers > 0 && committed.Total != params.Amount {
+			return &IdempotencyConflict{
+				Operation: "capture", Source: params.Source, SourceID: params.SourceID,
+				Field: "amount", Committed: committed.Total, Retried: params.Amount,
+			}
 		}
 		existing, gerr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
 			MerchantID: tenantID,
@@ -186,6 +216,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 ) (balanceSpent, owedAccrued int64, err error) {
 	if amount <= 0 {
 		return 0, 0, fmt.Errorf("amount must be positive")
+	}
+	// or#891 items 1+4: every leg posted below carries this key — the ledger
+	// transfers AND the pending invoice item behind uq_invoice_items_source. A
+	// blank key used to reach here and be papered over with a freshly minted
+	// uuidv7, which can never collide, so every replay of a keyless spend accrued
+	// a NEW invoice item. The ledger does not mint keys on a caller's behalf.
+	if err := requireIdempotencyKey("spend", source, sourceID); err != nil {
+		return 0, 0, err
 	}
 	now := s.now()
 	cur := normalizeCurrency(currency)
@@ -278,11 +316,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		if _, err := ml.AccrueOwed(ctx, payerID, cur, fromOwed, source, sourceID, nil); err != nil {
 			return 0, 0, err
 		}
-		itemSourceID := sourceID
-		if itemSourceID == "" {
-			itemSourceID = uuidutil.NewV7().String()
-		}
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, fromOwed, now, map[string]any{
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, fromOwed, now, map[string]any{
 			"source": source,
 		}); err != nil {
 			return 0, 0, err
