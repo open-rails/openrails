@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -106,6 +107,36 @@ func TestHTTPSuccessJSON(t *testing.T) {
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out["ok"] != true {
 		t.Fatalf("body %s err %v", rec.Body.String(), err)
+	}
+}
+
+func TestHTTPAPIErrorIncludesRequestID(t *testing.T) {
+	tests := []struct {
+		name      string
+		requestID string
+	}{
+		{name: "preserves caller request id", requestID: "req-149"},
+		{name: "generates missing request id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/checkout", nil)
+			if tt.requestID != "" {
+				httpReq.Header.Set("X-Request-ID", tt.requestID)
+			}
+			req := NewHTTP(rec, httpReq, nil)
+			req.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, api.CodeCardDeclined, "Your card was declined."))
+
+			var body api.ErrorResponse
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.NotEmpty(t, body.Error.RequestID)
+			require.Equal(t, body.Error.RequestID, rec.Header().Get("X-Request-ID"))
+			if tt.requestID != "" {
+				require.Equal(t, tt.requestID, body.Error.RequestID)
+			}
+		})
 	}
 }
 

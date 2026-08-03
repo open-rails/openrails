@@ -1437,6 +1437,16 @@ func (a httpCatalogApplier) CreatePrice(_ context.Context, req billingservice.Cr
 	return &out, nil
 }
 
+func (a httpCatalogApplier) UpdatePrice(_ context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/prices/"+id.String(), a.token, req)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("update price: status %d: %s", status, string(body))
+	}
+	var out billingservice.CatalogPrice
+	require.NoError(a.t, json.Unmarshal(body, &out))
+	return &out, nil
+}
+
 func (a httpCatalogApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
 	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/activate", a.token, nil)
 	if status != http.StatusOK {

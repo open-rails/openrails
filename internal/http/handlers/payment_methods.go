@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -20,6 +21,11 @@ import (
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	createPaymentMethodTimeout              = 28 * time.Second
+	codePaymentMethodProviderOutcomeUnknown = "provider_outcome_unknown"
 )
 
 type listPaymentMethodsQuery struct {
@@ -214,7 +220,9 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
+	// The NMI transport has a 25-second ceiling. Leave enough time for the
+	// local write while still completing before the browser's 30-second cap.
+	ctx, cancel := context.WithTimeout(r.Request.Context(), createPaymentMethodTimeout)
 	defer cancel()
 
 	email := strings.TrimSpace(req.Email)
@@ -229,18 +237,21 @@ func CreatePaymentMethod(r *httprequest.Request) {
 
 	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
 	if err != nil {
-		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
+		log.WithError(err).WithFields(log.Fields{
+			"request_id": r.RequestID(),
+			"user_id":    user.ID,
+		}).Error("Failed to create payment method")
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
+		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
+			r.APIError(providerErr)
+			return
+		}
 		var vaultErr *paymentmethods.VaultError
 		if errors.As(err, &vaultErr) {
-			code := api.CodePaymentFailed
-			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
-				code = vaultErr.LocalizationID
-			}
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+			writeVaultError(r, vaultErr)
 			return
 		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")
@@ -248,6 +259,18 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(paymentMethodToAPI(pm, nil))
+}
+
+func createPaymentMethodProviderError(err error) *api.APIError {
+	if !nmi.IsTransportAmbiguous(err) {
+		return nil
+	}
+	return api.NewAPIError(
+		http.StatusConflict,
+		api.ErrorTypeAPI,
+		codePaymentMethodProviderOutcomeUnknown,
+		"The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.",
+	)
 }
 
 func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreateVaultRequest {

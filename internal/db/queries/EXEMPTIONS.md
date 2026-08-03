@@ -129,5 +129,11 @@ Nothing about them requires raw SQL.
 transaction. The nine existing migrations are excluded by path: `0001` is the
 squashed baseline (creates the schema from nothing, so lock-safety rules are
 vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
-excluded and must pass clean — including `require-lock-timeout` and
-`require-statement-timeout`, which only `0001` currently sets.
+excluded and must pass clean.
+
+`0011_query_audit_indexes.up.sql` has one file-specific exception:
+`require-concurrent-index-creation`. PostgreSQL forbids `CREATE INDEX
+CONCURRENTLY` inside the transaction migratekit always opens, so these two
+narrow partial indexes use regular creation bounded by a five-second lock
+timeout and five-minute statement timeout. The lint script still applies every
+other Squawk rule to that file.

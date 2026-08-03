@@ -44,6 +44,11 @@ type Options struct {
 	// *controlplane.ControlPlane. Nil (an embedded host without a control plane)
 	// keeps the /team routes mounted but answering 501.
 	Team httphandlers.MerchantTeamManager
+
+	// AdminLimiter is the #111 per-human-admin operation limiter. It runs after
+	// Gate has resolved the effective principal, so counters key the authorized
+	// user rather than an untrusted token claim or source IP.
+	AdminLimiter *middleware.AdminOperationLimiter
 }
 
 type GateOptions struct {
@@ -253,6 +258,9 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 }
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	if opts.AdminLimiter == nil && rt != nil {
+		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
+	}
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
@@ -679,11 +687,14 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 
 func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
 	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
-	customerWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
+	offChannelWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	grantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	revokeWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationDestructive, dbMW...)
 	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
-	payRefund := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRefund)}, dbMW...)
+	payRefund := opts.merchantAdminOperationMW(controlplane.PermMerchantPaymentsRefund, middleware.AdminOperationDestructive, dbMW...)
 	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsRead)}, dbMW...)
 	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsUpdate)}, dbMW...)
+	subCancel := opts.merchantAdminOperationMW(controlplane.PermMerchantSubscriptionsUpdate, middleware.AdminOperationDestructive, dbMW...)
 	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantRepairAlertsRead)}, dbMW...)
 
 	// #740: merchant customer list/search for the admin console.
@@ -693,11 +704,11 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	customers.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserBillingProfile), customerRead...)
 	customers.Handle(http.MethodGet, "/payment-methods", h(httphandlers.GetAdminUserPaymentMethods), customerRead...)
 	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
-	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), customerWrite...)
-	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), customerWrite...)
-	customers.Handle(http.MethodDelete, "/entitlements/:id", h(httphandlers.RevokeAdminEntitlement), customerWrite...)
-	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess), customerWrite...)
-	customers.Handle(http.MethodDelete, "/product-access/:id", h(httphandlers.RevokeAdminProductAccess), customerWrite...)
+	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), offChannelWrite...)
+	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), grantWrite...)
+	customers.Handle(http.MethodDelete, "/entitlements/:id", h(httphandlers.RevokeAdminEntitlement), revokeWrite...)
+	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess), grantWrite...)
+	customers.Handle(http.MethodDelete, "/product-access/:id", h(httphandlers.RevokeAdminProductAccess), revokeWrite...)
 
 	payments := rr.Group("/payments")
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)
@@ -707,7 +718,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	subs := rr.Group("/subscriptions")
 	subs.Handle(http.MethodGet, "", h(httphandlers.GetAdminSubscriptions), subRead...)
 	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminSubscription), subRead...)
-	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.AdminCancelSubscription), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.AdminCancelSubscription), subCancel...)
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
 	// #773 reprice: schedule a single subscription's price move at its next
@@ -834,6 +845,16 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	findings.Handle(http.MethodGet, "", h(httphandlers.AdminListFindings), repairRead...)
 	findings.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetFinding), repairRead...)
 	findings.Handle(http.MethodPost, "/:id/resolve", h(httphandlers.AdminResolveFinding), findingsResolve...)
+}
+
+// merchantAdminOperationMW keeps the authorization gate outermost, then applies
+// the user-keyed operation limiter before any merchant DB connection is pinned.
+func (opts Options) merchantAdminOperationMW(perm string, operation middleware.AdminOperation, trailing ...router.Middleware) []router.Middleware {
+	mw := []router.Middleware{opts.merchantActionPermissionMW(perm)}
+	if opts.AdminLimiter != nil && operation != "" {
+		mw = append(mw, opts.AdminLimiter.AdminRateLimitMW(operation))
+	}
+	return append(mw, trailing...)
 }
 
 // RegisterWebhookRoutes mounts the CANONICAL standalone webhook surface (#650):

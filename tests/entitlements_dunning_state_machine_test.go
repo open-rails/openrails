@@ -146,6 +146,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 			},
 			DB:                  rt.DB,
 			Clock:               clock,
+			CCBillClient:        testCCBillWebhookClient(),
 			SubscriptionService: rt.SubscriptionService,
 		}
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
@@ -198,6 +199,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
+		CCBillClient:                 testCCBillWebhookClient(),
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		MoneyService:                 rt.MoneyService,

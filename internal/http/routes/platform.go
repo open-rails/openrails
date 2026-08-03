@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
@@ -26,6 +28,13 @@ type RootPermissionChecker interface {
 type PlatformOptions struct {
 	Authenticator billingauth.Authenticator
 	Root          RootPermissionChecker
+	AdminLimiter  AdminRateLimitUnlocker
+}
+
+// AdminRateLimitUnlocker is the explicit root-operator override seam for an
+// active administrative-operation lockout.
+type AdminRateLimitUnlocker interface {
+	Unlock(ctx context.Context, userID, actorID string) error
 }
 
 // RegisterPlatformRoutes mounts the cross-merchant platform operator directory
@@ -38,6 +47,7 @@ func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOpti
 	read := opts.platformPermissionMW(controlplane.PermRootMerchantsRead)
 	del := opts.platformPermissionMW(controlplane.PermRootMerchantsDelete)
 	restore := opts.platformPermissionMW(controlplane.PermRootMerchantsRestore)
+	unlock := opts.platformPermissionMW(controlplane.PermRootAdminRateLimitsUnlock)
 
 	// #SEC-22: cross-merchant worker health (last_error is another merchant's
 	// verbatim job error) lives on the platform tier; the merchant tier keeps
@@ -50,6 +60,30 @@ func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOpti
 	merchants.Handle(http.MethodGet, "/:id", h(httphandlers.PlatformGetMerchant), read)
 	merchants.Handle(http.MethodDelete, "/:id", h(httphandlers.PlatformSoftDeleteMerchant), del)
 	merchants.Handle(http.MethodPost, "/:id/restore", h(httphandlers.PlatformRestoreMerchant), restore)
+
+	// Root-owner-only manual override. Bounded merchant-directory roles do not
+	// hold this distinct permission.
+	rr.Handle(http.MethodDelete, "/admin-rate-limit-lockouts/:user_id", h(func(r *httprequest.Request) {
+		if opts.AdminLimiter == nil {
+			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
+			return
+		}
+		target := r.Param("user_id")
+		if _, err := uuid.Parse(target); err != nil {
+			r.AbortJSON(http.StatusBadRequest, "invalid user_id")
+			return
+		}
+		actor, ok := r.UserContext()
+		if !ok || actor.UserID == "" {
+			r.AbortJSON(http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if err := opts.AdminLimiter.Unlock(r.Request.Context(), target, actor.UserID); err != nil {
+			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
+			return
+		}
+		r.SuccessJSONMessage("admin rate limit lockout cleared")
+	}), unlock)
 }
 
 // platformPermissionMW authenticates the user session and requires perm in the

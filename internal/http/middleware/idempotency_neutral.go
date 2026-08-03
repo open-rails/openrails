@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -27,6 +29,7 @@ import (
 const (
 	idempotencyHeaderCanonical = "Idempotency-Key"
 	maxCapturedResponseBytes   = 1 << 20 // 1 MiB — matches DefaultMaxBodyBytes
+	idempotencyFinalizeTimeout = 5 * time.Second
 )
 
 // IdempotencyKeyFromRequest returns the client-supplied idempotency key from the
@@ -160,7 +163,9 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 			resolved := false
 			defer func() {
 				if !resolved {
-					_ = svc.Fail(ctx, operation, storeKey, fmt.Errorf("handler did not complete"))
+					_ = finalizeIdempotency(ctx, func(finalizeCtx context.Context) error {
+						return svc.Fail(finalizeCtx, operation, storeKey, fmt.Errorf("handler did not complete"))
+					})
 				}
 			}()
 
@@ -175,7 +180,9 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 				// unauthorized attempt pre-answer a later AUTHORIZED request
 				// carrying the same key. Server errors and oversized bodies are
 				// likewise not cached; a retry re-runs the handler.
-				_ = svc.Fail(ctx, operation, storeKey, fmt.Errorf("status %d not cached", status))
+				_ = finalizeIdempotency(ctx, func(finalizeCtx context.Context) error {
+					return svc.Fail(finalizeCtx, operation, storeKey, fmt.Errorf("status %d not cached", status))
+				})
 				resolved = true
 				return
 			}
@@ -186,11 +193,15 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 				Body:        cw.buf.Bytes(),
 			})
 			if mErr != nil {
-				_ = svc.Fail(ctx, operation, storeKey, mErr)
+				_ = finalizeIdempotency(ctx, func(finalizeCtx context.Context) error {
+					return svc.Fail(finalizeCtx, operation, storeKey, mErr)
+				})
 				resolved = true
 				return
 			}
-			if cErr := svc.Complete(ctx, operation, storeKey, payload); cErr != nil {
+			if cErr := finalizeIdempotency(ctx, func(finalizeCtx context.Context) error {
+				return svc.Complete(finalizeCtx, operation, storeKey, payload)
+			}); cErr != nil {
 				log.WithError(cErr).Warn("idempotency: Complete failed; response was still returned (#579)")
 			} else {
 				resolved = true
@@ -214,6 +225,14 @@ func requestSubject(r *http.Request) string {
 		return "c:" + hex.EncodeToString(sum[:])[:32]
 	}
 	return "anon"
+}
+
+func finalizeIdempotency(requestCtx context.Context, fn func(context.Context) error) error {
+	// Recording the terminal replay state must survive a client disconnect;
+	// otherwise a timed-out caller can leave its key pending for the full TTL.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), idempotencyFinalizeTimeout)
+	defer cancel()
+	return fn(ctx)
 }
 
 func hashIdempotencyKey(key string) string {

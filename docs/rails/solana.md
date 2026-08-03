@@ -84,6 +84,32 @@ delegates a spending allowance on their token account. OpenRails then pulls one
 plan-amount per period via `transfer_subscription` — the merchant signer signs
 and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
 
+- Catalog prices bill in `currency: usd`. Declaring `psps: [solana]` creates or
+  reattaches a USDC plan by default. Use `psp_links.solana.token: USD1` to select
+  USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its
+  configured token from the on-chain mint:
+
+  ```yaml
+  prices:
+    - currency: usd
+      unit_amount: 23_000_000
+      duration: 30d
+      auto_renew: true
+      psps: [solana]
+      # Optional:
+      # psp_links:
+      #   solana: {token: USD1}
+      # Or attach an existing plan:
+      #   solana: {plan_pda: 7Xy...PdA}
+  ```
+
+- `currency` is the price and ledger denomination; stablecoins remain Solana
+  payment assets, not billing currencies. A recurring price has one immutable
+  Solana Plan and therefore one token. `token` selects creation of a new Plan;
+  `plan_pda` instead attaches an existing Plan and must be supplied without
+  `token`, because its mint is authoritative on-chain. `mint_symbol` is stored
+  snapshot metadata and is not manifest input.
+
 - **Stablecoins only**: recurring plans are limited to an allowlist (currently
   `USDC`, `USD1`). On-chain plan amounts are immutable, so only a stablecoin
   keeps a fixed base-unit amount ≈ a fixed fiat amount. One-off purchases are

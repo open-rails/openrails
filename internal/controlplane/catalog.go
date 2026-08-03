@@ -168,13 +168,14 @@ const (
 	PermMerchantMembersManage          = permissions.MerchantMembersManage
 	PermMerchantCredentialsManage      = permissions.MerchantCredentialsManage
 
-	// --- Platform operator (root persona, #721): cross-merchant directory
-	// authority checked against the singleton root group, never a merchant
-	// group. `root:` is authkit's platform-operator namespace (#111 rename). ---
-	PermRootMerchantsRead    = permissions.RootMerchantsRead
-	PermRootMerchantsDelete  = permissions.RootMerchantsDelete
-	PermRootMerchantsRestore = permissions.RootMerchantsRestore
-	PermRootWorkerHealthRead = permissions.RootWorkerHealthRead
+	// --- Platform operator (root persona, #721): cross-merchant directory and
+	// operational override authority checked against the singleton root group,
+	// never a merchant group. `root:` is authkit's platform-operator namespace. ---
+	PermRootMerchantsRead         = permissions.RootMerchantsRead
+	PermRootMerchantsDelete       = permissions.RootMerchantsDelete
+	PermRootMerchantsRestore      = permissions.RootMerchantsRestore
+	PermRootWorkerHealthRead      = permissions.RootWorkerHealthRead
+	PermRootAdminRateLimitsUnlock = permissions.RootAdminRateLimitsUnlock
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT
 	// merchant-owner), scoped to /v1/customers/:customer_id/* (#567). Coarse: one

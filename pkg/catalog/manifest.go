@@ -14,13 +14,18 @@
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //
-// Each price declares its own `providers:` list and optional `provider_links`
+// Each price declares its own `psps:` list and optional `psp_links`
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 // Manifest is the root of a catalog-as-code document.
 //
-// Every price declares its own `currency` and `providers` explicitly — there
+// Every price declares its own `currency` and `psps` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
 	Version        int             `json:"version" yaml:"version"`
@@ -97,13 +102,30 @@ type CreditBalance struct {
 }
 
 type CreditGrant struct {
-	Key         string `json:"key" yaml:"key"`
-	Unit        string `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Currency    string `json:"currency,omitempty" yaml:"currency,omitempty"`
-	Amount      *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
-	ExpiryHours *int   `json:"expiry_hours,omitempty" yaml:"expiry_hours,omitempty"`
+	Key string `json:"key" yaml:"key"`
+	// Unit is resolved from the referenced CreditBalance during validation.
+	Unit string `json:"-" yaml:"-"`
+	// Currency is internal state; catalog v1 does not declare it on grants.
+	Currency string `json:"-" yaml:"-"`
+	Amount   *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+	// ExpiryHours is resolved from Expires or the balance default.
+	ExpiryHours *int   `json:"-" yaml:"-"`
 	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
 	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
+}
+
+// UnmarshalJSON keeps the HTTP catalog manifest as strict as the YAML parser.
+func (g *CreditGrant) UnmarshalJSON(raw []byte) error {
+	type manifestCreditGrant CreditGrant
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var declared manifestCreditGrant
+	if err := decoder.Decode(&declared); err != nil {
+		return err
+	}
+	*g = CreditGrant(declared)
+	return nil
 }
 
 func (p Product) tierRank() int {
@@ -151,19 +173,21 @@ type Price struct {
 	// only: no external provider sync.
 	PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
 
-	// PSPLinks pre-supplies PSP-specific link ids, mapping
+	// PSPLinks supplies PSP-specific link/config values, mapping
 	// PSP key -> key/value pairs. Maps straight onto
 	// service.CreatePriceRequest.PSPLinks. A supplied link is VALIDATED
 	// against the provider (object exists + matches the price's money terms)
 	// before it is accepted; a mismatch fails the apply loudly. An existing
-	// object is never duplicated. A MISSING object is created where the linked id
-	// is client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
-	// provider-generated (Stripe price_id, Solana plan_pda). Canonical keys:
+	// object is never duplicated. A MISSING object is created where the supplied
+	// value is declarative (NMI plan_id, Stripe lookup_key, Solana token)
+	// and errors where it is provider-generated (Stripe price_id, Solana
+	// plan_pda). Canonical keys:
 	//   psp_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
 	//     mobius: {plan_id: premium}                           # NMI recurring plan on the "mobius" PSP; find-or-create
-	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
+	//     solana: {token: USD1}                                # optional override; recurring defaults to USDC
+	//     solana: {plan_pda: 7Xy...PdA}                        # attach a plan and resolve its token on-chain
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
 

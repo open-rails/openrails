@@ -83,7 +83,7 @@ catalogs:
 // bootManifestRuntime is one "pod boot": parse the manifest bytes (secret-file
 // overlay applied via VAULT_SECRETS_PATH), start the engine, apply the merchant
 // manifest, converge the catalog.
-func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug string, manifestRaw, catalogRaw []byte) (*embed.Runtime, merchant.ID) {
+func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5BaseURL string, manifestRaw, catalogRaw []byte) (*embed.Runtime, merchant.ID) {
 	t.Helper()
 	cfg := manifestModeConfig(dsn)
 	manifest, err := embed.LoadMerchantConfigManifest(manifestRaw)
@@ -94,8 +94,17 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug string, ma
 	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
+	runtime := rt.Embedded().App().Runtime
+	require.NotNil(t, runtime.SolanaPlanService,
+		"embedded provisioning arms recurring Solana services")
+	runtime.CollectionResolver = &money.MerchantCollectionAdapterBuilder{
+		Config:      runtime.Config,
+		DB:          runtime.DB,
+		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
+		Endpoints:   money.CollectionEndpoints{NMIV5BaseURL: nmiV5BaseURL},
+	}
 	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
-		Config:   cfg,
+		Runtime:  rt.Embedded(),
 		Manifest: catalogRaw,
 		Insert:   true, Overwrite: true, Prune: true,
 	}))
@@ -135,9 +144,15 @@ func fakeNMI(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
 	var keys []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/payments/sale", r.URL.Path)
-		keys = append(keys, r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_manifest_mode","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/plans":
+			_, _ = w.Write([]byte(`{"plans":[],"next_cursor":null,"has_more":false}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/payments/sale":
+			keys = append(keys, r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_manifest_mode","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		default:
+			http.Error(w, "unexpected NMI request", http.StatusNotFound)
+		}
 	}))
 	t.Cleanup(server.Close)
 	return server, &keys
@@ -199,7 +214,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	server, seenKeys := fakeNMI(t)
 
 	// ---- Boot 1.
-	rt1, id := bootManifestRuntime(t, ctx, dsn, slug, manifestRaw, manifestModeCatalogYAML(slug, 5_000_000))
+	rt1, id := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 5_000_000))
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
@@ -259,7 +274,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.NoError(t, rt1.Close(ctx))
 
 	// ---- Boot 2 (reboot: fresh runtime, same DB).
-	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
+	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
 	require.Equal(t, id, id2, "reboot binds the same merchant")
 
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id), "changed price is live after reboot; the old one is archived")
@@ -269,7 +284,7 @@ func TestManifestMode_Loop(t *testing.T) {
 
 	// ---- Boot 3: unchanged inputs are an idempotent no-op.
 	require.NoError(t, rt2.Close(ctx))
-	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
+	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
 	require.Equal(t, id, id3)
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id))
 	require.NoError(t, chargeViaStorePlane(t, ctx, rt3, id, server.URL))

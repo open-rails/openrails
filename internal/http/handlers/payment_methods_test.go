@@ -2,13 +2,31 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCreatePaymentMethodProviderError(t *testing.T) {
+	ambiguous := fmt.Errorf("create vault: %w", &nmi.TransportAmbiguousError{
+		Err: errors.New("request timed out after send"),
+	})
+
+	got := createPaymentMethodProviderError(ambiguous)
+	require.NotNil(t, got)
+	require.Equal(t, http.StatusConflict, got.HTTPStatus)
+	require.Equal(t, codePaymentMethodProviderOutcomeUnknown, got.Code)
+	require.Contains(t, got.Message, "Refresh your payment methods")
+
+	require.Nil(t, createPaymentMethodProviderError(errors.New("declined")))
+}
 
 // #589: derived payment-method health is computed at query time, so the pure
 // derivation logic is unit-tested without a DB.

@@ -184,10 +184,13 @@ type MaterializeResult struct {
 // charge (PS-4), deduped on (tenant, rail, transaction_id), and grants
 // the subscription's entitlements when the period is current.
 type BackfillPaymentAction struct {
-	PspID          *uuid.UUID
-	Rail           string
-	TransactionID  string
-	AmountCents    int64
+	PspID         *uuid.UUID
+	Rail          string
+	TransactionID string
+	AmountCents   int64
+	// AmountMicros preserves exact host-ledger amounts for embedded historical
+	// imports. Nil keeps the provider-wire cents conversion used by reconcile.
+	AmountMicros   *int64
 	Currency       string
 	PurchasedAt    time.Time
 	PriceID        uuid.UUID

@@ -81,6 +81,8 @@ type TestContainerSuite struct {
 // TestSuiteOption customizes an integration test suite before it boots.
 type TestSuiteOption func(*TestContainerSuite)
 
+const testNMIProviderKey = "mobius"
+
 // testNMIRailMerchantAccountID is the suite's ONE active NMI provider
 // account (#788: the mobius gateway id from defaultSuiteRails — the harness
 // seeds it as the armed rail state every consumer resolves).
@@ -193,7 +195,7 @@ func defaultSuiteRails(stripeSecretKey string) config.PSPSet {
 		},
 		// Test-only env overrides use the OPENRAILS_TEST_* prefix (#711 — the
 		// runtime RAILS_ config prefix is retired; don't teach operators a dead one).
-		"mobius": {
+		testNMIProviderKey: {
 			Rail:      models.RailNMI,
 			AccountID: envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145"),
 			NMI: &config.NMIRailConfig{

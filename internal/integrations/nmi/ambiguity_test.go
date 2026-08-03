@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/open-rails/openrails/config"
 )
@@ -94,6 +95,25 @@ func TestTransportAmbiguity_ConnectionRefused(t *testing.T) {
 	_, err = client.AddRecurringSubscription(RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD"})
 	if !IsTransportAmbiguous(err) {
 		t.Fatalf("direct-post connection failure should be transport-ambiguous, got %v", err)
+	}
+}
+
+func TestCreateCustomerVaultTimeoutIsBoundedAndAmbiguous(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	client := testClient(t, srv.URL)
+	client.httpClient.Timeout = 20 * time.Millisecond
+	started := time.Now()
+	_, err := client.CreateCustomerVault(CreateCustomerVaultData{PaymentToken: "tok_test"})
+
+	if !IsTransportAmbiguous(err) {
+		t.Fatalf("timed-out vault create should be transport-ambiguous, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("vault create timeout took %s", elapsed)
 	}
 }
 

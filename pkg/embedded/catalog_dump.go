@@ -447,7 +447,18 @@ func creditGrants(raw []byte) []catalog.CreditGrant {
 	for _, k := range keys {
 		v := m[k]
 		amount := v.Amount
-		out = append(out, catalog.CreditGrant{Key: k, Unit: v.Unit, Amount: &amount, ExpiryHours: v.ExpiryHours, Cadence: v.Cadence})
+		expires := ""
+		if v.ExpiryHours != nil {
+			expires = hoursSpec(*v.ExpiryHours)
+		}
+		out = append(out, catalog.CreditGrant{
+			Key:         k,
+			Unit:        v.Unit,
+			Amount:      &amount,
+			ExpiryHours: v.ExpiryHours,
+			Expires:     expires,
+			Cadence:     v.Cadence,
+		})
 	}
 	return out
 }
@@ -461,8 +472,20 @@ func providerLinks(raw []byte) map[string]map[string]string {
 	// The stored blob is account-keyed with the rail stamped inside each
 	// entry; the manifest derives the rail from the account key, so the stamp
 	// is storage detail, not manifest content.
-	for _, cfg := range links {
+	for psp, cfg := range links {
 		delete(cfg, models.RailKeyRail)
+		if strings.EqualFold(strings.TrimSpace(psp), string(models.RailSolana)) {
+			// mint_symbol is the resolved on-chain snapshot. The push manifest
+			// declares token only when selecting a new non-default plan, so
+			// never emit snapshot metadata as input. A stored plan_pda is
+			// authoritative for an attached plan and resolves its token from
+			// chain, so emitting token beside it would duplicate that fact.
+			delete(cfg, "mint_symbol")
+			if strings.TrimSpace(cfg["plan_pda"]) != "" ||
+				strings.EqualFold(strings.TrimSpace(cfg["token"]), "USDC") {
+				delete(cfg, "token")
+			}
+		}
 	}
 	return links
 }

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +139,100 @@ products:
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "requires psps to include") {
 		t.Fatalf("want provider_links/provider mismatch error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsRetiredProviderKeysForTypedPrice(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: topup
+    display_name: Topup
+    credits: [{key: credits}]
+    prices:
+      - currency: usd
+        model: tiered
+        providers: [stripe]
+        tiered:
+          mode: graduated
+          tiers:
+            - {unit_amount: 10_000}
+credit_balances:
+  - {key: credits, unit: credit}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "providers/provider_links were renamed to psps/psp_links") {
+		t.Fatalf("want retired provider-key error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsNoncanonicalCreditGrantFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     string
+		yamlValue string
+		jsonValue string
+	}{
+		{name: "unit", field: "unit", yamlValue: "other-credit", jsonValue: `"other-credit"`},
+		{name: "currency", field: "currency", yamlValue: "usd", jsonValue: `"usd"`},
+		{name: "expiry hours", field: "expiry_hours", yamlValue: "24", jsonValue: "24"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `
+version: 1
+credit_balances:
+  - {key: credits, unit: credit}
+products:
+  - key: product
+    display_name: Product
+    credits:
+      - key: credits
+        amount: 10
+        ` + tt.field + `: ` + tt.yamlValue + `
+`
+			_, err := Parse([]byte(body))
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("want noncanonical %s rejection, got %v", tt.field, err)
+			}
+
+			var grant CreditGrant
+			err = json.Unmarshal([]byte(`{"key":"credits","`+tt.field+`":`+tt.jsonValue+`}`), &grant)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("want noncanonical JSON %s rejection, got %v", tt.field, err)
+			}
+		})
+	}
+}
+
+func TestValidate_CreditGrantPreservesInternalCurrency(t *testing.T) {
+	amount := int64(10)
+	m := &Manifest{
+		Version: SupportedVersion,
+		CreditBalances: []CreditBalance{
+			{Key: "credits", Unit: "credit"},
+		},
+		Products: []Product{
+			{
+				Key:         "product",
+				DisplayName: "Product",
+				Credits: []CreditGrant{
+					{Key: "credits", Currency: "usd", Amount: &amount},
+				},
+			},
+		},
+	}
+
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	grant := m.TierGroups[0].Products[0].Credits[0]
+	if grant.Unit != "credit" {
+		t.Fatalf("credit did not derive balance unit: %q", grant.Unit)
+	}
+	if grant.Currency != "usd" {
+		t.Fatalf("validation discarded internal currency: %q", grant.Currency)
 	}
 }
 
@@ -324,20 +419,133 @@ func ranksByKey(m *Manifest) map[string]int {
 	return ranks
 }
 
-func TestLoad_SolanaNonStablecoinRejected(t *testing.T) {
-	body := `
+func TestLoad_SolanaSettlementToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		price   string
+		wantErr string
+	}{
+		{
+			name: "one-off may quote a non-USD billing currency",
+			price: `
+      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
+`,
+		},
+		{
+			name: "recurring defaults to USDC",
+			price: `
+      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
+`,
+		},
+		{
+			name: "recurring rejects an ineligible settlement token",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {token: SOL}
+`,
+			wantErr: `got "SOL"`,
+		},
+		{
+			name: "recurring requires USD billing currency",
+			price: `
+      - currency: eur
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {token: USDC}
+`,
+			wantErr: "recurring solana currently requires USD billing currency",
+		},
+		{
+			name: "recurring accepts USDC independently from USD",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {token: USDC}
+`,
+		},
+		{
+			name: "recurring existing plan resolves its token on-chain",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {plan_pda: 7XyPdA}
+`,
+		},
+		{
+			name: "recurring existing plan rejects duplicate token input",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {plan_pda: 7XyPdA, token: USD1}
+`,
+			wantErr: "token selects a new plan; omit it when plan_pda is supplied",
+		},
+		{
+			name: "mint symbol is output only",
+			price: `
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {mint_symbol: USDC}
+`,
+			wantErr: "mint_symbol is output metadata",
+		},
+		{
+			name: "legacy stablecoin currency gets a migration hint",
+			price: `
+      - currency: usdc
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+`,
+			wantErr: "redeclare as currency: usd with psp_links.solana.token: USDC",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `
 version: 1
 products:
   - key: p
     display_name: P
-    tier_group: g
-    tier_rank: 1
     prices:
-      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
-		t.Fatalf("want solana eligibility error, got %v", err)
+` + tt.price
+			_, err := Load(writeManifest(t, body))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("want error containing %q, got %v", tt.wantErr, err)
+			}
+		})
 	}
 }
 
@@ -364,12 +572,10 @@ products:
     usage_limits: [starter-spend]
     credits:
       - key: monthly-usd
-        currency: usd
         amount: 25_000_000
         expires: 30d
         cadence: per_renewal
       - key: ai-images
-        unit: local-stack/ai-image-credit
         amount: 100
     prices:
       - currency: usd
@@ -389,10 +595,13 @@ products:
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
 	if got := p.Credits[0].Unit; got != "usd" {
-		t.Fatalf("credit currency alias did not populate unit: %q", got)
+		t.Fatalf("credit did not derive balance unit: %q", got)
+	}
+	if got := p.Credits[0].ExpiryHours; got == nil || *got != 30*24 {
+		t.Fatalf("credit expires did not populate expiry hours: %v", got)
 	}
 	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
-		t.Fatalf("qualified custom credit unit not preserved: %q", got)
+		t.Fatalf("credit did not derive qualified balance unit: %q", got)
 	}
 	// #707: the metered: sugar translates into a rate card; the pure-usage
 	// (unit_amount 0) price row disappears.
@@ -580,6 +789,32 @@ products:
 	}
 }
 
+func TestLoad_SolanaSharedUSDPriceDefaultsToUSDC(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: premium
+    display_name: Premium
+    prices:
+      - currency: usd
+        unit_amount: 23000000
+        duration: 30d
+        auto_renew: true
+        psps: [nmi, ccbill, solana]
+`
+	manifest, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("shared USD price should be accepted: %v", err)
+	}
+	price := manifest.TierGroups[0].Products[0].Prices[0]
+	if price.Currency != "usd" {
+		t.Fatalf("shared price currency = %q, want usd", price.Currency)
+	}
+	if got := price.PSPLinks["solana"]["token"]; got != "USDC" {
+		t.Fatalf("default Solana token = %q, want USDC", got)
+	}
+}
+
 func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
@@ -589,10 +824,20 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        auto_renew: true
+        psps: [solana]
+        psp_links:
+          solana: {token: usd1}
 `
-	if _, err := Load(writeManifest(t, body)); err != nil {
-		t.Fatalf("usdc + solana should be accepted, got %v", err)
+	manifest, err := Load(writeManifest(t, body))
+	if err != nil {
+		t.Fatalf("usd billed + usd1 settled should be accepted, got %v", err)
+	}
+	if got := manifest.Products[0].Prices[0].PSPLinks["solana"]["token"]; got != "USD1" {
+		t.Fatalf("normalized Solana token = %q, want USD1", got)
 	}
 }
 

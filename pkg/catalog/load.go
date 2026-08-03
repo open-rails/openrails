@@ -53,13 +53,17 @@ func normalizeCurrency(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-// stablecoinCurrencies are the currencies eligible for the Solana provider.
-// Solana settles on-chain in stablecoins pegged $1; a recurring fiat price is
-// only Solana-eligible if its currency is one of these.
+// stablecoinCurrencies are explicit ledger currency identifiers accepted
+// alongside generic three-letter currency codes.
 var stablecoinCurrencies = map[string]struct{}{
-	"usd":  {}, // priced in USD, settled in a $1-pegged stablecoin
+	"usd":  {},
 	"usdc": {},
 	"usdg": {},
+}
+
+var recurringSolanaTokenSymbols = map[string]struct{}{
+	"USDC": {},
+	"USD1": {},
 }
 
 // Load reads, parses and validates a manifest from disk. Validation normalizes
@@ -352,18 +356,11 @@ func validateCredits(productKey string, credits []CreditGrant, balances map[stri
 		if !ok {
 			return fmt.Errorf("product %q credit %q references unknown credit balance", productKey, credit.Key)
 		}
-		if strings.TrimSpace(credit.Unit) == "" && strings.TrimSpace(credit.Currency) != "" {
-			credit.Unit = credit.Currency
-		}
-		if strings.TrimSpace(credit.Unit) == "" {
-			credit.Unit = balance.Unit
-		}
-		if unit := strings.ToLower(strings.TrimSpace(credit.Unit)); unit != "" && !validCreditUnit(unit) {
-			return fmt.Errorf("product %q credit %q has invalid unit %q", productKey, credit.Key, credit.Unit)
-		}
+		credit.Unit = balance.Unit
 		if credit.Amount != nil && *credit.Amount <= 0 {
 			return fmt.Errorf("product %q credit %q amount must be positive", productKey, credit.Key)
 		}
+		credit.ExpiryHours = nil
 		expires := strings.TrimSpace(credit.Expires)
 		if expires == "" {
 			expires = strings.TrimSpace(balance.ExpiresDefault)
@@ -440,6 +437,9 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if !validPriceCurrency(price.Currency) {
 		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
 	}
+	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
+		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
+	}
 	if price.Model != "" {
 		price.PSPs = normalizePSPs(price.PSPs)
 		return nil
@@ -485,9 +485,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		}
 		price.Trial.Duration = formatDurationHours(*trialHours)
 	}
-	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
-		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
-	}
 	if price.PSPs != nil {
 		price.PSPs = normalizePSPs(price.PSPs)
 	}
@@ -496,26 +493,84 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 		for _, provider := range price.PSPs {
 			declared[provider] = struct{}{}
 		}
-		for provider := range price.PSPLinks {
+		// Normalize the psp_links keys IN PLACE (psps above are already
+		// normalized): every later lookup — the eligibility checks below,
+		// plan-time drift detection — reads by the canonical lowercase key, so
+		// a cased manifest key like "Solana:" must not survive as a distinct,
+		// invisible entry.
+		normalizedLinks := make(map[string]map[string]string, len(price.PSPLinks))
+		for provider, link := range price.PSPLinks {
 			key := strings.ToLower(strings.TrimSpace(provider))
 			if _, ok := declared[key]; !ok {
 				return fmt.Errorf("product %q price %s: psp_links.%s requires psps to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
 			}
+			if _, dup := normalizedLinks[key]; dup {
+				return fmt.Errorf("product %q price %s: psp_links declares %q more than once (differing only in case)", product.Key, PriceLabel(product.Key, *price), key)
+			}
+			normalizedLinks[key] = link
 		}
+		price.PSPLinks = normalizedLinks
 	}
 
-	// Per-provider eligibility (shape-only; no chain calls). Solana settles
-	// on-chain in $1-pegged stablecoins, so a Solana price must be priced in a
-	// stablecoin currency (one-off finite windows and recurring are both allowed).
+	// Per-provider eligibility (shape-only; no chain calls). One-off Solana
+	// checkout quotes the selected token at payment time. A recurring plan is
+	// mint-specific: USDC is the default settlement token, while token selects
+	// another supported stablecoin and plan_pda resolves its token on-chain.
 	if price.Metered != nil && len(price.PSPs) > 0 {
 		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
 	}
 	for _, provider := range price.PSPs {
-		if provider == "solana" {
-			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
-				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (usd/usdc/usdg), got %q",
-					product.Key, PriceLabel(product.Key, *price), price.Currency)
+		if provider != "solana" {
+			continue
+		}
+		if price.AutoRenew {
+			if price.Currency != "usd" {
+				hint := ""
+				if _, legacy := stablecoinCurrencies[price.Currency]; legacy {
+					// Pre-#745 manifests declared the settlement token AS the
+					// billing currency; point the operator at the new shape.
+					hint = fmt.Sprintf("; pre-#745 manifests billed in the token — redeclare as currency: usd with psp_links.solana.token: %s", strings.ToUpper(price.Currency))
+				}
+				return fmt.Errorf("product %q price %s: recurring solana currently requires USD billing currency, got %q%s",
+					product.Key, PriceLabel(product.Key, *price), price.Currency, hint)
 			}
+			link := price.PSPLinks[provider]
+			if link == nil {
+				link = map[string]string{}
+				if price.PSPLinks == nil {
+					price.PSPLinks = map[string]map[string]string{}
+				}
+				price.PSPLinks[provider] = link
+			}
+			if _, retired := link["mint_symbol"]; retired {
+				return fmt.Errorf("product %q price %s: psp_links.solana.mint_symbol is output metadata; use psp_links.solana.token",
+					product.Key, PriceLabel(product.Key, *price))
+			}
+			symbol := strings.ToUpper(strings.TrimSpace(link["token"]))
+			planPDA := strings.TrimSpace(link["plan_pda"])
+			if symbol != "" && planPDA != "" {
+				return fmt.Errorf("product %q price %s: psp_links.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain",
+					product.Key, PriceLabel(product.Key, *price))
+			}
+			if symbol == "" && planPDA == "" {
+				symbol = "USDC"
+			}
+			if symbol != "" {
+				if _, ok := recurringSolanaTokenSymbols[symbol]; !ok {
+					return fmt.Errorf("product %q price %s: psp_links.solana.token must be USDC or USD1, got %q",
+						product.Key, PriceLabel(product.Key, *price), symbol)
+				}
+				link["token"] = symbol
+			}
+			continue
+		}
+		// One-off Solana settles as a direct transfer quoted at checkout: it
+		// has no plan and consumes no link keys. Silently accepting (and then
+		// dropping) a declared link would leave the plan flagging the same
+		// "drift" on every run — reject it loudly instead.
+		if len(price.PSPLinks[provider]) > 0 {
+			return fmt.Errorf("product %q price %s: one-off solana prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana",
+				product.Key, PriceLabel(product.Key, *price))
 		}
 	}
 	return nil

@@ -40,10 +40,11 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		// Sandbox posture: the CCBill IP allowlist bypass engages (no live
 		// ccbill accounts exist for these merchants) — same as hentai0's
 		// compose suite.
-		TestMode:          config.CredentialPostureSandbox,
-		MerchantSource:    source,
-		ProviderWriteMode: config.ProviderWriteModeFull,
-		DB:                &config.DBConfig{URL: dsn},
+		TestMode:                 config.CredentialPostureSandbox,
+		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
+		MerchantSource:           source,
+		ProviderWriteMode:        config.ProviderWriteModeFull,
+		DB:                       &config.DBConfig{URL: dsn},
 	}
 }
 

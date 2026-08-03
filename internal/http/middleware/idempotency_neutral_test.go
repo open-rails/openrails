@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -29,6 +31,23 @@ func idempotencyTestHandler(counter *atomic.Int64, status int, body string) http
 }
 
 func TestIdempotencyHTTP(t *testing.T) {
+	t.Run("finalization survives request cancellation", func(t *testing.T) {
+		requestCtx, cancelRequest := context.WithCancel(context.Background())
+		cancelRequest()
+
+		var finalizeErr error
+		err := finalizeIdempotency(requestCtx, func(ctx context.Context) error {
+			finalizeErr = ctx.Err()
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			require.WithinDuration(t, time.Now().Add(idempotencyFinalizeTimeout), deadline, time.Second)
+			return nil
+		})
+
+		require.NoError(t, err)
+		require.NoError(t, finalizeErr)
+	})
+
 	t.Run("replay: same key same body twice returns the same response, handler runs once", func(t *testing.T) {
 		svc := idempotency.NewIdempotencyService(nil)
 		t.Cleanup(svc.Close)

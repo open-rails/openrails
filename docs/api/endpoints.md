@@ -295,7 +295,7 @@ manifest and reboot instead. Reads stay live.
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
-| POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids, or `create` where the provider supports auto-create — Stripe only; NMI/CCBill are link-only) |
+| POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
 | GET | `/v1/merchant/catalog/prices` | List prices |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
