@@ -2,6 +2,7 @@ package merchants
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,6 +11,20 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+func TestPaymentProviderDefinitions(t *testing.T) {
+	expected := []PaymentProviderDefinition{
+		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret"}},
+		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
+		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin"}},
+		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}},
+		{Rail: "vaulted_card", DisplayName: "Credit Card", CredentialKeys: []string{"api_key"}},
+	}
+
+	if got := PaymentProviderDefinitions(); !reflect.DeepEqual(got, expected) {
+		t.Fatalf("PaymentProviderDefinitions() = %#v, want %#v", got, expected)
+	}
+}
 
 func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)

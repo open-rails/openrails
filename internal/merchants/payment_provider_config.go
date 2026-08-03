@@ -46,6 +46,14 @@ type PaymentProviderConfig struct {
 	UpdatedAt       time.Time                                  `json:"updated_at"`
 }
 
+// PaymentProviderDefinition describes one merchant-configurable provider from
+// the rail registry. CredentialKeys contains only merchant-writable secrets.
+type PaymentProviderDefinition struct {
+	Rail           string   `json:"rail"`
+	DisplayName    string   `json:"display_name"`
+	CredentialKeys []string `json:"credential_keys"`
+}
+
 // UpsertPaymentProviderConfigRequest creates or replaces one provider account.
 type UpsertPaymentProviderConfigRequest struct {
 	Environment  string            `json:"environment"`
@@ -57,6 +65,28 @@ type UpsertPaymentProviderConfigRequest struct {
 
 type railMerchantAccountEvidence struct {
 	PublicConfig map[string]string `json:"public_config,omitempty"`
+}
+
+// PaymentProviderDefinitions returns every merchant-configurable provider in
+// registry order.
+func PaymentProviderDefinitions() []PaymentProviderDefinition {
+	descriptors := rails.All()
+	definitions := make([]PaymentProviderDefinition, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if !descriptor.HasRailMerchantAccounts {
+			continue
+		}
+		credentialKeys := rails.MerchantCredentialKeyNames(descriptor.Rail)
+		if credentialKeys == nil {
+			credentialKeys = []string{}
+		}
+		definitions = append(definitions, PaymentProviderDefinition{
+			Rail:           string(descriptor.Rail),
+			DisplayName:    descriptor.DisplayName,
+			CredentialKeys: credentialKeys,
+		})
+	}
+	return definitions
 }
 
 // ListPaymentProviderConfigs returns provider-account configs for a merchant.

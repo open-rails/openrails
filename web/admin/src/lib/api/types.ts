@@ -411,6 +411,12 @@ export interface PaymentProviderConfig {
   updated_at: string
 }
 
+export interface PaymentProviderDefinition {
+  rail: Rail
+  display_name: string
+  credential_keys: string[]
+}
+
 // --- API keys (#757) ---
 
 export interface MerchantAPIKey {
