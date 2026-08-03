@@ -157,9 +157,13 @@ undocumented and unevenly applied:
 - `0011_query_audit_indexes.up.sql` carried a bespoke exclusion implemented as a
   second squawk invocation inside `scripts/migration-lint.sh`. That carve-out is
   now deleted; 0011 is linted by the same rule set as every other file.
-- `0016_cross_merchant_directory.up.sql:103-106` states the identical constraint
-  in a code comment and would fail this gate today. It passes only because the
-  linter is run against changed files in practice, so it was never re-linted.
+- `0016_cross_merchant_directory.up.sql` (on the unmerged `chaos` branch, not on
+  `master`) states the identical constraint in a code comment written
+  independently: *"Not CONCURRENTLY: the migrator applies each file inside ONE
+  transaction, where CREATE INDEX CONCURRENTLY is illegal (same constraint as
+  the five indexes in 0011)."* A second author reached the same conclusion
+  unprompted, and that migration will trip this gate the moment it merges unless
+  the rules are excluded here.
 
 **What is still enforced.** Only these two rules are excluded. `require-lock-timeout`,
 `require-statement-timeout`, `ban-drop-column`, `ban-drop-table` and the rest

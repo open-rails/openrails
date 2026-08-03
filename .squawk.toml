@@ -20,9 +20,9 @@ assume_in_transaction = true
 # standard being relaxed for one file — they are unreachable for every file, and
 # a rule nobody can satisfy is noise that blocks every future index. Precedent:
 # 0011 carried a bespoke per-file exclusion inside migration-lint.sh, and
-# 0016_cross_merchant_directory.up.sql:103-106 states the same constraint in a
-# comment (it passes only because the linter checks changed files, so it was
-# never re-linted). Rationale in internal/db/queries/EXEMPTIONS.md.
+# 0016_cross_merchant_directory.up.sql (unmerged, on `chaos`) states the same
+# constraint in a comment written independently — it will trip this gate the
+# moment it merges. Rationale in internal/db/queries/EXEMPTIONS.md.
 #
 # Reversing this is a migratekit change (a non-transactional apply mode), not a
 # .squawk.toml change. Nothing else is relaxed: require-lock-timeout,
