@@ -71,6 +71,39 @@ func (q *Queries) GetPlatformMerchantLastPayment(ctx context.Context, merchantID
 	return created_at, err
 }
 
+const listLedgerAuditMerchants = `-- name: ListLedgerAuditMerchants :many
+SELECT id, slug
+FROM openrails.merchants
+ORDER BY slug
+`
+
+type ListLedgerAuditMerchantsRow struct {
+	ID   uuid.UUID
+	Slug string
+}
+
+// ListLedgerAuditMerchants is an on-demand fleet integrity sweep. It must list
+// the complete merchant directory so an audit cannot silently omit a tenant.
+func (q *Queries) ListLedgerAuditMerchants(ctx context.Context) ([]ListLedgerAuditMerchantsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerAuditMerchants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerAuditMerchantsRow
+	for rows.Next() {
+		var i ListLedgerAuditMerchantsRow
+		if err := rows.Scan(&i.ID, &i.Slug); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformMerchantRailsArmed = `-- name: ListPlatformMerchantRailsArmed :many
 
 SELECT DISTINCT rail

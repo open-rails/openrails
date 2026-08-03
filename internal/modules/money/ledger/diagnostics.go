@@ -89,84 +89,50 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 	return r, nil
 }
 
-const conservationSQL = `
-SELECT merchant_id,
-       currency,
-       SUM(credits_posted - debits_posted)::bigint AS net,
-       COUNT(*)::bigint                            AS accounts
-FROM openrails.ledger_accounts
-WHERE ($1::uuid IS NULL OR merchant_id = $1::uuid)
-GROUP BY merchant_id, currency
-HAVING SUM(credits_posted - debits_posted) <> 0
-ORDER BY merchant_id, currency`
-
 // CheckConservation returns every (merchant, currency) ledger whose balances do
 // not sum to zero. An empty slice is the healthy answer.
 func CheckConservation(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]ConservationBreach, error) {
-	rows, err := q.Query(ctx, conservationSQL, merchantFilter(merchant))
+	rows, err := gen.New(q).ListLedgerConservationBreaches(ctx, merchantFilter(merchant))
 	if err != nil {
 		return nil, fmt.Errorf("ledger: conservation check: %w", err)
 	}
-	defer rows.Close()
 
 	var out []ConservationBreach
-	for rows.Next() {
-		var b ConservationBreach
-		if err := rows.Scan(&b.MerchantID, &b.Currency, &b.Net, &b.Accounts); err != nil {
-			return nil, fmt.Errorf("ledger: conservation check: %w", err)
-		}
-		out = append(out, b)
+	for _, row := range rows {
+		out = append(out, ConservationBreach{
+			MerchantID: row.MerchantID,
+			Currency:   row.Currency,
+			Net:        row.Net,
+			Accounts:   row.Accounts,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
-
-// counterDriftSQL rebuilds each account's counters from the immutable transfer
-// log (one pass, credit and debit legs unioned) and returns only the accounts
-// where the maintained projection disagrees.
-const counterDriftSQL = `
-WITH logged AS (
-    SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
-    FROM (
-        SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
-        FROM openrails.ledger_transfers
-        WHERE ($1::uuid IS NULL OR merchant_id = $1::uuid)
-        UNION ALL
-        SELECT debit_account_id, 0::bigint, amount
-        FROM openrails.ledger_transfers
-        WHERE ($1::uuid IS NULL OR merchant_id = $1::uuid)
-    ) legs
-    GROUP BY account_id
-)
-SELECT a.id, a.merchant_id, a.currency, a.account_type, a.customer_id,
-       a.credits_posted, COALESCE(l.credits, 0)::bigint,
-       a.debits_posted,  COALESCE(l.debits, 0)::bigint
-FROM openrails.ledger_accounts a
-LEFT JOIN logged l ON l.account_id = a.id
-WHERE ($1::uuid IS NULL OR a.merchant_id = $1::uuid)
-  AND (a.credits_posted <> COALESCE(l.credits, 0)
-    OR a.debits_posted  <> COALESCE(l.debits, 0))
-ORDER BY a.merchant_id, a.currency, a.id`
 
 // CheckCounterDrift recomputes every account's counters from ledger_transfers
 // and returns the accounts whose stored projection disagrees. An empty slice is
 // the healthy answer.
 func CheckCounterDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]CounterDrift, error) {
-	rows, err := q.Query(ctx, counterDriftSQL, merchantFilter(merchant))
+	rows, err := gen.New(q).ListLedgerCounterDrifts(ctx, merchantFilter(merchant))
 	if err != nil {
 		return nil, fmt.Errorf("ledger: counter drift check: %w", err)
 	}
-	defer rows.Close()
 
 	var out []CounterDrift
-	for rows.Next() {
-		var d CounterDrift
-		if err := rows.Scan(&d.AccountID, &d.MerchantID, &d.Currency, &d.AccountType, &d.CustomerID,
-			&d.StoredCredits, &d.LoggedCredits, &d.StoredDebits, &d.LoggedDebits); err != nil {
-			return nil, fmt.Errorf("ledger: counter drift check: %w", err)
-		}
-		out = append(out, d)
+	for _, row := range rows {
+		out = append(out, CounterDrift{
+			AccountID:     row.AccountID,
+			MerchantID:    row.MerchantID,
+			Currency:      row.Currency,
+			AccountType:   row.AccountType,
+			CustomerID:    row.CustomerID,
+			StoredCredits: row.StoredCredits,
+			LoggedCredits: row.LoggedCredits,
+			StoredDebits:  row.StoredDebits,
+			LoggedDebits:  row.LoggedDebits,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // merchantFilter maps the nil UUID onto a SQL NULL ("no merchant predicate").

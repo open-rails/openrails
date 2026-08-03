@@ -158,27 +158,17 @@ func ledgerAuditTargets(ctx context.Context, database *db.DB, merchantSlug strin
 		}
 		return []ledgerAuditTarget{{id: id, slug: strings.TrimSpace(merchantSlug)}}, nil
 	}
-	rows, err := database.DataPool().Query(ctx,
-		`SELECT id::text, slug FROM openrails.merchants ORDER BY slug`)
+	rows, err := database.GenGlobal().ListLedgerAuditMerchants(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list merchants: %w", err)
 	}
-	defer rows.Close()
 
-	var out []ledgerAuditTarget
-	for rows.Next() {
-		var rawID, slug string
-		if err := rows.Scan(&rawID, &slug); err != nil {
-			return nil, fmt.Errorf("list merchants: %w", err)
-		}
-		id, err := merchant.ParseID(rawID)
-		if err != nil {
-			return nil, fmt.Errorf("parse merchant id %q: %w", rawID, err)
-		}
-		out = append(out, ledgerAuditTarget{id: id, slug: slug})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list merchants: %w", err)
+	out := make([]ledgerAuditTarget, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ledgerAuditTarget{
+			id:   merchant.ID(row.ID),
+			slug: row.Slug,
+		})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no merchants on file")

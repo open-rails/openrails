@@ -93,6 +93,11 @@ provably and the exemption is gone.)
 listing. The predicate is absent on most calls, so no index serves it
 generically; the merchant index bounds the scan, the page `LIMIT` the result.
 
+**PERMANENT — ledger integrity diagnostics.**
+`ListLedgerConservationBreaches` and `ListLedgerCounterDrifts` are explicitly
+invoked operator audits. They must inspect the full ledger and return every
+finding: pagination or truncation could make a damaged ledger appear healthy.
+
 **DEBT (or#837).** Everything else. These are real:
 
 - *Deployment-wide sweeps with no LIMIT* — `ListDueDunningSubscriptions` (the
@@ -100,9 +105,8 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
   the reconciliation/drift/intent scans.
 - *Unbatched retention and expiry writes* — `DeleteCompletedWebhookEventsBefore`,
   `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
-  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`,
-  `DeleteDeliveredPaymentSettlementsBefore`. A large backlog makes each one a
-  single long transaction.
+  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
+  backlog makes each one a single long transaction.
 - *Missing indexes* — RETIRED by or#846 (migration 0012). Note the lesson: under
   RLS every query carries `merchant_id = …`, so a missing index almost never
   shows up as a `Seq Scan` — "no Seq Scans" is NOT evidence that indexing is

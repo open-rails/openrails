@@ -379,6 +379,132 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 	return balance, err
 }
 
+const listLedgerConservationBreaches = `-- name: ListLedgerConservationBreaches :many
+SELECT merchant_id,
+       currency,
+       SUM(credits_posted - debits_posted)::bigint AS net,
+       COUNT(*)::bigint AS accounts
+FROM openrails.ledger_accounts
+WHERE ($1::uuid IS NULL
+    OR merchant_id = $1::uuid)
+GROUP BY merchant_id, currency
+HAVING SUM(credits_posted - debits_posted) <> 0
+ORDER BY merchant_id, currency
+`
+
+type ListLedgerConservationBreachesRow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	Net        int64
+	Accounts   int64
+}
+
+// ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
+// return every breached ledger so the operator cannot receive a false healthy
+// result from pagination.
+func (q *Queries) ListLedgerConservationBreaches(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerConservationBreachesRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerConservationBreaches, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerConservationBreachesRow
+	for rows.Next() {
+		var i ListLedgerConservationBreachesRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.Currency,
+			&i.Net,
+			&i.Accounts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerCounterDrifts = `-- name: ListLedgerCounterDrifts :many
+WITH logged AS (
+    SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
+    FROM (
+        SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
+        FROM openrails.ledger_transfers
+        WHERE ($1::uuid IS NULL
+            OR merchant_id = $1::uuid)
+        UNION ALL
+        SELECT debit_account_id, 0::bigint, amount
+        FROM openrails.ledger_transfers
+        WHERE ($1::uuid IS NULL
+            OR merchant_id = $1::uuid)
+    ) legs
+    GROUP BY account_id
+)
+SELECT a.id AS account_id,
+       a.merchant_id,
+       a.currency,
+       a.account_type,
+       a.customer_id,
+       a.credits_posted AS stored_credits,
+       COALESCE(l.credits, 0)::bigint AS logged_credits,
+       a.debits_posted AS stored_debits,
+       COALESCE(l.debits, 0)::bigint AS logged_debits
+FROM openrails.ledger_accounts a
+LEFT JOIN logged l ON l.account_id = a.id
+WHERE ($1::uuid IS NULL
+    OR a.merchant_id = $1::uuid)
+  AND (a.credits_posted <> COALESCE(l.credits, 0)
+    OR a.debits_posted <> COALESCE(l.debits, 0))
+ORDER BY a.merchant_id, a.currency, a.id
+`
+
+type ListLedgerCounterDriftsRow struct {
+	AccountID     uuid.UUID
+	MerchantID    uuid.UUID
+	Currency      string
+	AccountType   string
+	CustomerID    *uuid.UUID
+	StoredCredits int64
+	LoggedCredits int64
+	StoredDebits  int64
+	LoggedDebits  int64
+}
+
+// ListLedgerCounterDrifts rebuilds account counters from the immutable
+// transfer log and returns every account whose maintained projection differs.
+func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerCounterDriftsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerCounterDrifts, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerCounterDriftsRow
+	for rows.Next() {
+		var i ListLedgerCounterDriftsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.MerchantID,
+			&i.Currency,
+			&i.AccountType,
+			&i.CustomerID,
+			&i.StoredCredits,
+			&i.LoggedCredits,
+			&i.StoredDebits,
+			&i.LoggedDebits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid

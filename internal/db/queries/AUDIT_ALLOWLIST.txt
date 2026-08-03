@@ -37,6 +37,11 @@ unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
 # Capped by a caller-supplied key list the auditor cannot prove from the schema.
 unbounded-many LookupCustomerIDsBySubjects  # capped by subjects[]; uq index is PARTIAL so uncredited
 
+# On-demand integrity diagnostics must return every finding. Pagination would
+# let a partial result be mistaken for a healthy ledger.
+unbounded-many ListLedgerConservationBreaches # operator audit: every breached ledger
+unbounded-many ListLedgerCounterDrifts         # operator audit: every drifted account
+
 ## DEBT
 
 # or#837. These ARE unbounded; allowlisted only so the gate could be switched on
@@ -69,8 +74,7 @@ unscoped-write DeleteNotificationsBefore                 # or#837 unbatched rete
 unscoped-write DeleteSeenNotificationsBefore             # or#837 unbatched retention delete
 unscoped-write ExpireCheckoutSessions                    # or#837 unbatched cross-merchant UPDATE
 unscoped-write AutoResolveVanishedReconciliationFindings # or#837 unbatched cross-merchant UPDATE
-unscoped-write DeleteDeliveredPaymentSettlementsBefore   # or#837 unbatched retention delete (RLS scopes it; batch it)
 
-# The whole "missing indexes" group is gone: or#846 added them (0011) and every
+# The whole "missing indexes" group is gone: or#846 added them (0012) and every
 # entry here went STALE. Leave the heading out — a new missing index is a
 # migration, not an exemption.

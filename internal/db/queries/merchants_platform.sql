@@ -55,3 +55,10 @@ FROM openrails.payments
 WHERE merchant_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- ListLedgerAuditMerchants is an on-demand fleet integrity sweep. It must list
+-- the complete merchant directory so an audit cannot silently omit a tenant.
+-- name: ListLedgerAuditMerchants :many
+SELECT id, slug
+FROM openrails.merchants
+ORDER BY slug;

@@ -112,3 +112,53 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND created_at >= sqlc.arg(period_from)::timestamptz
   AND created_at < sqlc.arg(period_to)::timestamptz
 GROUP BY transfer_type;
+
+-- ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
+-- return every breached ledger so the operator cannot receive a false healthy
+-- result from pagination.
+-- name: ListLedgerConservationBreaches :many
+SELECT merchant_id,
+       currency,
+       SUM(credits_posted - debits_posted)::bigint AS net,
+       COUNT(*)::bigint AS accounts
+FROM openrails.ledger_accounts
+WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+    OR merchant_id = sqlc.narg(merchant_id)::uuid)
+GROUP BY merchant_id, currency
+HAVING SUM(credits_posted - debits_posted) <> 0
+ORDER BY merchant_id, currency;
+
+-- ListLedgerCounterDrifts rebuilds account counters from the immutable
+-- transfer log and returns every account whose maintained projection differs.
+-- name: ListLedgerCounterDrifts :many
+WITH logged AS (
+    SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
+    FROM (
+        SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
+        FROM openrails.ledger_transfers
+        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+        UNION ALL
+        SELECT debit_account_id, 0::bigint, amount
+        FROM openrails.ledger_transfers
+        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+    ) legs
+    GROUP BY account_id
+)
+SELECT a.id AS account_id,
+       a.merchant_id,
+       a.currency,
+       a.account_type,
+       a.customer_id,
+       a.credits_posted AS stored_credits,
+       COALESCE(l.credits, 0)::bigint AS logged_credits,
+       a.debits_posted AS stored_debits,
+       COALESCE(l.debits, 0)::bigint AS logged_debits
+FROM openrails.ledger_accounts a
+LEFT JOIN logged l ON l.account_id = a.id
+WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+    OR a.merchant_id = sqlc.narg(merchant_id)::uuid)
+  AND (a.credits_posted <> COALESCE(l.credits, 0)
+    OR a.debits_posted <> COALESCE(l.debits, 0))
+ORDER BY a.merchant_id, a.currency, a.id;
