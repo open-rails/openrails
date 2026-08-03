@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -368,7 +369,16 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 }
 
 func (c *NMIClient) sendQueryRequest(data url.Values) (_ string, err error) {
-	resp, err := c.client().PostForm(c.QueryURL, data)
+	return c.sendQueryRequestWithContext(context.TODO(), data)
+}
+
+func (c *NMIClient) sendQueryRequestWithContext(ctx context.Context, data url.Values) (_ string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.QueryURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to build query request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.client().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send query request: %w", err)
 	}

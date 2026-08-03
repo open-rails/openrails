@@ -40,7 +40,7 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 		Environment:    "live",
 		AccountID:      "acct_123",
 		Archived:       false,
-		Evidence:       []byte(`{"public_config":{"publishable_key":"pk_live_123"}}`),
+		Evidence:       []byte(`{"public_config":{"publishable_key":"pk_live_123"},"credentials_validated":true}`),
 		FirstSeenAt:    now,
 		LastVerifiedAt: &now,
 		CreatedAt:      now,
@@ -59,8 +59,60 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 	if got.Credentials["secret_key"].LastValidatedAt == nil {
 		t.Fatal("secret_key should carry last validation metadata")
 	}
+	if got.Credentials["webhook_signing_secret"].LastValidatedAt != nil {
+		t.Fatal("format-only webhook secret must not carry live validation metadata")
+	}
 	if _, leaked := any(got.Credentials["secret_key"]).(string); leaked {
 		t.Fatal("credential status leaked plaintext")
+	}
+}
+
+func TestPaymentProviderConfigFromRowHidesUnprovenTimestamp(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	secretName, err := PSPSecretName("nmi", "live", "gateway", "security_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := paymentProviderConfigFromRow(gen.OpenrailsPsp{
+		Rail:           "nmi",
+		Environment:    "live",
+		AccountID:      "gateway",
+		LastVerifiedAt: &now,
+	}, []MerchantSecretStatus{{
+		SecretDefinition: SecretDefinition{Name: secretName},
+		Configured:       true,
+	}})
+
+	if got.LastVerifiedAt != nil || got.Credentials["security_key"].LastValidatedAt != nil {
+		t.Fatal("an auto-stamped timestamp without probe evidence must stay hidden")
+	}
+}
+
+func TestCredentialValidatedAtOnlyMarksLiveProbedCredentials(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		rail string
+		key  string
+		want bool
+	}{
+		{name: "stripe secret key", rail: "stripe", key: "secret_key", want: true},
+		{name: "stripe webhook secret", rail: "stripe", key: "webhook_signing_secret"},
+		{name: "nmi security key", rail: "nmi", key: "security_key", want: true},
+		{name: "nmi webhook secret", rail: "nmi", key: "webhook_signing_secret"},
+		{name: "ccbill datalink username", rail: "ccbill", key: "datalink_username", want: true},
+		{name: "ccbill datalink password", rail: "ccbill", key: "datalink_password", want: true},
+		{name: "ccbill salt", rail: "ccbill", key: "salt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := credentialValidatedAt(tt.rail, tt.key, &now)
+			if (got != nil) != tt.want {
+				t.Fatalf("credentialValidatedAt(%q, %q) validated = %t, want %t", tt.rail, tt.key, got != nil, tt.want)
+			}
+		})
 	}
 }
 

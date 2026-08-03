@@ -20,7 +20,7 @@ INSERT INTO openrails.psps (
     sqlc.narg(key),
     COALESCE(sqlc.narg(archived)::boolean, false),
     sqlc.narg(evidence),
-    COALESCE(sqlc.narg(last_verified_at)::timestamptz, now())
+    sqlc.narg(last_verified_at)::timestamptz
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     key = COALESCE(EXCLUDED.key, openrails.psps.key),
@@ -30,7 +30,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
         ELSE NULL
     END,
     evidence = COALESCE(EXCLUDED.evidence, openrails.psps.evidence),
-    last_verified_at = EXCLUDED.last_verified_at,
+    last_verified_at = COALESCE(EXCLUDED.last_verified_at, openrails.psps.last_verified_at),
     updated_at = now()
 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
