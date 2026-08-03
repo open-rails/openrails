@@ -103,7 +103,7 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
   `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`,
   `DeleteDeliveredPaymentSettlementsBefore`. A large backlog makes each one a
   single long transaction.
-- *Missing indexes* — RETIRED by or#846 (migration 0011). Note the lesson: under
+- *Missing indexes* — RETIRED by or#846 (migration 0012). Note the lesson: under
   RLS every query carries `merchant_id = …`, so a missing index almost never
   shows up as a `Seq Scan` — "no Seq Scans" is NOT evidence that indexing is
   adequate. A merchant_id index that is *partial* leaves the RLS predicate
