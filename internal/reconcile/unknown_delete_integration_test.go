@@ -17,11 +17,10 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #679 queue-always on the unknown-resolution path: a stale-decline cancel
-// (remote NOT confirmed gone) durably queues the deferred NMI delete
-// (DeletionScheduledAt marker + nmi_delete intent); a roster-confirmed-gone
-// cancel queues nothing — there is nothing left to delete.
-func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
+// #821: a retryable stale decline is not evidence that the remote subscription
+// is dead, so it stays unknown and queues no delete. A provider-confirmed-gone
+// subscription still cancels without a delete because nothing remains upstream.
+func TestReconcileUnknownCohort_SoftDeclineParksAndRosterGoneCancels(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -71,8 +70,8 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	})
 
 	// NMI snapshot: rsGone is roster-confirmed cancelled; rsStale is absent from
-	// a NON-exhaustive roster but has a stale declined renewal → terminal cancel
-	// with the remote possibly still alive and retrying.
+	// a non-exhaustive roster and has a retryable stale decline, which provides
+	// no terminal-cancellation certainty.
 	nmiSnap := &RemoteSnapshot{
 		Provider: ProviderNMI,
 		Subscriptions: []RemoteSubscription{
@@ -92,29 +91,29 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 		res, err = ReconcileUnknownCohort(ctx, appDB, lc, fetchers, nil, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
 		return err
 	}))
-	require.Equal(t, 2, res.Cancelled)
+	require.Equal(t, 1, res.Cancelled)
+	require.Equal(t, 1, res.StillUnknown)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var status string
 		var marker *time.Time
 		var feedback *string
 
-		// Stale decline: cancelled + marker + pending system-origin nmi_delete intent.
+		// Retryable stale decline: remains unknown, with no deletion marker or
+		// provider-delete intent. Its failed payment is still backfilled as money truth.
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status, deletion_scheduled_at, cancel_feedback FROM openrails.subscriptions WHERE id=$1`, subStale).
 			Scan(&status, &marker, &feedback))
-		require.Equal(t, "cancelled", status)
-		require.NotNil(t, marker, "stale-decline cancel must record DeletionScheduledAt (#679)")
-		require.NotNil(t, feedback)
-		require.Contains(t, *feedback, "declined beyond dunning window")
-
-		var intentStatus, origin, intentType string
+		require.Equal(t, "unknown", status)
+		require.Nil(t, marker)
+		require.Nil(t, feedback)
+		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, origin, intent_type FROM openrails.rail_intents WHERE subscription_id=$1`, subStale).
-			Scan(&intentStatus, &origin, &intentType))
-		require.Equal(t, "pending", intentStatus)
-		require.Equal(t, "system", origin)
-		require.Equal(t, intents.TypeNMIDeleteSubscription, intentType)
+			`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, subStale).Scan(&n))
+		require.Zero(t, n)
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status='failed'`, subStale).Scan(&n))
+		require.Equal(t, 1, n)
 
 		// Roster-confirmed gone: cancelled, NO marker, NO intent.
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
@@ -122,7 +121,6 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 			Scan(&status, &marker))
 		require.Equal(t, "cancelled", status)
 		require.Nil(t, marker, "roster-gone cancel must not schedule a delete")
-		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, subGone).Scan(&n))
 		require.Zero(t, n, "nothing to delete for a roster-confirmed-gone subscription")

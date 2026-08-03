@@ -122,6 +122,7 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 		Provider:     ProviderNMI,
 		FetchedAt:    now,
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Vault: true},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Subscriptions: []RemoteSubscription{
 			{RailSubscriptionID: alivePSID, Status: SubscriptionStatusActive, NextBillingAt: &end},
 			{RailSubscriptionID: "ghost-" + seeded.subAlive.String()[:8], Status: SubscriptionStatusActive, Email: "ghost@example.com"},

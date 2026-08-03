@@ -82,17 +82,17 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 				   (id, price_id, product_id, status, rail, rail_subscription_id,
 				    payment_method_id, current_period_starts_at, current_period_ends_at, started_at,
 				    entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
-				 VALUES ($1, $2, $3, 'active', 'nmi', 'sub-shared',
+				 VALUES ($1, $2, $3, 'active', 'nmi', 'sub-' || $10::text,
 				    $4, $5, $6, $5, jsonb_build_object('premium', null), $7, $8, $9)`,
-				subID, priceID, productID, pmID, start, end, customerID, dbtest.TestMerchantID.UUID(), account.ID)
+				subID, priceID, productID, pmID, start, end, customerID, dbtest.TestMerchantID.UUID(), account.ID, marker)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.payments
 				   (id, price_id, rail, transaction_id, amount, list_amount, currency,
 				    status, subscription_id, purchased_at, customer_id, merchant_id, psp_id)
-				 VALUES ($1, $2, 'nmi', 'txn-shared', 999, 999, 'usd',
+				 VALUES ($1, $2, 'nmi', 'txn-' || $8::text, 999, 999, 'usd',
 				    'completed', $3, $4, $5, $6, $7)`,
-				uuid.New(), priceID, subID, now, customerID, dbtest.TestMerchantID.UUID(), account.ID)
+				uuid.New(), priceID, subID, now, customerID, dbtest.TestMerchantID.UUID(), account.ID, marker)
 			require.NoError(t, err)
 		}
 		seedMirrorRows(accountA, customerA, "1111")
@@ -109,7 +109,7 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 		require.Len(t, stateA.PaymentMethods, 1)
 		require.Equal(t, "1111", stateA.PaymentMethods[0].LastFour)
 
-		paymentsA, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountA.ID, []string{"txn-shared"})
+		paymentsA, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountA.ID, []string{"txn-1111", "txn-2222"})
 		require.NoError(t, err)
 		require.Len(t, paymentsA, 1)
 		require.Equal(t, customerA, paymentsA[0].CustomerID)
@@ -121,7 +121,7 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 		require.Len(t, stateB.PaymentMethods, 1)
 		require.Equal(t, "2222", stateB.PaymentMethods[0].LastFour)
 
-		paymentsB, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountB.ID, []string{"txn-shared"})
+		paymentsB, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountB.ID, []string{"txn-1111", "txn-2222"})
 		require.NoError(t, err)
 		require.Len(t, paymentsB, 1)
 		require.Equal(t, customerB, paymentsB[0].CustomerID)
