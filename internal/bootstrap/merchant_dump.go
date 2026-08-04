@@ -136,10 +136,11 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if localKey == "" {
 			localKey = railMerchantAccountDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
+		// #882: environment is derived from test_mode, so it is never emitted —
+		// dumping it would round-trip into the removal error on apply.
 		account := ProviderRailAccountConfig{
-			Environment: a.Environment,
-			AccountID:   a.AccountID,
-			Archived:    a.Archived,
+			AccountID: a.AccountID,
+			Archived:  a.Archived,
 		}
 		if signer := railMerchantAccountSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer

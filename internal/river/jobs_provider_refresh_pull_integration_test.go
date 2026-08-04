@@ -193,7 +193,6 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, railSubID str
 func seedProviderAccount(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) {
 	t.Helper()
 	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   accountID,
 		Credentials: credentials,
 	})

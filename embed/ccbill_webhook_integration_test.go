@@ -218,9 +218,8 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"ccbill": {
 				"ccbill": {
-					Environment: "test",
-					AccountID:   ccbillAccount,
-					Secrets:     map[string]string{"salt": "test-salt-" + slug},
+					AccountID: ccbillAccount,
+					Secrets:   map[string]string{"salt": "test-salt-" + slug},
 				},
 			},
 		},

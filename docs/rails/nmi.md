@@ -47,7 +47,6 @@ merchants:
     psps:
       mobius:                 # your name for this PSP (any slug)
         nmi:                  # the rail
-          environment: live   # assertion cross-checked against test_mode
           account_id: "1234567"  # dashboard "Gateway ID"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -58,9 +57,8 @@ merchants:
 ```
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
-never commit them. `environment: test|live` does not select behavior — the
-deployment-level `test_mode` does — it is an assertion, and a contradiction
-refuses boot.
+never commit them. A PSP declares no environment (#882): the deployment-level
+`test_mode` decides, and every PSP in the deployment follows it.
 
 ### Webhook registration
 
@@ -96,9 +94,9 @@ see `docs/dev/local-webhooks.md`.
 ### Sandbox testing
 
 Ask your ISO for a **sandbox/test gateway account** — most provision one on
-request. Declare it as its own PSP entry (`mobius-sandbox` in the example
-manifest) with `environment: test`, and run the deployment with
-`test_mode: sandbox` (env `TEST_MODE=sandbox`).
+request. Declare it as its own PSP entry and run the deployment with
+`test_mode: sandbox` (env `TEST_MODE=sandbox`), which is what puts every PSP in
+the test environment.
 
 An NMI sandbox is otherwise undetectable: same URLs, and the security key
 carries no test marker (unlike Stripe's `sk_test_` prefix). So under

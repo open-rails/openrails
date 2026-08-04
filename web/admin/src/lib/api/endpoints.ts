@@ -317,8 +317,8 @@ export const listPaymentProviders = () =>
     provider_definitions: PaymentProviderDefinition[]
   }>("/merchant/payment-providers")
 
+// #882: no `environment` — it is derived from the deployment's test_mode.
 export interface UpsertProviderRequest {
-  environment?: string
   account_id: string
   public_config?: Record<string, string>
   credentials?: Record<string, string>

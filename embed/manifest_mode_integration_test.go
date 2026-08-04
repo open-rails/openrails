@@ -468,7 +468,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
-			"mobius": {"nmi": {Environment: "live", AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
+			"mobius": {"nmi": {AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
 		},
 	})
 	require.Error(t, err)
@@ -616,8 +616,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,
@@ -671,8 +670,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,

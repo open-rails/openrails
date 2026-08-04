@@ -493,8 +493,8 @@ verdict refuses from cache without re-probing (a crash loop costs one
 declined auth total), a fresh `simulated` verdict skips the probe, a rotated
 key or stale verdict re-probes, and cache failures degrade to probing.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
-rail-credential validation (the live-key refusal, plus each PSP's declared
-`environment` cross-checked against `test_mode`), not the environment string.
+rail-credential validation (the live-key refusal and the NMI live-gateway
+probe, which ask the credential itself), not the environment string.
 
 ### Cutover: booting against production credentials
 

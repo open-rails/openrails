@@ -61,7 +61,6 @@ func TestMerchantFetcherBuilder_StoreArmsDeclaredAccount(t *testing.T) {
 
 	storeKey := "store-key-" + sfx
 	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   "8811" + sfx,
 		Credentials: map[string]string{"security_key": storeKey},
 	})
@@ -108,7 +107,6 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 
 	// Account row declared, but the security_key secret was never seeded.
 	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   "8833" + sfx,
 	})
 	require.NoError(t, err)

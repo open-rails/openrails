@@ -182,7 +182,6 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 	// PUT /v1/merchant/payment-providers equivalent (service level; the HTTP
 	// handler delegates here): declares the account and stores credentials.
 	cfgA, err := svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   acctA,
 		Credentials: map[string]string{
 			"security_key":           "sk-full-A-1",
@@ -211,7 +210,6 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 
 	// Second merchant configured independently.
 	_, err = svc.UpsertPaymentProviderConfig(ctx, midB, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   acctB,
 		Credentials: map[string]string{"security_key": "sk-full-B-1"},
 	})
@@ -219,7 +217,6 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 
 	// Rotate A via a second PUT: new value live immediately, KV version bumps.
 	_, err = svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   acctA,
 		Credentials: map[string]string{"security_key": "sk-full-A-2"},
 	})

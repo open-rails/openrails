@@ -2,10 +2,9 @@ version: 1
 
 # Store real secrets in Hashicorp Vault and overlay them into this manifest.
 #
-# Per-account `environment: test|live` is an ASSERTION cross-checked against the
-# deployment's test_mode — NOT a behavior selector (test_mode alone drives
-# sandbox posture; a contradiction refuses to boot). Omitted = derived from
-# test_mode.
+# A PSP does NOT declare an environment (#882). test_mode alone decides: sandbox
+# => test, live => live, for every PSP in the deployment. The `-sandbox` keys
+# below are just a second account on the same rail, not a second environment.
 #
 # Solana runtime knobs (#711) live in the solana account's `settings` block
 # below. Solana provider account identity is derived from the signer public key.
@@ -43,7 +42,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: "1234567"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -54,7 +52,6 @@ merchants:
 
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "7654321"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -65,7 +62,6 @@ merchants:
 
       paykings:
         nmi:
-          environment: live
           account_id: "5551234"
           archived: true
           settings:
@@ -85,7 +81,6 @@ merchants:
       # custodial secret is the custodian's PRIVATE application key.
       mobius-bt:
         nmi:
-          environment: test
           account_id: "7654322"
           settings:
             custodian: basis_theory
@@ -99,7 +94,6 @@ merchants:
 
       ccbill:
         ccbill:
-          environment: live
           # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
           account_id: "999999-0000"
           # Webhook source IPs are CCBill's documented provider-wide ranges,
@@ -111,7 +105,6 @@ merchants:
 
       stripe:
         stripe:
-          environment: live
           account_id: acct_1AbCdEfGhIjKlMnOp
           secrets:
             secret_key: replace-with-live-stripe-secret-key
@@ -119,7 +112,6 @@ merchants:
 
       stripe-sandbox:
         stripe:
-          environment: test
           account_id: acct_1ZyXwVuTsRqPoNmL
           secrets:
             secret_key: replace-with-test-stripe-secret-key
@@ -127,7 +119,6 @@ merchants:
 
       solana:
         solana:
-          environment: live
           archived: false
           signer: { mode: local_keypair }
           settings:
@@ -156,7 +147,6 @@ merchants:
       # Alternative Solana signer using Hashicorp Vault Transit.
       solana-vault:
         solana:
-          environment: live
           archived: false
           signer: { mode: vault_transit, key: openrails-solana-local-stack }
 

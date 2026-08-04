@@ -188,8 +188,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_test_123",
+				AccountID: "acct_test_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_bootstrap",
 				},
@@ -250,8 +249,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "900000-0000",
+				AccountID: "900000-0000",
 				Secrets: map[string]string{
 					"salt":              "secret",
 					"datalink_username": "merchant-user",
@@ -302,9 +300,8 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "900000/0000",
-				Secrets:     map[string]string{"salt": "secret"},
+				AccountID: "900000/0000",
+				Secrets:   map[string]string{"salt": "secret"},
 			},
 		},
 	}
@@ -336,8 +333,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	mt.PSPs = map[string]PSPConfig{
 		"solana": {
 			"solana": {
-				Environment: "live",
-				Signer:      &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
+				Signer: &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
 				Settings: map[string]any{
 					"recipient_wallet": recipientWallet,
 				},
@@ -400,12 +396,13 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		{Key: "burst", Window: "15m", Limit: 5_000_000},
 		{Key: "sustained", Window: "5h", Limit: 20_000_000},
 	}
-	// NMI gateway "mobius": live and sandbox accounts side by side (#646).
+	// NMI gateway "mobius": two accounts side by side (#646). Both land in the
+	// deployment's derived environment — #882 removed the per-PSP knob, so one
+	// deployment can no longer mix test and live accounts.
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				Environment: "live",
-				AccountID:   "579145",
+				AccountID: "579145",
 				Settings: map[string]any{
 					"tokenization_url": "https://secure.networkmerchants.com/token/Collect.js",
 					"tokenization_key": "live-token",
@@ -417,8 +414,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		},
 		"mobius-sandbox": {
 			"nmi": {
-				Environment: "test",
-				AccountID:   "681902",
+				AccountID: "681902",
 				Secrets: map[string]string{
 					"security_key": "test-security",
 				},
@@ -427,8 +423,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		// #697: CCBill composite identity is dash-joined (clientAccnum-clientSubacc).
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "945280-0000",
+				AccountID: "945280-0000",
 				Secrets: map[string]string{
 					"salt": "flexform-salt",
 				},
@@ -459,11 +454,28 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, threshold, gotThreshold)
 	require.Equal(t, floor, gotFloor)
 
+	// #882: every PSP lands in the environment derived from test_mode.
+	derivedEnv := config.ExpectedProviderEnvironment(cfg.IsTestMode())
+	var envs []string
+	rows, err := pool.Query(ctx, `SELECT environment FROM openrails.psps WHERE merchant_id = $1::uuid`, merchantID)
+	require.NoError(t, err)
+	for rows.Next() {
+		var e string
+		require.NoError(t, rows.Scan(&e))
+		envs = append(envs, e)
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+	require.Len(t, envs, 3)
+	for _, e := range envs {
+		require.Equal(t, derivedEnv, e, "a deployment is all-test or all-live (#882)")
+	}
+
 	// The manifest PSP map key persists as the provider account key.
 	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT key FROM openrails.psps
-		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND environment = 'live'
+		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND account_id = '579145'
 	`, merchantID).Scan(&liveKey))
 	require.Equal(t, "mobius", liveKey)
 
@@ -498,27 +510,31 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, "5h", gotWindows["sustained"].Window)
 
 	require.Len(t, d.PSPs, 3)
-	byEnv := map[string]ProviderRailAccountConfig{}
+	byAccount := map[string]ProviderRailAccountConfig{}
 	var ccbillDump ProviderRailAccountConfig
 	for _, account := range d.PSPs {
 		require.Len(t, account, 1)
 		for rail, a := range account {
+			// #882: the dump never re-emits `environment:` — it would round-trip
+			// straight into the removal error on apply.
+			require.Empty(t, a.LegacyEnvironment)
 			if rail == "ccbill" {
 				ccbillDump = a
 				continue
 			}
-			byEnv[a.Environment] = a
+			byAccount[a.AccountID] = a
 		}
 	}
 	// #697: the dash-form CCBill composite id survives push⇄dump verbatim.
 	require.Equal(t, "945280-0000", ccbillDump.AccountID)
-	require.Equal(t, "579145", byEnv["live"].AccountID)
-	require.False(t, byEnv["live"].Archived)
-	require.False(t, byEnv["test"].Archived)
-	require.Empty(t, byEnv["live"].Secrets, "redacted dump omits secret values entirely")
-	require.NotContains(t, byEnv["live"].Secrets, "tokenization_key")
-	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byEnv["live"].Settings["tokenization_url"])
-	require.Equal(t, "live-token", byEnv["live"].Settings["tokenization_key"])
+	require.Contains(t, byAccount, "579145")
+	require.Contains(t, byAccount, "681902")
+	require.False(t, byAccount["579145"].Archived)
+	require.False(t, byAccount["681902"].Archived)
+	require.Empty(t, byAccount["579145"].Secrets, "redacted dump omits secret values entirely")
+	require.NotContains(t, byAccount["579145"].Secrets, "tokenization_key")
+	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byAccount["579145"].Settings["tokenization_url"])
+	require.Equal(t, "live-token", byAccount["579145"].Settings["tokenization_key"])
 
 	// the dump re-marshals to valid YAML that re-parses (round-trip closure).
 	encoded, err := MarshalMerchantManifest(dumped)
@@ -547,8 +563,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_vault_123",
+				AccountID: "acct_vault_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_vault_bootstrap",
 				},
@@ -600,8 +615,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_db_123",
+				AccountID: "acct_db_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_db_bootstrap",
 				},

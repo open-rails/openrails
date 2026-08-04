@@ -318,8 +318,8 @@ func mergeInvoiceConfig(dst, src *InvoiceConfig) {
 }
 
 func mergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src ProviderRailAccountConfig) {
-	if strings.TrimSpace(src.Environment) != "" {
-		dst.Environment = src.Environment
+	if strings.TrimSpace(src.LegacyEnvironment) != "" {
+		dst.LegacyEnvironment = src.LegacyEnvironment
 	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
@@ -449,14 +449,15 @@ type MerchantProfileConfig struct {
 type PSPConfig map[string]ProviderRailAccountConfig
 
 type ProviderRailAccountConfig struct {
-	// Environment (test|live) is an ASSERTION cross-checked against the
-	// deployment's test_mode (#641/#711), not a behavior selector — test_mode
-	// alone drives sandbox posture. Omitted derives from test_mode.
-	Environment string                           `yaml:"environment,omitempty" koanf:"environment"`
-	AccountID   string                           `yaml:"account_id,omitempty" koanf:"account_id"`
-	Archived    bool                             `yaml:"archived,omitempty" koanf:"archived"`
-	Signer      *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
-	Secrets     map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
+	// LegacyEnvironment keeps the retired `environment:` key parseable ONLY so a
+	// manifest that still declares it fails loudly (#882). The environment is
+	// DERIVED from test_mode — it never was anything else, since a declared value
+	// that disagreed refused to boot and one that agreed was a no-op.
+	LegacyEnvironment string                           `yaml:"environment,omitempty" koanf:"environment"`
+	AccountID         string                           `yaml:"account_id,omitempty" koanf:"account_id"`
+	Archived          bool                             `yaml:"archived,omitempty" koanf:"archived"`
+	Signer            *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
+	Secrets           map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
 	// Settings are per-account NON-SECRET runtime knobs, stored on the
 	// psps row (NMI: tokenization_key/tokenization_url;
 	// Solana: rpc_provider, rpc_api_key, tokens,
@@ -889,7 +890,7 @@ func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID me
 	declared := map[string]struct{}{}
 	for _, entry := range pspEntries(mt.PSPs) {
 		rail := normalizeManifestRail(entry.rail)
-		environment, err := manifestProviderEnvironment(cfg, entry.config.Environment)
+		environment, err := manifestProviderEnvironment(cfg, entry.config)
 		if err != nil {
 			return err
 		}
@@ -963,7 +964,7 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	if out.rail == "" {
 		return out, fmt.Errorf("provider account rail is required")
 	}
-	environment, err := manifestProviderEnvironment(cfg, account.Environment)
+	environment, err := manifestProviderEnvironment(cfg, account)
 	if err != nil {
 		return out, err
 	}
@@ -1352,25 +1353,14 @@ func solanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 	return solanago.PublicKeyFromBytes(raw).String(), nil
 }
 
-func normalizeProviderEnvironment(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "live", "prod", "production", "mainnet":
-		return "live", nil
-	case "test", "sandbox", "devnet", "testnet":
-		return "test", nil
-	default:
-		return "", fmt.Errorf("provider account environment must be live or test")
+// manifestProviderEnvironment derives a PSP's environment from deployment
+// posture (#681/#882 — test under test_mode, live otherwise). It is never
+// declared: a manifest that still carries `environment:` fails loudly here.
+func manifestProviderEnvironment(cfg *config.Config, account ProviderRailAccountConfig) (string, error) {
+	if strings.TrimSpace(account.LegacyEnvironment) != "" {
+		return "", fmt.Errorf("psp `environment:` is no longer configurable (#882) — it is derived from test_mode (sandbox => test, live => live); remove the key")
 	}
-}
-
-// manifestProviderEnvironment resolves a manifest-declared provider environment:
-// omitted follows deployment posture (#681 — test under test_mode, live
-// otherwise); explicit values are normalized strictly.
-func manifestProviderEnvironment(cfg *config.Config, raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()), nil
-	}
-	return normalizeProviderEnvironment(raw)
+	return config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()), nil
 }
 
 func normalizeManifestRail(raw string) string {

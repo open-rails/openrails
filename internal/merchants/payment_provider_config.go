@@ -55,12 +55,16 @@ type PaymentProviderDefinition struct {
 }
 
 // UpsertPaymentProviderConfigRequest creates or replaces one provider account.
+// There is no `environment` field (#882): a deployment is all-test or all-live,
+// so the environment is derived from the deployment's test_mode posture.
 type UpsertPaymentProviderConfigRequest struct {
-	Environment  string            `json:"environment"`
 	Enabled      *bool             `json:"enabled"`
 	AccountID    string            `json:"account_id"`
 	PublicConfig map[string]string `json:"public_config"`
 	Credentials  map[string]string `json:"credentials"`
+	// LegacyEnvironment stays bound ONLY so a caller still sending `environment`
+	// is refused instead of silently ignored (#882).
+	LegacyEnvironment string `json:"environment,omitempty"`
 }
 
 type railMerchantAccountEvidence struct {
@@ -174,12 +178,10 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if !supportedPaymentProvider(rail) {
 		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
 	}
-	environment := strings.TrimSpace(req.Environment)
-	if environment == "" {
-		environment = s.providerEnvironment // deployment posture (#681)
-	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider environment must be live or test")
+	if strings.TrimSpace(req.LegacyEnvironment) != "" {
+		return PaymentProviderConfig{}, fmt.Errorf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
 	}
+	environment := s.providerEnvironment // derived from test_mode (#681/#882)
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
 		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider account_id required")

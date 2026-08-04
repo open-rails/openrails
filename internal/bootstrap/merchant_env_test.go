@@ -70,7 +70,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: "579145"
           secrets:
             security_key: public-placeholder
@@ -107,7 +106,6 @@ merchants:
     psps:
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "681902"
           secrets:
             security_key: public-placeholder
@@ -199,7 +197,6 @@ merchants:
     psps:
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "681902"
           secrets:
             security_key: public-placeholder

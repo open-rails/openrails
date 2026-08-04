@@ -41,7 +41,6 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
 				AccountID:   "acct_seed_851",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_seed_851",

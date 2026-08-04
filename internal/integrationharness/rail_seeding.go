@@ -44,7 +44,7 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		require.NotEmpty(t, rail, "rail for account %q", name)
 		accountID := proc.EffectiveAccountID()
 		require.NotEmpty(t, accountID, "account_id for account %q", name)
-		environment := proc.EffectiveEnvironment(testMode)
+		environment := config.ExpectedProviderEnvironment(testMode)
 
 		var evidence []byte
 		if settings := railAccountSettings(proc); len(settings) > 0 {

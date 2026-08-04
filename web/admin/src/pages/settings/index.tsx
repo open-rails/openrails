@@ -326,7 +326,6 @@ function ProviderDialog({
   const [open, setOpen] = React.useState(false)
   const [rail, setRail] = React.useState("")
   const [accountID, setAccountID] = React.useState("")
-  const [environment, setEnvironment] = React.useState("")
   const [credentials, setCredentials] = React.useState<Record<string, string>>(
     {}
   )
@@ -344,8 +343,9 @@ function ProviderDialog({
           <DialogTitle>Configure payment provider</DialogTitle>
           <DialogDescription>
             account_id is operator-declared per rail (NMI gateway id, Stripe
-            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet).
-            Credentials are stored in the secret backend.
+            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet). The
+            environment follows the deployment's test_mode. Credentials are
+            stored in the secret backend.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -369,9 +369,6 @@ function ProviderDialog({
           </Field>
           <Field label="Account id" id="pv-acct">
             <Input id="pv-acct" value={accountID} onChange={(e) => setAccountID(e.target.value)} />
-          </Field>
-          <Field label="Environment (live | test, empty = deployment default)" id="pv-env">
-            <Input id="pv-env" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
           </Field>
           {selectedProvider?.credential_keys.map((name) => (
             <Field key={name} label={name} id={`pv-credential-${name}`}>
@@ -401,7 +398,6 @@ function ProviderDialog({
               try {
                 await putPaymentProvider(rail, {
                   account_id: accountID.trim(),
-                  ...(environment ? { environment } : {}),
                   ...(Object.keys(creds).length ? { credentials: creds } : {}),
                 })
                 setCredentials({})
