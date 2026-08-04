@@ -132,6 +132,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add notification email sweep worker: %w", err)
 	}
+	// or#870 bucket 2: the payment-method notice ladder. Bucket 2 stops charging
+	// on purpose, which leaves no event to hang the follow-up reminders on — so
+	// they are durable work. Notification-only: nothing it does can cancel a
+	// subscription or touch a stored payment method.
+	if err := addTrackedWorker(r, workers, &riverjobs.PaymentMethodNoticeWorker{
+		DB:     r.DB,
+		Clock:  clock,
+		Config: r.Config,
+	}); err != nil {
+		return fmt.Errorf("add payment method notice worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -726,6 +737,22 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.NotificationEmailSweepArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 10 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Hourly: the or#870 bucket-2 notice ladder. Rung offsets are in DAYS, so
+	// hourly is far finer than the schedule needs and keeps a rung from drifting
+	// noticeably past its due moment. The due predicate is indexed and the fan-out
+	// is merchants-with-parked-customers, so an idle install pays one empty
+	// index probe per hour.
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.PaymentMethodNoticeArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

@@ -543,7 +543,11 @@ func (w *DunningWorker) applyDeclinedRebill(
 	}
 
 	// or#870: ONE classifier, three outcomes. Unknown codes land in bucket 1.
-	outcome := collection.ClassifyDecline(string(rail), normalize.FromPtr(failureCode))
+	declineClass := collection.ClassifyDeclineDetail(string(rail), normalize.FromPtr(failureCode))
+	outcome := declineClass.Outcome
+	// A code no table recognizes duns exactly like insufficient funds, so the
+	// gap has no downstream symptom. This is the only place it can be seen.
+	collection.AlertUnmappedDecline(ctx, declineClass)
 
 	// #821/#839: name the evidence leg that would justify a terminal outcome.
 	// Only bucket 3 does — the issuer has withdrawn the mandate or the
@@ -568,6 +572,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 		"response_code":      responseCode,
 		"reason":             reason,
 		"decline_outcome":    outcome.String(),
+		"decline_coverage":   declineClass.Coverage.String(),
 		"terminal_certainty": certainty,
 		"terminal_blocked":   blocked,
 	})

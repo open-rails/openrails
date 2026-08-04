@@ -25,6 +25,11 @@ type Action struct {
 	// (subscription: cancel at the rail + revoke; invoice: uncollectible). Set
 	// for bucket 3 immediately, and for bucket 1 once the schedule is spent.
 	Terminal bool
+	// Decline is the classifier's full answer, carried so the consumer can tell
+	// "bucket 1 because the rail says retry" from "bucket 1 because nobody ever
+	// mapped this code" — indistinguishable from Outcome alone, and only the
+	// second is a problem.
+	Decline Classification
 }
 
 // AwaitingPaymentMethod is bucket 2: charging STOPS but nothing is terminated.
@@ -56,27 +61,28 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 	if failureCode != nil {
 		code = *failureCode
 	}
-	switch outcome := ClassifyDecline(rail, code); outcome {
+	decline := ClassifyDeclineDetail(rail, code)
+	switch decline.Outcome {
 	case DeclineNonRecoverable:
 		// Bucket 3 — the issuer withdrew the recurring mandate, or the
 		// instrument is permanently dead. Terminal on the FIRST look: there is
 		// no schedule worth running against an instrument that cannot succeed.
-		return Action{Outcome: outcome, Terminal: true}
+		return Action{Outcome: decline.Outcome, Terminal: true, Decline: decline}
 	case DeclineFixPaymentMethod:
 		// Bucket 2 — their card, fixable in a minute. Stop charging NOW, and
 		// terminate NOTHING.
-		return Action{Outcome: outcome}
+		return Action{Outcome: decline.Outcome, Decline: decline}
 	}
 
 	// Bucket 1 — ours or transient. Keep the schedule.
 	failures := priorFailures + 1
 	if failures >= MaxFailures(cycleHours) {
-		return Action{Outcome: DeclineRetry, Terminal: true}
+		return Action{Outcome: DeclineRetry, Terminal: true, Decline: decline}
 	}
 	first := now
 	if firstFailureAt != nil {
 		first = *firstFailureAt
 	}
 	next := first.Add(RetryOffsets(cycleHours)[failures-1])
-	return Action{Outcome: DeclineRetry, NextAttemptAt: &next}
+	return Action{Outcome: DeclineRetry, NextAttemptAt: &next, Decline: decline}
 }
