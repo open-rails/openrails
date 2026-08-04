@@ -47,6 +47,8 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-merchant-catalog [--file] [mutation flags]` | terraform-style catalog apply (OpenRails rows + provider objects) |
 | `dump-merchant-config --slug [--out] [--include-secrets]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
+| `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
+| `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 
 The `push-*` commands push declared file state outward; `pull-provider` moves
@@ -195,8 +197,9 @@ openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--provider-ac
                         [--since=… --until=…] [--manifest=…] [--format table|json]
                         [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
 openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
-openrails prune list     --merchant=<slug> [--limit=N] [--format table|json]
-openrails prune rollback --merchant=<slug> --run=<id>
+openrails prune list    --merchant=<slug> [--limit=N] [--format table|json]
+openrails converge list --merchant=<slug> [--limit=N] [--format table|json]
+openrails undo-run      --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
 ```
 
 A bare `pull-provider` pulls provider truth, diffs, logs what it WOULD
@@ -224,17 +227,91 @@ evidence there is. So it is built to be undone and hard to fire by accident:
 - **Grant-entangled rows are skipped**, as before: retraction goes through
   convergence, never removal.
 
-To undo one:
+### An enforcing pull is reversible too
+
+`--prune` retires rows; an **enforcing** pull (mutation flags set) overwrites
+them — the measured incident is a bad NMI roster cancelling 40/40 subscriptions,
+which changed `status`, `ended_at`, `cancelled_at`, the grace/retry schedule and
+the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
+cannot undo that, so an enforcing pass records what it is about to overwrite:
+
+- it opens a `destructive_runs` record — merchant-scoped, PSP-bound when the pass
+  is account-bound, carrying the coverage proof that authorised it;
+- it captures a **before-image** of each subscription (and of the entitlement
+  windows the transition closes) *before* writing. If the capture fails, the
+  transition is not applied;
+- it stamps the provider intents it queues with the run id.
+
+A pass with no way to record its undo refuses to run rather than doing
+irreversible damage.
+
+### Reversing a destructive run
+
+One verb reverses any of them. A prune destroys rows and reverses by clearing
+tombstones; an enforcing pass destroys row VALUES and reverses from the captured
+before-images — but `undo-run` reads the kind from the ledger and dispatches, so
+nobody can reverse the wrong way round and be told it worked.
 
 ```
-openrails prune list --merchant=<slug>            # find the run id
-openrails prune rollback --merchant=<slug> --run=<id>
-openrails pull-provider --merchant=<slug> --insert --overwrite
+openrails prune list --merchant=<slug>            # or `converge list`: find the run id
+openrails undo-run   --merchant=<slug> --run=<id>                        # PLAN — changes nothing
+openrails undo-run   --merchant=<slug> --run=<id> --apply --expect-rows=N
+openrails pull-provider --merchant=<slug>          # advisory: review findings, then re-arm
 ```
+
+**Dry run is the default.** With no `--apply` the command prints what it would
+restore, the provider writes it would supersede, the ones that already fired and
+cannot be undone, and the NULL-`psp_id` rows no PSP-scoped predicate can reach.
+Applying additionally requires `--expect-rows` to match that plan: an undo is
+itself a mass mutation of the live book, at the worst possible moment to be
+wrong.
+
+**Scope is a property of the run, not a flag.** The ledger row carries the
+merchant and — when the pass was account-bound — the PSP, and every restore
+predicate is keyed on the run id inside a merchant-scoped connection. Reversing
+one PSP's bad run cannot reach a sibling PSP's book, and cannot reach another
+merchant at all. There is no widening knob.
+
+An apply runs five steps in a fixed order:
+
+1. **Quiesce** — clears the merchant's first-enforce arming and trips its
+   destructive stop, so nothing re-cancels what is about to be restored.
+2. **Supersede the unfired intents FIRST**, before any row is restored. This is
+   the only step racing a live actor: the intent runner may claim a queued NMI
+   vault delete at any moment, and `superseded` is an ordinary forward status, so
+   neutralising a queued provider write is a lifecycle transition, not a rewrite
+   of the intent log. Only `pending`/`failed_retryable` count as unfired.
+3. **Restore** the rows, in one transaction with step 2 — a reversal that
+   superseded the intents but failed to restore the rows would leave the operator
+   worse off than before.
+4. **Invalidate and re-derive.** The entitlement windows the run closed are
+   soft-deleted, never replayed, and `Converge` rebuilds them from the
+   append-only grant log the rollback never touched. The proven source-domain
+   flags are reset to unproven, because the post-rollback book is definitionally
+   incomplete and a stale `true` would license a mass retraction against it.
+5. **Report** — rows restored, intents superseded, and what could NOT be undone.
+
+What it never does: restore an entitlement directly (a restored effect can
+silently disagree with its grant; a re-derived one cannot), touch the ledger,
+grants, status transitions, or the intent/webhook/findings logs, resurrect a row
+some other run deliberately removed, or count a provider write that already fired
+as undone. Those are reported as **irreversible divergence**, with the
+provider-side consequence spelled out per intent type ("the NMI vault entry is
+gone; the customer must re-enter a card"); an `in_flight` or
+`unknown_needs_verify` intent is reported as **ambiguous** and left to its
+executor's lease. Resubscribe and card re-entry are operator and customer work,
+never an automatic provider re-write.
+
+Some kinds are refused by name rather than half-reversed: a `merchant_delete`
+run hard-DELETEs append-only rows nothing local restores (recovery there is a
+cluster PITR or a snapshot taken beforehand), and a kind that exists in the
+ledger but has not been made reversible yet says so instead of marking itself
+reversed.
 
 The final pull is not optional. A rollback restores local state to before the
 run while the provider has moved on; `rollback → pull → converge` is the
-complete operation.
+complete operation, and the pull runs **advisory** until an operator reviews the
+findings and re-arms enforcement by hand.
 
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows

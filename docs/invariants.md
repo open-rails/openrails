@@ -198,6 +198,40 @@ stored card; the customer must re-enter it.
 | DES-4 | Absence is not evidence of death. A subscription missing from a pull, an empty response, a 404, or a timeout must not retract standing. The confirmed-absence gate must hold at **every** retraction site. | **MOSTLY ENFORCED** (or#842) — confirmed-absence gate extended to every retraction site; an empty roster is no longer stamped exhaustive; `diff.go`'s hardcoded `forceExhaustive` removed. Residual: #839/#840 in the collection engine. |
 | DES-5 | No unattended irreversible provider call without provider-confirmed certainty, a blast-radius cap, and an operator kill switch that works without a deploy. | **SPLIT.** The switch itself is **ENFORCED** and genuinely fail-closed — `destructive_action_switch` is RLS-exempt on purpose, the read is a `LEFT JOIN` off `(SELECT 1)` so `ErrNoRows` is impossible, `COALESCE(s.enabled,false)` reads an unreadable switch as OFF, and OFF means deny. The `jobs_dunning`/or#856 residuals are closed. But on the **background intent-runner plane the gate is never consulted**: `river/jobs_provider_intents.go:49-66` runs `RunExecuteOnce` on a bare job context, so `ClaimDue` claims zero intents and neither the kill switch nor the #679 volume breaker executes at all — or#862. |
 
+## 9a. Recovery classes — what a rollback may restore
+
+A rollback restores state that was wrongly **destroyed**. It can never retract value that
+was wrongly **granted**: retraction is a revoke event, a compensating transfer, and an
+explicitly operator-authorised refund. Conflating the two is how a recovery feature becomes
+a way to silently take money and access back.
+
+Every merchant-owned table falls in exactly one class. This is the register `undo-run`
+obeys (`internal/reconcile/never_rollbackable.go`).
+
+| Class | Tables | Rule |
+|---|---|---|
+| **A — append-only spine** | `ledger_transfers`, `ledger_accounts`, `grants`, `subscription_status_transitions`, `rail_mutation_logs`, `webhook_events`, `reconciliation_findings`/`_runs`, `catalog_drift_events`, `merchant_exports`, `price_key_movements` | **NEVER rolled back, at any scope, by any tier.** |
+| **P — provider mirror** | `payments`, `subscriptions`, `payment_methods`, `rail_customer_accounts`, `solana_subscriptions`, `checkout_sessions`, refund/dispute mirrors, `rail_refresh_watermarks` | Freely restored; `reconcile pull` is the repair. Six of the eight PSP-tagged tables live here, so **per-PSP scope is native**. |
+| **D — derived** | `entitlements`, product access, credit-lot spendability | **Never restored, always recomputed.** `Converge` rebuilds each effect from the append-only grant log. A restored effect can silently disagree with its grant; a re-derived one cannot. |
+| **C — definitions and policy** | `products`, `prices`, rate cards, meters, `psps`, `merchant_webhooks`, spend limits, `merchant_destructive_policy`, … | Merchant-scoped only, **never PSP-scoped**. No external authority — convergence pushes this outward, so corruption here propagates instead of self-correcting. |
+| **X — outside the transaction** | `public.river_*`, Redis holds and leases, `profiles.*` (AuthKit), Vault secrets, `worker_health`, `probe_verdicts` | Not rollbackable with the schema. Jobs are **quiesced** for the duration, never rewound; Redis holds self-heal. |
+
+| # | Invariant | Status |
+|---|---|---|
+| REC-1 | **Class A is never rolled back.** No undo path may write a Class A table. | **ENFORCED** — `TestNeverRollbackableRegisterIsEnforcedOnEveryUndoPath` walks the undo implementations, resolves the sqlc queries they call, and fails on any write to a registered table. Backed by role privilege where it can be: `ledger_transfers`/`ledger_accounts`/`grants`/`subscription_status_transitions` are `GRANT SELECT,INSERT` only, and migration 0036 revokes `UPDATE` on `rail_mutation_logs` and `DELETE` on `reconciliation_runs`. |
+| REC-2 | **Superseding an unfired intent is a forward transition, not a rollback.** `rail_intents` moves `pending`/`failed_retryable` → `superseded`, never deleted, never rewritten once executed. This is how an undo neutralises a queued provider write. | **ENFORCED** — `TestSupersedeIsTheOnlyRailIntentWriteOnAnUndoPath` pins the status predicate and refuses a DELETE on any undo path. |
+| REC-3 | **Class D is invalidated and re-derived, never restored.** | **ENFORCED** — the reverse soft-deletes the windows the run closed and stamps them with it; `Converge` rebuilds them. Entitlement before-images are captured as evidence and deliberately left `restored_at IS NULL`. |
+| REC-4 | **A destructive operation with no way to record its undo does not run.** | **ENFORCED** — an enforce pass planning state transitions with no `DestructiveRunRecorder` errors before writing, and a before-image capture failure skips that transition. |
+| REC-5 | **An undo plans before it applies, and never resurrects a row another run removed.** Dry run is the default; `--apply` needs a typed row count matching the plan; a row a later prune tombstoned belongs to that run's reverse and is skipped and reported. | **ENFORCED** — `undo_run_integration_test.go`. |
+| REC-6 | **A reversal is scoped by the run, not by a flag.** The ledger row carries the merchant and (when account-bound) the PSP; every restore predicate is keyed on the run id inside a merchant-scoped connection. | **ENFORCED** — the per-PSP and cross-merchant cases are proven against the real enforce path. |
+| REC-7 | **A kind whose damage no local undo reaches is refused by name**, with what to reach for instead — never half-reversed and marked reversed. | **ENFORCED** — `merchant_delete` is registered unrecoverable; unconverted kinds refuse. |
+| REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | **ENFORCED** — steps 1 and 4 of the reversal, asserted in `converge_rollback_integration_test.go`. |
+
+**The known hole**: `psp_id` is nullable on all eight PSP-tagged tables, so a PSP-scoped
+predicate silently skips legacy rows. The undo reports that blind spot as an explicit count
+rather than excluding it in silence. Backfilling and `NOT NULL`-ing the column is the real
+fix (or#831/GAP-5).
+
 ## 10. Known gaps — rules we hold but do not enforce
 
 Every one of these is a rule the codebase intends. Rows are retained after closure as a

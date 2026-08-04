@@ -253,7 +253,7 @@ type OpenrailsCheckoutSession struct {
 	CustomerID     uuid.UUID
 	// PSP selected for this provider checkout/session.
 	PspID *uuid.UUID
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
 }
@@ -325,7 +325,7 @@ type OpenrailsDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails prune rollback --run <id>`, which dispatches on kind. declared_import / plan_migration / catalog_push / merchant_delete are declared and not yet converted.
+// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails undo-run --run <id>`, which dispatches on kind, plans before it applies, and refuses a kind it cannot reverse. declared_import / plan_migration / catalog_push are declared and not yet converted; merchant_delete is registered as unrecoverable (it hard-DELETEs Class A rows).
 type OpenrailsDestructiveRun struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -799,7 +799,7 @@ type OpenrailsPayment struct {
 	ReversalKind *string
 	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
 	// or#827 rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
@@ -1032,7 +1032,7 @@ type OpenrailsRailIntent struct {
 	DestructiveRunID *uuid.UUID
 }
 
-// Append-only operator history for external provider mutations executed from provider intents/convergence (#533).
+// Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
 type OpenrailsRailMutationLog struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1099,7 +1099,7 @@ type OpenrailsReconciliationFinding struct {
 	NotifiedSeverity *string
 }
 
-// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report.
+// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report. or#859 Class A forensics: INSERT at start, UPDATE at finish, never DELETE — a rollback that erases the evidence of what went wrong defeats itself.
 type OpenrailsReconciliationRun struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1198,7 +1198,7 @@ type OpenrailsSubscription struct {
 	CustomerID          uuid.UUID
 	// PSP that produced this remote subscription mirror row.
 	PspID *uuid.UUID
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
+	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
 }

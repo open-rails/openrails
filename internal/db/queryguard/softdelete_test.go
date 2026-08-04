@@ -48,6 +48,10 @@ var allow = map[string]string{
 	"RestorePaymentsByDestructiveRun":         "the rollback",
 	"RestoreCheckoutSessionsByDestructiveRun": "the rollback",
 	"RestoreEntitlementsByDestructiveRun":     "the rollback",
+	// or#859 `undo-run --run <id>` with no --apply: the plan counts what the
+	// rollback above would bring back, so it must see exactly the tombstoned
+	// rows. Filtering them out would make the dry run promise zero every time.
+	"CountPruneRestorableForRun": "the undo's dry run — it counts the soft-deleted rows the rollback would restore",
 
 	// Merchant purge (#225) removes EVERY row of a merchant, tombstoned or not.
 	// Filtering here would strand soft-deleted rows after the merchant is gone.

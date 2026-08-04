@@ -37,7 +37,7 @@ type PruneParams struct {
 // PruneResult tallies one provider account's prune pass.
 type PruneResult struct {
 	// RunID is the destructive_runs id when Apply wrote anything — the handle
-	// `openrails prune rollback --run <id>` reverses.
+	// `openrails undo-run --run <id>` reverses.
 	RunID                  uuid.UUID
 	Subscriptions          int // soft-deleted (Apply) or would-delete (dry-run)
 	SubscriptionsSkipped   int // excess but entangled with the #514 grant ledger
@@ -92,7 +92,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //
 //   - or#858: nothing is DELETED. Eligible rows are SOFT-deleted (deleted_at)
 //     and stamped with a destructive_runs id, so the whole pass reverses with
-//     `openrails prune rollback --run <id>`.
+//     `openrails undo-run --run <id>`.
 //   - An empty remote set REFUSES — in the SQL (cardinality 0 matches nothing)
 //     and here (an error) — rather than matching everything.
 //   - --apply requires a typed expected row count that must match what the pass
@@ -325,7 +325,7 @@ func finishRunFailed(ctx context.Context, q *gen.Queries, merchantID, runID uuid
 	}); err != nil {
 		return fmt.Errorf("%w (and could not mark run %s failed: %v)", cause, runID, err)
 	}
-	return fmt.Errorf("%w — run %s is reversible with `openrails prune rollback --run %s`", cause, runID, runID)
+	return fmt.Errorf("%w — run %s is reversible with `openrails undo-run --run %s`", cause, runID, runID)
 }
 
 // RollbackResult tallies one reversal.
@@ -374,7 +374,7 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 	// its queued provider writes free to fire, and still mark the run reversed —
 	// a silent no-op wearing a success message.
 	if run.Kind != DestructiveRunKindPrune {
-		return res, fmt.Errorf("destructive run %s is kind %q; `prune rollback` only reverses %q runs. Use `openrails converge rollback --run %s`",
+		return res, fmt.Errorf("destructive run %s is kind %q; this reverse only handles %q runs. Use `openrails undo-run --run %s`, which dispatches on kind",
 			runID, run.Kind, DestructiveRunKindPrune, runID)
 	}
 	if actor == "" {

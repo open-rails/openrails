@@ -123,7 +123,7 @@ state from provider truth, but providers hold only what they were told: no
 entitlements, no grant history, no ledger. A pull is recovery of the mirror, not
 of the system.
 
-**A `--prune` rollback.** `openrails prune rollback --run <id>` reverses one
+**A `--prune` rollback.** `openrails undo-run --run <id>` reverses one
 prune run's soft deletes. That is scoped undo of one operation, not a restore
 point — and per `operations.md` the complete recovery is `rollback → pull →
 converge`.
