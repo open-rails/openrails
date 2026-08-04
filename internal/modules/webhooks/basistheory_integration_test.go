@@ -22,6 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -234,6 +236,59 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		row := fx.methodRow(t)
 		require.Equal(t, "bt_au_closed_account", row.ParkReason)
 	})
+}
+
+// or#872 — DO NOT FIGHT THE ACCOUNT UPDATER.
+//
+// The sequence that used to strand a customer: the card expires, the custodian
+// emits token.expired, we PARK the instrument (correct — charges must fail
+// loudly, never cancel). Then the network reissues the card and the account
+// updater returns UPD_EXP_DATE for the same token. Before this fix the fold
+// refreshed the expiry but left park_reason set, so
+// custodian_proxy_collection.ChargeCustodianProxy and invoice recovery kept
+// refusing the instrument FOREVER — the engine overruling the very recovery the
+// updater exists to deliver, and the customer lands in dunning anyway.
+//
+// The updater's word is the newest evidence about the credential, so an UPD_*
+// row clears the park.
+func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *testing.T) {
+	fx := newBTWebhookFixture(t)
+	svc := &basisTheoryWebhookService{d: fx.dispatcher}
+
+	// 1. The card expires at the custodian: parked, never cancelled.
+	require.NoError(t, fx.deliver(t, "evt_"+uuid.NewString(), basistheory.EventTokenExpired,
+		map[string]any{"token": map[string]any{"id": fx.tokenID, "type": "card"}}))
+	parked := fx.methodRow(t)
+	require.Equal(t, "bt_token_expired", parked.ParkReason)
+	require.NotNil(t, parked.ParkedAt)
+	// The PRODUCTION collection guard refuses it — this is the state that,
+	// left alone, outlives the network's own repair.
+	collect := money.NewCustodianProxyCollectionAdapter(&nmiproxy.Charger{})
+	_, err := collect.ChargeSavedMethod(fx.ctx, parked, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	require.ErrorContains(t, err, "is parked")
+
+	// 2. The network reissues the card; the AU job reports the new expiry
+	//    IN PLACE (no new token — the dedup path).
+	require.NoError(t, svc.FoldAccountUpdaterRows(fx.ctx, []basistheory.AccountUpdaterResultRow{{
+		Token:              fx.tokenID,
+		NewExpirationMonth: "9",
+		NewExpirationYear:  "2034",
+		NewLast4:           "1111",
+		ResultCode:         basistheory.AUUpdatedExpDate,
+	}}))
+
+	row := fx.methodRow(t)
+	require.Equal(t, "09/34", *row.ExpiryDate, "the provider's refreshed expiry is truth")
+	require.Equal(t, fx.tokenID, row.RailMethodRef, "an in-place update keeps the token the customer's card maps to")
+	require.Empty(t, row.ParkReason, "the updater recovered the card; the park must not outlive it")
+	require.Nil(t, row.ParkedAt)
+	require.Equal(t, "pan_proxy", row.ChargeVia)
+
+	// And the production guard no longer refuses it: the recovered card can
+	// bill again, so this customer never reaches or#870 bucket 2.
+	_, err = collect.ChargeSavedMethod(fx.ctx, row, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	require.Error(t, err) // the fake charger has no gateway; what matters is WHY
+	require.NotContains(t, err.Error(), "is parked", "an updater-recovered instrument is billable again")
 }
 
 func TestBasisTheoryWebhook_UnverifiedIsRejectedNonRetryable(t *testing.T) {

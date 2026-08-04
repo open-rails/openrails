@@ -214,12 +214,20 @@ WHERE custodian = sqlc.arg(custodian)
 -- #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
 -- re-point rail_method_ref and refresh card metadata. The old->new mapping is
 -- the same machinery a future custodian swap remap uses.
+-- or#872 (do not fight the updater): the park is CLEARED here. An UPD_* row is
+-- the network telling us the credential was reissued, so an instrument parked
+-- earlier for bt_token_expired / bt_au_closed_account is usable again; leaving
+-- the park set kept charges refused (custodian_proxy_collection) and invoice
+-- recovery skipping the method, which is the engine overruling the very
+-- recovery the account updater exists to deliver.
 UPDATE openrails.payment_methods SET
     rail_method_ref = sqlc.arg(new_method_ref),
     fingerprint = COALESCE(NULLIF(sqlc.arg(new_fingerprint)::text, ''), fingerprint),
     last_four = COALESCE(NULLIF(sqlc.arg(new_last_four)::text, ''), last_four),
     card_type = COALESCE(NULLIF(sqlc.arg(new_card_type)::text, ''), card_type),
     expiry_date = COALESCE(NULLIF(sqlc.arg(new_expiry_date)::text, ''), expiry_date),
+    park_reason = '',
+    parked_at = NULL,
     updated_at = now()
 WHERE custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(old_method_ref);

@@ -89,4 +89,30 @@ func TestEmbedded_RunInMerchantConn(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+
+	// #814 gap 3 — the AUTOMATIC pin. Before the engine is bound to a merchant
+	// there is nothing to pin from, and that is a loud error rather than a
+	// silent default merchant.
+	require.ErrorContains(t,
+		e.RunInMerchant(ctx, func(context.Context) error { return nil }),
+		"bound to a merchant")
+
+	// Once bound (what an embedding host's provisioning does), the host names
+	// no merchant at all — so it cannot name the WRONG one.
+	e.App().Runtime.SetConfiguredMerchant(res.MerchantID)
+	var autoPinned *billingservice.CatalogProduct
+	require.NoError(t, e.RunInMerchant(ctx, func(mctx context.Context) error {
+		var perr error
+		autoPinned, perr = svc.CreateProduct(mctx, billingservice.CreateProductRequest{
+			Key: "autopinned-" + sfx, DisplayName: "Auto-pinned",
+		})
+		return perr
+	}))
+	require.Equal(t, "autopinned-"+sfx, autoPinned.Key)
+
+	// And a bound engine refuses a call that names a DIFFERENT merchant — the
+	// mispin that would read somebody else's rows.
+	require.ErrorContains(t,
+		e.RunInMerchantConn(ctx, dbtest.TestMerchantID, func(context.Context) error { return nil }),
+		"never reaches another merchant's rows")
 }

@@ -871,6 +871,8 @@ UPDATE openrails.payment_methods SET
     last_four = COALESCE(NULLIF($3::text, ''), last_four),
     card_type = COALESCE(NULLIF($4::text, ''), card_type),
     expiry_date = COALESCE(NULLIF($5::text, ''), expiry_date),
+    park_reason = '',
+    parked_at = NULL,
     updated_at = now()
 WHERE custodian = $6
   AND rail_method_ref = $7
@@ -889,6 +891,12 @@ type RotateCustodianMethodRefParams struct {
 // #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
 // re-point rail_method_ref and refresh card metadata. The old->new mapping is
 // the same machinery a future custodian swap remap uses.
+// or#872 (do not fight the updater): the park is CLEARED here. An UPD_* row is
+// the network telling us the credential was reissued, so an instrument parked
+// earlier for bt_token_expired / bt_au_closed_account is usable again; leaving
+// the park set kept charges refused (custodian_proxy_collection) and invoice
+// recovery skipping the method, which is the engine overruling the very
+// recovery the account updater exists to deliver.
 func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustodianMethodRefParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rotateCustodianMethodRef,
 		arg.NewMethodRef,

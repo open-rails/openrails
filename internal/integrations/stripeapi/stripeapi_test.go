@@ -168,3 +168,40 @@ func TestSentinelSurvivesWrapping(t *testing.T) {
 	wrapped := errors.Join(errors.New("stripe charge failed"), doErr)
 	require.ErrorIs(t, wrapped, ErrProviderReadOnly)
 }
+
+// #814: SetBaseTransport is the supported (untagged) test seam. It installs
+// UNDER the guard — readonly still refuses writes before a byte reaches the
+// host transport, and the version pin is stamped on what does — and nil
+// restores the default.
+func TestSetBaseTransportInstallsUnderTheGuard(t *testing.T) {
+	var seen *http.Request
+	SetBaseTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
+	}))
+	t.Cleanup(func() { SetBaseTransport(nil) })
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
+	require.NoError(t, err)
+	resp, err := newClient(false, 0).Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.NotNil(t, seen, "the installed transport carried the request")
+	require.Equal(t, APIVersion, seen.Header.Get(VersionHeader), "the guard still pins the version above it")
+
+	// Read-only: the write never reaches the installed transport at all.
+	seen = nil
+	req2, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
+	require.NoError(t, err)
+	_, err = newClient(true, 0).Do(req2)
+	require.ErrorIs(t, err, ErrProviderReadOnly)
+	require.Nil(t, seen, "a fake wire server must never buy a caller an unguarded write")
+
+	SetBaseTransport(nil)
+	require.Nil(t, baseTransportOverride)
+	require.Equal(t, http.DefaultTransport, defaultBaseTransport())
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

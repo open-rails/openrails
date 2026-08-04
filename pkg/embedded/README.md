@@ -377,3 +377,42 @@ hold, err := svc.HoldCredits(ctx, service.HoldCreditsRequest{
 // Capture actual usage
 trx, err = svc.CaptureHold(ctx, service.CaptureHoldRequest{HoldID: hold.ID, Amount: actualAmount})
 ```
+
+### Merchant scoping (required)
+
+Every merchant-owned table is RLS-scoped by the `app.merchant_id` session GUC.
+HTTP callers get it from middleware; an in-process Go caller must ask for it, or
+reads silently see zero rows and writes are rejected:
+
+```go
+// The engine is bound to one merchant: no id to pass, no id to get wrong.
+err := openrails.RunInMerchant(ctx, func(ctx context.Context) error {
+	_, err := svc.CreateProduct(ctx, service.CreateProductRequest{ /* … */ })
+	return err
+})
+
+// Multi-merchant engines name the merchant explicitly.
+err = openrails.RunInMerchantConn(ctx, merchantID, func(ctx context.Context) error { /* … */ })
+```
+
+Both PROVE the pin took before running the callback, and a bound engine refuses
+a call that names a different merchant.
+
+## Testing rail pushes against a fake Stripe
+
+`Options.StripeTransport` installs a host-supplied `http.RoundTripper` under
+OpenRails' Stripe choke point, so an integration test can drive real rail-push
+paths (catalog push, checkout, plan migration) against an `httptest` server.
+Readonly enforcement and the pinned `Stripe-Version` still apply above it, and
+the option is refused when `Config.TestMode` is `CredentialPostureLive`.
+
+```go
+e, err := embedded.New(embedded.Options{
+	Config:          cfg, // TestMode: config.CredentialPostureSandbox
+	PGXPool:         pool,
+	River:           embedded.RiverManagedByOpenRails(),
+	StripeTransport: hostRewriteTransport{target: fakeStripe.URL},
+})
+```
+
+`Close` removes it. It is process-global, so one engine per process may set it.
