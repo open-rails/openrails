@@ -145,9 +145,16 @@ jobs:
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
+      # -count=1 for the same reason as the integration suite, and it is FREE
+      # here: the integration shards are the long pole, so re-running every unit
+      # test costs no wall clock. The build cache still does its job — what is
+      # disabled is Go's test-RESULT cache, so "this gate passed" always means
+      # the tests ran on this commit rather than that an older verdict was
+      # reused. A latency budget should not be paid for out of what a green
+      # check means.
       - name: Test (race)
         if: needs.changes.outputs.go == 'true'
-        run: go test -race ./...
+        run: go test -count=1 -race ./...
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save

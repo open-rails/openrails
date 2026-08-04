@@ -67,7 +67,7 @@ jobs:
       - name: Download modules
         run: go mod download
       - name: Test (race)
-        run: go test -race ./...
+        run: go test -count=1 -race ./...
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
