@@ -66,6 +66,68 @@ var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, Credit
 // idx_ledger_transfers_lot_once.
 var LotOnceTransferTypes = []TransferType{Deposit, CreditExpire, CreditRevoke}
 
+// Operation is the KIND of money write that posted a transfer — the or#894
+// discriminator in the idempotency coordinate. It is ENGINE-COMPOSED: a caller
+// supplies only (source, source_id), so two different operations can never
+// alias on one caller key, and a caller cannot claim another operation's key.
+//
+// Without it, a wasted-spend overage charge and the CAPTURE of the same
+// rendered request both landed at ("invoke", request_id): the capture moved 0
+// micros, returned the waste transfer, and reported success.
+type Operation string
+
+const (
+	OpSpend    Operation = "spend"    // MoneyService.SpendCredits
+	OpCapture  Operation = "capture"  // MoneyService.CaptureAuthorized
+	OpWithdraw Operation = "withdraw" // MoneyService.Withdraw
+	OpDeposit  Operation = "deposit"  // credit grant / top-up
+
+	OpCreditExpire    Operation = "credit_expire"
+	OpCreditRevoke    Operation = "credit_revoke"
+	OpCreditReinstate Operation = "credit_reinstate"
+
+	OpArrearsAccrual     Operation = "arrears_accrual"      // MoneyService.AccrueOwed
+	OpMeteredRating      Operation = "metered_rating"       // rate-card sweep accrual
+	OpMinimumSpendTrueUp Operation = "minimum_spend_trueup" // invoice close true-up
+	OpInvoicePayment     Operation = "invoice_payment"      // arrears settled by a rail charge
+	OpManualInvoicePay   Operation = "manual_invoice_payment"
+
+	usageOpPrefix = "usage:"
+)
+
+// UsageOperation is the operation kind of a metered usage charge. event_type is
+// part of the kind because usage_events already dedupes on it
+// (uq_usage_events_idem): two different event types at one (source, source_id)
+// are two events, so they must be two ledger legs.
+func UsageOperation(eventType string) Operation {
+	return Operation(usageOpPrefix + strings.TrimSpace(eventType))
+}
+
+// Coord is the idempotency coordinate a durable money write posts at, within
+// (merchant, customer, currency). All three parts are required — money.
+// IdempotencyKey is the only constructor callers use to build one.
+type Coord struct {
+	Operation Operation
+	Source    string
+	SourceID  string
+}
+
+// Validate refuses a partial coordinate. A blank part is the shape that made a
+// money write silently non-idempotent (or#891) or ambiguous (or#894).
+func (c Coord) Validate() error {
+	if strings.TrimSpace(string(c.Operation)) == "" || c.Operation == usageOpPrefix {
+		return fmt.Errorf("ledger: operation required on the idempotency coordinate")
+	}
+	if strings.TrimSpace(c.Source) == "" || strings.TrimSpace(c.SourceID) == "" {
+		return fmt.Errorf("ledger: source and source_id required on the idempotency coordinate")
+	}
+	return nil
+}
+
+func (c Coord) String() string {
+	return string(c.Operation) + "/" + c.Source + "/" + c.SourceID
+}
+
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
 var ErrInsufficientFunds = errors.New("ledger: transfer breaches the debit account's sign constraint")
@@ -144,10 +206,11 @@ type Transfer struct {
 	Amount        int64
 	Currency      string
 	Type          TransferType
-	// Opaque control-plane references (ledger purity — no business logic here).
-	Source, SourceID *string
+	// Coord is the operation coordinate this leg is idempotent on (or#894).
+	// Required on every transfer.
+	Coord Coord
 	// GrantID attributes a credit_spend/credit_expire/deposit to its #514 credit
-	// lot, independently of Source/SourceID (which carry the OPERATION coordinate).
+	// lot, independently of Coord (which carries the OPERATION coordinate).
 	GrantID           *uuid.UUID
 	Customer          *uuid.UUID
 	Invoker, Resource *string
@@ -160,9 +223,15 @@ type Transfer struct {
 // Apply appends one (posted, single-phase) transfer, enforcing the debit
 // account's sign constraint before it posts to the balance counters.
 func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, error) {
+	// The coordinate is validated HERE, at the one insert every money movement
+	// funnels through, so no new spend path can post an unkeyed or ambiguous leg.
+	if err := t.Coord.Validate(); err != nil {
+		return gen.OpenrailsLedgerTransfer{}, err
+	}
 	if err := l.checkDebitFloor(ctx, t.Debit, t.Amount, t.AllowDebitNegativeUpTo); err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
 	}
+	source, sourceID := t.Coord.Source, t.Coord.SourceID
 	tr, err := l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
 		MerchantID:             l.merchant,
 		DebitAccountID:         t.Debit,
@@ -171,8 +240,9 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 		Currency:               t.Currency,
 		TransferType:           string(t.Type),
 		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
-		Source:                 t.Source,
-		SourceID:               t.SourceID,
+		Operation:              string(t.Coord.Operation),
+		Source:                 &source,
+		SourceID:               &sourceID,
 		GrantID:                t.GrantID,
 		CustomerID:             t.Customer,
 		InvokerID:              t.Invoker,
@@ -215,7 +285,7 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 // Deposit credits the customer's balance from the rail-clearing account
 // (DR processor_clearing / CR customer_balance). grantID attributes the deposit
 // to its #514 credit lot (uuid.Nil for a non-lot deposit).
-func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string, grantID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
@@ -227,7 +297,7 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 	c := customer
 	t := Transfer{
 		Debit: clearing, Credit: cust, Amount: amount, Currency: currency, Type: Deposit,
-		Source: &source, SourceID: &sourceID, Customer: &c,
+		Coord: coord, Customer: &c,
 	}
 	if grantID != uuid.Nil {
 		g := grantID
@@ -241,7 +311,7 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 // balance is untouched — the debt is tracked as a pending invoice item by the
 // caller and nets out when PayOwed settles it. arrears_liability's net balance
 // (which goes negative as debt accrues) is the conserved owed exposure.
-func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
 	liab, err := l.EnsureSystemAccount(ctx, ArrearsLiability, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
@@ -253,13 +323,13 @@ func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency st
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: liab, Credit: rev, Amount: amount, Currency: currency, Type: OwedAccrual,
-		Source: &source, SourceID: &sourceID, Customer: &c, Invoice: invoice,
+		Coord: coord, Customer: &c, Invoice: invoice,
 	})
 }
 
 // PayOwed settles accrued arrears via an external charge (DR processor_clearing /
 // CR arrears_liability), bringing the liability account back toward zero.
-func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, source, sourceID string, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
@@ -271,7 +341,7 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: clearing, Credit: liab, Amount: amount, Currency: currency, Type: OwedPayment,
-		Source: &source, SourceID: &sourceID, Customer: &c, Invoice: invoice,
+		Coord: coord, Customer: &c, Invoice: invoice,
 	})
 }
 

@@ -27,8 +27,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 		Invoker:         "user:a",
 		Currency:        money.DefaultCurrency,
 		EstimatedAmount: 800,
-		Source:          "req",
-		SourceID:        "h1",
+		Key:             money.MustIdempotencyKey(money.OpCapture, "req", "h1"),
 		ExpiresAt:       time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -38,8 +37,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 		Invoker:  "user:a",
 		Currency: money.DefaultCurrency,
 		Amount:   800,
-		Source:   "req",
-		SourceID: "h1",
+		Key:      money.MustIdempotencyKey(money.OpCapture, "req", "h1"),
 	})
 	require.NoError(t, err, "arrears capture past balance must not error")
 

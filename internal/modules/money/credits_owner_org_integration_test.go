@@ -61,8 +61,7 @@ func TestPostedSpend_ConservesTotal(t *testing.T) {
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   150,
-		Source:   "api",
-		SourceID: "req-spend-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-spend-1"),
 	})
 	require.NoError(t, err)
 
@@ -87,8 +86,7 @@ func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   300,
-		Source:   "api",
-		SourceID: "req-replay-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-replay-1"),
 	})
 	require.NoError(t, err)
 	err = svc.SpendCredits(ctx, money.SpendParams{
@@ -96,8 +94,7 @@ func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   300,
-		Source:   "api",
-		SourceID: "req-replay-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-replay-1"),
 	})
 	require.NoError(t, err)
 

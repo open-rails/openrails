@@ -65,7 +65,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// Deposit 1000 — exercises BeginMerchantTx under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "test", SourceID: &depSrc,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Key: money.MustIdempotencyKey(money.OpDeposit, "test", depSrc.String()),
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
@@ -76,7 +76,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	eurSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: "EUR", Amount: 2500, Source: "test", SourceID: &eurSrc,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: "EUR", Amount: 2500, Key: money.MustIdempotencyKey(money.OpDeposit, "test", eurSrc.String()),
 	})
 	require.NoError(t, err, "DepositCredits must keep non-USD funds in their requested currency")
 	eurAcct, err := svc.GetCreditAccount(tctx, payer, "EUR")

@@ -94,8 +94,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears',
 			Currency:   money.DefaultCurrency,
 			EventType:  "or868.b2." + meter,
 			Dimensions: map[string]int64{"units": 7},
-			Source:     "or868-b2",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation("or868.b2."+meter), "or868-b2", uuid.NewString()),
 			OccurredAt: time.Now(),
 		})
 		require.NoError(t, err)

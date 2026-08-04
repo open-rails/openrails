@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -658,8 +659,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: quantity},
 			Amount:     0,
-			Source:     "metered-usage-http",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "metered-usage-http", uuid.NewString()),
 			OccurredAt: time.Now(),
 		})
 		require.NoError(t, err)
@@ -670,8 +670,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 		Currency:   "USD",
 		EventType:  meterKey,
 		Amount:     0,
-		Source:     "metered-usage-http",
-		SourceID:   uuid.NewString(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "metered-usage-http", uuid.NewString()),
 		OccurredAt: time.Now(),
 	})
 	require.NoError(t, err)
@@ -1107,7 +1106,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(100), aiBalance.BalanceAmount)
 	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
-	require.NoError(t, grantLedger.CreditSpend(ctx, customerID, aiUnit, 40, customerID.String(), "ai-image-generation", "catalog-ai-image-generation", uuid.NewString()))
+	require.NoError(t, grantLedger.CreditSpend(ctx, customerID, aiUnit, 40, customerID.String(), "ai-image-generation", ledger.Coord{Operation: ledger.OpSpend, Source: "catalog-ai-image-generation", SourceID: uuid.NewString()}))
 	aiBalance, err = client.GetCreditAccount(ctx, customerID.String(), aiUnit)
 	require.NoError(t, err)
 	require.Equal(t, int64(60), aiBalance.BalanceAmount)

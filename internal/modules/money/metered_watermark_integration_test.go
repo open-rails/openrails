@@ -77,8 +77,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: unitSeconds},
 			Amount:     0,
-			Source:     "test-usage",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "test-usage", uuid.NewString()),
 			OccurredAt: occurred,
 		})
 		require.NoError(t, err)

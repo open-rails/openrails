@@ -3,7 +3,6 @@ package money
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,11 +20,10 @@ type AuthorizeHoldInput struct {
 	Invoker         string // canonical: 'apiKey:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency        string
 	EstimatedAmount int64
-	// Source + SourceID are the durable provenance/idempotency coordinates used
-	// later when the admitted request is captured. SourceID is the caller's
-	// request_id.
-	Source   string
-	SourceID string
+	// Key is the coordinate the admitted request will be CAPTURED at, so the
+	// hold and its capture are the same idempotency coordinate by construction
+	// (operation=capture, source=<admit namespace>, source_id=<request_id>).
+	Key IdempotencyKey
 	// ExpiresAt bounds the Redis hold's lifetime; this package only validates it.
 	ExpiresAt time.Time
 }
@@ -60,10 +58,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 	if in.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
-	in.Source = strings.TrimSpace(in.Source)
-	in.SourceID = strings.TrimSpace(in.SourceID)
-	if in.Source == "" || in.SourceID == "" {
-		return nil, fmt.Errorf("source and source_id (request_id) required")
+	if err := in.Key.RequireOperation(OpCapture); err != nil {
+		return nil, err
 	}
 	if in.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("expires_at required")

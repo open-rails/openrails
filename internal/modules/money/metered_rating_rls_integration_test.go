@@ -82,6 +82,6 @@ VALUES ($1, $2, $3, 'USD', $4, '{"seconds": 7200}'::jsonb, 0, 'rls-826', $5, $6)
 	require.NoError(t, superPool.QueryRow(ctx, `
 SELECT COALESCE(sum(amount), 0)::bigint
 FROM openrails.invoice_items
-WHERE customer_id = $1 AND status = 'pending' AND source_id LIKE 'metered:%'`, payer.UUID()).Scan(&total))
+WHERE customer_id = $1 AND status = 'pending' AND source_id LIKE 'metered_rating:metered:%'`, payer.UUID()).Scan(&total))
 	require.Equal(t, int64(72_000_000), total, "7200 units x 10000 micros must rate non-zero under the app role")
 }

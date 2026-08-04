@@ -22,12 +22,12 @@ RETURNING *;
 -- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
-    allow_debit_negative_up_to,
+    allow_debit_negative_up_to, operation,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
-    sqlc.arg(allow_debit_negative_up_to)::bigint,
+    sqlc.arg(allow_debit_negative_up_to)::bigint, sqlc.arg(operation)::text,
     sqlc.narg(source)::text, sqlc.narg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid
 )
@@ -62,39 +62,32 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text;
 
--- GetLedgerTransferByCoords: idempotency / lookup by the operation coordinate
--- (merchant, customer, currency, transfer_type, source, source_id). Replaces
--- GetMoneyTransactionByCoords. Newest-first so a replay returns the latest row.
+-- GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
+-- coordinate (merchant, customer, currency, transfer_type, operation, source,
+-- source_id). `operation` is the or#894 discriminator: without it a capture and
+-- a wasted-spend usage charge sharing one (source, source_id) alias here.
+-- Newest-first so a replay returns the latest row.
 -- name: GetLedgerTransferByCoords :one
 SELECT * FROM openrails.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type = sqlc.arg(transfer_type)::text
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
 ORDER BY created_at DESC
 LIMIT 1;
 
--- CountLedgerSpendByCoords: unified-spend idempotency — a spend (balance debit)
--- OR an owed accrual with this operation coordinate means it already happened.
--- name: CountLedgerSpendByCoords :one
-SELECT count(*) FROM openrails.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
-  AND source = sqlc.arg(source)::text
-  AND source_id = sqlc.arg(source_id)::text;
-
--- GetLedgerSpendByCoords: the first posted spend movement for an idempotent
--- captured request.
+-- GetLedgerSpendByCoords: the first posted spend movement for one money
+-- operation at its idempotency coordinate.
 -- name: GetLedgerSpendByCoords :one
 SELECT * FROM openrails.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
 ORDER BY created_at ASC
@@ -175,5 +168,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text;

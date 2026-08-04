@@ -616,6 +616,8 @@ type OpenrailsLedgerTransfer struct {
 	Resource   *string
 	InvoiceID  *uuid.UUID
 	CreatedAt  time.Time
+	// or#894 engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
+	Operation string
 }
 
 // Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. RLS-exempt by design: it IS the tenant directory — the scope, not a scoped row.

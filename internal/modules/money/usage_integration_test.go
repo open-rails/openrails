@@ -24,13 +24,13 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
-		Amount:     5_000, Source: "req", SourceID: "r1",
+		Amount:     5_000, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "r1"),
 	})
 	require.NoError(t, err)
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
-		Amount:     3_000, Source: "req", SourceID: "r2",
+		Amount:     3_000, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "r2"),
 	})
 	require.NoError(t, err)
 
@@ -64,7 +64,7 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 
 	p := money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
-		Amount: 2_000, Source: "req", SourceID: "dup",
+		Amount: 2_000, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "dup"),
 	}
 	ev1, err := svc.RecordUsage(ctx, p)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	ev, err := svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "cached-hit",
 		Dimensions: map[string]int64{"cached_input_tokens": 200, "requests": 1},
-		Amount:     0, Source: "req", SourceID: "z1",
+		Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation("cached-hit"), "req", "z1"),
 	})
 	require.NoError(t, err)
 	require.Nil(t, ev.LedgerTransferID, "zero-cost event has no debit txn")

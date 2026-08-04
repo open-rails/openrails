@@ -202,8 +202,8 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, acct, cb2acct, mA, c[2], "customer_balance", true)
 	exec(ctx, t, pool, acct, rev, mA, nil, "platform_revenue", false)
 	exec(ctx, t, pool, acct, arrears, mA, nil, "arrears_liability", false)
-	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, $8)`
+	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at, operation, source, source_id)
+		VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, $8, $6, 'metrics-fixture', $1::uuid::text)`
 	// deposits first so the customer-balance floor never trips.
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 20_000_000, "deposit", c[1], d(t, 2026, 6, 3))
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 10_000_000, "deposit", c[1], d(t, 2026, 6, 15))

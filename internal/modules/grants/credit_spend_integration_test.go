@@ -38,13 +38,13 @@ func TestGrants_CreditSpendFIFO(t *testing.T) {
 	mustBal(t, ctx, ml, custAcc, 600) // both deposited
 
 	// Spend 250 -> drains lotA (100) then 150 of lotB (FIFO by expiry).
-	require.NoError(t, l.CreditSpend(ctx, customer, cur, 250, "invoker-1", "gpt", "spend", "req-1"))
+	require.NoError(t, l.CreditSpend(ctx, customer, cur, 250, "invoker-1", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-1"}))
 	mustBal(t, ctx, ml, custAcc, 350)
 	require.Equal(t, int64(0), lotRemaining(t, ctx, pool, merchantID, customer, cur, lotA.ID))
 	require.Equal(t, int64(350), lotRemaining(t, ctx, pool, merchantID, customer, cur, lotB.ID))
 
 	// Over-spend the remainder is rejected atomically (nothing applied).
-	require.ErrorIs(t, l.CreditSpend(ctx, customer, cur, 400, "invoker-1", "gpt", "spend", "req-2"), grants.ErrInsufficientCredits)
+	require.ErrorIs(t, l.CreditSpend(ctx, customer, cur, 400, "invoker-1", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-2"}), grants.ErrInsufficientCredits)
 	mustBal(t, ctx, ml, custAcc, 350)
 
 	requireConserved(t, ctx, pool, merchantID, cur)
@@ -123,7 +123,7 @@ func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 			if err := gl.LockCustomer(ctx, customer); err != nil {
 				return err
 			}
-			if err := gl.CreditSpend(ctx, customer, cur, 800, "invoker-1", "gpt", "spend", "race-1"); err != nil {
+			if err := gl.CreditSpend(ctx, customer, cur, 800, "invoker-1", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "race-1"}); err != nil {
 				return err
 			}
 			close(spendApplied)

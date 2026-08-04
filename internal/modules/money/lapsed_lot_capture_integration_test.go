@@ -36,8 +36,7 @@ func TestCaptureAuthorized_LapsedLotNeverBlocksCapture(t *testing.T) {
 		Invoker:  "user:a",
 		Currency: cur,
 		Amount:   300,
-		Source:   "req",
-		SourceID: "lapsed-1",
+		Key:      money.MustIdempotencyKey(money.OpCapture, "req", "lapsed-1"),
 	})
 	require.NoError(t, err, "capture must not fail on an unswept lapsed lot")
 	require.NotNil(t, trx)
@@ -49,7 +48,7 @@ func TestCaptureAuthorized_LapsedLotNeverBlocksCapture(t *testing.T) {
 
 	// Idempotent retry returns the same durable spend, no double debit.
 	_, err = svc.CaptureAuthorized(ctx, money.SpendParams{
-		Payer: &payer, Invoker: "user:a", Currency: cur, Amount: 300, Source: "req", SourceID: "lapsed-1",
+		Payer: &payer, Invoker: "user:a", Currency: cur, Amount: 300, Key: money.MustIdempotencyKey(money.OpCapture, "req", "lapsed-1"),
 	})
 	require.NoError(t, err)
 	owed2, err := svc.GetOutstandingOwed(ctx, payer, cur)

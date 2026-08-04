@@ -87,8 +87,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		Invoker:    customerPayer.UUID().String(),
 		Currency:   currency,
 		Amount:     deposit,
-		Source:     "test_customer_prepay",
-		SourceID:   &depositID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_customer_prepay", depositID.String()),
 	})
 	require.NoError(t, err)
 
@@ -229,8 +228,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 		Invoker:    customerPayer.UUID().String(),
 		Currency:   money.DefaultCurrency,
 		Amount:     1_000_000_000,
-		Source:     "test_customer_prepay",
-		SourceID:   &depositID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_customer_prepay", depositID.String()),
 	})
 	require.NoError(t, err)
 

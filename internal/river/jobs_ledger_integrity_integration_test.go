@@ -43,7 +43,7 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 		customer, merchantID)
 	require.NoError(t, err)
 	l := ledger.New(gen.New(merchantPool), merchantID)
-	_, err = l.Deposit(mctx, customer, currency, 1000, "grant", uuid.NewString(), uuid.New())
+	_, err = l.Deposit(mctx, customer, currency, 1000, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(mctx, customer, currency)
 	require.NoError(t, err)
