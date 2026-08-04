@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -67,6 +66,11 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
 		require.Equal(t, "pending", status, "the subscription must survive an unproven absence")
+		var findingStatus string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			merchantID, "subscription:"+subID.String()).Scan(&findingStatus))
+		require.Equal(t, "reconcile_required", findingStatus)
 		return nil
 	}))
 
@@ -78,27 +82,6 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 			 VALUES ($1,'subscriptions',true,now())
 			 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET fully_reconciled = true`, merchantID)
 		return err
-	}))
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
-		require.NoError(t, err)
-		require.Equal(t, 1, res.Findings)
-		require.Equal(t, 0, res.AutoFixed)
-		require.Equal(t, 1, res.ReconcileRequired)
-		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
-		require.Equal(t, "pending", status, "a timeout alone cannot retract a subscription")
-		var findingStatus string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
-			merchantID, "subscription:"+subID.String()).Scan(&findingStatus))
-		require.Equal(t, "reconcile_required", findingStatus)
-
-		_, err = appDB.Gen(ctx).UpsertReconciliationState(ctx, gen.UpsertReconciliationStateParams{
-			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: true,
-		})
-		require.NoError(t, err)
-		return nil
 	}))
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})

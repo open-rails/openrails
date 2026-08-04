@@ -25,7 +25,10 @@ import (
 func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
 	_, appDSN := dbtest.SharedRLSPostgres(t)
-	super := dbtest.SharedPGXPool(t)
+	// Fixture seeding crosses merchants in one statement, and the control plane
+	// itself reads across them — both need the privileged role, not the
+	// RLS-forced app role SharedPGXPool now hands out (or#782).
+	super := dbtest.SharedSuperuserPGXPool(t)
 
 	appPool, err := pgxpool.New(ctx, appDSN)
 	require.NoError(t, err)
@@ -56,7 +59,7 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2), ($3, $4)`, custA, mA, custB, mB)
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'PS A', $3), ($4, $5, 'PS B', $6)`,
 		prodA, "psiso-pa-"+suffix, mA, prodB, "psiso-pb-"+suffix, mB)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'usd', $3, false), ($4, $5, 9000000, 'usd', $6, false)`,
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false), ($4, $5, 9000000, 'USD', $6, false)`,
 		priceA, prodA, mA, priceB, prodB, mB)
 
 	// Insert completed payments as openrails_app under each merchant's GUC: the

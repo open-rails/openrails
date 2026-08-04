@@ -405,7 +405,9 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 
 func TestUpsertPSPOnlyRecordsExplicitValidation(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	// psps is RLS-FORCED and this contract test carries no app.merchant_id GUC,
+	// so it seeds through the owner like its sibling above (or#782).
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 	accountID := "validation-" + uuid.NewString()
