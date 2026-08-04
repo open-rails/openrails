@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,6 +39,12 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	if limit <= 0 {
 		limit = 20
 	}
+	// Host-supplied page size: clamp AT the narrowing so a caller's huge value
+	// cannot wrap to a negative LIMIT.
+	if limit > math.MaxInt32 {
+		limit = math.MaxInt32
+	}
+	lim := int32(limit)
 	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
@@ -54,7 +61,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		runs, e = database.Gen(ctx).ListDestructiveRuns(ctx, gen.ListDestructiveRunsParams{
-			MerchantID: merchantID.UUID(), Lim: int32(limit),
+			MerchantID: merchantID.UUID(), Lim: lim,
 		})
 		return e
 	}); err != nil {
