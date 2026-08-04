@@ -27,7 +27,7 @@ func TestAuthorizeAndHold_ArrearsCreditLine(t *testing.T) {
 	// Balance 0, credit line 1000. An estimate up to the line is allowed.
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 1000,
-		Source: "usage", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "h1"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
@@ -36,7 +36,7 @@ func TestAuthorizeAndHold_ArrearsCreditLine(t *testing.T) {
 	// Above the line is denied. Active Redis hold subtraction is tracked by #505.
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 1001,
-		Source: "usage", SourceID: "h2", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "h2"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)
@@ -53,7 +53,7 @@ func TestAuthorizeAndHold_ArrearsCreditLineSubtractsOwedExposure(t *testing.T) {
 
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 200,
-		Source: "usage", SourceID: "over-line", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "over-line"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)
@@ -61,7 +61,7 @@ func TestAuthorizeAndHold_ArrearsCreditLineSubtractsOwedExposure(t *testing.T) {
 
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "at-line", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "at-line"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
@@ -79,7 +79,7 @@ func TestAuthorizeAndHold_ArrearsZeroCreditLinePrepaidOnly(t *testing.T) {
 
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 200,
-		Source: "usage", SourceID: "prepaid-ok", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "prepaid-ok"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
@@ -87,7 +87,7 @@ func TestAuthorizeAndHold_ArrearsZeroCreditLinePrepaidOnly(t *testing.T) {
 
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 600,
-		Source: "usage", SourceID: "prepaid-over", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "prepaid-over"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)
@@ -103,7 +103,7 @@ func TestAuthorizeAndHold_PrepaidUnaffected(t *testing.T) {
 
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 600,
-		Source: "usage", SourceID: "over", ExpiresAt: time.Now().Add(time.Hour),
+		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "over"), ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)

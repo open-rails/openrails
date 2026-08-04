@@ -360,55 +360,12 @@ func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer 
 	return out, err
 }
 
-// GetTransactionBySource looks up a single money transaction by its idempotency key.
-// For usage tracking, this is commonly used with transactionType="hold" and
-// (source, sourceID) = (metering_source, request_id).
-func (s *MoneyService) GetTransactionBySource(ctx context.Context, invokerID string, currency string, transactionType string, source string, sourceID string) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	invokerID = strings.TrimSpace(invokerID)
-	transactionType = strings.TrimSpace(transactionType)
-	source = strings.TrimSpace(source)
-	sourceID = strings.TrimSpace(sourceID)
-	if invokerID == "" {
-		return nil, fmt.Errorf("invoker required")
-	}
-	if transactionType == "" {
-		return nil, fmt.Errorf("transaction_type required")
-	}
-	if source == "" {
-		return nil, fmt.Errorf("source required")
-	}
-	if sourceID == "" {
-		return nil, fmt.Errorf("source_id required")
-	}
-
-	payer, err := resolveCustomer(nil, invokerID)
-	if err != nil {
-		return nil, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
-		return nil, err
-	}
-	row, err := s.db.Gen(ctx).GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
-		MerchantID:   tid.UUID(),
-		CustomerID:   payer.UUID(),
-		Currency:     cur,
-		TransferType: transactionType,
-		Source:       source,
-		SourceID:     sourceID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return moneyTransactionFromTransfer(row), nil
-}
+// or#894 task 4: GetTransactionBySource is DELETED, not fixed. It read the
+// ledger by (transfer_type, source, source_id) — the same coordinate the
+// capture/waste collision lived at — and had no callers. A dead read that
+// resolves an ambiguous coordinate is a trap waiting for its first caller, so
+// it goes. Reads by coordinate now go through GetLedgerTransferByCoords with an
+// operation.
 
 type DepositParams struct {
 	// CustomerID is the merchant subject that owns the deposited balance (issue #221). When
@@ -626,7 +583,7 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 // grant_id for lot attribution. The available/credit-line gate is the CALLER's
 // job (#491); this fails only if the lots physically cannot cover `amount` (a
 // gated caller never hits that). Returns the derived balance AFTER the debit.
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency, source, sourceID, resource string, amount int64) (int64, error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (int64, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -643,7 +600,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 		return 0, ErrInsufficientCredits
 	}
 	gl := s.grantLedger(q, tenantID)
-	if err := gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, source, sourceID); err != nil {
+	if err := gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, key.Coord()); err != nil {
 		if errors.Is(err, grants.ErrInsufficientCredits) {
 			return 0, ErrInsufficientCredits
 		}
@@ -741,29 +698,22 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 	}
 	sid := params.SourceID.String()
 	sourceIDText := &sid
-	if err := requireIdempotencyKey("withdraw", strings.TrimSpace(params.Source), strings.TrimSpace(sid)); err != nil {
-		return nil, err
+	key, kerr := NewIdempotencyKey(OpWithdraw, params.Source, sid)
+	if kerr != nil {
+		return nil, kerr
 	}
 	// or#891 item 3: compare the TOTAL already withdrawn at these coordinates (a
 	// withdraw fans out one credit_spend transfer per FIFO lot) and refuse a
 	// replay whose amount differs, rather than answering it with the first row.
-	committed, cerr := q.SumLedgerSpendByCoords(ctx, gen.SumLedgerSpendByCoordsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Source: params.Source, SourceID: sid,
-	})
+	committed, cerr := key.requireSameAmount(ctx, q, tenantID, payerID, cur, params.Amount)
 	if cerr != nil {
 		return nil, cerr
 	}
-	if committed.Transfers > 0 {
-		if committed.Total != params.Amount {
-			return nil, &IdempotencyConflict{
-				Operation: "withdraw", Source: params.Source, SourceID: sid,
-				Field: "amount", Committed: committed.Total, Retried: params.Amount,
-			}
-		}
+	if committed {
 		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransferType: "credit_spend", Source: params.Source, SourceID: sid,
+			TransferType: "credit_spend", Operation: string(key.Operation()),
+			Source: key.Source(), SourceID: key.SourceID(),
 		})
 		if gerr == nil {
 			return moneyTransactionFromTransfer(existing), nil
@@ -772,7 +722,7 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, params.Source, sid, "", params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, key, "", params.Amount)
 	if err != nil {
 		return nil, err
 	}

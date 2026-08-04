@@ -17,12 +17,12 @@ var ErrInsufficientCredits = errors.New("grants: insufficient credits")
 
 // CreditSpend consumes `amount` of credits FIFO across the customer's live
 // credit lots (soonest-expiring first), emitting one #512 ledger spend transfer
-// per lot drawn. Each transfer carries the OPERATION coordinate (source,
-// sourceID) — the caller's idempotency key — AND grant_id = the lot it draws
-// from (lot attribution). Per-lot remaining is derived from the ledger — no
+// per lot drawn. Each transfer carries the OPERATION coordinate (operation,
+// source, sourceID) — the caller's idempotency key, discriminated by the kind
+// of money write (or#894) — AND grant_id = the lot it draws from. Per-lot remaining is derived from the ledger — no
 // mutable remaining column. Atomic: nothing is applied unless the full amount is
 // covered. Compose inside a tx for isolation.
-func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource, source, sourceID string) error {
+func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string, coord ledger.Coord) error {
 	if amount <= 0 {
 		return fmt.Errorf("grants: spend amount must be positive, got %d", amount)
 	}
@@ -63,10 +63,10 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 		if take > left {
 			take = left
 		}
-		src, sid, lotID, c, inv, res := source, sourceID, lot.ID, customer, invoker, resource
+		lotID, c, inv, res := lot.ID, customer, invoker, resource
 		if _, err := l.money.Apply(ctx, ledger.Transfer{
 			Debit: cust, Credit: rev, Amount: take, Currency: currency, Type: ledger.CreditSpend,
-			Source: &src, SourceID: &sid, GrantID: &lotID, Customer: &c, Invoker: &inv, Resource: &res,
+			Coord: coord, GrantID: &lotID, Customer: &c, Invoker: &inv, Resource: &res,
 		}); err != nil {
 			return fmt.Errorf("grants: credit spend from lot %s: %w", lot.ID, err)
 		}
@@ -116,10 +116,11 @@ func (l *Ledger) ExpireLapsed(ctx context.Context, customer uuid.UUID, currency 
 		if lot.Remaining <= 0 {
 			continue
 		}
-		src, sid, lotID, c := "credit_expiry", lot.ID.String(), lot.ID, customer
+		lotID, c := lot.ID, customer
 		if _, err := l.money.Apply(ctx, ledger.Transfer{
 			Debit: cust, Credit: exp, Amount: lot.Remaining, Currency: currency, Type: ledger.CreditExpire,
-			Source: &src, SourceID: &sid, GrantID: &lotID, Customer: &c,
+			Coord:   ledger.Coord{Operation: ledger.OpCreditExpire, Source: "credit_expiry", SourceID: lot.ID.String()},
+			GrantID: &lotID, Customer: &c,
 		}); err != nil {
 			return expired, fmt.Errorf("grants: expire lot %s: %w", lot.ID, err)
 		}

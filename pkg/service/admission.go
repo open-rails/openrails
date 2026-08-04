@@ -558,9 +558,11 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 //     claim: it expires with the widest configured window and does not survive a
 //     flush. After a flush a replay is re-graded and re-counted against grace.
 //   - The MONEY is durable regardless: the direct-payer overage charge posts
-//     through money.RecordUsage at (source, source_id, event_type=wasted_spend),
-//     whose key is structural, so a replay cannot double-charge and a replay
-//     with a changed amount is refused (money.ErrIdempotencyKeyReused).
+//     through money.RecordUsage at operation "usage:wasted_spend" over
+//     (source, source_id), whose key is structural, so a replay cannot
+//     double-charge and a replay with a changed amount is refused
+//     (money.ErrIdempotencyKeyReused). The operation is engine-composed, so the
+//     charge never aliases the CAPTURE of the same request id (or#894).
 //
 // Reported measurements: or#891, and DESIGN-RULINGS §4.23.
 type WastedSpendInput struct {
@@ -573,6 +575,9 @@ type WastedSpendInput struct {
 	SourceID    string
 	Reason      string
 }
+
+// wastedSpendEventType is the metered event kind a charged overage posts under.
+const wastedSpendEventType = "wasted_spend"
 
 // WastedSpendResult describes how OpenRails handled one wasted-spend report.
 type WastedSpendResult struct {
@@ -680,14 +685,21 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 			Action:               "forgiven",
 		}
 		if chargeable > 0 {
+			// or#894: the overage charge posts at operation "usage:wasted_spend",
+			// NOT at the bare (source, source_id) the caller reported. Without the
+			// operation it aliased the CAPTURE of the same rendered request — the
+			// capture then moved 0 micros and returned the waste transfer.
+			wasteKey, kerr := money.NewIdempotencyKey(money.UsageOperation(wastedSpendEventType), in.Source, in.SourceID)
+			if kerr != nil {
+				return nil, kerr
+			}
 			_, err = s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
 				Payer:     &in.CustomerID,
 				Invoker:   strings.TrimSpace(in.Invoker),
 				Currency:  cur,
-				EventType: "wasted_spend",
+				EventType: wastedSpendEventType,
 				Amount:    chargeable,
-				Source:    in.Source,
-				SourceID:  in.SourceID,
+				Key:       wasteKey,
 				Metadata: map[string]any{
 					"reason":                   in.Reason,
 					"reported_amount":          in.Amount,

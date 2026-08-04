@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/modules/money"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -92,8 +94,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 		Invoker:    subjectA,
 		Currency:   currency,
 		Amount:     7_500_000,
-		Source:     "test_seed",
-		SourceID:   &sourceID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_seed", sourceID.String()),
 	})
 	require.NoError(t, err)
 

@@ -507,15 +507,20 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AN
 			return err
 		}
 		ml := s.moneyLedger(q, tenantID)
-		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, source, sourceID, nil); err != nil {
+		ratingKey, kerr := NewIdempotencyKey(OpMeteredRating, source, sourceID)
+		if kerr != nil {
+			return kerr
+		}
+		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, ratingKey.Coord(), nil); err != nil {
 			return err
 		}
 		// #798: the accrual belongs to its RATING PERIOD, not the sweep time —
 		// stamp invoice_at = periodFrom so a close over a past window (e.g. the
 		// previous-month finalize) attaches it instead of leaking it into the
 		// next period's invoice.
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, delta, periodFrom.UTC(), map[string]any{
-			"source": source,
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, ratingKey.invoiceItemSourceID(), delta, periodFrom.UTC(), map[string]any{
+			"operation": string(ratingKey.Operation()),
+			"source":    ratingKey.Source(),
 		}); err != nil {
 			return err
 		}

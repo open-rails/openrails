@@ -60,7 +60,7 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 func TestLedger_ConservationAndFlows(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 
-	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 1000, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -75,10 +75,12 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 	c := customer
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 300, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: exp, Amount: 200, Currency: cur, Type: "credit_expire", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpCreditExpire, Source: "credit_expiry", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
 
@@ -94,7 +96,7 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 // A customer_balance cannot be overdrawn past its arrears floor.
 func TestLedger_SignConstraint(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
-	_, err := l.Deposit(ctx, customer, cur, 100, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 100, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
@@ -105,6 +107,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 	// No credit line: overspend rejected, balance unchanged.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 	})
 	require.ErrorIs(t, err, ledger.ErrInsufficientFunds)
 	mustBalance(t, ctx, l, custAcc, 100)
@@ -112,6 +115,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 	// With a 100 arrears floor, the same spend is allowed and goes negative.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord:                  ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 		AllowDebitNegativeUpTo: 100,
 	})
 	require.NoError(t, err)
@@ -137,6 +141,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 	// Debit account is in curB, transfer/credit in curA — the trigger rejects it.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: clearingB, Credit: custA, Amount: 10, Currency: curA, Type: "deposit",
+		Coord: ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()},
 	})
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "cross-currency")
@@ -146,7 +151,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 // transfer are denied, proving the ledger is append-only at the role level.
 func TestLedger_AppendOnly(t *testing.T) {
 	l, _, ctx, customer, merchantID, cur := testLedger(t)
-	tr, err := l.Deposit(ctx, customer, cur, 100, "grant", uuid.NewString(), uuid.New())
+	tr, err := l.Deposit(ctx, customer, cur, 100, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
 	_, appDSN := dbtest.SharedRLSPostgres(t)

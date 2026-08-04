@@ -34,7 +34,7 @@ func TestGrants_RevokeClawback(t *testing.T) {
 	require.NoError(t, err)
 
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
-	require.NoError(t, l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", "spend", "req-1"))
+	require.NoError(t, l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-1"}))
 	mustBal(t, ctx, ml, custAcc, 70)
 
 	_, err = l.Revoke(ctx, lot.ID, "admin removed")
@@ -81,10 +81,11 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	// Reverse the clawback: revoked_credits -> customer_balance.
 	revAcc, err := ml.EnsureSystemAccount(ctx, ledger.RevokedCredits, cur)
 	require.NoError(t, err)
-	src, sid, c := "grant_reinstate", lot.ID.String(), customer
+	c := customer
 	_, err = ml.Apply(ctx, ledger.Transfer{
 		Debit: revAcc, Credit: custAcc, Amount: 100, Currency: cur, Type: ledger.CreditReinstate,
-		Source: &src, SourceID: &sid, GrantID: &lot.ID, Customer: &c,
+		Coord:   ledger.Coord{Operation: ledger.OpCreditReinstate, Source: "grant_reinstate", SourceID: lot.ID.String()},
+		GrantID: &lot.ID, Customer: &c,
 	})
 	require.NoError(t, err)
 	mustBal(t, ctx, ml, custAcc, 100) // restored

@@ -258,6 +258,11 @@ func ServiceRecordUsage(r *httprequest.Request) {
 	if req.OccurredAtUnix > 0 {
 		occurredAt = time.Unix(req.OccurredAtUnix, 0).UTC()
 	}
+	usageKey, err := money.NewIdempotencyKey(money.UsageOperation(req.EventType), req.Source, req.SourceID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := svc.RecordUsage(r.Request.Context(), billingservice.RecordUsageInput{
 		CustomerID: *payer,
 		Invoker:    req.Invoker,
@@ -267,8 +272,7 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		Amount:     req.Amount,
 		Resource:   req.Resource,
 		Metadata:   req.Metadata,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
+		Key:        usageKey,
 		OccurredAt: occurredAt,
 	}); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -395,13 +399,21 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		expiresAt = &v
 	}
 
+	var depositSourceID string
+	if req.SourceID != nil && *req.SourceID != uuid.Nil {
+		depositSourceID = req.SourceID.String()
+	}
+	depositKey, err := money.NewIdempotencyKey(money.OpDeposit, req.Source, depositSourceID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		CustomerID:  tenantSubjectID,
 		Invoker:     invoker,
 		Currency:    currency,
 		Amount:      req.Amount,
-		Source:      req.Source,
-		SourceID:    req.SourceID,
+		Key:         depositKey,
 		ExpiresAt:   expiresAt,
 		Description: req.Description,
 	})

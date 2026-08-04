@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -43,10 +44,9 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
-	source = strings.TrimSpace(source)
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil, fmt.Errorf("source_id required for owed accrual idempotency")
+	key, kerr := NewIdempotencyKey(OpArrearsAccrual, source, sourceID)
+	if kerr != nil {
+		return nil, kerr
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -83,7 +83,8 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		// Idempotency: an owed-accrual transfer at these coordinates means it ran.
 		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransferType: "owed_accrual", Source: source, SourceID: sourceID,
+			TransferType: "owed_accrual", Operation: string(key.Operation()),
+			Source: key.Source(), SourceID: key.SourceID(),
 		})
 		if gerr == nil {
 			trx = moneyTransactionFromTransfer(existing)
@@ -98,13 +99,14 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		}
 
 		ml := s.moneyLedger(q, tenantID)
-		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, source, sourceID, nil)
+		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, key.Coord(), nil)
 		if err != nil {
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)
-		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, amount, now, map[string]any{
-			"source": source,
+		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.invoiceItemSourceID(), amount, now, map[string]any{
+			"operation": string(key.Operation()),
+			"source":    key.Source(),
 		})
 	})
 	if err != nil {
@@ -429,15 +431,17 @@ func (s *MoneyService) settleClaimedInvoiceCharge(ctx context.Context, claim *in
 		// Settle the arrears liability via the external charge. An existing
 		// owed-payment transfer at this attempt key means a previous/concurrent run
 		// already recorded this exact charge — done.
+		payCoord := ledger.Coord{Operation: ledger.OpInvoicePayment, Source: "invoice_charge", SourceID: sid}
 		storedTrx, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: cur,
-			TransferType: "owed_payment", Source: "invoice_charge", SourceID: sid,
+			TransferType: "owed_payment", Operation: string(payCoord.Operation),
+			Source: payCoord.Source, SourceID: payCoord.SourceID,
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
+			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, payCoord, &r.InvoiceID)
 			if err != nil {
 				return err
 			}

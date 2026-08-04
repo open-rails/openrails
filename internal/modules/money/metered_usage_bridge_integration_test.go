@@ -78,8 +78,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: us},
 			Amount:     0,
-			Source:     "test-usage",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "test-usage", uuid.NewString()),
 			OccurredAt: occurred.Add(time.Duration(i) * time.Second),
 		})
 		require.NoError(t, err)
@@ -109,7 +108,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 		  AND source_type = 'owed_accrual'
 		  AND status = 'invoiced'
 		  AND source_id = $3
-	`, payer.UUID(), inv.ID, "metered:"+meterKey+":"+periodSourceID).Scan(&invoicedCount, &invoicedAmount))
+	`, payer.UUID(), inv.ID, string(money.OpMeteredRating)+":metered:"+meterKey+":"+periodSourceID).Scan(&invoicedCount, &invoicedAmount))
 	require.Equal(t, 1, invoicedCount)
 	require.Equal(t, expected, invoicedAmount)
 
@@ -127,6 +126,6 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 		WHERE customer_id = $1
 		  AND source_type = 'owed_accrual'
 		  AND source_id = $2
-	`, payer.UUID(), "metered:"+meterKey+":"+periodSourceID).Scan(&afterCount))
+	`, payer.UUID(), string(money.OpMeteredRating)+":metered:"+meterKey+":"+periodSourceID).Scan(&afterCount))
 	require.Equal(t, 1, afterCount)
 }

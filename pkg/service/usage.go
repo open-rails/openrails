@@ -12,11 +12,15 @@ import (
 
 // RecordUsageInput is one host-reported metered usage event (#797).
 //
-// Source+SourceID are REQUIRED and form the idempotency key within
-// (merchant, payer, currency, event_type) — structurally, via
-// uq_usage_events_idem, not by convention. Both halves must be REPRODUCIBLE by
-// the caller across retries of the same logical event: a value minted per
-// attempt passes every check here and guarantees nothing.
+// Key is REQUIRED and is the idempotency coordinate within
+// (merchant, payer, currency) — structurally, via uq_usage_events_idem and the
+// ledger's operation coordinate, not by convention. Build it with
+// money.NewIdempotencyKey(money.UsageOperation(EventType), source, sourceID);
+// its operation must match EventType, so two different event types at one
+// (source, source_id) are two charges rather than one collision (or#894). Both
+// halves must be REPRODUCIBLE by the caller across retries of the same logical
+// event: a value minted per attempt passes every check here and guarantees
+// nothing.
 //
 // A replay under the same key with the SAME Amount returns success and neither
 // re-records nor re-charges. A replay with a DIFFERENT Amount is refused with
@@ -35,16 +39,15 @@ type RecordUsageInput struct {
 	Amount     int64
 	Resource   string
 	Metadata   map[string]any
-	Source     string
-	SourceID   string
+	Key        money.IdempotencyKey
 	// OccurredAt places the event in its rating window (zero = now).
 	OccurredAt time.Time
 }
 
 // RecordUsage durably records a metered usage event (and debits the ledger for
 // a non-zero Amount) via money.RecordUsage (#289/#797). Idempotent on
-// (merchant, payer, currency, event_type, source, source_id); a replay carrying
-// a different Amount returns money.ErrIdempotencyKeyReused.
+// (merchant, payer, currency, usage:<event_type>, source, source_id); a replay
+// carrying a different Amount returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
@@ -73,8 +76,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 		EventType:  strings.TrimSpace(in.EventType),
 		Dimensions: in.Dimensions,
 		Amount:     in.Amount,
-		Source:     strings.TrimSpace(in.Source),
-		SourceID:   strings.TrimSpace(in.SourceID),
+		Key:        in.Key,
 		Metadata:   metadata,
 		OccurredAt: in.OccurredAt,
 	})

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -370,7 +371,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// ledger balance and amount_due agree. Idempotent — FinalizeInvoice
 		// returns the existing invoice on re-finalize before reaching here.
 		if trueUp > 0 {
-			if _, lerr := s.moneyLedger(q, tenantID).AccrueOwed(ctx, payerID, cur, trueUp, "minimum_spend_trueup", inv.ID.String(), &inv.ID); lerr != nil {
+			if _, lerr := s.moneyLedger(q, tenantID).AccrueOwed(ctx, payerID, cur, trueUp, ledger.Coord{Operation: ledger.OpMinimumSpendTrueUp, Source: "minimum_spend_trueup", SourceID: inv.ID.String()}, &inv.ID); lerr != nil {
 				return lerr
 			}
 		}
@@ -589,12 +590,14 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		}
 		now := s.now()
 		sourceID := railPaymentID
+		manualPayCoord := ledger.Coord{Operation: ledger.OpManualInvoicePay, Source: "manual_invoice_payment", SourceID: sourceID}
 		// Reference dedup: a prior owed-payment transfer with this reference means
 		// the manual payment was already applied (the single-entry uniqueness this
 		// replaced lived on money_transactions).
 		if _, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: normalizeCurrency(invoiceRow.Currency),
-			TransferType: "owed_payment", Source: "manual_invoice_payment", SourceID: sourceID,
+			TransferType: "owed_payment", Operation: string(manualPayCoord.Operation),
+			Source: manualPayCoord.Source, SourceID: manualPayCoord.SourceID,
 		}); derr == nil {
 			return fmt.Errorf("manual payment reference %q already applied", sourceID)
 		} else if !errors.Is(derr, pgx.ErrNoRows) {
@@ -616,7 +619,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		// Settle the arrears liability via a #512 ledger owed-payment transfer
 		// (DR processor_clearing / CR arrears_liability).
 		ml := s.moneyLedger(q, tid.UUID())
-		tr, e := ml.PayOwed(ctx, payer.UUID(), normalizeCurrency(invoiceRow.Currency), amount, "manual_invoice_payment", sourceID, &id)
+		tr, e := ml.PayOwed(ctx, payer.UUID(), normalizeCurrency(invoiceRow.Currency), amount, manualPayCoord, &id)
 		if e != nil {
 			return e
 		}

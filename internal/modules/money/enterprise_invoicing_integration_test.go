@@ -76,7 +76,7 @@ func TestEnterpriseInvoicing_PayerRateCardOverride(t *testing.T) {
 		_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 			Payer: &pp, Invoker: pp.UUID().String(), Currency: cur, EventType: eventType,
 			Dimensions: map[string]int64{"mib_seconds": quantity},
-			Amount:     0, Source: "th798-test", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+			Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-test", uuid.NewString()), OccurredAt: time.Now(),
 		})
 		require.NoError(t, err)
 	}
@@ -351,7 +351,7 @@ func TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals(t *testing.T) {
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: payer.UUID().String(), Currency: cur, EventType: eventType,
 		Dimensions: map[string]int64{"mib_seconds": 3 * gbMonthDivisor},
-		Amount:     0, Source: "th798-past", SourceID: uuid.NewString(), OccurredAt: time.Now().AddDate(0, 0, -20),
+		Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-past", uuid.NewString()), OccurredAt: time.Now().AddDate(0, 0, -20),
 	})
 	require.NoError(t, err)
 
@@ -397,7 +397,7 @@ func TestEnterpriseInvoicing_SweepUsageFeedsPendingChargesAndExposure(t *testing
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: payer.UUID().String(), Currency: cur, EventType: eventType,
 		Dimensions: map[string]int64{"mib_seconds": 2 * gbMonthDivisor},
-		Amount:     0, Source: "th798-sweep", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+		Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-sweep", uuid.NewString()), OccurredAt: time.Now(),
 	})
 	require.NoError(t, err)
 

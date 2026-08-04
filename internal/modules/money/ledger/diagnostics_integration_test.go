@@ -21,7 +21,7 @@ import (
 func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 
-	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 1000, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
@@ -105,8 +105,8 @@ func bypassTriggerInsert(t *testing.T, ctx context.Context, _ *pgxpool.Pool, mer
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
 INSERT INTO openrails.ledger_transfers
-    (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, source)
-VALUES ($1, $2, $3, $4, $5, 'deposit', '833_test_bypass')`,
+    (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, operation, source, source_id)
+VALUES ($1, $2, $3, $4, $5, 'deposit', 'deposit', '833_test_bypass', gen_random_uuid()::text)`,
 		merchantID, debit, credit, amount, cur)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `ALTER TABLE openrails.ledger_transfers ENABLE TRIGGER trg_ledger_transfers_apply_counters`)
@@ -152,7 +152,7 @@ func requireIntegrityClean(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 // CheckIntegrity composes both checks and OK() is the single operator verdict.
 func TestLedgerDiagnostics_ReportComposesBothChecks(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
-	_, err := l.Deposit(ctx, customer, cur, 500, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 500, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
 	rep, err := ledger.CheckIntegrity(ctx, pool, merchantID)

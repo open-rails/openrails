@@ -82,8 +82,7 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 		Dimensions: map[string]int64{"seconds": 10_000 * 3600},
 		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1"},
 		Amount:     0,
-		Source:     "ratecard-test",
-		SourceID:   uuid.NewString(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-test", uuid.NewString()),
 		OccurredAt: occurred,
 	})
 	require.NoError(t, err)
@@ -94,8 +93,7 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 		EventType:  "bandwidth.transfer",
 		Dimensions: map[string]int64{"bytes": 3 * 1024 * 1024 * 1024},
 		Amount:     0,
-		Source:     "ratecard-test",
-		SourceID:   uuid.NewString(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("bandwidth.transfer"), "ratecard-test", uuid.NewString()),
 		OccurredAt: occurred,
 	})
 	require.NoError(t, err)
@@ -113,7 +111,7 @@ FROM openrails.invoice_items
 WHERE customer_id = $1
   AND invoice_id = $2
   AND status = 'invoiced'
-  AND source_id LIKE 'metered:%:period:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
+  AND source_id LIKE 'metered_rating:metered:%:period:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
 	require.Equal(t, 2, itemCount)
 	require.Equal(t, inv.AmountDue, itemTotal)
 }
@@ -240,7 +238,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', '{
 		EventType:  "droplet.usage",
 		Dimensions: map[string]int64{"seconds": 100 * 3600}, // 100h: under the cap AND under cell.included
 		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1"},
-		Source:     "ratecard-selfallow", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-selfallow", uuid.NewString()), OccurredAt: time.Now(),
 	})
 	require.NoError(t, err)
 
