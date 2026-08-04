@@ -376,79 +376,119 @@ function ProvidersTab() {
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
 
+  const providerDefinitions = data?.provider_definitions ?? []
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <ProviderDialog
-          providerDefinitions={data?.provider_definitions ?? []}
-          onDone={reload}
-        />
-      </div>
-      {!data?.data?.length ? (
-        <p className="text-sm text-muted-foreground">
-          No payment providers configured.
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
+    <div className="max-w-4xl">
+      <section className="grid gap-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="grid gap-1">
+            <h2 className="text-base font-semibold">Payment providers</h2>
+            <p className="text-sm text-muted-foreground">
+              Configure the payment rails this merchant can use.
+            </p>
+          </div>
+          <ProviderDialog
+            providerDefinitions={providerDefinitions}
+            onDone={reload}
+          />
+        </div>
+        {!data?.data?.length ? (
+          <p className="py-2 text-sm text-muted-foreground">
+            No payment providers configured.
+          </p>
+        ) : (
+          <Table className="min-w-[44rem]">
             <TableHeader>
               <TableRow>
-                <TableHead>Rail</TableHead>
-                <TableHead>Environment</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Credentials</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead />
+                <TableHead className="text-muted-foreground">
+                  Provider
+                </TableHead>
+                <TableHead className="text-muted-foreground">
+                  Environment
+                </TableHead>
+                <TableHead className="text-muted-foreground">
+                  Credentials
+                </TableHead>
+                <TableHead className="text-muted-foreground">State</TableHead>
+                <TableHead className="text-right text-muted-foreground">
+                  Action
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.data.map((p) => (
-                <ProviderRow key={p.id} provider={p} onDone={reload} />
+              {data.data.map((provider) => (
+                <ProviderRow
+                  key={provider.id}
+                  provider={provider}
+                  definition={providerDefinitions.find(
+                    (definition) => definition.rail === provider.rail
+                  )}
+                  onDone={reload}
+                />
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </section>
     </div>
   )
 }
 
 function ProviderRow({
   provider,
+  definition,
   onDone,
 }: {
   provider: PaymentProviderConfig
+  definition?: PaymentProviderDefinition
   onDone: () => void
 }) {
   const [busy, setBusy] = React.useState(false)
   return (
     <TableRow className={provider.archived ? "opacity-60" : undefined}>
-      <TableCell className="font-medium">{provider.rail}</TableCell>
-      <TableCell>{provider.environment}</TableCell>
-      <TableCell className="text-xs">{provider.account_id}</TableCell>
-      <TableCell>
-        <span className="flex flex-wrap gap-1">
-          {Object.entries(provider.credentials).map(([name, c]) => (
-            <Badge
-              key={name}
-              variant="secondary"
-              className={
-                c.configured
-                  ? ""
-                  : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-              }
-              title={
-                c.last_validated_at
-                  ? `validated ${formatDate(c.last_validated_at)}`
-                  : undefined
-              }
-            >
-              {name}
-            </Badge>
-          ))}
-        </span>
+      <TableCell className="py-3">
+        <div className="grid min-w-0 leading-tight">
+          <span className="font-medium">
+            {definition?.display_name ?? provider.rail}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
+            {provider.rail} · {provider.account_id}
+          </span>
+        </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3 capitalize">
+        {provider.environment || "Default"}
+      </TableCell>
+      <TableCell className="py-3">
+        {Object.keys(provider.credentials).length > 0 ? (
+          <span className="flex flex-wrap gap-1">
+            {Object.entries(provider.credentials).map(([name, credential]) => (
+              <Badge
+                key={name}
+                variant="secondary"
+                className={
+                  credential.configured
+                    ? ""
+                    : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                }
+                title={
+                  credential.last_validated_at
+                    ? `Validated ${formatDate(credential.last_validated_at)}`
+                    : credential.configured
+                      ? "Configured"
+                      : "Not configured"
+                }
+              >
+                {name}
+              </Badge>
+            ))}
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">None required</span>
+        )}
+      </TableCell>
+      <TableCell className="py-3">
         {provider.archived ? (
           <Badge variant="secondary">archived</Badge>
         ) : provider.drained ? (
@@ -467,7 +507,7 @@ function ProviderRow({
           </Badge>
         )}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         {!provider.archived && (
           <Button
             variant="outline"
