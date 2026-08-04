@@ -296,6 +296,9 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 // integration test to drive the fold without a live BT job.
 func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, rows []basistheory.AccountUpdaterResultRow) error {
 	q := s.gen(ctx)
+	// or#872: adopted is the number that proves the updater pays for itself —
+	// instruments the network refreshed that never reached dunning.
+	var adopted, rotated, parked int
 	for _, row := range rows {
 		switch row.ResultCode {
 		case basistheory.AUUpdatedPAN, basistheory.AUUpdatedExpDate:
@@ -316,10 +319,14 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 			if err != nil {
 				return fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
 			}
-			if n > 0 && newRef != row.Token {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": row.ResultCode,
-				}).Info("basistheory account updater: instrument rail_method_ref rotated")
+			if n > 0 {
+				adopted++
+				if newRef != row.Token {
+					rotated++
+					log.WithContext(ctx).WithFields(log.Fields{
+						"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": row.ResultCode,
+					}).Info("basistheory account updater: instrument rail_method_ref rotated")
+				}
 			}
 		case basistheory.AUClosedAccount:
 			n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
@@ -331,6 +338,7 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 				return fmt.Errorf("account updater: park %s: %w", row.Token, err)
 			}
 			if n > 0 {
+				parked++
 				log.WithContext(ctx).WithFields(log.Fields{
 					"bt_token_id": row.Token,
 				}).Error("basistheory account updater: instrument PARKED — closed account; operator action required (never auto-cancelled)")
@@ -342,6 +350,11 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 				"bt_token_id": row.Token, "result_code": row.ResultCode,
 			}).Warn("basistheory account updater: unrecognized result code recorded verbatim; no fold")
 		}
+	}
+	if adopted > 0 || parked > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"rows": len(rows), "adopted": adopted, "rotated": rotated, "parked": parked,
+		}).Info("basistheory account updater: fold complete")
 	}
 	return nil
 }
