@@ -1,10 +1,11 @@
 name: Go toolchain + per-variant caches
 description: >-
   actions/setup-go with its bundled cache switched OFF, plus exactly one
-  explicit restore per cache path: the module cache keyed on go.sum, and the
-  BUILD cache keyed on the build variant as well.
+  explicit RESTORE per cache path: the module cache keyed on go.sum, and the
+  BUILD cache keyed on the build variant as well. Pair with the go-cache-save
+  action as the job's last step.
 
-# WHY THIS RE-ADDS THE CACHE STEPS THAT #855 DELETED (ci.yaml:78's rule).
+# WHY THIS RE-ADDS THE CACHE STEPS THAT #855 DELETED (ci.yaml's old :78 rule).
 #
 # The rule was written after a real bug: `actions/cache` on ~/go/pkg/mod +
 # ~/.cache/go-build ran ALONGSIDE setup-go's `cache: true`, which restores the
@@ -24,21 +25,20 @@ description: >-
 # DIFFERENT action id for EVERY package in the graph. One shared entry is
 # written by whichever job wins the race to save it and is then a near-total
 # miss for the other three configurations, which recompile the dependency graph
-# from scratch. Measured p50 of that recompilation on 15 PR runs:
-# `go test -race ./...` 143s, `go vet ./...` 55s, `go vet -tags console_assets
-# ./...` 68s, `go vet -tags integration ./...` 29s.
+# from scratch. Measured on this pipeline's first two runs: with a per-variant
+# cache the `build` job went 132s -> 23s and console's tagged build 55s -> 2s.
 #
-# Keys are deliberately NOT suffixed with github.sha. A stable key means at most
-# one entry per (variant, go version, go.sum) — six entries, ~2GB — instead of a
-# new multi-hundred-MB entry per commit, which would blow the 10GB repo budget
+# Keys are deliberately NOT suffixed with the commit sha. A stable key means at
+# most one entry per (variant, go version, go.sum) — a handful of entries — not
+# a new multi-hundred-MB entry per commit, which would blow the 10GB repo budget
 # and start evicting the entries it just wrote.
 
 inputs:
   variant:
     description: >-
       Build-configuration name (vet / race / integration / console / sqlc /
-      gosec). Jobs that compile the same configuration must share it, and jobs
-      that compile different configurations must NOT.
+      gosec / govulncheck). Jobs that compile the same configuration must share
+      it, and jobs that compile different configurations must NOT.
     required: true
 
 runs:
@@ -49,26 +49,26 @@ runs:
         go-version-file: go.mod
         cache: false
 
-    - id: goenv
-      shell: bash
+    # The keys live in the environment so go-cache-save can reuse them verbatim
+    # rather than restating the expressions and drifting from them.
+    - shell: bash
       run: |
         {
-          echo "modcache=$(go env GOMODCACHE)"
-          echo "buildcache=$(go env GOCACHE)"
-          echo "goversion=$(go env GOVERSION)"
-        } >> "$GITHUB_OUTPUT"
+          echo "GO_MODCACHE_PATH=$(go env GOMODCACHE)"
+          echo "GO_BUILDCACHE_PATH=$(go env GOCACHE)"
+          echo "GO_MODCACHE_KEY=gomod-${{ runner.os }}-$(go env GOVERSION)-${{ hashFiles('**/go.sum') }}"
+          echo "GO_BUILDCACHE_KEY=gobuild-${{ inputs.variant }}-${{ runner.os }}-$(go env GOVERSION)-${{ hashFiles('**/go.sum') }}"
+        } >> "$GITHUB_ENV"
 
     # Module cache: identical for every variant, so it is keyed on go.sum alone.
-    - uses: actions/cache@v4
+    - uses: actions/cache/restore@v4
       with:
-        path: ${{ steps.goenv.outputs.modcache }}
-        key: gomod-${{ runner.os }}-${{ steps.goenv.outputs.goversion }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: gomod-${{ runner.os }}-${{ steps.goenv.outputs.goversion }}-
+        path: ${{ env.GO_MODCACHE_PATH }}
+        key: ${{ env.GO_MODCACHE_KEY }}
 
     # Build cache: per variant, because a different tag/race set means a
     # different action id for every compiled package.
-    - uses: actions/cache@v4
+    - uses: actions/cache/restore@v4
       with:
-        path: ${{ steps.goenv.outputs.buildcache }}
-        key: gobuild-${{ inputs.variant }}-${{ runner.os }}-${{ steps.goenv.outputs.goversion }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: gobuild-${{ inputs.variant }}-${{ runner.os }}-${{ steps.goenv.outputs.goversion }}-
+        path: ${{ env.GO_BUILDCACHE_PATH }}
+        key: ${{ env.GO_BUILDCACHE_KEY }}

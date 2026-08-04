@@ -1,0 +1,31 @@
+name: Save Go caches
+description: >-
+  Save the caches that go-env restored. Call as the LAST step of a job that used
+  go-env, with `if: always()`.
+
+# WHY THIS IS A SEPARATE STEP INSTEAD OF `actions/cache`'s AUTOMATIC POST STEP.
+#
+# `actions/cache` declares its save `post-if: success()`, so a job that FAILS
+# caches nothing. That is exactly backwards for the case that matters: a red PR
+# is the one whose next push you most want to be fast. Measured on this
+# pipeline's first two runs — `build` and `console` had passed, so they saved and
+# came back warm (132s -> 23s, 87s -> 48s); `unit`, `gosec`, `sqlc` and all six
+# integration shards had failed, saved nothing, and were still stone cold on the
+# second run. Splitting restore from save and gating on `always()` fixes it.
+#
+# Re-saving a key that already exists is a warning, not an error, but
+# continue-on-error keeps even that from colouring a job.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: ${{ env.GO_MODCACHE_PATH }}
+        key: ${{ env.GO_MODCACHE_KEY }}
+    - uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: ${{ env.GO_BUILDCACHE_PATH }}
+        key: ${{ env.GO_BUILDCACHE_KEY }}

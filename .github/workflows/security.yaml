@@ -90,6 +90,10 @@ jobs:
         run: "$GOSEC_BIN -severity high -confidence medium -exclude-dir=.agents ./..."
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   govulncheck:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -116,6 +120,10 @@ jobs:
 
   # Trivy: additional SCA + filesystem vulnerability/secret scanning. Fails on
   # HIGH/CRITICAL findings. Cheap — always runs, no path gating.
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   trivy:
     runs-on: ubuntu-latest
     timeout-minutes: 15

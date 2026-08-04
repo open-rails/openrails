@@ -125,6 +125,10 @@ jobs:
             (cd "$d" && go build ./... && go vet ./...)
           done
 
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   # Unit tests, split out of `build` so the two run in parallel. Still -race,
   # still the whole tree: nothing here is scoped, skipped or downgraded.
   unit:
@@ -144,6 +148,9 @@ jobs:
       - name: Test (race)
         if: needs.changes.outputs.go == 'true'
         run: go test -race ./...
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
 
   # or#869: .golangci.yml existed for a year with nothing running it — and could
   # not have run (v1 schema, which current golangci-lint refuses to load). The
@@ -216,10 +223,15 @@ jobs:
           POSTGRES_HOST_PORT: "5434"
         run: "$TASK_BIN sqlc-check"
 
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   # Admin console SPA (#754: dist is NOT committed, so nothing else compiles
   # web/admin) — lint + typecheck+build the frontend, then prove the tagged Go
   # binary embeds the produced dist. Steps run only when web/admin/** (or a
   # shared surface) changed.
+
   console:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -281,6 +293,10 @@ jobs:
             exit 1
           fi
 
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   # PR tier (#855): integration tests SCOPED to the tagged packages the diff
   # touches. Cross-package fallout is deliberately deferred to integration-full
   # (push + nightly, complete suite). Broad/shared-surface diffs (go.mod,
@@ -293,6 +309,7 @@ jobs:
   # serialises everything inside a shard, so the shared-Postgres/Garnet and
   # un-namespaced-Redis-key assumptions that forbid raising -parallel are
   # untouched. See scripts/ci-integration-select.sh for the balancing.
+
   integration-shard:
     name: integration shard ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
@@ -328,9 +345,14 @@ jobs:
           echo "shard ${SHARD}/${SHARDS}: ${pkgs[*]}"
           OPENRAILS_INTEGRATION_TIMEOUT=15m bash scripts/test_integration.sh "${pkgs[@]}"
 
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   # One stable name for branch protection to require, so changing the shard
   # count never means editing the ruleset. `always()` + an explicit result check
   # is load-bearing: without it a cancelled or skipped shard would let this pass.
+
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 5
