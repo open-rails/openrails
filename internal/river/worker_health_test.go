@@ -16,6 +16,13 @@ func agoAt(d time.Duration) *time.Time {
 	return &t
 }
 
+// evalRow keeps these cases on the worker_health-only evidence path (no
+// river_job watermark), which is exactly the shape the old River-job checker
+// evaluated — so the ported rules are compared like for like.
+func evalRow(row gen.OpenrailsWorkerHealth, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
+	return evaluateKindProgress(row, KindProgress{}, now, failureThreshold, staleMultiplier, minStale)
+}
+
 func TestEvaluateWorkerHealth(t *testing.T) {
 	now := healthNow()
 	const threshold, mult = 3, 3
@@ -39,7 +46,7 @@ func TestEvaluateWorkerHealth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, evaluateWorkerHealth(tc.row, now, threshold, mult, minStale))
+			require.Equal(t, tc.want, evalRow(tc.row, now, threshold, mult, minStale))
 		})
 	}
 }

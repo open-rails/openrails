@@ -162,3 +162,18 @@ WHERE (sqlc.narg(merchant_id)::uuid IS NULL
   AND (a.credits_posted <> COALESCE(l.credits, 0)
     OR a.debits_posted <> COALESCE(l.debits, 0))
 ORDER BY a.merchant_id, a.currency, a.id;
+
+-- SumLedgerSpendByCoords: the TOTAL money already posted at one operation
+-- coordinate. A spend fans out into one credit_spend transfer per FIFO credit
+-- lot drawn plus at most one owed_accrual, so the first transfer's amount is NOT
+-- the operation's amount — only the sum is. or#891 item 3 compares this against
+-- a retry's amount to refuse a reused key carrying a changed body.
+-- name: SumLedgerSpendByCoords :one
+SELECT COALESCE(SUM(amount), 0)::bigint AS total, count(*)::bigint AS transfers
+FROM openrails.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND source = sqlc.arg(source)::text
+  AND source_id = sqlc.arg(source_id)::text;

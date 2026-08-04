@@ -620,3 +620,45 @@ func (q *Queries) SumLedgerMovementsByCustomerInPeriod(ctx context.Context, arg 
 	}
 	return items, nil
 }
+
+const sumLedgerSpendByCoords = `-- name: SumLedgerSpendByCoords :one
+SELECT COALESCE(SUM(amount), 0)::bigint AS total, count(*)::bigint AS transfers
+FROM openrails.ledger_transfers
+WHERE merchant_id = $1::uuid
+  AND customer_id = $2::uuid
+  AND currency = $3::text
+  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND source = $4::text
+  AND source_id = $5::text
+`
+
+type SumLedgerSpendByCoordsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Source     string
+	SourceID   string
+}
+
+type SumLedgerSpendByCoordsRow struct {
+	Total     int64
+	Transfers int64
+}
+
+// SumLedgerSpendByCoords: the TOTAL money already posted at one operation
+// coordinate. A spend fans out into one credit_spend transfer per FIFO credit
+// lot drawn plus at most one owed_accrual, so the first transfer's amount is NOT
+// the operation's amount — only the sum is. or#891 item 3 compares this against
+// a retry's amount to refuse a reused key carrying a changed body.
+func (q *Queries) SumLedgerSpendByCoords(ctx context.Context, arg SumLedgerSpendByCoordsParams) (SumLedgerSpendByCoordsRow, error) {
+	row := q.db.QueryRow(ctx, sumLedgerSpendByCoords,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Source,
+		arg.SourceID,
+	)
+	var i SumLedgerSpendByCoordsRow
+	err := row.Scan(&i.Total, &i.Transfers)
+	return i, err
+}

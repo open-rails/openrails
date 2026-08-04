@@ -84,19 +84,14 @@ records on file.
 **PERMANENT — capped by a caller-supplied list.**
 `LookupCustomerIDsBySubjects` is capped by `subjects[]`;
 `uq_customers_merchant_subject` is a *partial* unique index and the auditor
-deliberately refuses to credit partial indexes. (`SnapshotPaymentCards` was here
-too until or#831 made `UNIQUE(merchant_id, rail, transaction_id)` total: the
-`rail = 'stripe'` literal completes that key, so `transaction_ids[]` now caps it
-provably and the exemption is gone.)
+deliberately refuses to credit partial indexes. `SnapshotPaymentCards` is capped
+by `transaction_ids[]` and index-backed by
+`idx_payments_merchant_rail_transaction`; a `UNIQUE(merchant_id, rail,
+transaction_id)` would make it provable.
 
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it
 generically; the merchant index bounds the scan, the page `LIMIT` the result.
-
-**PERMANENT — ledger integrity diagnostics.**
-`ListLedgerConservationBreaches` and `ListLedgerCounterDrifts` are explicitly
-invoked operator audits. They must inspect the full ledger and return every
-finding: pagination or truncation could make a damaged ledger appear healthy.
 
 **DEBT (or#837).** Everything else. These are real:
 
@@ -107,12 +102,11 @@ finding: pagination or truncation could make a damaged ledger appear healthy.
   `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
   `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
   backlog makes each one a single long transaction.
-- *Missing indexes* — RETIRED by or#846 (migration 0012). Note the lesson: under
-  RLS every query carries `merchant_id = …`, so a missing index almost never
-  shows up as a `Seq Scan` — "no Seq Scans" is NOT evidence that indexing is
-  adequate. A merchant_id index that is *partial* leaves the RLS predicate
-  unbacked outside its predicate;
-  `TestMerchantIsolationPolicyIsIndexBacked` now fails the build on that shape.
+- *Missing indexes* — `solana_subscriptions.merchant_id` (its RLS predicate is
+  not index-backed; the only true `Seq Scan` in the codebase),
+  `product_usage_limit_bindings` (no index at all), `grants.payment_id`,
+  `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
+  `reprice_batches.price_key`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
   The caller's list is bounded but each element's row set is not.
 
@@ -123,6 +117,13 @@ GUCs, RLS probes, the schema-rewrite wrapper, advisory locks), SQL built
 dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
+
+`internal/river/progress.go` is PERMANENT for a different reason: it reads
+**River's own** `river_job` table, which is not part of OpenRails' schema, is
+created by River's migrator rather than `migrations/`, and lives in a schema
+named at runtime (`config.RiverSchema`). sqlc has no type information for it and
+could not express the schema-qualified name anyway. Only the schema is
+interpolated, after an identifier check; the kind list is a bound parameter.
 
 **DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
 Nothing about them requires raw SQL.
@@ -135,11 +136,51 @@ squashed baseline (creates the schema from nothing, so lock-safety rules are
 vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
 excluded and must pass clean.
 
-`0011_query_audit_indexes.up.sql` through
-`0013_total_rail_transaction_uniques.up.sql`, plus
-`0015_merchant_permission_group_unique.up.sql`, have file-specific exceptions
-for concurrent index creation (and deletion where an old index is replaced).
-PostgreSQL forbids those concurrent forms inside the transaction migratekit
-always opens, so these indexes use regular operations bounded by a five-second
-lock timeout and five-minute statement timeout. The lint script still applies
-every other Squawk rule to these files.
+### `require-concurrent-index-creation` / `require-concurrent-index-deletion` — PERMANENT, repo-wide
+
+**Not a relaxed standard: an unreachable one.** migratekit's only Postgres apply
+path (`postgres.go` `applyOne`) opens `BeginTx` and executes the whole file
+inside it. There is no per-file opt-out, no `-- no-transaction` directive, and
+no second path — verified by reading migratekit v1.4.0, not inferred from the
+`assume_in_transaction` setting. PostgreSQL then refuses both operations
+outright. Measured on `postgres:18-alpine` rather than quoted from the docs:
+
+```
+BEGIN; CREATE INDEX CONCURRENTLY idx_t1_x ON t1 (x);
+  ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+BEGIN; DROP INDEX CONCURRENTLY idx_t1_x2;
+  ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
+```
+
+So **no migration in this repo can ever satisfy these two rules**, and a rule
+nobody can satisfy is not a gate — it is noise that blocks every future index
+and trains readers to reach for a path exclusion. They are therefore excluded in
+`.squawk.toml` via `excluded_rules`, repo-wide, in preference to a growing list
+of per-file carve-outs.
+
+Two pieces of evidence that this was already the de-facto state, just
+undocumented and unevenly applied:
+
+- `0011_query_audit_indexes.up.sql` carried a bespoke exclusion implemented as a
+  second squawk invocation inside `scripts/migration-lint.sh`. That carve-out is
+  now deleted; 0011 is linted by the same rule set as every other file.
+- `0016_cross_merchant_directory.up.sql` (on the unmerged `chaos` branch, not on
+  `master`) states the identical constraint in a code comment written
+  independently: *"Not CONCURRENTLY: the migrator applies each file inside ONE
+  transaction, where CREATE INDEX CONCURRENTLY is illegal (same constraint as
+  the five indexes in 0011)."* A second author reached the same conclusion
+  unprompted, and that migration will trip this gate the moment it merges unless
+  the rules are excluded here.
+
+**What is still enforced.** Only these two rules are excluded. `require-lock-timeout`,
+`require-statement-timeout`, `ban-drop-column`, `ban-drop-table` and the rest
+remain enforcing on every non-baseline migration — verified by running squawk
+with this config against a deliberately unsafe statement, which still reports
+all three of its issues. Because CONCURRENTLY is unavailable, a migration that
+builds an index must instead bound its blocking window explicitly: `SET
+lock_timeout` and `SET statement_timeout` at the top of the file, which
+`require-lock-timeout` / `require-statement-timeout` continue to force.
+
+**How to reverse this.** Give migratekit a non-transactional apply mode and mark
+such files with a directive; then delete the two entries from `excluded_rules`.
+It is a migratekit change, not a `.squawk.toml` change.

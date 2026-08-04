@@ -30,7 +30,7 @@ func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: superDSN},
 	}
-	e, err := New(Options{Config: cfg, PGXPool: pool, Redis: rdb})
+	e, err := New(Options{Config: cfg, PGXPool: pool, Redis: rdb, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	require.NoError(t, e.Close(context.Background()))
 

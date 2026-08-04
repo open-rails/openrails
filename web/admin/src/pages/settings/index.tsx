@@ -30,7 +30,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { useApiData } from "@/hooks/use-api-data"
 import {
   deletePaymentProvider,
@@ -42,7 +41,10 @@ import {
   putPaymentProvider,
   setCreditLimit,
 } from "@/lib/api/endpoints"
-import type { PaymentProviderConfig } from "@/lib/api/types"
+import type {
+  PaymentProviderConfig,
+  PaymentProviderDefinition,
+} from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { AlertsTab } from "./alerts"
@@ -210,8 +212,6 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
   )
 }
 
-const PROVIDER_RAILS = ["nmi", "ccbill", "stripe", "solana"]
-
 function ProvidersTab() {
   const { data, loading, error, reload } = useApiData(() => listPaymentProviders(), [])
   React.useEffect(() => {
@@ -223,7 +223,10 @@ function ProvidersTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <ProviderDialog onDone={reload} />
+        <ProviderDialog
+          providerDefinitions={data?.provider_definitions ?? []}
+          onDone={reload}
+        />
       </div>
       {!data?.data?.length ? (
         <p className="text-sm text-muted-foreground">No payment providers configured.</p>
@@ -313,13 +316,24 @@ function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; on
   )
 }
 
-function ProviderDialog({ onDone }: { onDone: () => void }) {
+function ProviderDialog({
+  providerDefinitions,
+  onDone,
+}: {
+  providerDefinitions: PaymentProviderDefinition[]
+  onDone: () => void
+}) {
   const [open, setOpen] = React.useState(false)
   const [rail, setRail] = React.useState("")
   const [accountID, setAccountID] = React.useState("")
   const [environment, setEnvironment] = React.useState("")
-  const [credentials, setCredentials] = React.useState("")
+  const [credentials, setCredentials] = React.useState<Record<string, string>>(
+    {}
+  )
   const [busy, setBusy] = React.useState(false)
+  const selectedProvider = providerDefinitions.find(
+    (provider) => provider.rail === rail
+  )
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -329,9 +343,9 @@ function ProviderDialog({ onDone }: { onDone: () => void }) {
         <DialogHeader>
           <DialogTitle>Configure payment provider</DialogTitle>
           <DialogDescription>
-            account_id is operator-declared per rail (NMI gateway id, Stripe acct_…, CCBill
-            clientAccnum-clientSubacc, Solana wallet). Credentials are name=value lines and
-            are stored in the secret backend.
+            account_id is operator-declared per rail (NMI gateway id, Stripe
+            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet).
+            Credentials are stored in the secret backend.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -340,12 +354,15 @@ function ProviderDialog({ onDone }: { onDone: () => void }) {
               id="pv-rail"
               className="h-9 rounded-md border bg-transparent px-3 text-sm"
               value={rail}
-              onChange={(e) => setRail(e.target.value)}
+              onChange={(e) => {
+                setRail(e.target.value)
+                setCredentials({})
+              }}
             >
               <option value="">Pick a rail…</option>
-              {PROVIDER_RAILS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+              {providerDefinitions.map((provider) => (
+                <option key={provider.rail} value={provider.rail}>
+                  {provider.rail} — {provider.display_name}
                 </option>
               ))}
             </select>
@@ -356,25 +373,30 @@ function ProviderDialog({ onDone }: { onDone: () => void }) {
           <Field label="Environment (live | test, empty = deployment default)" id="pv-env">
             <Input id="pv-env" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
           </Field>
-          <Field label="Credentials (name=value per line)" id="pv-creds">
-            <Textarea
-              id="pv-creds"
-              className="font-mono text-xs"
-              placeholder={"security_key=...\n"}
-              value={credentials}
-              onChange={(e) => setCredentials(e.target.value)}
-            />
-          </Field>
+          {selectedProvider?.credential_keys.map((name) => (
+            <Field key={name} label={name} id={`pv-credential-${name}`}>
+              <Input
+                id={`pv-credential-${name}`}
+                type="password"
+                autoComplete="new-password"
+                value={credentials[name] ?? ""}
+                onChange={(e) =>
+                  setCredentials((current) => ({
+                    ...current,
+                    [name]: e.target.value,
+                  }))
+                }
+              />
+            </Field>
+          ))}
         </div>
         <DialogFooter>
           <Button
             disabled={busy || !rail || !accountID.trim()}
             onClick={async () => {
-              const creds: Record<string, string> = {}
-              for (const line of credentials.split("\n")) {
-                const idx = line.indexOf("=")
-                if (idx > 0) creds[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
-              }
+              const creds = Object.fromEntries(
+                Object.entries(credentials).filter(([, value]) => value !== "")
+              )
               setBusy(true)
               try {
                 await putPaymentProvider(rail, {
@@ -382,6 +404,7 @@ function ProviderDialog({ onDone }: { onDone: () => void }) {
                   ...(environment ? { environment } : {}),
                   ...(Object.keys(creds).length ? { credentials: creds } : {}),
                 })
+                setCredentials({})
                 toast.success("Provider saved")
                 setOpen(false)
                 onDone()

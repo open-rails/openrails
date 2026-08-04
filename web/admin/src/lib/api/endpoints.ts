@@ -25,6 +25,7 @@ import type {
   PaymentMethodResponse,
   PaymentObject,
   PaymentProviderConfig,
+  PaymentProviderDefinition,
   PriceKeyHistoryEntry,
   RawEntitlement,
   RepairAlert,
@@ -311,7 +312,10 @@ export const putMerchantSettings = (body: MerchantSettings) =>
   api<{ message: string }>("/merchant/settings", { method: "PUT", body })
 
 export const listPaymentProviders = () =>
-  api<{ data: PaymentProviderConfig[] }>("/merchant/payment-providers")
+  api<{
+    data: PaymentProviderConfig[]
+    provider_definitions: PaymentProviderDefinition[]
+  }>("/merchant/payment-providers")
 
 export interface UpsertProviderRequest {
   environment?: string

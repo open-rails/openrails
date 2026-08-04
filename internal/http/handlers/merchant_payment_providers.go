@@ -28,7 +28,10 @@ func MerchantListPaymentProviders(r *httprequest.Request) {
 		writeMerchantProviderError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, map[string]any{"data": items})
+	r.JSON(http.StatusOK, map[string]any{
+		"data":                 items,
+		"provider_definitions": merchants.PaymentProviderDefinitions(),
+	})
 }
 
 // MerchantGetPaymentProvider handles GET /v1/merchant/payment-providers/:provider.

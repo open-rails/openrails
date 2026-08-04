@@ -143,7 +143,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// ConsoleAssets is nil unless this binary was built with
 	// `-tags console_assets` (#754: `task build-console-binary` / Dockerfile).
-	embeddedApp, err := embedded.New(embedded.Options{Config: cfg, ConsoleAssets: consoleassets.FS()})
+	embeddedApp, err := embedded.New(embedded.Options{
+		Config:        cfg,
+		ConsoleAssets: consoleassets.FS(),
+		// Standalone keeps self-provisioning (#895): OpenRails builds and runs
+		// its own River client in RunWorkers. The declaration is now explicit.
+		River: embedded.RiverManagedByOpenRails(),
+	})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}

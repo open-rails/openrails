@@ -49,7 +49,7 @@ func TestLocalClientAdmit(t *testing.T) {
 		rdb, _ := dbtest.SharedRedisClient(t)
 
 		slug := fmt.Sprintf("embed-localclient-admit-%d", time.Now().UnixNano())
-		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, Redis: rdb}})
+		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, Redis: rdb, River: embedded.RiverManagedByOpenRails()}})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -94,7 +94,7 @@ func TestLocalClientAdmit(t *testing.T) {
 	})
 
 	t.Run("no merchant bound: 500 message names the real cause", func(t *testing.T) {
-		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		// Deliberately no UpsertMerchantConfig: merchantCtx has nothing to pin, so
@@ -142,7 +142,7 @@ func TestMerchantPinMismatch(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	slug := fmt.Sprintf("embed-merchant-pin-mismatch-%d", time.Now().UnixNano())
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 

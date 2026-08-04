@@ -735,11 +735,34 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 	if bal.Balance-bal.HeldBalance < params.Amount {
 		return nil, ErrInsufficientCredits
 	}
-	sourceIDText := (*string)(nil)
-	sid := ""
-	if params.SourceID != nil {
-		sid = params.SourceID.String()
-		sourceIDText = &sid
+	// or#891 item 1 (same shape as SpendCredits): the dedupe read used to sit
+	// behind `if params.SourceID != nil`, so a keyless withdraw posted
+	// unconditionally and every retry debited again.
+	if params.SourceID == nil {
+		return nil, fmt.Errorf("withdraw: source_id required for idempotency")
+	}
+	sid := params.SourceID.String()
+	sourceIDText := &sid
+	if err := requireIdempotencyKey("withdraw", strings.TrimSpace(params.Source), strings.TrimSpace(sid)); err != nil {
+		return nil, err
+	}
+	// or#891 item 3: compare the TOTAL already withdrawn at these coordinates (a
+	// withdraw fans out one credit_spend transfer per FIFO lot) and refuse a
+	// replay whose amount differs, rather than answering it with the first row.
+	committed, cerr := q.SumLedgerSpendByCoords(ctx, gen.SumLedgerSpendByCoordsParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+		Source: params.Source, SourceID: sid,
+	})
+	if cerr != nil {
+		return nil, cerr
+	}
+	if committed.Transfers > 0 {
+		if committed.Total != params.Amount {
+			return nil, &IdempotencyConflict{
+				Operation: "withdraw", Source: params.Source, SourceID: sid,
+				Field: "amount", Committed: committed.Total, Retried: params.Amount,
+			}
+		}
 		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			TransferType: "credit_spend", Source: params.Source, SourceID: sid,

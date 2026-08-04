@@ -402,6 +402,37 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	require.Equal(t, dbtest.TestMerchantID.UUID(), byIdentity.MerchantID)
 }
 
+func TestUpsertPSPOnlyRecordsExplicitValidation(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.SharedPGXPool(t)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	q := gen.New(pool)
+	accountID := "validation-" + uuid.NewString()
+	params := gen.UpsertPSPParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
+		Rail:        "nmi",
+		Environment: strptr("test"),
+		AccountID:   accountID,
+	}
+
+	unvalidated, err := q.UpsertPSP(ctx, params)
+	require.NoError(t, err)
+	require.Nil(t, unvalidated.LastVerifiedAt)
+
+	validatedAt := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	params.LastVerifiedAt = &validatedAt
+	validated, err := q.UpsertPSP(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, validated.LastVerifiedAt)
+	require.True(t, validatedAt.Equal(*validated.LastVerifiedAt))
+
+	params.LastVerifiedAt = nil
+	preserved, err := q.UpsertPSP(ctx, params)
+	require.NoError(t, err)
+	require.NotNil(t, preserved.LastVerifiedAt)
+	require.True(t, validatedAt.Equal(*preserved.LastVerifiedAt))
+}
+
 func strptr(s string) *string { return &s }
 
 func int32ptr(i int32) *int32 { return &i }

@@ -65,6 +65,10 @@ type Service struct {
 	// point it at a fake gateway instead of the real NMI API. Empty in
 	// production — the probe uses nmi.NewClient's documented default.
 	nmiProbeV5BaseURL string
+	// Credential-probe endpoint overrides are test-only seams for the
+	// read-only NMI Query API and CCBill DataLink checks.
+	nmiCredentialProbeQueryURL   string
+	ccbillCredentialProbeBaseURL string
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
