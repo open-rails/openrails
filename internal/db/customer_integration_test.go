@@ -53,6 +53,8 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 
 // seedForeignCustomer creates a second merchant plus a customer row owned by it,
 // returning that merchant's id and the customer id.
+// It requires a handle that spans merchants (the privileged pool): the foreign
+// customer row is by definition outside the test merchant's RLS scope.
 func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	otherMerchantID := uuid.New()
@@ -79,7 +81,10 @@ func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid
 // and hand the caller an id it does not own.
 func TestEnsureCustomerID_RefusesCrossMerchantClaim(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	// The privileged handle IS the subject of this test: the guard has to hold
+	// where RLS does not. A bare SharedPGXPool is RLS-enforcing with no
+	// app.merchant_id, so seeding customers on it fails WITH CHECK (42501).
+	pool := dbtest.SharedSuperuserPGXPool(t)
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
@@ -100,7 +105,9 @@ func TestEnsureCustomerID_RefusesCrossMerchantClaim(t *testing.T) {
 // bypass RLS).
 func TestEnsureCustomerRow_RefusesCrossMerchantClaim(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	// Privileged for the same reason as the sibling above: FK checks bypass RLS,
+	// so the silent-no-op corruption this guards is reachable precisely here.
+	pool := dbtest.SharedSuperuserPGXPool(t)
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
@@ -118,7 +125,9 @@ func TestEnsureCustomerRow_RefusesCrossMerchantClaim(t *testing.T) {
 // The same id under the SAME merchant stays a plain idempotent no-op.
 func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	// One merchant's own rows: the RLS-enforcing pinned pool, so the policies
+	// stay live and the fixture proves the merchant can write its own customer.
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
@@ -144,7 +153,7 @@ func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 // it once that writer commits (#889).
 func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
@@ -155,6 +164,11 @@ func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
+	// The committing goroutine below is only reached if every assertion between
+	// here and it passes. Without this, ANY failure in between abandons a
+	// checked-out connection and the pool's Close cleanup blocks forever —
+	// turning a one-line assertion failure into a whole-package hang.
+	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx,
 		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
 		customerID, tenantID, customerID.String())
