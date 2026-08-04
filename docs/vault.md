@@ -122,13 +122,13 @@ secret/openrails/merchants/<merchant-slug>/<name>     # value under KV-v2 field 
 ```
 
 Slugs (not ids) make operator-written paths deterministic and readable. The names are identical
-across backends — switching to Vault changes only the physical path. Canonical names:
+across backends — switching to Vault changes only the physical path.
+
+There is exactly ONE canonical name shape, for every rail (#884 retired the flat
+`<rail>/<purpose>` spellings — they were write-only and never read):
 
 | Secret | `<name>` |
 |---|---|
-| Stripe API key | `stripe/secret_key` |
-| Stripe webhook signing secret | `stripe/webhook_signing_secret` |
-| Stripe thin-event signing secret | `stripe/webhook_signing_secret_thin` |
 | PSP-scoped credential (all rails) | `psps/<rail>/<live\|test>/<account_id>/<key>` |
 
 The `psps/` prefix is the durable per-PSP shape — one merchant can run multiple accounts on a
@@ -139,7 +139,7 @@ CCBill `accnum-subacc`, Solana signer address); `<key>` is a rail-registry crede
 ```sh
 vault kv put secret/openrails/merchants/acme/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
 vault kv put secret/openrails/merchants/acme/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/acme/stripe/secret_key value="$STRIPE_SECRET_KEY"
+vault kv put secret/openrails/merchants/acme/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
 ```
 
 `psps/solana/<env>/<address>/private_key` (local-keypair signer) is operator-only — it is never

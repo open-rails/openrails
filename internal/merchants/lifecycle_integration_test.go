@@ -391,7 +391,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)
-	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeSecretKey, "sk")
+	_, err = svc.secrets.Put(ctx, tn.ID, "psps/stripe/live/acct_884_test/secret_key", "sk")
 	require.NoError(t, err)
 
 	svc.WithDestructivePolicy(allowAllDestructive{})

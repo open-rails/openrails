@@ -182,7 +182,7 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 	// PUT /v1/merchant/payment-providers equivalent (service level; the HTTP
 	// handler delegates here): declares the account and stores credentials.
 	cfgA, err := svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		AccountID:   acctA,
+		AccountID: acctA,
 		Credentials: map[string]string{
 			"security_key":           "sk-full-A-1",
 			"webhook_signing_secret": "wh-full-A-1",
@@ -295,9 +295,9 @@ func TestVaultCapabilityGating_RealPolicies(t *testing.T) {
 
 		// Secrets round-trip through Postgres, not Vault.
 		mid, _ := registerMerchant(t, ctx, pool, "vcg-db") // merchant_deks FK needs a real merchant
-		_, err = store.Secrets.Put(ctx, mid, merchants.SecretNMISecurityKey, "db-backed")
+		_, err = store.Secrets.Put(ctx, mid, "psps/nmi/live/100884/security_key", "db-backed")
 		require.NoError(t, err)
-		got, err := store.Secrets.Get(ctx, mid, merchants.SecretNMISecurityKey)
+		got, err := store.Secrets.Get(ctx, mid, "psps/nmi/live/100884/security_key")
 		require.NoError(t, err)
 		require.Equal(t, "db-backed", got.Value)
 	})

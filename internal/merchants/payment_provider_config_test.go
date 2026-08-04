@@ -47,10 +47,7 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 		LastVerifiedAt: &now,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-	}, []MerchantSecretStatus{{
-		SecretDefinition: SecretDefinition{Name: secretName},
-		Configured:       true,
-	}})
+	}, []MerchantSecretStatus{{Name: secretName, Configured: true}})
 
 	if got.PublicConfig["publishable_key"] != "pk_live_123" {
 		t.Fatalf("public_config = %#v", got.PublicConfig)
@@ -81,10 +78,7 @@ func TestPaymentProviderConfigFromRowHidesUnprovenTimestamp(t *testing.T) {
 		Environment:    "live",
 		AccountID:      "gateway",
 		LastVerifiedAt: &now,
-	}, []MerchantSecretStatus{{
-		SecretDefinition: SecretDefinition{Name: secretName},
-		Configured:       true,
-	}})
+	}, []MerchantSecretStatus{{Name: secretName, Configured: true}})
 
 	if got.LastVerifiedAt != nil || got.Credentials["security_key"].LastValidatedAt != nil {
 		t.Fatal("an auto-stamped timestamp without probe evidence must stay hidden")
@@ -144,7 +138,7 @@ func TestValidateScopedStripeCredentialDoesNotPersist(t *testing.T) {
 	}
 	if statuses, err := svc.ListSecretStatuses(context.Background(), id); err != nil {
 		t.Fatal(err)
-	} else if len(statuses) != len(merchantSecretRegistry) {
+	} else if len(statuses) != 0 {
 		t.Fatalf("validation should not create provider-account secrets, got %d statuses", len(statuses))
 	}
 }

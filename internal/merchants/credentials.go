@@ -53,9 +53,6 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if s.secrets == nil {
 		return creds, nil
 	}
-	if s.pool == nil {
-		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin, SecretStripeWebhookSigningPrevious)
-	}
 	scope, ok, err := s.activePSPSecretScope(ctx, id, "stripe", s.providerEnvironment)
 	if err != nil {
 		return creds, err
@@ -89,9 +86,6 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 	if strings.ToLower(strings.TrimSpace(provider)) != string(models.RailNMI) {
 		return "", nil
 	}
-	if s.pool == nil {
-		return s.secretValue(ctx, id, SecretNMIWebhookSigning)
-	}
 	scope, ok, err := s.activePSPSecretScope(ctx, id, "nmi", s.providerEnvironment)
 	if err != nil {
 		return "", err
@@ -118,10 +112,6 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	collectURL := ""
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case string(models.RailNMI):
-		if s.pool == nil {
-			cfg.CollectJSURL = DefaultNMICollectJSURL
-			return cfg, nil
-		}
 		scope, ok, err := s.activePSPSecretScope(ctx, id, "nmi", s.providerEnvironment)
 		if err != nil {
 			return cfg, err
@@ -909,14 +899,6 @@ func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value
 // RotateCredential is PutCredential with action="rotate".
 func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
 	return s.PutCredential(ctx, id, name, value)
-}
-
-// TestStripeCredential verifies a merchant's stored Stripe secret key works WITHOUT
-// charging, by listing the account's balance via the Stripe API. tester is the
-// verification function (so this stays testable without a live Stripe); when nil,
-// a default real Stripe balance check is used. It records a "test" audit row.
-func (s *Service) TestStripeCredential(ctx context.Context, id merchant.ID, tester func(ctx context.Context, secretKey string) error) error {
-	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", tester)
 }
 
 // CountActivePSPsForRail is how many PSPs the merchant has ACTIVE for new work

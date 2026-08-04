@@ -51,7 +51,7 @@ func TestEncryptedSecretStore_RoundTrips(t *testing.T) {
 	}
 	tA := merchant.ID(uuid.New())
 
-	put, err := store.Put(ctx, tA, SecretStripeSecretKey, "sk_live_abc")
+	put, err := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", "sk_live_abc")
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestEncryptedSecretStore_RoundTrips(t *testing.T) {
 	}
 
 	// The INNER store must hold ciphertext, never the plaintext.
-	raw, err := inner.Get(ctx, tA, SecretStripeSecretKey)
+	raw, err := inner.Get(ctx, tA, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatalf("inner Get: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestEncryptedSecretStore_RoundTrips(t *testing.T) {
 		t.Fatal("inner store must hold ciphertext, not plaintext")
 	}
 
-	got, err := store.Get(ctx, tA, SecretStripeSecretKey)
+	got, err := store.Get(ctx, tA, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -82,12 +82,12 @@ func TestEncryptedSecretStore_IdempotentRotation(t *testing.T) {
 	store, _ := NewEncryptedSecretStore(NewMemorySecretStore(), newEnc(t))
 	tA := merchant.ID(uuid.New())
 
-	v1, _ := store.Put(ctx, tA, SecretStripeSecretKey, "sk_1")
-	v1again, _ := store.Put(ctx, tA, SecretStripeSecretKey, "sk_1")
+	v1, _ := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", "sk_1")
+	v1again, _ := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", "sk_1")
 	if v1again.Version != v1.Version {
 		t.Fatalf("re-putting the same plaintext must not bump version (%d -> %d)", v1.Version, v1again.Version)
 	}
-	v2, _ := store.Put(ctx, tA, SecretStripeSecretKey, "sk_2")
+	v2, _ := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", "sk_2")
 	if v2.Version != v1.Version+1 {
 		t.Fatalf("changing the value must bump version, got %d want %d", v2.Version, v1.Version+1)
 	}
@@ -101,12 +101,12 @@ func TestEncryptedSecretStore_CrossMerchantIsolation(t *testing.T) {
 	tA := merchant.ID(uuid.New())
 	tB := merchant.ID(uuid.New())
 
-	if _, err := store.Put(ctx, tA, SecretStripeSecretKey, "A-secret"); err != nil {
+	if _, err := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", "A-secret"); err != nil {
 		t.Fatalf("Put A: %v", err)
 	}
 	// Merchant B has its own DEK; merchant A's ciphertext is unreadable as B.
-	rawA, _ := inner.Get(ctx, tA, SecretStripeSecretKey)
-	if _, err := enc.Decrypt(ctx, tB, crypto.SecretAAD(tB, SecretStripeSecretKey), rawA.Value); err == nil {
+	rawA, _ := inner.Get(ctx, tA, "psps/stripe/live/acct_884_test/secret_key")
+	if _, err := enc.Decrypt(ctx, tB, crypto.SecretAAD(tB, "psps/stripe/live/acct_884_test/secret_key"), rawA.Value); err == nil {
 		t.Fatal("merchant B must not decrypt merchant A's stored secret")
 	}
 }
@@ -136,26 +136,26 @@ func TestEncryptedSecretStore_CiphertextIsBoundToItsRow(t *testing.T) {
 	store, _ := NewEncryptedSecretStore(inner, enc)
 	tA := merchant.ID(uuid.New())
 
-	if _, err := store.Put(ctx, tA, SecretStripeWebhookSigning, "whsec_real"); err != nil {
+	if _, err := store.Put(ctx, tA, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_real"); err != nil {
 		t.Fatalf("Put webhook secret: %v", err)
 	}
-	blob, err := inner.Get(ctx, tA, SecretStripeWebhookSigning)
+	blob, err := inner.Get(ctx, tA, "psps/stripe/live/acct_884_test/webhook_signing_secret")
 	if err != nil {
 		t.Fatalf("read raw ciphertext: %v", err)
 	}
 
 	// Relocate the ciphertext into a DIFFERENT name for the SAME merchant —
 	// exactly what a DB-write actor can do.
-	if _, err := inner.Put(ctx, tA, SecretStripeSecretKey, blob.Value); err != nil {
+	if _, err := inner.Put(ctx, tA, "psps/stripe/live/acct_884_test/secret_key", blob.Value); err != nil {
 		t.Fatalf("relocate blob: %v", err)
 	}
-	if _, err := store.Get(ctx, tA, SecretStripeSecretKey); err == nil {
+	if _, err := store.Get(ctx, tA, "psps/stripe/live/acct_884_test/secret_key"); err == nil {
 		t.Fatal("a ciphertext moved into another (merchant, name) row must NOT decrypt: " +
 			"AAD binds it to the row it was sealed for (SEC-24 item 1)")
 	}
 
 	// The row it belongs to still round-trips.
-	got, err := store.Get(ctx, tA, SecretStripeWebhookSigning)
+	got, err := store.Get(ctx, tA, "psps/stripe/live/acct_884_test/webhook_signing_secret")
 	if err != nil {
 		t.Fatalf("original row must still decrypt: %v", err)
 	}
