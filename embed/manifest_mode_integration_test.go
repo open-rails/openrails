@@ -60,7 +60,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: %q
 `, slug, slug, gatewayID))
 }
