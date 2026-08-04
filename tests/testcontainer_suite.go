@@ -103,7 +103,7 @@ func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
 
 // WithSuiteStripeRail adds an active Stripe rail (construction-time config,
 // like the mobius/ccbill/solana defaults) so the hosted Stripe checkout path
-// is reachable. Pair with stripeapi.SetTestBaseTransport so no request ever
+// is reachable. Pair with stripeapi.SetBaseTransport so no request ever
 // leaves the process. Forces a fresh (non-shared) suite boot.
 func WithSuiteStripeRail(secretKey string) TestSuiteOption {
 	return func(suite *TestContainerSuite) {

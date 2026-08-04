@@ -114,16 +114,30 @@ func SetIdempotencyKey(req *http.Request, key string) {
 	req.Header.Set(IdempotencyKeyHeader, key)
 }
 
-// testBaseTransport, when non-nil, replaces http.DefaultTransport UNDER the
-// guard (readonly + version pinning still apply). Settable only in
-// `integration` builds via SetTestBaseTransport (stripeapi_integration.go) so
-// e2e tests can point every Stripe byte at a fake wire server; always nil in
-// production builds.
-var testBaseTransport http.RoundTripper
+// baseTransportOverride, when non-nil, replaces http.DefaultTransport UNDER the
+// guard (readonly + version pinning still apply). nil in production.
+var baseTransportOverride http.RoundTripper
+
+// SetBaseTransport installs rt as the base RoundTripper every Stripe request
+// travels on, UNDER the choke-point guard — readonly enforcement and the
+// Stripe-Version pin still run above it, so a fake wire server never buys a
+// caller an unguarded write. nil restores http.DefaultTransport.
+//
+// This is a TEST seam, deliberately NOT behind a build tag (#814): an embedding
+// host cannot compile internal/ test-tagged code, so an integration-first host
+// had no way to drive a rail-push path against a fake Stripe. The supported
+// entry point is embedded.Options.StripeTransport, which calls this; hosts
+// never reach the choke point directly.
+//
+// Process-global and not safe for parallel use — the integration suite runs
+// serially (-p 1 -parallel 1).
+func SetBaseTransport(rt http.RoundTripper) {
+	baseTransportOverride = rt
+}
 
 func defaultBaseTransport() http.RoundTripper {
-	if testBaseTransport != nil {
-		return testBaseTransport
+	if baseTransportOverride != nil {
+		return baseTransportOverride
 	}
 	return http.DefaultTransport
 }

@@ -112,8 +112,8 @@ func newFakeStripeAPI(t *testing.T) *fakeStripeAPI {
 
 	// Install the choke-point fake: every stripeapi client call is host-rewritten
 	// onto the fake server; guard semantics (version pinning) still apply.
-	stripeapi.SetTestBaseTransport(hostRewriteTransport{target: f.server.URL})
-	t.Cleanup(func() { stripeapi.SetTestBaseTransport(nil) })
+	stripeapi.SetBaseTransport(hostRewriteTransport{target: f.server.URL})
+	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
 	return f
 }
 

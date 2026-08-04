@@ -116,8 +116,8 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
-	stripeapi.SetTestBaseTransport(hostRewriteTransport{target: f.server.URL})
-	t.Cleanup(func() { stripeapi.SetTestBaseTransport(nil) })
+	stripeapi.SetBaseTransport(hostRewriteTransport{target: f.server.URL})
+	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
 	return f
 }
 
