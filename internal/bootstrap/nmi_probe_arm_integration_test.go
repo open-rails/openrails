@@ -50,7 +50,7 @@ func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				AccountID:   "681902",
+				AccountID: "681902",
 				Secrets: map[string]string{
 					"security_key": securityKey,
 				},
@@ -191,8 +191,8 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				AccountID:   "681902",
-				Secrets:     map[string]string{"security_key": "live-security-key-prod"},
+				AccountID: "681902",
+				Secrets:   map[string]string{"security_key": "live-security-key-prod"},
 			},
 		},
 	}

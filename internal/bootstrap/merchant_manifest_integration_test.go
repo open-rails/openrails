@@ -197,7 +197,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
@@ -412,9 +412,13 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 				},
 			},
 		},
-		"mobius-sandbox": {
+		// Archived: with both NMI accounts in the SAME derived environment
+		// (#882), "the active account for new work" must be unambiguous — an
+		// archived sibling still round-trips through dump.
+		"mobius-secondary": {
 			"nmi": {
 				AccountID: "681902",
+				Archived:  true,
 				Secrets: map[string]string{
 					"security_key": "test-security",
 				},
@@ -530,7 +534,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Contains(t, byAccount, "579145")
 	require.Contains(t, byAccount, "681902")
 	require.False(t, byAccount["579145"].Archived)
-	require.False(t, byAccount["681902"].Archived)
+	require.True(t, byAccount["681902"].Archived, "the archived sibling survives push -> dump")
 	require.Empty(t, byAccount["579145"].Secrets, "redacted dump omits secret values entirely")
 	require.NotContains(t, byAccount["579145"].Secrets, "tokenization_key")
 	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byAccount["579145"].Settings["tokenization_url"])
@@ -551,7 +555,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	vault := newMerchantManifestVault(t)
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Vault: &config.VaultConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureSandbox, Vault: &config.VaultConfig{
 		Enabled:    true,
 		Address:    vault.Address,
 		AuthMethod: "token",
@@ -606,7 +610,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureSandbox, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 
@@ -834,6 +838,15 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 // development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
 	return &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI}
+}
+
+// sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.
+// #882: that posture is the ONLY thing that puts a PSP in the test environment,
+// so a test asserting `psps/<rail>/test/…` must declare it.
+func sandboxModeReconcileConfig() *config.Config {
+	cfg := apiModeReconcileConfig()
+	cfg.TestMode = config.CredentialPostureSandbox
+	return cfg
 }
 
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
