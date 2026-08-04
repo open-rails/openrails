@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +44,9 @@ func TestReconcile_IgnoresLegacyPostgresHoldRows(t *testing.T) {
 
 func resetMoneyLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
 	t.Helper()
+	// The app role cannot DELETE across RLS-forced ledger tables; resets are
+	// harness maintenance, so they run on the superuser pool.
+	pool = dbtest.SharedSuperuserPGXPool(t)
 	// FK-safe order: invoice_payments/usage_events reference ledger_transfers
 	// (#705 ledger_transfer_id FKs), so they go first; transfers before
 	// accounts; grants after (self-FK ok in one statement).

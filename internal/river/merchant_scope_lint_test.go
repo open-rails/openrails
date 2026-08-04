@@ -58,7 +58,6 @@ var workersWithoutMerchantScope = map[string]string{
 
 	// --- verified: touches no merchant-owned table ---
 	"CreditReconcileWorker":   "MoneyService.Reconcile is a stub in the Redis hold model — it reads nothing",
-	"WorkerHealthCheckWorker": "openrails.worker_health only, RLS-exempt by design (operator telemetry, not merchant data)",
 }
 
 // scopers are the calls that pin app.merchant_id for the work inside them.

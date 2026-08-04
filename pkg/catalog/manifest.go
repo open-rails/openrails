@@ -14,7 +14,7 @@
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //
-// Each price declares its own `psps:` list and optional `psp_links`
+// Each price declares its own `providers:` list and optional `provider_links`
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
@@ -25,7 +25,7 @@ import (
 
 // Manifest is the root of a catalog-as-code document.
 //
-// Every price declares its own `currency` and `psps` explicitly — there
+// Every price declares its own `currency` and `providers` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
 	Version        int             `json:"version" yaml:"version"`
@@ -180,21 +180,19 @@ type Price struct {
 	// only: no external provider sync.
 	PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
 
-	// PSPLinks supplies PSP-specific link/config values, mapping
+	// PSPLinks pre-supplies PSP-specific link ids, mapping
 	// PSP key -> key/value pairs. Maps straight onto
 	// service.CreatePriceRequest.PSPLinks. A supplied link is VALIDATED
 	// against the provider (object exists + matches the price's money terms)
 	// before it is accepted; a mismatch fails the apply loudly. An existing
-	// object is never duplicated. A MISSING object is created where the supplied
-	// value is declarative (NMI plan_id, Stripe lookup_key, Solana token)
-	// and errors where it is provider-generated (Stripe price_id, Solana
-	// plan_pda). Canonical keys:
+	// object is never duplicated. A MISSING object is created where the linked id
+	// is client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
+	// provider-generated (Stripe price_id, Solana plan_pda). Canonical keys:
 	//   psp_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
 	//     mobius: {plan_id: premium}                           # NMI recurring plan on the "mobius" PSP; find-or-create
-	//     solana: {token: USD1}                                # optional override; recurring defaults to USDC
-	//     solana: {plan_pda: 7Xy...PdA}                        # attach a plan and resolve its token on-chain
+	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
 

@@ -479,6 +479,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "scope-ok",
 		Description:     "invoice",
 	})
@@ -494,6 +495,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Payer:           otherPayer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "wrong-customer",
 	})
 	require.ErrorContains(t, err, "another customer")
@@ -504,6 +506,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Payer:           payer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "wrong-merchant",
 	})
 	require.ErrorContains(t, err, "another merchant")
@@ -522,6 +525,7 @@ func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 		Payer:           payer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "ccbill",
 	})
 	require.ErrorContains(t, err, "does not support invoice collection")
