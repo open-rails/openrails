@@ -36,7 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -595,9 +595,9 @@ type servicesInstances struct {
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *idempotency.IdempotencyService
+	IdempotencyService           *replaycache.Store
 	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579).
-	HTTPIdempotency   *idempotency.IdempotencyService
+	HTTPIdempotency   *replaycache.Store
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
 	CheckoutService        *checkout.CheckoutService
@@ -746,12 +746,12 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService := idempotency.NewIdempotencyService(redisClient)
-	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
+	idempotencyService := replaycache.NewStore(redisClient)
+	webhookIdempotencyService := replaycache.NewStoreWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
 	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
 	// HTTP replay middleware, separate from the internal checkout dedup
 	// (idempotencyService) and webhook dedup (webhookIdempotencyService) above.
-	httpIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, idempotency.HTTPIdempotencyTTL)
+	httpIdempotencyService := replaycache.NewStoreWithTTL(redisClient, replaycache.HTTPReplayTTL)
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,

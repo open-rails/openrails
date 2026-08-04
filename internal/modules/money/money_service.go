@@ -478,7 +478,12 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
-			return s.creditGrantTxn(existing, params), nil
+			// or#892: the deposit's structural key is the credit grant's
+			// (merchant, customer, source_id). A hit means this deposit already
+			// credited; say so instead of letting the caller assume it moved money.
+			replayed := s.creditGrantTxn(existing, params)
+			replayed.Replayed = true
+			return replayed, nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return nil, gerr
@@ -583,30 +588,36 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 // grant_id for lot attribution. The available/credit-line gate is the CALLER's
 // job (#491); this fails only if the lots physically cannot cover `amount` (a
 // gated caller never hits that). Returns the derived balance AFTER the debit.
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (int64, error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (newBalance int64, applied bool, err error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	// Lock + serialize, then derive the balance under the lock.
 	bal, err := s.lockBalance(ctx, q, payer, invokerID, cur)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if bal.Balance < amount {
-		return 0, ErrInsufficientCredits
+		return 0, false, ErrInsufficientCredits
 	}
 	gl := s.grantLedger(q, tenantID)
-	if err := gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, key.Coord()); err != nil {
+	applied, err = gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, key.Coord())
+	if err != nil {
 		if errors.Is(err, grants.ErrInsufficientCredits) {
-			return 0, ErrInsufficientCredits
+			return 0, false, ErrInsufficientCredits
 		}
-		return 0, err
+		return 0, false, err
 	}
-	return bal.Balance - amount, nil
+	if !applied {
+		// The coordinate was already committed: the balance never moved in this
+		// call, so the pre-debit snapshot IS the current balance.
+		return bal.Balance, false, nil
+	}
+	return bal.Balance - amount, true, nil
 }
 
 // lockBalance is the per-customer spend mutex (#491): it FOR UPDATE-locks the
@@ -716,13 +727,15 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 			Source: key.Source(), SourceID: key.SourceID(),
 		})
 		if gerr == nil {
-			return moneyTransactionFromTransfer(existing), nil
+			replayed := moneyTransactionFromTransfer(existing)
+			replayed.Replayed = true
+			return replayed, nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, key, "", params.Amount)
+	newBal, applied, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, key, "", params.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -741,6 +754,8 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		SourceID:        sourceIDText,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		// Authoritative: the unique index, not the pre-check above, decides.
+		Replayed: !applied,
 	}
 	return trx, nil
 }

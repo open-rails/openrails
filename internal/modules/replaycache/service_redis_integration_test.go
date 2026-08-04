@@ -1,6 +1,6 @@
 //go:build integration
 
-package idempotency
+package replaycache
 
 import (
 	"testing"
@@ -13,7 +13,7 @@ import (
 // #678: lease renewal + takeover semantics against real Redis (the production store).
 func TestRenewAndTakeoverPendingRedis(t *testing.T) {
 	rdb, ctx := dbtest.SharedRedisClient(t)
-	svc := NewIdempotencyServiceWithTTL(rdb, time.Hour)
+	svc := NewStoreWithTTL(rdb, time.Hour)
 	defer svc.Close()
 
 	_, existed, err := svc.Begin(ctx, "webhook.test", "evt_redis")
@@ -48,5 +48,5 @@ func TestRenewAndTakeoverPendingRedis(t *testing.T) {
 	require.False(t, renewed)
 	rec, err = svc.Get(ctx, "webhook.test", "evt_redis")
 	require.NoError(t, err)
-	require.Equal(t, IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, StatusSuccess, rec.Status)
 }

@@ -29,7 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -268,7 +268,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies
-	var httpIdempotency *idempotency.IdempotencyService
+	var httpIdempotency *replaycache.Store
 	if s.Cfg != nil {
 		rateLimits = s.Cfg.RateLimits
 		captchaCfg = s.Cfg.Captcha

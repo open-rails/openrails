@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	ctx := context.Background()
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
@@ -52,12 +52,12 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-retryable")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }
 
 func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testing.T) {
 	ctx := context.Background()
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
@@ -92,12 +92,12 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-terminal")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }
 
 func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T) {
 	ctx := context.Background()
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	svc := NewDeduplicationService(idem, nil)
 
 	started := make(chan struct{})
@@ -145,14 +145,14 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-concurrent")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }
 
 // A handler slower than the pending lease must stay exclusive: the heartbeat
 // renews the lease, so a redelivery is rejected instead of taking over (#678).
 func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 	ctx := context.Background()
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	svc := NewDeduplicationService(idem, nil)
 	svc.pendingLease = 100 * time.Millisecond
 
@@ -195,7 +195,7 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 // after the lease ages out.
 func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
 	ctx := context.Background()
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	svc := NewDeduplicationService(idem, nil)
 	svc.pendingLease = 50 * time.Millisecond
 
@@ -220,5 +220,5 @@ func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-dead")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }

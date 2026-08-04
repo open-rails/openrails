@@ -41,6 +41,11 @@ type MoneyTransaction struct {
 	Description     *string        `json:"description,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+	// Replayed reports that this write's idempotency coordinate was ALREADY
+	// committed, so no money moved in the call that returned it — the row
+	// described here is the movement that did land, earlier (or#892). Consumers
+	// needing applied-vs-replayed read this instead of rebuilding a claim table.
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 // MoneyAccount is the per-(merchant, merchant subject) spend policy and money-in

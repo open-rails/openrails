@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -335,7 +335,7 @@ func (s *Server) trustedProxies() *iputil.TrustedProxies {
 // replay store (#579), nil-safe against a Server built without New() (some
 // unit tests construct &Server{} directly and call wrapPublicHandler, e.g.
 // routes_self_test.go).
-func (s *Server) httpIdempotencyService() *idempotency.IdempotencyService {
+func (s *Server) httpIdempotencyService() *replaycache.Store {
 	if s == nil || s.runtime == nil {
 		return nil
 	}

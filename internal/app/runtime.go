@@ -29,7 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -208,12 +208,12 @@ type Runtime struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *idempotency.IdempotencyService
+	IdempotencyService           *replaycache.Store
 	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579):
 	// a THIRD idempotency instance (24h TTL), separate from IdempotencyService
 	// (checkout's internal dedup) and the webhook dedup instance, backing the
 	// generic HTTP response-replay middleware on public mutating routes.
-	HTTPIdempotency *idempotency.IdempotencyService
+	HTTPIdempotency *replaycache.Store
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService

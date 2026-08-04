@@ -19,6 +19,13 @@ INSERT INTO openrails.ledger_accounts (
 )
 RETURNING *;
 
+-- InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
+-- NOTHING against idx_ledger_transfers_operation_once makes once-only a
+-- DATABASE fact: a replay at the same (merchant, customer, currency,
+-- transfer_type, operation, source, source_id, grant_id) inserts nothing and
+-- returns zero rows, whatever order the caller took its locks in. Zero rows is
+-- therefore "already applied", not an error — ledger.Apply reads the committed
+-- row and reports Replayed.
 -- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
@@ -28,10 +35,26 @@ INSERT INTO openrails.ledger_transfers (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
     sqlc.arg(allow_debit_negative_up_to)::bigint, sqlc.arg(operation)::text,
-    sqlc.narg(source)::text, sqlc.narg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
+    sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid
 )
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+DO NOTHING
 RETURNING *;
+
+-- GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
+-- the full physical identity, lot included, so a multi-lot spend resolves the
+-- right leg.
+-- name: GetLedgerTransferAtCoordinate :one
+SELECT * FROM openrails.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+  AND transfer_type = sqlc.arg(transfer_type)::text
+  AND operation = sqlc.arg(operation)::text
+  AND source = sqlc.arg(source)::text
+  AND source_id = sqlc.arg(source_id)::text
+  AND grant_id IS NOT DISTINCT FROM sqlc.narg(grant_id)::uuid;
 
 -- name: GetLedgerAccountByID :one
 SELECT * FROM openrails.ledger_accounts

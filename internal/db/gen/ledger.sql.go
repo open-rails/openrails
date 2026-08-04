@@ -157,6 +157,66 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 	return i, err
 }
 
+const getLedgerTransferAtCoordinate = `-- name: GetLedgerTransferAtCoordinate :one
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
+WHERE merchant_id = $1::uuid
+  AND customer_id IS NOT DISTINCT FROM $2::uuid
+  AND currency = $3::text
+  AND transfer_type = $4::text
+  AND operation = $5::text
+  AND source = $6::text
+  AND source_id = $7::text
+  AND grant_id IS NOT DISTINCT FROM $8::uuid
+`
+
+type GetLedgerTransferAtCoordinateParams struct {
+	MerchantID   uuid.UUID
+	CustomerID   *uuid.UUID
+	Currency     string
+	TransferType string
+	Operation    string
+	Source       string
+	SourceID     string
+	GrantID      *uuid.UUID
+}
+
+// GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
+// the full physical identity, lot included, so a multi-lot spend resolves the
+// right leg.
+func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedgerTransferAtCoordinateParams) (OpenrailsLedgerTransfer, error) {
+	row := q.db.QueryRow(ctx, getLedgerTransferAtCoordinate,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.TransferType,
+		arg.Operation,
+		arg.Source,
+		arg.SourceID,
+		arg.GrantID,
+	)
+	var i OpenrailsLedgerTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.DebitAccountID,
+		&i.CreditAccountID,
+		&i.Amount,
+		&i.Currency,
+		&i.TransferType,
+		&i.AllowDebitNegativeUpTo,
+		&i.Source,
+		&i.SourceID,
+		&i.GrantID,
+		&i.CustomerID,
+		&i.InvokerID,
+		&i.Resource,
+		&i.InvoiceID,
+		&i.CreatedAt,
+		&i.Operation,
+	)
+	return i, err
+}
+
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
@@ -276,6 +336,8 @@ INSERT INTO openrails.ledger_transfers (
     $9::text, $10::text, $11::uuid, $12::uuid,
     $13::text, $14::text, $15::uuid
 )
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+DO NOTHING
 RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation
 `
 
@@ -288,8 +350,8 @@ type InsertLedgerTransferParams struct {
 	TransferType           string
 	AllowDebitNegativeUpTo int64
 	Operation              string
-	Source                 *string
-	SourceID               *string
+	Source                 string
+	SourceID               string
 	GrantID                *uuid.UUID
 	CustomerID             *uuid.UUID
 	InvokerID              *string
@@ -297,6 +359,13 @@ type InsertLedgerTransferParams struct {
 	InvoiceID              *uuid.UUID
 }
 
+// InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
+// NOTHING against idx_ledger_transfers_operation_once makes once-only a
+// DATABASE fact: a replay at the same (merchant, customer, currency,
+// transfer_type, operation, source, source_id, grant_id) inserts nothing and
+// returns zero rows, whatever order the caller took its locks in. Zero rows is
+// therefore "already applied", not an error — ledger.Apply reads the committed
+// row and reports Replayed.
 func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTransferParams) (OpenrailsLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, insertLedgerTransfer,
 		arg.MerchantID,

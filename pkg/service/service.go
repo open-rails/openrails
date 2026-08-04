@@ -98,6 +98,11 @@ type CreditTransaction struct {
 	Description     *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// Replayed reports that this write's idempotency key had ALREADY committed,
+	// so nothing moved in this call — the transaction described here is the
+	// movement that landed earlier (or#892). This is the applied-vs-replayed
+	// answer consumers were building their own claim tables to get.
+	Replayed bool
 }
 
 type WithdrawCreditsRequest struct {
@@ -159,6 +164,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 
@@ -230,6 +236,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 
@@ -353,6 +360,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 

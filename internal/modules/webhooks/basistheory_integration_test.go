@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -97,7 +97,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 
 	fx.dispatcher = &WebhookDispatcher{
 		DB:                   dbi,
-		DeduplicationService: NewDeduplicationService(idempotency.NewIdempotencyService(nil), dbi),
+		DeduplicationService: NewDeduplicationService(replaycache.NewStore(nil), dbi),
 		// or#879: the custodian's client is armed off the NMI PSP its proxy
 		// charges land on — the webhook routes to that PSP by tenant id.
 		RailConfigs: railresolve.FixedSet{
