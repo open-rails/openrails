@@ -1,8 +1,12 @@
 package collection
 
 import (
+	"context"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/modules/payments"
+	log "github.com/sirupsen/logrus"
 )
 
 // or#870 decline doctrine — ONE classifier, three outcomes.
@@ -191,24 +195,122 @@ var stripeDeclineOutcomes = map[string]DeclineOutcome{
 	"no_account":                       DeclineNonRecoverable,
 }
 
-// ClassifyDecline is the ONE answer to "what does this decline mean" for any
-// rail. code is the failure code recorded VERBATIM off the rail (NMI: the
-// numeric response_code or its localization id; Stripe: decline_code).
+// ccbillDeclineOutcomes maps CCBill's own decline vocabulary onto the same
+// three buckets. Source: CCBill's published list of their custom alphanumerical
+// decline codes (ccbill.com/kb/list-of-credit-card-declined-codes). CCBill does
+// not emit ISO codes — it emits BE-nnn, and that string is what arrives
+// verbatim in the webhook `failureCode` field.
 //
-// Empty and unrecognized codes are DeclineRetry — no evidence, no action.
-func ClassifyDecline(rail, code string) DeclineOutcome {
-	code = strings.ToLower(strings.TrimSpace(code))
-	if code == "" {
-		return DeclineRetry
+// Keyed on the canonical form (lowercase, dashes stripped), so BE-114, be-114
+// and BE114 are one row.
+//
+// There is deliberately NO bucket-3 row here. The bucket-1 default costs a few
+// pointless retries; a wrong bucket-3 row terminally cancels a paying customer.
+// BE-112 (No Account) is the one plausible candidate — the Stripe equivalents
+// `no_account`/`invalid_account` ARE bucket 3 — and it stays in bucket 1 until
+// a live webhook proves the code's meaning on this rail. Widening this is a
+// cancellation decision, so it needs cancellation-grade evidence.
+//
+// Bucket-1 codes, for the record: BE-101 invalid MID/TID (OURS) · BE-105
+// invalid transaction · BE-112 no account (see above) · BE-113 insufficient
+// funds · BE-119 activity limit exceeded · BE-130 invalid field provided ·
+// BE-900..999 system error.
+var ccbillDeclineOutcomes = map[string]DeclineOutcome{
+	// Bucket 2 — their card, fixable. Charging stops, access and the stored
+	// payment method are untouched, the customer is asked to update the card.
+	"be102": DeclineFixPaymentMethod, // pickup card — NMI 250's twin, bucket 2 by owner decision
+	"be103": DeclineFixPaymentMethod, // do not honor (NMI 201)
+	"be107": DeclineFixPaymentMethod, // invalid credit card (NMI 220)
+	"be114": DeclineFixPaymentMethod, // expired card (NMI 223)
+	"be116": DeclineFixPaymentMethod, // service not allowed (NMI 204)
+	"be132": DeclineFixPaymentMethod, // card blocked by CCBill — another instrument is the only fix
+	"be146": DeclineFixPaymentMethod, // blocked country — likewise
+}
+
+// DeclineCoverage says how much the classifier actually KNEW about a code. The
+// outcome alone cannot tell "bucket 1 because the rail says retry" from
+// "bucket 1 because nobody ever mapped this code" — and only the second is an
+// operational problem worth surfacing.
+type DeclineCoverage int
+
+const (
+	// CoverageUnrecognized — the rail HAS a decline vocabulary and this code is
+	// in none of our tables. Bucket 1 by doctrine, and ALERT-WORTHY: it is
+	// either a rail that added a code or a rail we are misreading, and looking
+	// is what fixes both. Zero value on purpose, so a forgotten path alerts
+	// rather than going quiet.
+	CoverageUnrecognized DeclineCoverage = iota
+	// CoverageBucketed — an explicit row in one of the bucket tables above.
+	CoverageBucketed
+	// CoverageKnownRetry — a code the rail's normalized-reason table recognizes
+	// that carries no bucket-2/3 meaning. Bucket 1 deliberately; not an alert.
+	CoverageKnownRetry
+	// CoverageNoVocabulary — nothing to map: no code was recorded, or the rail
+	// publishes no decline vocabulary we can bucket at all (Solana's on-chain
+	// crank carries no issuer mandate signal; a retired or unknown rail carries
+	// nothing). Bucket 1, and silent — alerting on every code of a rail with no
+	// table is noise, not signal.
+	CoverageNoVocabulary
+)
+
+func (c DeclineCoverage) String() string {
+	switch c {
+	case CoverageBucketed:
+		return "bucketed"
+	case CoverageKnownRetry:
+		return "known_retry"
+	case CoverageNoVocabulary:
+		return "no_vocabulary"
+	default:
+		return "unrecognized"
 	}
-	switch strings.ToLower(strings.TrimSpace(rail)) {
+}
+
+// Classification is the classifier's full answer: the bucket, plus how well the
+// code was actually understood.
+type Classification struct {
+	Rail     string
+	Code     string
+	Outcome  DeclineOutcome
+	Coverage DeclineCoverage
+}
+
+// NeedsMapping reports an alert-worthy gap: a rail we DO have a vocabulary for
+// returned a code none of our tables know.
+func (c Classification) NeedsMapping() bool { return c.Coverage == CoverageUnrecognized }
+
+// canonicalCCBillCode normalizes BE-114 / be-114 / BE114 onto one key.
+func canonicalCCBillCode(code string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(code) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// ClassifyDeclineDetail is ClassifyDecline plus the coverage answer.
+func ClassifyDeclineDetail(rail, code string) Classification {
+	c := Classification{Rail: strings.ToLower(strings.TrimSpace(rail)), Code: strings.TrimSpace(code)}
+	lowered := strings.ToLower(c.Code)
+	if lowered == "" {
+		// No code recorded is not an unmapped code; there is nothing to map.
+		c.Coverage = CoverageNoVocabulary
+		return c
+	}
+	switch c.Rail {
 	case "nmi", "mobius":
 		// A custodian-proxied charge lands on the SAME NMI gateway and returns
 		// the SAME classic response, so it classifies here too — the rail is
 		// nmi either way (or#879: custody is not a rail). #795: one decline
 		// vocabulary, two transports.
-		if n, err := strconv.Atoi(code); err == nil {
-			return nmiDeclineOutcomes[n]
+		if n, err := strconv.Atoi(lowered); err == nil {
+			if outcome, ok := nmiDeclineOutcomes[n]; ok {
+				c.Outcome, c.Coverage = outcome, CoverageBucketed
+				return c
+			}
+			break
 		}
 		// The charge path records the verbatim code as the localization id when
 		// NMI published one and `nmi_response_<code>` when it did not (#733
@@ -216,23 +318,71 @@ func ClassifyDecline(rail, code string) DeclineOutcome {
 		// evidence and must classify identically — reading only one of them is
 		// how the invoice consumer would silently drop every numeric decline
 		// into bucket 1.
-		if n, err := strconv.Atoi(strings.TrimPrefix(code, "nmi_response_")); err == nil {
-			return nmiDeclineOutcomes[n]
+		if n, err := strconv.Atoi(strings.TrimPrefix(lowered, "nmi_response_")); err == nil {
+			if outcome, ok := nmiDeclineOutcomes[n]; ok {
+				c.Outcome, c.Coverage = outcome, CoverageBucketed
+				return c
+			}
+			break
 		}
-		return nmiDeclineOutcomesByLocalizationID[strings.TrimPrefix(code, "nmi_")]
+		if outcome, ok := nmiDeclineOutcomesByLocalizationID[strings.TrimPrefix(lowered, "nmi_")]; ok {
+			c.Outcome, c.Coverage = outcome, CoverageBucketed
+			return c
+		}
 	case "stripe":
-		return stripeDeclineOutcomes[code]
+		if outcome, ok := stripeDeclineOutcomes[lowered]; ok {
+			c.Outcome, c.Coverage = outcome, CoverageBucketed
+			return c
+		}
+	case "ccbill":
+		if outcome, ok := ccbillDeclineOutcomes[canonicalCCBillCode(lowered)]; ok {
+			c.Outcome, c.Coverage = outcome, CoverageBucketed
+			return c
+		}
 	default:
-		// CCBill publishes no enumerated decline vocabulary (its failureCode
-		// values are recorded verbatim but unmapped — see
-		// payments.ccbillFailureReasons, deliberately empty), and Solana's
-		// on-chain crank vocabulary carries no issuer mandate signal at all.
-		// Both therefore classify as bucket 1 for every code: OpenRails keeps
-		// dunning on the schedule and terminates only on provider-confirmed
-		// truth or genuinely exhausted attempts, never on a decline string it
-		// cannot read. Widening either needs live-verified codes first.
-		return DeclineRetry
+		// Solana's on-chain crank vocabulary carries no issuer mandate signal at
+		// all, and `vaulted_card` is a RETIRED value (or#879) that must never
+		// carry a taxonomy again. Both classify bucket 1 for every code:
+		// OpenRails terminates only on provider-confirmed truth or genuinely
+		// exhausted attempts, never on a decline string it cannot read.
+		c.Coverage = CoverageNoVocabulary
+		return c
 	}
+	// Bucket 1 either way; the only question left is whether the rail's own
+	// normalized-reason table recognizes the code. If it does, bucket 1 is a
+	// decision. If it does not, nobody has ever mapped this code.
+	if payments.NormalizeFailureReason(c.Rail, lowered) != payments.FailureUnknown {
+		c.Coverage = CoverageKnownRetry
+	}
+	return c
+}
+
+// ClassifyDecline is the ONE answer to "what does this decline mean" for any
+// rail. code is the failure code recorded VERBATIM off the rail (NMI: the
+// numeric response_code or its localization id; Stripe: decline_code; CCBill:
+// the BE-nnn failureCode).
+//
+// Empty and unrecognized codes are DeclineRetry — no evidence, no action.
+func ClassifyDecline(rail, code string) DeclineOutcome {
+	return ClassifyDeclineDetail(rail, code).Outcome
+}
+
+// AlertUnmappedDecline emits the ONE loud, greppable line for a decline code no
+// table recognizes. Loud because the safe default is SILENT: an unmapped code
+// keeps dunning exactly like an ordinary insufficient-funds decline, so nothing
+// downstream ever looks wrong — a rail could add a "stop all recurring" code
+// and we would retry it into the ground forever without a single symptom.
+// Error level, not warn: the doctrine's correctness rests on these tables being
+// complete, and completeness is only observable here.
+func AlertUnmappedDecline(ctx context.Context, c Classification) {
+	if !c.NeedsMapping() {
+		return
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"rail":            c.Rail,
+		"failure_code":    c.Code,
+		"decline_outcome": c.Outcome.String(),
+	}).Error("or#870: UNMAPPED decline code — no bucket-table row and no normalized reason for this rail; treated as bucket 1 (retry) by doctrine. Map it in internal/modules/collection/decline.go")
 }
 
 // ClassifyNMIResponseCode is ClassifyDecline for a numeric NMI response code

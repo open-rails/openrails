@@ -521,11 +521,16 @@ func invoiceCycleHours(claim *invoiceCollectionClaim) int {
 // consequences differ because the products differ — an invoice is not a
 // subscription, so nothing here cancels anything.
 func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+	// or#870: a code no table recognizes is bucket 1 by doctrine, and SILENT by
+	// nature — it duns exactly like insufficient funds, so nothing downstream
+	// ever looks wrong. Say it out loud here, once per decline.
+	collection.AlertUnmappedDecline(ctx, action.Decline)
 	entry := log.WithContext(ctx).WithFields(log.Fields{
-		"invoice_id":      invoiceID,
-		"rail":            rail,
-		"failure_code":    derefStr(failureCode),
-		"decline_outcome": action.Outcome.String(),
+		"invoice_id":       invoiceID,
+		"rail":             rail,
+		"failure_code":     derefStr(failureCode),
+		"decline_outcome":  action.Outcome.String(),
+		"decline_coverage": action.Decline.Coverage.String(),
 	})
 	switch {
 	case action.AwaitingPaymentMethod():
