@@ -45,8 +45,7 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	status, body := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/stripe", adminToken, map[string]any{
-		"environment": "live",
-		"account_id":  accountID,
+		"account_id": accountID,
 		"public_config": map[string]string{
 			"publishable_key": "pk_test_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		},
@@ -64,16 +63,31 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	require.Equal(t, accountID, putResp.PaymentProvider.AccountID)
 	require.True(t, putResp.PaymentProvider.Credentials["webhook_signing_secret"].Configured)
 
+	// #882: the request declared NO environment — the server derived it from the
+	// deployment's test_mode. Every later read filters on that derived value.
+	env := putResp.PaymentProvider.Environment
+	require.Contains(t, []string{"live", "test"}, env)
+
+	// A caller still sending `environment` is REFUSED over the wire, not
+	// silently ignored — including a value that AGREES with the derived one.
+	for _, declared := range []string{env, "moon"} {
+		retiredStatus, retiredBody := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/stripe", adminToken, map[string]any{
+			"environment": declared,
+			"account_id":  accountID,
+		})
+		require.Equal(t, http.StatusBadRequest, retiredStatus, string(retiredBody))
+		require.Contains(t, string(retiredBody), "was removed (#882)", string(retiredBody))
+	}
+
 	deniedReadStatus, deniedReadBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers", deniedToken, nil)
 	require.Equal(t, http.StatusForbidden, deniedReadStatus, string(deniedReadBody))
 
 	deniedWriteStatus, deniedWriteBody := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/stripe", readToken, map[string]any{
-		"environment": "live",
-		"account_id":  accountID,
+		"account_id": accountID,
 	})
 	require.Equal(t, http.StatusForbidden, deniedWriteStatus, string(deniedWriteBody))
 
-	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment=live", readToken, nil)
+	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment="+env, readToken, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
 	require.NotContains(t, string(getBody), "whsec_")
 	var getResp struct {
@@ -84,19 +98,18 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 
 	invalidAccountID := "nmi_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	invalidStatus, invalidBody := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/nmi", adminToken, map[string]any{
-		"environment": "live",
-		"account_id":  invalidAccountID,
+		"account_id": invalidAccountID,
 		"credentials": map[string]string{
 			"tokenization_url": "http://example.test/collect.js",
 		},
 	})
 	require.Equal(t, http.StatusBadRequest, invalidStatus, string(invalidBody))
 
-	listStatus, listBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=nmi&environment=live", readToken, nil)
+	listStatus, listBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=nmi&environment="+env, readToken, nil)
 	require.Equal(t, http.StatusOK, listStatus, string(listBody))
 	require.NotContains(t, string(listBody), invalidAccountID)
 
-	deleteStatus, deleteBody := requestJSON(t, http.MethodDelete, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment=live", adminToken, nil)
+	deleteStatus, deleteBody := requestJSON(t, http.MethodDelete, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment="+env, adminToken, nil)
 	require.Equal(t, http.StatusOK, deleteStatus, string(deleteBody))
 	var deleteResp struct {
 		PaymentProvider merchants.PaymentProviderConfig `json:"payment_provider"`
@@ -106,10 +119,10 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	require.True(t, deleteResp.PaymentProvider.Drained, string(deleteBody))
 	require.Equal(t, int64(0), deleteResp.PaymentProvider.OpenObligations)
 
-	afterDeleteStatus, afterDeleteBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment=live", readToken, nil)
+	afterDeleteStatus, afterDeleteBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers/stripe?environment="+env, readToken, nil)
 	require.Equal(t, http.StatusNotFound, afterDeleteStatus, string(afterDeleteBody))
 
-	archivedStatus, archivedBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment=live&status=archived", readToken, nil)
+	archivedStatus, archivedBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment="+env+"&status=archived", readToken, nil)
 	require.Equal(t, http.StatusOK, archivedStatus, string(archivedBody))
 	var archivedResp struct {
 		Data []merchants.PaymentProviderConfig `json:"data"`

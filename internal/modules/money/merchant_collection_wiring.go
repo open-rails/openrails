@@ -231,10 +231,9 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 		// from the scope this adapter was armed for.
 		Rails: railresolve.FixedSet{
 			string(models.RailStripe): {
-				Rail:        models.RailStripe,
-				AccountID:   scope.AccountID,
-				Environment: scope.Environment,
-				Stripe:      &config.StripeRailConfig{SecretKey: secretKey},
+				Rail:      models.RailStripe,
+				AccountID: scope.AccountID,
+				Stripe:    &config.StripeRailConfig{SecretKey: secretKey},
 			},
 		},
 	}

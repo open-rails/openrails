@@ -130,9 +130,8 @@ type Config struct {
 	// including production — a staging (or production) deployment running
 	// sandbox rails under full non-dev hard gates is a legitimate, common
 	// shape, not a footgun. Nothing here special-cases env=production; the
-	// credential guarantees this field attaches (live-key refusal above,
-	// ExpectedProviderEnvironment's cross-check against each configured rail
-	// account's declared Environment) are what keep a sandbox posture honest
+	// credential guarantees this field attaches (live-key refusal above, the
+	// NMI live-gateway probe) are what keep a sandbox posture honest
 	// regardless of Env. Set test_mode=live explicitly to run live credentials
 	// locally in development.
 	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
@@ -619,8 +618,9 @@ const (
 	ProviderEnvironmentLive = "live"
 )
 
-// ExpectedProviderEnvironment is the environment every provider account must
-// declare for the given test_mode: test under sandbox, live in production.
+// ExpectedProviderEnvironment is the environment every provider account runs in
+// for the given test_mode: test under sandbox, live in production. It is DERIVED
+// (#882) — a PSP never declares it.
 func ExpectedProviderEnvironment(testMode bool) string {
 	if testMode {
 		return ProviderEnvironmentTest
@@ -659,11 +659,6 @@ type PSPConfig struct {
 	// e.g. 945280-0000, #697), or Solana wallet (#592: operator-declared).
 	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string
-	// Environment is test|live — an ASSERTION cross-checked against test_mode
-	// (#641/#711), not a behavior selector. Sandbox-vs-live behavior is driven by
-	// test_mode alone; a declared environment that contradicts it refuses to
-	// boot. Empty → derived from test_mode.
-	Environment string
 	// Archived keeps an account addressable for existing obligations and inbound
 	// provider events, but excludes it from new checkout/subscription work.
 	Archived bool
@@ -784,18 +779,6 @@ func ValidateRailAccountID(rail models.Rail, accountID string) error {
 		return fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000 (got %q)", accountID)
 	}
 	return nil
-}
-
-// EffectiveEnvironment returns the account's declared environment (test|live), or
-// the test_mode-derived default when unset (#641). An explicitly-set value that
-// contradicts test_mode is rejected by ValidateRailSet.
-func (p *PSPConfig) EffectiveEnvironment(testMode bool) string {
-	if p != nil {
-		if env := strings.ToLower(strings.TrimSpace(p.Environment)); env != "" {
-			return env
-		}
-	}
-	return ExpectedProviderEnvironment(testMode)
 }
 
 func (p *PSPConfig) normalizeTypedBlock(name string) error {
@@ -1175,9 +1158,8 @@ func Validate(cfg *Config) error {
 		// disabling every other hard gate, or lie as live with no rail
 		// credentials). What actually prevents a sandbox posture from being
 		// misused in a genuinely-live deployment is rail-credential
-		// validation, not the environment string: ExpectedProviderEnvironment
-		// cross-checks every configured rail account's declared Environment
-		// against TestMode (ValidateRailSet/validateRails below), and
+		// validation, not the environment string: the NMI live-gateway probe
+		// asks the gateway itself whether the credentials are live, and
 		// validateStripeKeyForTestMode hard-rejects a live secret key
 		// (sk_live_/rk_live_) whenever TestMode is sandbox, in every
 		// environment including production. A deployment that declares
@@ -1476,19 +1458,6 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 		}
 		if err := proc.normalizeTypedBlock(name); err != nil {
 			return err
-		}
-
-		// #641: all-test or all-live — a declared environment is an ASSERTION
-		// cross-checked against test_mode (not a behavior selector; test_mode
-		// alone drives sandbox posture). Empty is derived and always passes.
-		if env := strings.ToLower(strings.TrimSpace(proc.Environment)); env != "" {
-			if env != ProviderEnvironmentTest && env != ProviderEnvironmentLive {
-				return fmt.Errorf("rail '%s' has unknown environment '%s' (want test|live)", name, env)
-			}
-			testMode := cfg != nil && cfg.IsTestMode()
-			if want := ExpectedProviderEnvironment(testMode); env != want {
-				return fmt.Errorf("rail '%s' declares environment=%s but test_mode=%v requires environment=%s (a deployment is all-test or all-live; never mix)", name, env, testMode, want)
-			}
 		}
 
 		effectiveType := proc.EffectiveRail(name)

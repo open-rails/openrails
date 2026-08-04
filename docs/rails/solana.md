@@ -36,7 +36,6 @@ derived from the signer's public key (a declared value is ignored with a warning
 psps:
   solana:
     solana:
-      environment: live          # assertion cross-checked against test_mode; omit to derive
       signer: { mode: local_keypair }
       settings:
         # Optional destination wallet; defaults to the signer public key.
@@ -55,7 +54,6 @@ psps:
   # Alternative: Vault Transit signer — no private_key secret at all.
   solana-vault:
     solana:
-      environment: live
       signer: { mode: vault_transit, key: openrails-solana-<slug> }
 ```
 
@@ -141,8 +139,8 @@ and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
 ### Devnet testing
 
 The network is derived structurally from the deployment's `test_mode`:
-sandbox → **devnet**, live → mainnet. There is no independent network knob;
-`environment: test` on the account is only an assertion cross-checked at boot.
+sandbox → **devnet**, live → mainnet. There is no independent network knob, and
+a PSP declares no environment of its own (#882).
 
 To exercise the flows on devnet:
 

@@ -218,9 +218,8 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"ccbill": {
 				"ccbill": {
-					Environment: "test",
-					AccountID:   ccbillAccount,
-					Secrets:     map[string]string{"salt": "test-salt-" + slug},
+					AccountID: ccbillAccount,
+					Secrets:   map[string]string{"salt": "test-salt-" + slug},
 				},
 			},
 		},
@@ -305,7 +304,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	t.Cleanup(adminServer.Close)
 
 	// Layer A, MODE 2: arm the ccbill account over the management API.
-	payload := fmt.Sprintf(`{"environment":"test","account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, ccbillAccount, slug)
+	payload := fmt.Sprintf(`{"account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, ccbillAccount, slug)
 	req, err := http.NewRequest(http.MethodPut, adminServer.URL+"/v1/merchant/payment-providers/ccbill", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")

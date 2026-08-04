@@ -660,32 +660,22 @@ func TestCatalogTargetSelectors(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestRailEnvironmentMustMatchTestMode covers the #641 "all-test or all-live"
-// guard: an account whose declared environment contradicts test_mode is rejected;
-// a matching or unset (derived) environment passes.
-func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
-	// test_mode=sandbox rejects a live-declared account.
-	err := ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}, PSPSet{
-		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
-	})
-	require.ErrorContains(t, err, "requires environment=test")
+// TestRailEnvironmentDerivesFromTestMode covers #882: a PSP has NO environment
+// axis to contradict — test_mode alone decides, and every PSP in a deployment
+// therefore lands in the same environment.
+func TestRailEnvironmentDerivesFromTestMode(t *testing.T) {
+	require.Equal(t, ProviderEnvironmentTest, ExpectedProviderEnvironment(true))
+	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(false))
 
-	// test_mode=live (production) rejects a test-declared account.
-	cfgLive := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
-	require.ErrorContains(t, ValidateRailSet(cfgLive, PSPSet{
-		"stripe": {Rail: models.RailStripe, Environment: "test", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
-	}), "requires environment=live")
-
-	// A garbage environment is rejected.
-	require.ErrorContains(t, ValidateRailSet(cfgLive, PSPSet{
-		"stripe": {Rail: models.RailStripe, Environment: "staging", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
-	}), "unknown environment")
-
-	// Matching environment passes; unset (derived from test_mode) passes.
-	require.NoError(t, ValidateRailSet(cfgLive, PSPSet{
-		"stripe": {Rail: models.RailStripe, Environment: "live", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+	sandbox := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}
+	require.Equal(t, ProviderEnvironmentTest, ExpectedProviderEnvironment(sandbox.IsTestMode()))
+	require.NoError(t, ValidateRailSet(sandbox, PSPSet{
+		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
 	}))
-	require.NoError(t, ValidateRailSet(cfgLive, PSPSet{
+
+	live := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
+	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(live.IsTestMode()))
+	require.NoError(t, ValidateRailSet(live, PSPSet{
 		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}))
 }

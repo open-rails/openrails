@@ -60,7 +60,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: %q
 `, slug, slug, gatewayID))
 }
@@ -379,7 +378,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	}
 
 	// Provider-config writes.
-	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"environment":"live","account_id":"acct_x"}`))
+	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`))
 	assertManifestDriven(do(http.MethodDelete, "/v1/merchant/payment-providers/stripe", ""))
 	// Catalog mutations — including plan-only publish (documented: the plan is
 	// computed at boot from the YAML; the CLI dry-run remains available).
@@ -436,7 +435,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	payload := fmt.Sprintf(`{"environment":"live","account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
+	payload := fmt.Sprintf(`{"account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
 	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/merchant/payment-providers/stripe", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -468,7 +467,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
-			"mobius": {"nmi": {Environment: "live", AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
+			"mobius": {"nmi": {AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
 		},
 	})
 	require.Error(t, err)
@@ -616,8 +615,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,
@@ -671,8 +669,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,

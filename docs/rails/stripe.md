@@ -31,7 +31,6 @@ merchants:
     psps:
       stripe:                    # PSP name (reserved gateway name)
         stripe:                  # rail block
-          environment: live      # assertion, cross-checked against test_mode (test|live)
           account_id: acct_XXXXXXXXXXXXXXXX
           secrets:
             secret_key: sk_live_...                # or rk_live_...
@@ -126,11 +125,12 @@ required for the hosted flow. Completion arrives via `checkout.session.completed
 
 ### Sandbox testing
 
-Set `test_mode: sandbox`, declare the PSP with `environment: test` and a test key
-(`sk_test_…` / `rk_test_…`). The live-key-under-sandbox boot refusal guarantees a
-sandbox deployment can never hold a credential that moves real money. Use Stripe's
-standard test cards. `test_mode` is orthogonal to the environment axis — a fully
-gated production-style deployment can legitimately run sandbox rails.
+Set `test_mode: sandbox` and declare the PSP with a test key (`sk_test_…` /
+`rk_test_…`); the PSP's environment follows `test_mode` and is not declarable
+(#882). The live-key-under-sandbox boot refusal guarantees a sandbox deployment
+can never hold a credential that moves real money. Use Stripe's standard test
+cards. `test_mode` is orthogonal to `env` — a fully gated production-style
+deployment can legitimately run sandbox rails.
 
 ### Read-only safety gate
 

@@ -161,10 +161,9 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
 	out := &config.PSPConfig{
-		Key:         scope.Key,
-		Rail:        models.Rail(scope.Rail),
-		AccountID:   scope.AccountID,
-		Environment: scope.Environment,
+		Key:       scope.Key,
+		Rail:      models.Rail(scope.Rail),
+		AccountID: scope.AccountID,
 	}
 	switch models.Rail(scope.Rail) {
 	case models.RailStripe:

@@ -84,7 +84,6 @@ merchants:
     psps:                          # operator-declared rail accounts
       mobius:
         nmi:
-          environment: live
           account_id: "100001"
           settings:
             tokenization_key: replace-with-nmi-tokenization-key
@@ -108,10 +107,10 @@ Per merchant:
 - `delegated_invoker_wasted_spend_windows` — per-invoker windowed spend caps.
 - `psps.<key>.<rail>` — one entry per PSP. `key` is the manifest PSP name
   catalog `psp_links` and checkout use ("mobius"); the rail nests inside.
-  Fields: `environment` (`test`|`live` — an **assertion** cross-checked
-  against the deployment's `test_mode`, not a behavior selector; a
-  contradiction refuses to boot), `account_id`, `archived`, non-secret
-  `settings`, `secrets`, and (Solana) `signer`.
+  Fields: `account_id`, `archived`, non-secret `settings`, `secrets`, and
+  (Solana) `signer`. There is NO `environment` (#882) — it is derived from the
+  deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`), so a deployment is
+  all-test or all-live; a manifest still declaring it fails loudly.
 
 `account_id` is operator-declared, per rail (never derived from credentials at
 runtime — details in `docs/rails/*.md`):

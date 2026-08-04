@@ -22,55 +22,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Canonical per-merchant secret names. The store namespaces values by
-// (merchant id, name); these are the well-known names OpenRails reads at request
-// time. A managed (Vault-backed) deployment keeps the SAME names but resolves
-// them to a merchant-scoped Vault path.
-const (
-	// SecretStripeSecretKey is the merchant's Stripe API secret key (BYO or Connect).
-	SecretStripeSecretKey = "stripe/secret_key"
-	// SecretStripeWebhookSigning is the merchant's Stripe webhook signing secret,
-	// used to verify inbound webhooks AFTER merchant resolution.
-	SecretStripeWebhookSigning = "stripe/webhook_signing_secret"
-	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
-	// Destination signing secret (a single endpoint may receive both).
-	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
-	// SecretStripeWebhookSigningPrevious is the outgoing signing secret kept
-	// through an api_version rollover (#856), so deliveries still queued on the
-	// superseded endpoint keep verifying while both endpoints run.
-	SecretStripeWebhookSigningPrevious = "stripe/webhook_signing_secret_previous"
-	// SecretNMISecurityKey is the legacy broad NMI security-key secret.
-	SecretNMISecurityKey = "nmi/mobius/security_key"
-	// SecretNMITokenizationURL overrides the Collect.js script URL for a
-	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
-	SecretNMITokenizationURL = "nmi/mobius/tokenization_url"
-	// SecretNMIWebhookSigning is the merchant's NMI webhook signing
-	// secret, used to verify inbound webhooks after merchant/provider resolution.
-	SecretNMIWebhookSigning = "nmi/mobius/webhook_signing_secret"
-)
-
-// SecretDefinition describes one OpenRails-owned merchant secret. It is the
-// canonical registry used by status APIs, docs, validation, and runbooks.
-type SecretDefinition struct {
-	Name              string `json:"name"`
-	Rail              string `json:"rail"`
-	Purpose           string `json:"purpose"`
-	DisplayLabel      string `json:"display_label"`
-	ManualVault       bool   `json:"manual_vault"`
-	MerchantWritable  bool   `json:"merchant_writable"`
-	Validation        string `json:"validation"`
-	PlaintextReadable bool   `json:"plaintext_readable"`
-}
-
-var merchantSecretRegistry = []SecretDefinition{
-	{Name: SecretStripeSecretKey, Rail: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
-	{Name: SecretStripeWebhookSigning, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretStripeWebhookSigningThin, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretStripeWebhookSigningPrevious, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe previous webhook signing secret (rollover overlap)", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretNMISecurityKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
-	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-}
+// A merchant secret has exactly ONE spelling: the PSP-scoped name
+// `psps/<rail>/<environment>/<account_id>/<key>` built by PSPSecretName. The
+// flat `<rail>/<purpose>` names (stripe/secret_key, nmi/mobius/security_key, …)
+// were retired in #884 — they were write-only surface, read only on a
+// `pool == nil` branch that no production construction can reach, and they baked
+// a PSP key ("mobius") into names presented as rail-generic.
 
 // PSPSecretName returns the canonical secret-store name for a
 // provider-account-owned credential. The merchant id still namespaces the store;
@@ -125,11 +82,9 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 }
 
 // SecretWritable reports whether a merchant operator may write the secret name.
+// Only PSP-scoped names qualify (#884): a retired flat name parses as
+// unscoped and is refused.
 func SecretWritable(name string) bool {
-	name = cleanSecretName(name)
-	if def, ok := SecretDefinitionFor(name); ok {
-		return def.MerchantWritable
-	}
 	rail, _, _, key, ok, err := ParsePSPSecretName(name)
 	if !ok || err != nil {
 		return false
@@ -169,23 +124,17 @@ func normalizeProviderSecretEnvironment(environment string) string {
 	}
 }
 
-// SecretDefinitionFor returns a registry entry by stable secret name.
-func SecretDefinitionFor(name string) (SecretDefinition, bool) {
-	name = cleanSecretName(name)
-	for _, d := range merchantSecretRegistry {
-		if d.Name == name {
-			return d, true
-		}
-	}
-	return SecretDefinition{}, false
-}
-
-// MerchantSecretStatus is the read-only dashboard/admin view of a merchant secret.
-// It never contains plaintext.
+// MerchantSecretStatus is the read-only dashboard/admin view of one merchant
+// secret slot. It never contains plaintext. The advertised slots come from the
+// rail credential registry (#884) — the same source the money path reads with.
 type MerchantSecretStatus struct {
-	SecretDefinition
-	Configured bool `json:"configured"`
-	Version    int  `json:"version,omitempty"`
+	Name             string `json:"name"`
+	Rail             string `json:"rail"`
+	Key              string `json:"key"`
+	DisplayLabel     string `json:"display_label"`
+	MerchantWritable bool   `json:"merchant_writable"`
+	Configured       bool   `json:"configured"`
+	Version          int    `json:"version,omitempty"`
 }
 
 // ErrSecretNotFound is returned by a MerchantSecretStore when no secret exists for

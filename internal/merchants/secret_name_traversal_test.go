@@ -36,8 +36,8 @@ func TestSecretNameRejectsTraversal(t *testing.T) {
 
 	// Ordinary names still work.
 	for _, name := range []string{
-		SecretStripeSecretKey,
-		SecretNMISecurityKey,
+		"psps/stripe/live/acct_884_test/secret_key",
+		"psps/nmi/live/100884/security_key",
 		"psps/nmi/production/579145/security_key",
 	} {
 		if got := cleanSecretName(name); got == "" {

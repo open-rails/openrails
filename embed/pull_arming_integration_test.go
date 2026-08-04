@@ -54,15 +54,13 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
-					Environment: "live",
-					AccountID:   nmiAccount,
-					Secrets:     map[string]string{"security_key": securityKey},
+					AccountID: nmiAccount,
+					Secrets:   map[string]string{"security_key": securityKey},
 				},
 			},
 			"ccbill": {
 				"ccbill": {
-					Environment: "live",
-					AccountID:   ccbillAccount,
+					AccountID: ccbillAccount,
 					Secrets: map[string]string{
 						"datalink_username": "dl-user-" + slug,
 						"datalink_password": "dl-pass-" + slug,
@@ -217,9 +215,8 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
-					Environment: "live",
-					AccountID:   nmiAccount,
-					Secrets:     map[string]string{"security_key": securityKey},
+					AccountID: nmiAccount,
+					Secrets:   map[string]string{"security_key": securityKey},
 				},
 			},
 		},
@@ -262,8 +259,7 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
 				"nmi": {
-					Environment: "live",
-					AccountID:   nmiAccount,
+					AccountID: nmiAccount,
 				},
 			},
 		},

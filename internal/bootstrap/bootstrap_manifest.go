@@ -163,12 +163,11 @@ func validateManifestRailMerchantAccount(slug string, key string, account PSPCon
 		if rail == "" {
 			return fmt.Errorf("merchant %q accounts.%s rail is required", slug, key)
 		}
-		// Omitted environment is valid — it follows deployment posture at
-		// reconcile time (#681); explicit values must normalize.
-		if strings.TrimSpace(cfg.Environment) != "" {
-			if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
-				return fmt.Errorf("merchant %q accounts.%s.%s.%w", slug, key, rail, err)
-			}
+		// #882: environment is DERIVED from test_mode, never declared. The field
+		// could only ever agree (a no-op) or disagree (refuse to boot), so it is
+		// retired — a manifest that still carries it fails loudly.
+		if strings.TrimSpace(cfg.LegacyEnvironment) != "" {
+			return fmt.Errorf("merchant %q psps.%s.%s.environment was removed (#882): the environment is derived from test_mode (sandbox => test, live => live) — delete the key", slug, key, rail)
 		}
 		for secretKey := range cfg.Secrets {
 			if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {

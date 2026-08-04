@@ -70,7 +70,6 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment: "test",
 		AccountID:   "arm-348-live",
 		Credentials: map[string]string{"security_key": "live-security-key"},
 	})
@@ -98,7 +97,6 @@ func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) 
 	require.NoError(t, err)
 
 	cfg, err := svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment: "test",
 		AccountID:   "arm-348-sim",
 		Credentials: map[string]string{"security_key": "sandbox-security-key"},
 	})
@@ -124,7 +122,6 @@ func TestUpsertPaymentProviderConfigProbeIndeterminateNeverRefuses(t *testing.T)
 	require.NoError(t, err)
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment: "test",
 		AccountID:   "arm-348-indeterminate",
 		Credentials: map[string]string{"security_key": "unclear-security-key"},
 	})
@@ -148,7 +145,6 @@ func TestUpsertPaymentProviderConfigCooldownRespected(t *testing.T) {
 	require.NoError(t, err)
 
 	req := UpsertPaymentProviderConfigRequest{
-		Environment: "test",
 		AccountID:   "arm-348-cooldown",
 		Credentials: map[string]string{"security_key": "live-cooldown-key"},
 	}
@@ -184,7 +180,6 @@ func TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode(t *testing
 	require.NoError(t, err)
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment: "live",
 		AccountID:   "arm-348-prod",
 		Credentials: map[string]string{"security_key": "live-prod-key"},
 	})
@@ -211,7 +206,6 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	require.NoError(t, err)
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment: "test",
 		AccountID:   "arm-348-existing",
 		Credentials: map[string]string{"security_key": "was-sandbox-then-rotated-live"},
 	})
@@ -232,7 +226,6 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	svc.nmiProbeV5BaseURL = liveServer.URL
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
-		Environment:  "test",
 		AccountID:    "arm-348-existing",
 		PublicConfig: map[string]string{"note": "unrelated update"},
 	})
