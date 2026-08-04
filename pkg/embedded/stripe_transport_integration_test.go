@@ -75,7 +75,6 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	require.NotNil(t, e.App().Runtime.Merchants, "the merchant credential plane must be armed")
 	_, err = e.App().Runtime.Merchants.UpsertPaymentProviderConfig(ctx, provisioned.MerchantID, "stripe",
 		merchants.UpsertPaymentProviderConfigRequest{
-			Environment: "test",
 			AccountID:   "acct_seam_" + sfx,
 			Credentials: map[string]string{"secret_key": "sk_test_seam_" + sfx},
 		})
