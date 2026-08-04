@@ -110,9 +110,14 @@ func ValidateSolanaAccountSettings(settings map[string]any) error {
 	return nil
 }
 
-// ApplyTo overlays the declared settings onto a boot-plane SolanaRailConfig
+// ApplyTo overlays the declared RPC settings onto a boot-plane SolanaRailConfig
 // (store-wins, #699) and returns a NEW config; base is never mutated. A nil
 // base starts from an empty config (standalone: the store is the only plane).
+//
+// Tokens are NOT resolved here (or#881): a declaration selects built-in symbols
+// out of a per-NETWORK mint registry, which this layer cannot see. The caller
+// that knows the network resolves them —
+// internal/modules/solana/tokens.ResolveDeclared.
 func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig {
 	out := &SolanaRailConfig{}
 	if base != nil {
@@ -130,18 +135,6 @@ func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig
 	if s.RPCAPIKey != "" {
 		out.RPCAPIKey = s.RPCAPIKey
 	}
-	// or#881: declared tokens EXTEND/OVERRIDE the base set per symbol; they do
-	// not replace it. Replacement meant adding one custom token forced the
-	// merchant to re-type every canonical mint they still wanted — a paste
-	// hazard manufactured by the config shape, on a money path.
-	if len(s.Tokens) > 0 {
-		if out.Tokens == nil {
-			out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
-		}
-		for k, v := range s.Tokens {
-			out.Tokens[k] = v
-		}
-	}
 	return out
 }
 
@@ -154,7 +147,9 @@ func settingString(key string, raw any) (string, error) {
 }
 
 // settingTokens decodes the tokens map. Values arrive as generic maps from
-// either the YAML manifest or the stored evidence JSON.
+// either the YAML manifest or the stored evidence JSON. It decodes SHAPE only —
+// mint semantics are network-dependent and belong to
+// internal/modules/solana/tokens.ResolveDeclared.
 func settingTokens(raw any) (map[string]TokenConfig, error) {
 	entries, err := settingAnyMap("tokens", raw)
 	if err != nil {
@@ -191,9 +186,10 @@ func settingTokens(raw any) (map[string]TokenConfig, error) {
 				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name)", symbol, key)
 			}
 		}
-		if strings.TrimSpace(token.Mint) == "" {
-			return nil, fmt.Errorf("solana settings: tokens.%s requires mint", symbol)
-		}
+		// A missing mint is NOT an error here: for a built-in symbol it is the
+		// correct declaration (or#881 — the mint comes from the registry), and
+		// which symbols are built-in depends on the network, which this layer
+		// does not know. solana/tokens.ResolveDeclared rules on it.
 		out[symbol] = token
 	}
 	return out, nil

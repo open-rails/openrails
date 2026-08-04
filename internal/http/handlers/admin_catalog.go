@@ -37,7 +37,11 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	// Map known business errors to stable status codes + machine-readable codes.
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "not found"):
+	// or#782: product_not_found/price_not_found (the stable codes the lookup
+	// helpers rewrite "sql: no rows" into) match on the UNDERSCORE form — without
+	// it every missing-or-foreign id fell through to a 500, so a cross-merchant
+	// read was denied while looking like a server fault.
+	case strings.Contains(msg, "not found"), strings.Contains(msg, "not_found"):
 		r.ErrorJSON(http.StatusNotFound, err.Error())
 	case strings.Contains(msg, "duplicate key"),
 		strings.Contains(msg, "already exists"):

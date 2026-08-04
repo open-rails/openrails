@@ -18,9 +18,9 @@ func TestDefaultMainnetTokensAllPriceable(t *testing.T) {
 		require.NotEqual(t, TokenPricingDisabled, decision,
 			"default mainnet token %s must be priceable (feed or USD parity)", symbol)
 	}
-	// USD1/USDG specifically graduated from feedless to feed-backed with
-	// verified Pyth feed ids.
-	for _, symbol := range []string{"USD1", "USDG"} {
+	// USD1/USDG/USDT graduated from feedless to feed-backed with verified Pyth
+	// feed ids.
+	for _, symbol := range []string{"USD1", "USDG", "USDT"} {
 		decision, _ := ClassifyPricing(symbol, DefaultSupportedTokens()[symbol].Mint)
 		require.Equal(t, TokenPricingFeed, decision, "%s has a verified Pyth feed", symbol)
 		require.False(t, IsFeedlessStablecoin(symbol), "%s is no longer feedless", symbol)
@@ -36,7 +36,10 @@ func TestClassifyPricing(t *testing.T) {
 	})
 
 	t.Run("USD-pegged registry mint without feed degrades to parity", func(t *testing.T) {
-		decision, sc := ClassifyPricing("USDT", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
+		// A CUSTOM symbol (no feed of its own) pointing at a known USD mint.
+		// Every shipped registry symbol is feed-backed, so this is the only way
+		// to reach the parity branch now.
+		decision, sc := ClassifyPricing("MYUSD", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
 		require.Equal(t, TokenPricingUSDParity, decision)
 		require.Equal(t, "usd", sc.Peg)
 	})
@@ -54,7 +57,10 @@ func TestClassifyPricing(t *testing.T) {
 	})
 
 	t.Run("parity is mint-anchored: stablecoin SYMBOL with unknown mint gets no parity", func(t *testing.T) {
-		decision, _ := ClassifyPricing("USDT", "FakeMint1111111111111111111111111111111111")
+		// EURC has no feed, so the decision falls through to the mint anchor.
+		// (or#881 closes the feed-backed variant of this by construction: a
+		// registry symbol can no longer carry a declared mint at all.)
+		decision, _ := ClassifyPricing("EURC", "FakeMint1111111111111111111111111111111111")
 		require.Equal(t, TokenPricingDisabled, decision)
 	})
 
@@ -86,8 +92,10 @@ func TestStablecoinRegistryHelpers(t *testing.T) {
 	_, ok = KnownStablecoinByMint("So11111111111111111111111111111111111111112")
 	require.False(t, ok)
 
-	// USDT remains the only feedless USD stablecoin shipped today.
-	require.True(t, IsFeedlessStablecoin("USDT"))
-	require.False(t, IsFeedlessStablecoin("USDC"))
+	// or#881: every USD stablecoin shipped today is feed-backed, so none is
+	// priced at bare parity without depeg protection.
+	for _, symbol := range []string{"USDC", "USDT", "USD1", "USDG", "PYUSD"} {
+		require.Falsef(t, IsFeedlessStablecoin(symbol), "%s must be feed-backed", symbol)
+	}
 	require.False(t, IsFeedlessStablecoin("EURC"))
 }
