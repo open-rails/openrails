@@ -2,22 +2,19 @@
 // (inset variant, brand header, nav, footer user menu, rail).
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  ArrowUpDownIcon,
+  Add01Icon,
   CreditCardIcon,
   DashboardCircleIcon,
-  Logout01Icon,
-  MoonIcon,
   PackageIcon,
   RepeatIcon,
   Settings01Icon,
-  Sun01Icon,
+  Tick02Icon,
+  UnfoldMoreIcon,
   UserGroupIcon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 
-import { useTheme } from "@/components/theme-provider"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +27,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -57,26 +53,7 @@ export function AppSidebar() {
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              render={
-                <Link to="/">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-                    µ
-                  </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">OpenRails</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      Merchant console
-                    </span>
-                  </div>
-                </Link>
-              }
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <MerchantSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -105,26 +82,16 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <UserMenu />
-      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )
 }
 
-function UserMenu() {
-  const { me, logout } = useAuth()
-  const { theme, setTheme } = useTheme()
-  const navigate = useNavigate()
-  if (!me) return null
-
-  const name = me.username || me.email || "Signed in"
-  const initials = name.slice(0, 2).toUpperCase()
-  const dark =
-    theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches)
+function MerchantSwitcher() {
+  const { activeMerchant, merchants, selectMerchant } = useAuth()
+  const label = activeMerchant?.instance_slug ?? "Select merchant"
+  const role = activeMerchant?.role ?? "Merchant console"
+  const initials = activeMerchant?.instance_slug.slice(0, 2) ?? "µ"
 
   return (
     <SidebarMenu>
@@ -134,63 +101,68 @@ function UserMenu() {
             render={
               <SidebarMenuButton
                 size="lg"
+                tooltip={label}
                 className="data-open:bg-sidebar-accent"
               >
-                <Avatar className="size-8 rounded-lg">
-                  <AvatarFallback className="rounded-lg">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-medium">{name}</span>
-                  {me.email && me.username && (
-                    <span className="truncate text-xs text-muted-foreground">
-                      {me.email}
-                    </span>
-                  )}
-                </div>
+                <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground uppercase">
+                  {initials}
+                </span>
+                <span className="grid min-w-0 flex-1 text-left leading-tight">
+                  <span className="truncate text-sm font-medium">{label}</span>
+                  <span className="truncate text-xs text-muted-foreground capitalize">
+                    {role}
+                  </span>
+                </span>
                 <HugeiconsIcon
-                  icon={ArrowUpDownIcon}
-                  className="ml-auto size-4"
+                  icon={UnfoldMoreIcon}
+                  className="ml-auto size-4 shrink-0"
                 />
               </SidebarMenuButton>
             }
           />
-          <DropdownMenuContent side="top" align="start" className="min-w-56">
+          <DropdownMenuContent side="bottom" align="start" className="min-w-60">
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="font-normal">
-                <div className="grid leading-tight">
-                  <span className="text-sm font-medium">{name}</span>
-                  {me.email && (
-                    <span className="text-xs text-muted-foreground">
-                      {me.email}
-                    </span>
-                  )}
-                </div>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Merchants
               </DropdownMenuLabel>
+              {merchants.map((merchant) => {
+                const active =
+                  merchant.instance_slug === activeMerchant?.instance_slug
+                return (
+                  <DropdownMenuItem
+                    key={merchant.instance_slug}
+                    onClick={() => selectMerchant(merchant.instance_slug)}
+                    className="gap-2 py-2"
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold uppercase">
+                      {merchant.instance_slug.slice(0, 2)}
+                    </span>
+                    <span className="grid min-w-0 flex-1 leading-tight">
+                      <span className="truncate text-sm">
+                        {merchant.instance_slug}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground capitalize">
+                        {merchant.role}
+                      </span>
+                    </span>
+                    {active && (
+                      <HugeiconsIcon
+                        icon={Tick02Icon}
+                        className="ml-auto size-4 shrink-0 text-primary"
+                      />
+                    )}
+                  </DropdownMenuItem>
+                )
+              })}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/settings")}>
-              <HugeiconsIcon icon={Settings01Icon} />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme(dark ? "light" : "dark")}>
-              {dark ? (
-                <HugeiconsIcon icon={Sun01Icon} />
-              ) : (
-                <HugeiconsIcon icon={MoonIcon} />
-              )}
-              {dark ? "Light mode" : "Dark mode"}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={async () => {
-                await logout()
-                navigate("/login")
+              onClick={() => {
+                window.location.href = "/account?create=merchant"
               }}
             >
-              <HugeiconsIcon icon={Logout01Icon} />
-              Sign out
+              <HugeiconsIcon icon={Add01Icon} />
+              Create merchant
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

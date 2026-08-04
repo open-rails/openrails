@@ -128,3 +128,21 @@
     @apply font-sans;
   }
 }
+
+button:not(:disabled),
+select:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[data-slot="button"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="select-trigger"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="select-item"]:not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-trigger"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-item"]:not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-sub-trigger"]:not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-checkbox-item"]:not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-radio-item"]:not([aria-disabled="true"]):not([data-disabled]),
+[role="menuitem"]:not([aria-disabled="true"]):not([data-disabled]),
+[role="menuitemcheckbox"]:not([aria-disabled="true"]):not([data-disabled]),
+[role="menuitemradio"]:not([aria-disabled="true"]):not([data-disabled]),
+[role="option"]:not([aria-disabled="true"]):not([data-disabled]) {
+  cursor: pointer;
+}

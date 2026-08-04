@@ -1,3 +1,10 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Copy02Icon,
+  CopyCheckIcon,
+  ViewIcon,
+  ViewOffIcon,
+} from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
 
@@ -70,30 +77,37 @@ export function ApiKeysTab() {
   const keys = data?.data ?? []
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Scoped credentials for agents and integrations. A key holds one role
-          of the merchant catalog; least privilege (Viewer) is the default. The
-          secret is shown once at creation and can never be retrieved again —
-          only revoked.
-        </p>
-        <CreateKeyDialog onDone={reload} />
-      </div>
-      {keys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No API keys yet.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
+    <div>
+      <section className="grid gap-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="grid max-w-2xl gap-1">
+            <h2 className="text-base font-semibold">API keys</h2>
+            <p className="text-sm text-pretty text-muted-foreground">
+              Create scoped credentials for integrations. Secrets are shown
+              once.
+            </p>
+          </div>
+          <CreateKeyDialog onDone={reload} />
+        </div>
+        {keys.length === 0 ? (
+          <p className="py-2 text-sm text-muted-foreground">
+            No API keys created.
+          </p>
+        ) : (
+          <Table className="min-w-[52rem]">
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last used</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead />
+                <TableHead className="text-muted-foreground">Name</TableHead>
+                <TableHead className="text-muted-foreground">Role</TableHead>
+                <TableHead className="text-muted-foreground">Prefix</TableHead>
+                <TableHead className="text-muted-foreground">Created</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Last used
+                </TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-right text-muted-foreground">
+                  Action
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -102,8 +116,8 @@ export function ApiKeysTab() {
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </section>
     </div>
   )
 }
@@ -126,16 +140,20 @@ function KeyRow({
   const status = keyStatus(apiKey)
   return (
     <TableRow className={status !== "active" ? "opacity-60" : undefined}>
-      <TableCell className="font-medium">{apiKey.name}</TableCell>
-      <TableCell>
-        <Badge variant="secondary">{apiKey.role}</Badge>
+      <TableCell className="py-3 font-medium">{apiKey.name}</TableCell>
+      <TableCell className="py-3">
+        <Badge variant="secondary" className="capitalize">
+          {apiKey.role}
+        </Badge>
       </TableCell>
-      <TableCell className="text-xs">{apiKey.prefix}…</TableCell>
-      <TableCell>{formatDate(apiKey.created_at)}</TableCell>
-      <TableCell>
+      <TableCell className="py-3 font-mono text-xs text-muted-foreground">
+        {apiKey.prefix}
+      </TableCell>
+      <TableCell className="py-3">{formatDate(apiKey.created_at)}</TableCell>
+      <TableCell className="py-3">
         {apiKey.last_used_at ? formatDate(apiKey.last_used_at) : "never"}
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         {status === "active" ? (
           <Badge
             variant="secondary"
@@ -144,10 +162,12 @@ function KeyRow({
             active
           </Badge>
         ) : (
-          <Badge variant="secondary">{status}</Badge>
+          <Badge variant="secondary" className="capitalize">
+            {status}
+          </Badge>
         )}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         {status === "active" && (
           <>
             <Button
@@ -284,6 +304,18 @@ function ShowOnceSecret({
   onClose: () => void
 }) {
   const [copied, setCopied] = React.useState(false)
+  const [revealed, setRevealed] = React.useState(false)
+
+  const copySecret = async () => {
+    try {
+      await copyText(minted.secret)
+      setCopied(true)
+      toast.success("Key copied to clipboard")
+    } catch {
+      toast.error("Copy failed — reveal and copy the key manually")
+    }
+  }
+
   return (
     <>
       <DialogHeader>
@@ -301,23 +333,27 @@ function ShowOnceSecret({
           <span className="font-medium">{minted.name}</span>{" "}
           <Badge variant="secondary">{minted.role}</Badge>
         </p>
-        <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2 text-xs whitespace-nowrap">
-            {minted.secret}
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs whitespace-nowrap">
+            {revealed ? minted.secret : `${minted.prefix}_••••••••••••••••`}
           </code>
           <Button
             variant="outline"
             size="sm"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(minted.secret)
-                setCopied(true)
-                toast.success("Key copied to clipboard")
-              } catch {
-                toast.error("Copy failed — select the key text manually")
-              }
-            }}
+            aria-pressed={revealed}
+            onClick={() => setRevealed((current) => !current)}
           >
+            <HugeiconsIcon
+              icon={revealed ? ViewOffIcon : ViewIcon}
+              className="size-4"
+            />
+            {revealed ? "Hide" : "Show"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={copySecret}>
+            <HugeiconsIcon
+              icon={copied ? CopyCheckIcon : Copy02Icon}
+              className="size-4"
+            />
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>
@@ -331,4 +367,29 @@ function ShowOnceSecret({
       </DialogFooter>
     </>
   )
+}
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return
+    } catch {
+      // Fall back for browsers that expose the API but deny clipboard access.
+    }
+  }
+
+  const textarea = document.createElement("textarea")
+  textarea.value = value
+  textarea.readOnly = true
+  textarea.style.position = "fixed"
+  textarea.style.opacity = "0"
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    if (!document.execCommand("copy")) throw new Error("Copy failed")
+  } finally {
+    textarea.remove()
+  }
 }
