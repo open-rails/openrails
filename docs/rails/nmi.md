@@ -1,5 +1,8 @@
 # NMI (high-risk gateway) setup
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md).
+
 ### What NMI is, and where your ISO fits
 
 NMI is white-label gateway software. High-risk ISOs/resellers — MobiusPay,

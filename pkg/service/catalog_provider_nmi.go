@@ -30,8 +30,8 @@ import (
 //     a recurring provider day cadence (NMI requires a frequency). When no NMI rail is
 //     configured, falls back to errPendingManualLink so the operator can link
 //     a control-center plan manually.
-//   - Update: propagates display_name via EditRecurringPlan; rejects financial
-//     changes (amount/frequency are immutable post-create in NMI).
+//   - Update: no-op. Amount/frequency are immutable post-create and is_active is
+//     not representable, so no mutable field is left to propagate.
 //   - Verify: live GetRecurringPlanByID + diff plan_name.
 //
 // Divergence from Stripe: on price deactivation OpenRails does NOT delete the

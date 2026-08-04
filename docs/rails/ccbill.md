@@ -1,5 +1,9 @@
 # CCBill
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md). Read it before relying on
+> CCBill refunds — that wire is modeled, not verified.
+
 CCBill is a hosted-checkout payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own

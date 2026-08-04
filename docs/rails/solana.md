@@ -1,5 +1,8 @@
 # Solana rail — merchant setup
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md).
+
 Solana is the self-custody rail: there is no third-party PSP account. You receive
 funds directly into a wallet you control, and OpenRails signs recurring pulls with
 a merchant key you provide. One-time payments use Solana Pay; recurring

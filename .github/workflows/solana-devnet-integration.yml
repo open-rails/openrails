@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       run_multirebill:
-        description: 'Also run the multi-HOUR multi-rebill test (TestDevnetMultiRebillHourly, ~3h). Off by default — too slow/expensive for the daily run.'
+        description: 'Also run the multi-HOUR multi-rebill test (TestDevnetSustainedRebill, ~3h). Off by default — too slow/expensive for the daily run.'
         type: boolean
         default: false
 
@@ -90,4 +90,4 @@ jobs:
             echo "HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY and SOLANA_DEVNET_SUBSCRIBER_KEY secrets are required" >&2
             exit 1
           fi
-          go test -tags devnet -run TestDevnetMultiRebillHourly -v -timeout 3h ./internal/modules/solana/recurring/...
+          go test -tags devnet -run TestDevnetSustainedRebill -v -timeout 3h ./internal/modules/solana/recurring/...

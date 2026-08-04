@@ -361,6 +361,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 
+- [Certification matrix](docs/rails/certification-matrix.md) — which flows each rail supports, and what evidence backs each one
 - [NMI](docs/rails/nmi.md) (MobiusPay, PaymentCloud, PayKings, and other NMI-backed ISOs)
 - [Stripe](docs/rails/stripe.md)
 - [CCBill](docs/rails/ccbill.md)
