@@ -1,13 +1,20 @@
 name: Validate Code (full)
 
 # FULL pipeline (#855): the complete suite, no path filtering, no scoping.
-# Runs on master pushes, nightly, and on demand — never on PRs or ordinary
-# branch pushes (PRs get the fast path-filtered pipeline in ci.yaml). Job ids
-# carry a -full suffix so branch-protection required checks (which must point
-# at ci.yaml's PR-scoped jobs) never reference these.
+# Runs on integration-branch pushes, nightly, and on demand — never on PRs or
+# ordinary branch pushes (PRs get the fast path-filtered pipeline in ci.yaml).
+# Job ids carry a -full suffix so branch-protection required checks (which must
+# point at ci.yaml's PR-scoped jobs) never reference these.
+#
+# It also PRIMES THE CACHES for every PR. GitHub scopes a cache to the branch
+# that wrote it plus that branch's descendants, so a PR restores from its BASE
+# branch. These jobs therefore mirror ci.yaml's split one-for-one and pass the
+# same `variant` to .github/actions/go-env: a push here leaves a warm build
+# cache for each build configuration the PR pipeline uses. Merging the split
+# back together would silently cost every PR the cold-compile time again.
 on:
   push:
-    branches: [ master ]
+    branches: [ master, dev ]
   schedule:
     # 05:00 UTC nightly.
     - cron: '0 5 * * *'
@@ -29,13 +36,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
-      # ~/.cache/go-build. Never add an explicit actions/cache step for those
-      # paths: restoring over a populated dir fails with "tar: File exists".
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: vet
       - name: Download modules
         run: go mod download
       - name: Vet
@@ -44,7 +47,23 @@ jobs:
         run: go build ./...
       - name: Vet (integration tag)
         run: go vet -tags integration ./...
-      - name: Test
+      - name: Build examples
+        run: |
+          for d in examples/*/; do
+            (cd "$d" && go build ./... && go vet ./...)
+          done
+
+  unit-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/go-env
+        with:
+          variant: race
+      - name: Download modules
+        run: go mod download
+      - name: Test (race)
         run: go test -race ./...
 
   sqlc-full:
@@ -66,10 +85,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: sqlc
       # or#855: pinned + checksum-verified downloads instead of compiling both
       # tools from source on every run (see scripts/ci-install-tool.sh).
       - name: Install pinned tools (task, sqlc)
@@ -94,15 +112,18 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/admin/pnpm-lock.yaml
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: console
       - name: Build console (pnpm install + tsc + vite)
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
       - name: Lint console
         run: pnpm run lint
         working-directory: web/admin
+      # Full tier keeps the WHOLE-TREE tagged vet that the PR tier narrows to
+      # the one package carrying tag-conditional source. Same reasoning as the
+      # PR job, opposite trade: nothing here is racing a 3-minute bar, so pay
+      # the 68s for the belt-and-braces version.
       - name: Tagged Go build embeds the dist
         run: go vet -tags console_assets ./...
 
@@ -111,13 +132,16 @@ jobs:
     # ENFORCING (#694): the suite runs green. The serial run is ~20-25 min (go
     # test itself is capped at 25m inside the script); the job timeout adds
     # headroom for image pulls + module download.
+    #
+    # NOT sharded, on purpose: this is the tier that must reproduce the real
+    # serial ordering across ALL packages on ONE stack. Sharding is a PR-tier
+    # wall-clock trade; the authority run keeps the single stack.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: integration
       - name: Download modules
         run: go mod download
       # Integration tests share one compose-backed Postgres/Garnet stack and

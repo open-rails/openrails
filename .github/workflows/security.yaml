@@ -1,12 +1,14 @@
 name: Security Scan
 
-# #855 triggers: PRs to master (fast, path-filtered), master pushes, nightly,
-# manual. Never ordinary branch pushes.
+# #855 triggers: PRs to an integration branch (fast, path-filtered), pushes to
+# those branches, nightly, manual. Never ordinary branch pushes. `dev` is listed
+# for the same reason as in ci.yaml: it is where work merges today, and PRs into
+# it were running no security scan at all.
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master, dev ]
   push:
-    branches: [ master ]
+    branches: [ master, dev ]
   schedule:
     # 05:00 UTC nightly.
     - cron: '0 5 * * *'
@@ -60,14 +62,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
-      # ~/.cache/go-build; never add an explicit actions/cache step for those
-      # paths ("tar: File exists" collision).
-      - uses: actions/setup-go@v5
+      # gosec loads packages with full type information, so it pays the same
+      # dependency-compile bill the Go jobs do and wants the same warm cache.
+      # See .github/actions/go-env for why explicit cache steps are back and why
+      # that does not reintroduce the "tar: File exists" collision.
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: gosec
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
@@ -91,11 +93,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: govulncheck
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download

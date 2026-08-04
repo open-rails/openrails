@@ -1,11 +1,16 @@
 name: Validate Code
 
-# FAST pipeline (#855): PRs targeting master ONLY. Ordinary branch pushes run
-# nothing by design — open a PR. Master pushes, nightly, and manual runs go
-# through ci-full.yaml (complete integration suite).
+# FAST pipeline (#855): PRs targeting an integration branch ONLY. Ordinary
+# branch pushes run nothing by design — open a PR. Pushes to those branches,
+# nightly, and manual runs go through ci-full.yaml (complete integration suite).
+#
+# `dev` is listed because it is where work merges today (PRs #208/#209 landed
+# there) and, until this change, a PR into `dev` ran ZERO checks: every gate in
+# this file was scoped to `master` alone. That is not a latency finding, it is a
+# hole in the gates, and it is fixed here first.
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master, dev ]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,6 +25,15 @@ permissions:
 # 2026-06-16; this opts into the new runtime ahead of the cutover.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# JOB NAMES ARE THE BRANCH-PROTECTION CONTRACT. The required checks from this
+# file are exactly: changes, build, unit, sqlc, console, integration. The
+# integration SHARDS are matrix jobs whose names carry the shard index, so they
+# are deliberately NOT the ones to list — the `integration` job below aggregates
+# them into one stable name, which means the shard count can change without
+# touching branch protection. Never list ci-full.yaml's `-full` jobs or CodeQL's
+# "Analyze (go)": neither runs on PRs, so a required check on them blocks every
+# PR forever.
 
 jobs:
   # Classifies the PR diff. Downstream jobs ALWAYS run (so branch-protection
@@ -67,6 +81,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "go=$go console=$console broad=$broad"
 
+  # Compile-and-analyse gates. `go test -race` used to live here too and made
+  # this a 272s job; it is now the separate `unit` job, because the two share
+  # nothing — a race build recompiles the whole graph with different action ids,
+  # so running them in sequence bought no cache reuse, only wall clock.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -74,14 +92,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
-      # ~/.cache/go-build. Never add an explicit actions/cache step for those
-      # paths: restoring over a populated dir fails with "tar: File exists".
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: vet
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
@@ -101,11 +115,33 @@ jobs:
         # Each example is its own module (replace => ../..), invisible to the
         # root ./... patterns — build them explicitly so engine changes that
         # break an example fail the same PR.
+        #
+        # The `if:` is a fix, not a speedup: without it this step ran on
+        # docs-only PRs, where checkout is skipped, so `examples/*/` matched
+        # nothing, `cd examples/*/` failed and the whole gate went red.
+        if: needs.changes.outputs.go == 'true'
         run: |
           for d in examples/*/; do
             (cd "$d" && go build ./... && go vet ./...)
           done
-      - name: Test
+
+  # Unit tests, split out of `build` so the two run in parallel. Still -race,
+  # still the whole tree: nothing here is scoped, skipped or downgraded.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
+      - uses: ./.github/actions/go-env
+        if: needs.changes.outputs.go == 'true'
+        with:
+          variant: race
+      - name: Download modules
+        if: needs.changes.outputs.go == 'true'
+        run: go mod download
+      - name: Test (race)
         if: needs.changes.outputs.go == 'true'
         run: go test -race ./...
 
@@ -154,14 +190,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: sqlc
       # or#855: `go install task@latest` + `go run sqlc@…` compiled both tools
-      # from source on every run — measured 61s and ~60s respectively, i.e.
-      # ~120s of a 144s job spent installing tools upstream already ships as
+      # from source on every run — measured 52s and ~60s respectively, i.e.
+      # ~110s of a 137s job spent installing tools upstream already ships as
       # binaries. Pinned + checksum-verified downloads take ~5s, and `@latest`
       # pinned nothing to begin with.
       - name: Install pinned tools (task, sqlc)
@@ -202,11 +237,10 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/admin/pnpm-lock.yaml
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.console == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: console
       - name: Build console (pnpm install + tsc + vite)
         if: needs.changes.outputs.console == 'true'
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
@@ -214,60 +248,97 @@ jobs:
         if: needs.changes.outputs.console == 'true'
         run: pnpm run lint
         working-directory: web/admin
+      # This gate's claim is "the tagged binary embeds the dist that was just
+      # built" — assets_embed.go's //go:embed fails to compile without it. It
+      # used to be spelled `go vet -tags console_assets ./...`, 68s, because a
+      # build tag changes the action id of EVERY package in the tree, so the
+      # whole repo plus every test package was recompiled and re-analysed to
+      # prove one embed. Only ONE package has console_assets-conditional source
+      # (guarded below), and every other package compiles identically to the
+      # untagged build the `build` job already vets. So: build the binary that
+      # makes the claim, and vet the one package that actually differs.
       - name: Tagged Go build embeds the dist
         if: needs.changes.outputs.console == 'true'
-        run: go vet -tags console_assets ./...
+        run: |
+          test -n "$(ls -A cmd/openrails/consoleassets/dist 2>/dev/null)" || {
+            echo "console: dist/ is empty — the embed gate would prove nothing" >&2
+            exit 1
+          }
+          go build -tags console_assets ./cmd/openrails/
+          go vet -tags console_assets ./cmd/openrails/consoleassets/
+      - name: Guard — console_assets stays in one package
+        # Narrowing the step above is only coverage-neutral while
+        # cmd/openrails/consoleassets is the sole package with tag-conditional
+        # source. The day that stops being true, this fails and says so.
+        if: needs.changes.outputs.console == 'true'
+        run: |
+          stray="$(grep -rlE '^//go:build .*console_assets' --include='*.go' . |
+                   grep -v '^\./cmd/openrails/consoleassets/' || true)"
+          if [ -n "$stray" ]; then
+            echo "console_assets-conditional source outside cmd/openrails/consoleassets:" >&2
+            echo "$stray" >&2
+            echo "widen the tagged build above to cover it, then update this guard" >&2
+            exit 1
+          fi
 
   # PR tier (#855): integration tests SCOPED to the tagged packages the diff
-  # touches, under a 15m go-test budget. Cross-package fallout is deliberately
-  # deferred to integration-full (master push + nightly, complete suite).
-  # Broad/shared-surface diffs (go.mod, migrations/, internal/db/, scripts/,
-  # ...) still run the full tagged suite here.
-  integration:
+  # touches. Cross-package fallout is deliberately deferred to integration-full
+  # (push + nightly, complete suite). Broad/shared-surface diffs (go.mod,
+  # migrations/, internal/db/, scripts/, .github/, ...) still run the full
+  # tagged suite here.
+  #
+  # SHARDED (or#855): the serial run was 360s and the pipeline's sole long pole.
+  # Sharding is coverage-neutral — the union of the shards is the same package
+  # set, each shard gets its OWN compose stack, and `-p 1 -parallel 1` still
+  # serialises everything inside a shard, so the shared-Postgres/Garnet and
+  # un-namespaced-Redis-key assumptions that forbid raising -parallel are
+  # untouched. See scripts/ci-integration-select.sh for the balancing.
+  integration-shard:
+    name: integration shard ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
     timeout-minutes: 35
     needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: integration
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
-      # Integration tests share one compose-backed Postgres/Garnet stack and
-      # run serially. scripts/test_integration.sh expands ./... to only the
-      # packages carrying the `integration` build tag (#790); explicit package
-      # args pass through, which is what the scoped tier uses.
-      - name: Integration test (scoped)
+      - name: Integration test
         if: needs.changes.outputs.go == 'true'
         env:
           CHANGED_FILES: ${{ needs.changes.outputs.files }}
           BROAD: ${{ needs.changes.outputs.broad }}
+          SHARDS: "6"
+          SHARD: ${{ matrix.shard }}
         run: |
-          if [ "$BROAD" = "true" ]; then
-            echo "shared surface changed — running the full tagged suite"
-            exec bash scripts/test_integration.sh ./...
-          fi
-          mapfile -t tagged < <(grep -rl --include='*.go' -E '^//go:build (.*[^a-zA-Z0-9_])?integration([^a-zA-Z0-9_].*)?$' . | xargs -n1 dirname | sed 's|^\./||' | sort -u)
-          declare -A want=()
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            d="$(dirname "$f")"
-            for t in "${tagged[@]}"; do
-              case "$d" in
-                "$t"|"$t"/*) want["$t"]=1 ;;
-              esac
-            done
-          done <<< "$CHANGED_FILES"
-          if [ "${#want[@]}" -eq 0 ]; then
-            echo "no integration-tagged package touched — nothing to run at PR tier (full suite runs on master push + nightly)"
+          mapfile -t pkgs < <(bash scripts/ci-integration-select.sh)
+          if [ "${#pkgs[@]}" -eq 0 ]; then
+            echo "nothing for this shard"
             exit 0
           fi
-          pkgs=()
-          for t in "${!want[@]}"; do pkgs+=("./$t"); done
-          echo "scoped integration run: ${pkgs[*]}"
+          echo "shard ${SHARD}/${SHARDS}: ${pkgs[*]}"
           OPENRAILS_INTEGRATION_TIMEOUT=15m bash scripts/test_integration.sh "${pkgs[@]}"
+
+  # One stable name for branch protection to require, so changing the shard
+  # count never means editing the ruleset. `always()` + an explicit result check
+  # is load-bearing: without it a cancelled or skipped shard would let this pass.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: integration-shard
+    if: always()
+    steps:
+      - name: All integration shards succeeded
+        run: |
+          result="${{ needs.integration-shard.result }}"
+          echo "integration-shard matrix result: $result"
+          [ "$result" = "success" ] || exit 1
