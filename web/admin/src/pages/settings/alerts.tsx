@@ -1,5 +1,13 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Add01Icon,
+  Delete02Icon,
+  Mail01Icon,
+  Notification01Icon,
+  SentIcon,
+  WebhookIcon,
+} from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { BellIcon, MailIcon, PlusIcon, SendIcon, Trash2Icon, WebhookIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
@@ -111,7 +119,10 @@ function templateDescription(t: AlertTemplateInfo): string {
   return TEMPLATE_COPY[t.key]?.description ?? t.description
 }
 
-function templateByKey(templates: AlertTemplateInfo[], key: string): AlertTemplateInfo | undefined {
+function templateByKey(
+  templates: AlertTemplateInfo[],
+  key: string
+): AlertTemplateInfo | undefined {
   return templates.find((t) => t.key === key)
 }
 
@@ -128,7 +139,9 @@ function humanizeParam(name: string): string {
 // read-only/informational rather than let the operator pick a value the
 // server will reject.
 function isFixedParam(templateKey: string, paramName: string): boolean {
-  return templateKey === "payers_at_depletion_risk" && paramName === "runway_days"
+  return (
+    templateKey === "payers_at_depletion_risk" && paramName === "runway_days"
+  )
 }
 
 // --- Channel wire adapter (array is the ONE true shape) ---------------------
@@ -139,12 +152,15 @@ interface ChannelSelection {
   webhookIds: string[]
 }
 
-function channelsFromWire(channels: AlertChannelRef[] | undefined): ChannelSelection {
+function channelsFromWire(
+  channels: AlertChannelRef[] | undefined
+): ChannelSelection {
   const sel: ChannelSelection = { in_app: false, email: false, webhookIds: [] }
   for (const c of channels ?? []) {
     if (c.type === "in_app") sel.in_app = true
     else if (c.type === "email") sel.email = true
-    else if (c.type === "webhook" && c.webhook_id) sel.webhookIds.push(c.webhook_id)
+    else if (c.type === "webhook" && c.webhook_id)
+      sel.webhookIds.push(c.webhook_id)
   }
   return sel
 }
@@ -210,7 +226,11 @@ export function AlertsTab() {
         alertEmail={alertEmail}
         onChanged={rules.reload}
       />
-      <WebhooksSection webhooks={hooks} loading={webhooks.loading} onChanged={webhooks.reload} />
+      <WebhooksSection
+        webhooks={hooks}
+        loading={webhooks.loading}
+        onChanged={webhooks.reload}
+      />
     </div>
   )
 }
@@ -239,8 +259,9 @@ function AlertEmailCard({
       <CardHeader>
         <CardTitle className="text-sm">Alert email</CardTitle>
         <CardDescription>
-          Where operator alerts are sent when a rule uses the email channel. Leave empty and the
-          email channel stays inactive — alerts fail soft to in-app and any webhooks.
+          Where operator alerts are sent when a rule uses the email channel.
+          Leave empty and the email channel stays inactive — alerts fail soft to
+          in-app and any webhooks.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -259,8 +280,13 @@ function AlertEmailCard({
               setBusy(true)
               try {
                 // Preserve existing settings; only change alert_email.
-                await putMerchantSettings({ ...(settings ?? {}), alert_email: email.trim() || undefined })
-                toast.success(email.trim() ? "Alert email saved" : "Alert email cleared")
+                await putMerchantSettings({
+                  ...(settings ?? {}),
+                  alert_email: email.trim() || undefined,
+                })
+                toast.success(
+                  email.trim() ? "Alert email saved" : "Alert email cleared"
+                )
                 onSaved()
               } catch (err) {
                 toastApiError(err, "Save alert email")
@@ -305,16 +331,17 @@ function ChannelSummary({ channels }: { channels: AlertChannelRef[] }) {
   return (
     <span className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1">
-        <BellIcon className="size-3" /> in-app
+        <HugeiconsIcon icon={Notification01Icon} className="size-3" /> in-app
       </span>
       {sel.email && (
         <span className="inline-flex items-center gap-1">
-          <MailIcon className="size-3" /> email
+          <HugeiconsIcon icon={Mail01Icon} className="size-3" /> email
         </span>
       )}
       {sel.webhookIds.length > 0 && (
         <span className="inline-flex items-center gap-1">
-          <WebhookIcon className="size-3" /> {sel.webhookIds.length} webhook
+          <HugeiconsIcon icon={WebhookIcon} className="size-3" />{" "}
+          {sel.webhookIds.length} webhook
           {sel.webhookIds.length > 1 ? "s" : ""}
         </span>
       )}
@@ -347,15 +374,22 @@ function RulesSection({
         <div>
           <h2 className="text-sm font-medium">Alert rules</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Threshold alerts run on a slow cadence over your live metrics and push a warning the
-            moment a threshold is crossed — before a rail fines you or churn spikes.
+            Threshold alerts run on a slow cadence over your live metrics and
+            push a warning the moment a threshold is crossed — before a rail
+            fines you or churn spikes.
           </p>
         </div>
         {canCreate ? (
-          <RuleDialog templates={templates} webhooks={webhooks} alertEmail={alertEmail} onDone={onChanged} />
+          <RuleDialog
+            templates={templates}
+            webhooks={webhooks}
+            alertEmail={alertEmail}
+            onDone={onChanged}
+          />
         ) : (
           <Button size="sm" disabled>
-            <PlusIcon className="size-4" /> {templatesLoading ? "Loading…" : "New rule"}
+            <HugeiconsIcon icon={Add01Icon} className="size-4" />{" "}
+            {templatesLoading ? "Loading…" : "New rule"}
           </Button>
         )}
       </div>
@@ -364,13 +398,17 @@ function RulesSection({
       ) : rules.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-            <BellIcon className="size-6 text-muted-foreground" />
+            <HugeiconsIcon
+              icon={Notification01Icon}
+              className="size-6 text-muted-foreground"
+            />
             <div>
               <p className="text-sm font-medium">No alert rules yet</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Alerting watches the metrics that can fine or bankrupt you — chargeback ratio,
-                dunning spikes, credit depletion, expiring cards — and notifies you when a
-                threshold is crossed. Start from a template.
+                Alerting watches the metrics that can fine or bankrupt you —
+                chargeback ratio, dunning spikes, credit depletion, expiring
+                cards — and notifies you when a threshold is crossed. Start from
+                a template.
               </p>
             </div>
             {canCreate && (
@@ -435,7 +473,11 @@ function RuleRow({
   const label = rule.name || (def ? templateLabel(def) : rule.template)
   const firing = ruleIsFiring(rule)
 
-  const run = async (fn: () => Promise<unknown>, action: string, ok: string) => {
+  const run = async (
+    fn: () => Promise<unknown>,
+    action: string,
+    ok: string
+  ) => {
     setBusy(true)
     try {
       await fn()
@@ -465,7 +507,9 @@ function RuleRow({
       <TableCell>
         <span className="font-medium">{label}</span>
         {def?.digest && (
-          <span className="block text-xs text-muted-foreground">Digest — periodic, not threshold-triggered</span>
+          <span className="block text-xs text-muted-foreground">
+            Digest — periodic, not threshold-triggered
+          </span>
         )}
       </TableCell>
       <TableCell>
@@ -476,7 +520,10 @@ function RuleRow({
       </TableCell>
       <TableCell>
         {firing ? (
-          <Badge variant="secondary" className="bg-red-500/15 text-red-600 dark:text-red-400">
+          <Badge
+            variant="secondary"
+            className="bg-red-500/15 text-red-600 dark:text-red-400"
+          >
             firing
           </Badge>
         ) : (
@@ -492,7 +539,7 @@ function RuleRow({
             run(
               () => updateAlertRule(rule.id, { enabled: next }),
               "Update rule",
-              next ? "Rule enabled" : "Rule disabled",
+              next ? "Rule enabled" : "Rule disabled"
             )
           }
         />
@@ -500,7 +547,7 @@ function RuleRow({
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
           <Button variant="ghost" size="sm" disabled={busy} onClick={runTest}>
-            <SendIcon className="size-3.5" /> Test
+            <HugeiconsIcon icon={SentIcon} className="size-3.5" /> Test
           </Button>
           <RuleDialog
             rule={rule}
@@ -521,7 +568,10 @@ function RuleRow({
             disabled={busy}
             onClick={() => setConfirmOpen(true)}
           >
-            <Trash2Icon className="size-4 text-muted-foreground" />
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              className="size-4 text-muted-foreground"
+            />
           </Button>
           <TypedConfirmDialog
             open={confirmOpen}
@@ -530,7 +580,9 @@ function RuleRow({
             description="This alert rule will stop evaluating and its firing state is discarded. This cannot be undone."
             confirmationWord="DELETE"
             actionLabel="Delete rule"
-            onConfirm={() => run(() => deleteAlertRule(rule.id), "Delete rule", "Rule deleted")}
+            onConfirm={() =>
+              run(() => deleteAlertRule(rule.id), "Delete rule", "Rule deleted")
+            }
           />
         </div>
       </TableCell>
@@ -554,13 +606,17 @@ function RuleDialog({
   webhooks: MerchantWebhook[]
   alertEmail: string
   onDone: () => void
-  trigger?: React.ReactNode
+  trigger?: React.ReactElement
   cta?: boolean
 }) {
   const editing = !!rule
   const [open, setOpen] = React.useState(false)
-  const [template, setTemplate] = React.useState<AlertTemplate>(rule?.template ?? templates[0]?.key ?? "")
-  const [severity, setSeverity] = React.useState<AlertSeverity>(rule?.severity ?? "warning")
+  const [template, setTemplate] = React.useState<AlertTemplate>(
+    rule?.template ?? templates[0]?.key ?? ""
+  )
+  const [severity, setSeverity] = React.useState<AlertSeverity>(
+    rule?.severity ?? "warning"
+  )
   const [params, setParams] = React.useState<Record<string, string>>({})
   const [channels, setChannels] = React.useState<ChannelSelection>({
     in_app: true,
@@ -579,7 +635,8 @@ function RuleDialog({
       const p: Record<string, string> = {}
       for (const spec of d?.params ?? []) {
         const existing = r?.params?.[spec.name]
-        if (existing !== undefined && existing !== null) p[spec.name] = String(existing)
+        if (existing !== undefined && existing !== null)
+          p[spec.name] = String(existing)
         else if (spec.default !== undefined) p[spec.name] = String(spec.default)
         else p[spec.name] = ""
       }
@@ -595,7 +652,7 @@ function RuleDialog({
         setEnabled(true)
       }
     },
-    [templates],
+    [templates]
   )
 
   const handleOpen = (next: boolean) => {
@@ -612,7 +669,9 @@ function RuleDialog({
     initFor(tpl, undefined)
   }
 
-  const missingRequired = (def?.params ?? []).some((spec) => spec.required && !params[spec.name]?.trim())
+  const missingRequired = (def?.params ?? []).some(
+    (spec) => spec.required && !params[spec.name]?.trim()
+  )
 
   const submit = async () => {
     if (!def) return
@@ -645,16 +704,21 @@ function RuleDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="sm">
-            <PlusIcon className="size-4" /> {cta ? "Create your first rule" : "New rule"}
-          </Button>
-        )}
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          trigger ?? (
+            <Button size="sm">
+              <HugeiconsIcon icon={Add01Icon} className="size-4" />{" "}
+              {cta ? "Create your first rule" : "New rule"}
+            </Button>
+          )
+        }
+      />
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit alert rule" : "New alert rule"}</DialogTitle>
+          <DialogTitle>
+            {editing ? "Edit alert rule" : "New alert rule"}
+          </DialogTitle>
           <DialogDescription>
             {editing && def
               ? templateDescription(def)
@@ -675,11 +739,15 @@ function RuleDialog({
                     aria-pressed={template === t.key}
                     className={cn(
                       "rounded-md border p-3 text-left transition-colors",
-                      template === t.key ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                      template === t.key
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/50"
                     )}
                   >
                     <p className="text-sm font-medium">{templateLabel(t)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{templateDescription(t)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {templateDescription(t)}
+                    </p>
                   </button>
                 ))}
               </div>
@@ -691,19 +759,36 @@ function RuleDialog({
               const readOnly = isFixedParam(template, spec.name)
               return (
                 <div key={spec.name} className="grid gap-1.5">
-                  <Label htmlFor={`p-${spec.name}`}>{humanizeParam(spec.name)}</Label>
+                  <Label htmlFor={`p-${spec.name}`}>
+                    {humanizeParam(spec.name)}
+                  </Label>
                   <Input
                     id={`p-${spec.name}`}
                     type={spec.type === "window" ? "text" : "number"}
-                    step={spec.type === "integer" ? 1 : spec.type === "number" ? "any" : undefined}
+                    step={
+                      spec.type === "integer"
+                        ? 1
+                        : spec.type === "number"
+                          ? "any"
+                          : undefined
+                    }
                     min={spec.min}
                     max={spec.max}
-                    placeholder={spec.type === "window" ? "e.g. 30d, 12w" : undefined}
+                    placeholder={
+                      spec.type === "window" ? "e.g. 30d, 12w" : undefined
+                    }
                     disabled={readOnly}
                     value={params[spec.name] ?? ""}
-                    onChange={(e) => setParams((prev) => ({ ...prev, [spec.name]: e.target.value }))}
+                    onChange={(e) =>
+                      setParams((prev) => ({
+                        ...prev,
+                        [spec.name]: e.target.value,
+                      }))
+                    }
                   />
-                  <p className="text-xs text-muted-foreground">{spec.description}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {spec.description}
+                  </p>
                 </div>
               )
             })}
@@ -711,13 +796,20 @@ function RuleDialog({
 
           <div className="grid gap-1.5">
             <Label>Severity</Label>
-            <Select value={severity} onValueChange={(v) => setSeverity(v as AlertSeverity)}>
+            <Select
+              value={severity}
+              onValueChange={(v) => setSeverity(v as AlertSeverity)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="warning">Warning — in-app by default</SelectItem>
-                <SelectItem value="critical">Critical — push harder (email + webhooks)</SelectItem>
+                <SelectItem value="warning">
+                  Warning — in-app by default
+                </SelectItem>
+                <SelectItem value="critical">
+                  Critical — push harder (email + webhooks)
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -727,7 +819,8 @@ function RuleDialog({
             <div className="grid gap-2 rounded-md border p-3">
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-sm">
-                  <BellIcon className="size-4" /> In-app
+                  <HugeiconsIcon icon={Notification01Icon} className="size-4" />{" "}
+                  In-app
                 </span>
                 <Badge variant="secondary" className="text-[10px]">
                   always on
@@ -737,34 +830,43 @@ function RuleDialog({
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-2 text-sm">
-                    <MailIcon className="size-4" /> Email
+                    <HugeiconsIcon icon={Mail01Icon} className="size-4" /> Email
                   </span>
                   <Switch
                     checked={channels.email}
-                    onCheckedChange={(next) => setChannels((c) => ({ ...c, email: next }))}
+                    onCheckedChange={(next) =>
+                      setChannels((c) => ({ ...c, email: next }))
+                    }
                     aria-label="Toggle email channel"
                   />
                 </div>
                 {channels.email &&
                   (alertEmail ? (
                     <p className="text-xs text-muted-foreground">
-                      Sent to <span className="font-medium text-foreground">{alertEmail}</span>.
+                      Sent to{" "}
+                      <span className="font-medium text-foreground">
+                        {alertEmail}
+                      </span>
+                      .
                     </p>
                   ) : (
                     <p className="text-xs text-amber-600 dark:text-amber-400">
-                      No alert email set — email won&apos;t send until you set one in “Alert email”
-                      above (the alert still reaches in-app and webhooks).
+                      No alert email set — email won&apos;t send until you set
+                      one in “Alert email” above (the alert still reaches in-app
+                      and webhooks).
                     </p>
                   ))}
               </div>
 
               <div className="grid gap-1.5">
                 <span className="inline-flex items-center gap-2 text-sm">
-                  <WebhookIcon className="size-4" /> Webhooks
+                  <HugeiconsIcon icon={WebhookIcon} className="size-4" />{" "}
+                  Webhooks
                 </span>
                 {webhooks.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    No webhooks configured — add one in the Webhooks section below.
+                    No webhooks configured — add one in the Webhooks section
+                    below.
                   </p>
                 ) : (
                   <div className="grid gap-1">
@@ -836,9 +938,10 @@ function WebhooksSection({
         <div>
           <h2 className="text-sm font-medium">Webhooks</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Deliver alerts to a chat channel or your own receiver. Paste a Discord or Slack channel
-            webhook URL — no bot needed — or point “generic” at your own endpoint. There is no
-            standalone test for a webhook — add it to a rule&apos;s channels and use that rule&apos;s
+            Deliver alerts to a chat channel or your own receiver. Paste a
+            Discord or Slack channel webhook URL — no bot needed — or point
+            “generic” at your own endpoint. There is no standalone test for a
+            webhook — add it to a rule&apos;s channels and use that rule&apos;s
             Test button.
           </p>
         </div>
@@ -848,7 +951,8 @@ function WebhooksSection({
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : webhooks.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No webhooks yet. Add one to route alerts to Discord, Slack, or a custom URL.
+          No webhooks yet. Add one to route alerts to Discord, Slack, or a
+          custom URL.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
@@ -873,7 +977,13 @@ function WebhooksSection({
   )
 }
 
-function WebhookRow({ webhook, onChanged }: { webhook: MerchantWebhook; onChanged: () => void }) {
+function WebhookRow({
+  webhook,
+  onChanged,
+}: {
+  webhook: MerchantWebhook
+  onChanged: () => void
+}) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   return (
     <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
@@ -881,7 +991,7 @@ function WebhookRow({ webhook, onChanged }: { webhook: MerchantWebhook; onChange
       <TableCell>
         <Badge variant="secondary">{webhook.format}</Badge>
       </TableCell>
-      <TableCell className="max-w-[22rem] truncate font-mono text-xs" title={webhook.url}>
+      <TableCell className="max-w-[22rem] truncate text-xs" title={webhook.url}>
         {webhook.url}
       </TableCell>
       <TableCell className="text-right">
@@ -892,7 +1002,10 @@ function WebhookRow({ webhook, onChanged }: { webhook: MerchantWebhook; onChange
             aria-label="Delete webhook"
             onClick={() => setConfirmOpen(true)}
           >
-            <Trash2Icon className="size-4 text-muted-foreground" />
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              className="size-4 text-muted-foreground"
+            />
           </Button>
           <TypedConfirmDialog
             open={confirmOpen}
@@ -935,17 +1048,19 @@ function WebhookDialog({ onDone }: { onDone: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <PlusIcon className="size-4" /> Add webhook
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button size="sm" variant="outline">
+            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add webhook
+          </Button>
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add webhook</DialogTitle>
           <DialogDescription>
-            Paste a Discord or Slack channel webhook URL — no bot needed — or a “generic” URL your
-            own receiver consumes.
+            Paste a Discord or Slack channel webhook URL — no bot needed — or a
+            “generic” URL your own receiver consumes.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -960,7 +1075,10 @@ function WebhookDialog({ onDone }: { onDone: () => void }) {
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="wh-format">Format</Label>
-            <Select value={format} onValueChange={(v) => setFormat(v as WebhookFormat)}>
+            <Select
+              value={format}
+              onValueChange={(v) => setFormat(v as WebhookFormat)}
+            >
               <SelectTrigger id="wh-format" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -977,7 +1095,7 @@ function WebhookDialog({ onDone }: { onDone: () => void }) {
             <Label htmlFor="wh-url">Webhook URL</Label>
             <Input
               id="wh-url"
-              className="font-mono text-xs"
+              className="text-xs"
               placeholder="https://discord.com/api/webhooks/…"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -990,7 +1108,11 @@ function WebhookDialog({ onDone }: { onDone: () => void }) {
             onClick={async () => {
               setBusy(true)
               try {
-                await createWebhook({ name: name.trim(), url: url.trim(), format })
+                await createWebhook({
+                  name: name.trim(),
+                  url: url.trim(),
+                  format,
+                })
                 toast.success("Webhook added")
                 handleOpen(false)
                 onDone()

@@ -1,5 +1,10 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Add01Icon,
+  Refresh01Icon,
+  Upload01Icon,
+} from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { PlusIcon, RefreshCwIcon, UploadIcon } from "lucide-react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -45,7 +50,12 @@ import {
   updateProduct,
 } from "@/lib/api/endpoints"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
-import { formatDate, formatMicros, microsFromInput, shortId } from "@/lib/format"
+import {
+  formatDate,
+  formatMicros,
+  microsFromInput,
+  shortId,
+} from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
@@ -101,7 +111,10 @@ export function CatalogPage() {
 }
 
 function ProductsTab() {
-  const { data, loading, error, reload } = useApiData(() => listProducts(1000, 0), [])
+  const { data, loading, error, reload } = useApiData(
+    () => listProducts(1000, 0),
+    []
+  )
   React.useEffect(() => {
     if (error) toastApiError(error, "Load products")
   }, [error])
@@ -133,7 +146,10 @@ function ProductsTab() {
               ))}
               {!data?.items?.length && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={6}
+                    className="h-24 text-center text-muted-foreground"
+                  >
                     No products yet.
                   </TableCell>
                 </TableRow>
@@ -146,14 +162,22 @@ function ProductsTab() {
   )
 }
 
-function ProductRow({ product, onDone }: { product: CatalogProduct; onDone: () => void }) {
+function ProductRow({
+  product,
+  onDone,
+}: {
+  product: CatalogProduct
+  onDone: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   const toggle = async () => {
     setBusy(true)
     try {
       if (product.archived) await activateProduct(product.id)
       else await deactivateProduct(product.id)
-      toast.success(product.archived ? "Product activated" : "Product deactivated")
+      toast.success(
+        product.archived ? "Product activated" : "Product deactivated"
+      )
       onDone()
     } catch (err) {
       toastApiError(err, "Toggle product")
@@ -164,8 +188,12 @@ function ProductRow({ product, onDone }: { product: CatalogProduct; onDone: () =
   return (
     <TableRow className={product.archived ? "opacity-60" : undefined}>
       <TableCell className="font-medium">{product.display_name}</TableCell>
-      <TableCell className="font-mono text-xs">{product.key}</TableCell>
-      <TableCell>{product.tier_group ? `${product.tier_group} #${product.tier_rank}` : "—"}</TableCell>
+      <TableCell className="text-xs">{product.key}</TableCell>
+      <TableCell>
+        {product.tier_group
+          ? `${product.tier_group} #${product.tier_rank}`
+          : "—"}
+      </TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
           {Object.keys(product.entitlements_spec ?? {}).map((e) => (
@@ -175,7 +203,13 @@ function ProductRow({ product, onDone }: { product: CatalogProduct; onDone: () =
           ))}
         </span>
       </TableCell>
-      <TableCell>{product.archived ? <Badge variant="secondary">archived</Badge> : <StatusBadge status="active" />}</TableCell>
+      <TableCell>
+        {product.archived ? (
+          <Badge variant="secondary">archived</Badge>
+        ) : (
+          <StatusBadge status="active" />
+        )}
+      </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-2">
           <ProductDialog product={product} onDone={onDone} />
@@ -188,15 +222,25 @@ function ProductRow({ product, onDone }: { product: CatalogProduct; onDone: () =
   )
 }
 
-function ProductDialog({ product, onDone }: { product?: CatalogProduct; onDone: () => void }) {
+function ProductDialog({
+  product,
+  onDone,
+}: {
+  product?: CatalogProduct
+  onDone: () => void
+}) {
   const [open, setOpen] = React.useState(false)
   const [key, setKey] = React.useState(product?.key ?? "")
   const [name, setName] = React.useState(product?.display_name ?? "")
-  const [description, setDescription] = React.useState(product?.description ?? "")
+  const [description, setDescription] = React.useState(
+    product?.description ?? ""
+  )
   const [tierGroup, setTierGroup] = React.useState(product?.tier_group ?? "")
-  const [tierRank, setTierRank] = React.useState(String(product?.tier_rank ?? 0))
+  const [tierRank, setTierRank] = React.useState(
+    String(product?.tier_rank ?? 0)
+  )
   const [entitlements, setEntitlements] = React.useState(
-    Object.keys(product?.entitlements_spec ?? {}).join(", "),
+    Object.keys(product?.entitlements_spec ?? {}).join(", ")
   )
   const [busy, setBusy] = React.useState(false)
 
@@ -204,7 +248,11 @@ function ProductDialog({ product, onDone }: { product?: CatalogProduct; onDone: 
     setBusy(true)
     try {
       const spec: Record<string, number | null> = {}
-      for (const e of entitlements.split(",").map((s) => s.trim()).filter(Boolean)) spec[e] = null
+      for (const e of entitlements
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean))
+        spec[e] = null
       if (product) {
         await updateProduct(product.id, {
           display_name: name,
@@ -237,15 +285,19 @@ function ProductDialog({ product, onDone }: { product?: CatalogProduct; onDone: 
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {product ? (
-          <Button variant="outline" size="sm">Edit</Button>
-        ) : (
-          <Button size="sm">
-            <PlusIcon className="size-4" /> Product
-          </Button>
-        )}
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          product ? (
+            <Button variant="outline" size="sm">
+              Edit
+            </Button>
+          ) : (
+            <Button size="sm">
+              <HugeiconsIcon icon={Add01Icon} className="size-4" /> Product
+            </Button>
+          )
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{product ? "Edit product" : "New product"}</DialogTitle>
@@ -256,25 +308,52 @@ function ProductDialog({ product, onDone }: { product?: CatalogProduct; onDone: 
         <div className="grid gap-3">
           {!product && (
             <Field label="Key" id="p-key">
-              <Input id="p-key" value={key} onChange={(e) => setKey(e.target.value)} placeholder="premium-monthly" />
+              <Input
+                id="p-key"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="premium-monthly"
+              />
             </Field>
           )}
           <Field label="Display name" id="p-name">
-            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="p-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </Field>
           <Field label="Description" id="p-desc">
-            <Input id="p-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              id="p-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Tier group (optional)" id="p-tg">
-              <Input id="p-tg" value={tierGroup} onChange={(e) => setTierGroup(e.target.value)} />
+              <Input
+                id="p-tg"
+                value={tierGroup}
+                onChange={(e) => setTierGroup(e.target.value)}
+              />
             </Field>
             <Field label="Tier rank" id="p-tr">
-              <Input id="p-tr" type="number" value={tierRank} onChange={(e) => setTierRank(e.target.value)} />
+              <Input
+                id="p-tr"
+                type="number"
+                value={tierRank}
+                onChange={(e) => setTierRank(e.target.value)}
+              />
             </Field>
           </div>
           <Field label="Entitlements (comma-separated)" id="p-ents">
-            <Input id="p-ents" value={entitlements} onChange={(e) => setEntitlements(e.target.value)} placeholder="premium, downloads" />
+            <Input
+              id="p-ents"
+              value={entitlements}
+              onChange={(e) => setEntitlements(e.target.value)}
+              placeholder="premium, downloads"
+            />
           </Field>
         </div>
         <DialogFooter>
@@ -319,11 +398,19 @@ function PricesTab() {
             </TableHeader>
             <TableBody>
               {(data?.items ?? []).map((price) => (
-                <PriceRow key={price.id} price={price} productName={productName(price.product_id)} onDone={reload} />
+                <PriceRow
+                  key={price.id}
+                  price={price}
+                  productName={productName(price.product_id)}
+                  onDone={reload}
+                />
               ))}
               {!data?.items?.length && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={7}
+                    className="h-24 text-center text-muted-foreground"
+                  >
                     No prices yet.
                   </TableCell>
                 </TableRow>
@@ -361,8 +448,11 @@ function PriceRow({
   }
   return (
     <TableRow className={price.archived ? "opacity-60" : undefined}>
-      <TableCell className="font-mono text-xs">
-        <Link className="underline-offset-2 hover:underline" to={`/catalog/prices/${price.id}`}>
+      <TableCell className="text-xs">
+        <Link
+          className="underline-offset-2 hover:underline"
+          to={`/catalog/prices/${price.id}`}
+        >
           {shortId(price.id, 13)}
         </Link>
       </TableCell>
@@ -375,7 +465,11 @@ function PriceRow({
             <Badge
               key={rail}
               variant="secondary"
-              className={state.status === "linked" ? "" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}
+              className={
+                state.status === "linked"
+                  ? ""
+                  : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+              }
               title={state.message}
             >
               {rail}: {state.status}
@@ -383,10 +477,20 @@ function PriceRow({
           ))}
         </span>
       </TableCell>
-      <TableCell>{price.archived ? <Badge variant="secondary">archived</Badge> : <StatusBadge status="active" />}</TableCell>
+      <TableCell>
+        {price.archived ? (
+          <Badge variant="secondary">archived</Badge>
+        ) : (
+          <StatusBadge status="active" />
+        )}
+      </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-2">
-          <PriceChangeWizard price={price} productName={productName} onDone={onDone} />
+          <PriceChangeWizard
+            price={price}
+            productName={productName}
+            onDone={onDone}
+          />
           <Button variant="outline" size="sm" disabled={busy} onClick={toggle}>
             {price.archived ? "Activate" : "Deactivate"}
           </Button>
@@ -396,7 +500,13 @@ function PriceRow({
   )
 }
 
-function PriceDialog({ products, onDone }: { products: CatalogProduct[]; onDone: () => void }) {
+function PriceDialog({
+  products,
+  onDone,
+}: {
+  products: CatalogProduct[]
+  onDone: () => void
+}) {
   const [open, setOpen] = React.useState(false)
   const [productId, setProductId] = React.useState("")
   const [amount, setAmount] = React.useState("")
@@ -406,17 +516,19 @@ function PriceDialog({ products, onDone }: { products: CatalogProduct[]; onDone:
   const [busy, setBusy] = React.useState(false)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <PlusIcon className="size-4" /> Price
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button size="sm">
+            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Price
+          </Button>
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New price</DialogTitle>
           <DialogDescription>
-            Financial terms are immutable after creation — a price change is a new price
-            plus archiving the old one.
+            Financial terms are immutable after creation — a price change is a
+            new price plus archiving the old one.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -437,18 +549,39 @@ function PriceDialog({ products, onDone }: { products: CatalogProduct[]; onDone:
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Amount (major units)" id="pr-amount">
-              <Input id="pr-amount" type="number" step="any" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Input
+                id="pr-amount"
+                type="number"
+                step="any"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
             </Field>
             <Field label="Currency" id="pr-cur">
-              <Input id="pr-cur" value={currency} onChange={(e) => setCurrency(e.target.value)} />
+              <Input
+                id="pr-cur"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Access duration (hours, empty = durable)" id="pr-dur">
-              <Input id="pr-dur" type="number" min="1" value={durationHours} onChange={(e) => setDurationHours(e.target.value)} />
+              <Input
+                id="pr-dur"
+                type="number"
+                min="1"
+                value={durationHours}
+                onChange={(e) => setDurationHours(e.target.value)}
+              />
             </Field>
             <div className="flex items-end gap-2 pb-1">
-              <Switch id="pr-renew" checked={autoRenew} onCheckedChange={setAutoRenew} />
+              <Switch
+                id="pr-renew"
+                checked={autoRenew}
+                onCheckedChange={setAutoRenew}
+              />
               <Label htmlFor="pr-renew">Auto-renew</Label>
             </div>
           </div>
@@ -463,7 +596,9 @@ function PriceDialog({ products, onDone }: { products: CatalogProduct[]; onDone:
                   product_id: productId,
                   unit_amount: microsFromInput(amount) ?? 0,
                   currency,
-                  ...(durationHours ? { access_duration_hours: Number(durationHours) } : {}),
+                  ...(durationHours
+                    ? { access_duration_hours: Number(durationHours) }
+                    : {}),
                   auto_renew: autoRenew,
                 })
                 toast.success("Price created")
@@ -485,7 +620,10 @@ function PriceDialog({ products, onDone }: { products: CatalogProduct[]; onDone:
 }
 
 function DriftTab() {
-  const { data, loading, error, reload } = useApiData(() => listCatalogDrift(200, 0), [])
+  const { data, loading, error, reload } = useApiData(
+    () => listCatalogDrift(200, 0),
+    []
+  )
   const [refreshing, setRefreshing] = React.useState(false)
   React.useEffect(() => {
     if (error) toastApiError(error, "Load drift")
@@ -503,7 +641,7 @@ function DriftTab() {
             try {
               const report = await refreshCatalogDrift()
               toast.success(
-                `Drift scan done: ${report.new_events} new, ${report.resolved_events} resolved`,
+                `Drift scan done: ${report.new_events} new, ${report.resolved_events} resolved`
               )
               reload()
             } catch (err) {
@@ -513,13 +651,19 @@ function DriftTab() {
             }
           }}
         >
-          <RefreshCwIcon className={refreshing ? "size-4 animate-spin" : "size-4"} /> Refresh scan
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className={refreshing ? "size-4 animate-spin" : "size-4"}
+          />{" "}
+          Refresh scan
         </Button>
       </div>
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : !data?.items?.length ? (
-        <p className="text-sm text-muted-foreground">No open drift events — catalog is in sync.</p>
+        <p className="text-sm text-muted-foreground">
+          No open drift events — catalog is in sync.
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <Table>
@@ -539,12 +683,20 @@ function DriftTab() {
                 <TableRow key={e.id}>
                   <TableCell>{e.provider}</TableCell>
                   <TableCell>{e.kind}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {e.openrails_resource_type} {shortId(e.openrails_resource_id ?? e.external_resource_id ?? "", 13)}
+                  <TableCell className="text-xs">
+                    {e.openrails_resource_type}{" "}
+                    {shortId(
+                      e.openrails_resource_id ?? e.external_resource_id ?? "",
+                      13
+                    )}
                   </TableCell>
                   <TableCell>{e.field ?? "—"}</TableCell>
-                  <TableCell className="max-w-40 truncate">{e.openrails_value ?? "—"}</TableCell>
-                  <TableCell className="max-w-40 truncate">{e.external_value ?? "—"}</TableCell>
+                  <TableCell className="max-w-40 truncate">
+                    {e.openrails_value ?? "—"}
+                  </TableCell>
+                  <TableCell className="max-w-40 truncate">
+                    {e.external_value ?? "—"}
+                  </TableCell>
                   <TableCell>{formatDate(e.detected_at)}</TableCell>
                 </TableRow>
               ))}
@@ -572,7 +724,10 @@ function PublishDialog({ onDone }: { onDone: () => void }) {
     }
     setBusy(true)
     try {
-      const res = await publishCatalog(parsed, planOnly ? { plan_only: true } : { insert: true, overwrite: true })
+      const res = await publishCatalog(
+        parsed,
+        planOnly ? { plan_only: true } : { insert: true, overwrite: true }
+      )
       setPlan(JSON.stringify(res, null, 2))
       if (!planOnly) {
         toast.success("Catalog published")
@@ -587,33 +742,44 @@ function PublishDialog({ onDone }: { onDone: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <UploadIcon className="size-4" /> Publish
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm">
+            <HugeiconsIcon icon={Upload01Icon} className="size-4" /> Publish
+          </Button>
+        }
+      />
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Publish catalog manifest</DialogTitle>
           <DialogDescription>
-            Terraform-style: paste the catalog manifest JSON, preview the plan, then apply
-            (insert + overwrite).
+            Terraform-style: paste the catalog manifest JSON, preview the plan,
+            then apply (insert + overwrite).
           </DialogDescription>
         </DialogHeader>
         <Textarea
-          className="min-h-40 font-mono text-xs"
+          className="min-h-40 text-xs"
           placeholder='{"groups": ...}'
           value={manifest}
           onChange={(e) => setManifest(e.target.value)}
         />
         {plan && (
-          <pre className="max-h-60 overflow-auto rounded-md bg-muted p-3 text-xs">{plan}</pre>
+          <pre className="max-h-60 overflow-auto rounded-md bg-muted p-3 text-xs">
+            {plan}
+          </pre>
         )}
         <DialogFooter>
-          <Button variant="outline" disabled={busy || !manifest.trim()} onClick={() => run(true)}>
+          <Button
+            variant="outline"
+            disabled={busy || !manifest.trim()}
+            onClick={() => run(true)}
+          >
             Preview plan
           </Button>
-          <Button disabled={busy || !manifest.trim()} onClick={() => run(false)}>
+          <Button
+            disabled={busy || !manifest.trim()}
+            onClick={() => run(false)}
+          >
             {busy ? "Working…" : "Apply"}
           </Button>
         </DialogFooter>
@@ -622,7 +788,15 @@ function PublishDialog({ onDone }: { onDone: () => void }) {
   )
 }
 
-function Field({ label, id, children }: { label: string; id: string; children: React.ReactNode }) {
+function Field({
+  label,
+  id,
+  children,
+}: {
+  label: string
+  id: string
+  children: React.ReactNode
+}) {
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>

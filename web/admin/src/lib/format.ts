@@ -30,7 +30,10 @@ export function formatDate(iso?: string | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+  return d.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }
 
 export function formatUnix(seconds?: number): string {
@@ -60,5 +63,8 @@ export function timeAgo(iso?: string | null): string {
   if (hours < 24) return `${hours}h`
   const days = Math.round(hours / 24)
   if (days < 7) return `${days}d`
-  return new Date(then).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  return new Date(then).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })
 }

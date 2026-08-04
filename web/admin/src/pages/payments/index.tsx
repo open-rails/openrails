@@ -22,10 +22,21 @@ const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
 const columns: ColumnDef<PaymentObject, unknown>[] = [
-  { header: "Payment", cell: ({ row }) => <span className="font-mono text-xs">{shortId(row.original.id, 16)}</span> },
+  {
+    header: "Payment",
+    cell: ({ row }) => (
+      <span className="text-xs">{shortId(row.original.id, 16)}</span>
+    ),
+  },
   { header: "Type", cell: ({ row }) => row.original.object },
-  { header: "Status", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
-  { header: "Amount", cell: ({ row }) => formatMicros(row.original.amount, row.original.currency) },
+  {
+    header: "Status",
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
+    header: "Amount",
+    cell: ({ row }) => formatMicros(row.original.amount, row.original.currency),
+  },
   {
     header: "Refunded",
     cell: ({ row }) =>
@@ -47,11 +58,14 @@ export function PaymentsPage() {
   const { data, loading, error } = useApiData(
     () =>
       listPayments(
-        { rail: rail || undefined, refunds_only: view === "refunds" ? true : undefined },
+        {
+          rail: rail || undefined,
+          refunds_only: view === "refunds" ? true : undefined,
+        },
         PAGE,
-        offset,
+        offset
       ),
-    [rail, view, offset],
+    [rail, view, offset]
   )
   React.useEffect(() => {
     if (error) toastApiError(error, "Load payments")
@@ -74,7 +88,10 @@ export function PaymentsPage() {
             <TabsTrigger value="refunds">Refunds</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Select value={rail || "all"} onValueChange={(v) => setParam("rail", v === "all" ? "" : v)}>
+        <Select
+          value={rail || "all"}
+          onValueChange={(v) => setParam("rail", !v || v === "all" ? "" : v)}
+        >
           <SelectTrigger className="w-36">
             <SelectValue placeholder="Rail" />
           </SelectTrigger>

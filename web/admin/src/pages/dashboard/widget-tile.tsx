@@ -1,16 +1,16 @@
 // One dashboard tile: runs its saved query through POST /metrics/query on
 // mount, renders the viz, and offers refresh / edit / delete. Count widgets
 // deep-link to the matching admin list page (#733 contract).
-import { Link } from "react-router-dom"
+import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  ArrowUpRightIcon,
-  GripVerticalIcon,
+  ArrowUpRight01Icon,
+  Delete02Icon,
+  DragDropVerticalIcon,
   MoreVerticalIcon,
   PencilIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-} from "lucide-react"
-
+  Refresh01Icon,
+} from "@hugeicons/core-free-icons"
+import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -21,7 +21,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiData } from "@/hooks/use-api-data"
 import { ApiError } from "@/lib/api/client"
-import { metricsQuery, type MetricsResult, type Widget } from "@/lib/api/metrics"
+import {
+  metricsQuery,
+  type MetricsResult,
+  type Widget,
+} from "@/lib/api/metrics"
 import { cn } from "@/lib/utils"
 
 import { deepLinkFor } from "./lib"
@@ -39,24 +43,27 @@ export function WidgetTile({
   const queryKey = JSON.stringify(widget.query)
   const { data, loading, error, reload } = useApiData(
     () => metricsQuery(widget.query),
-    [queryKey],
+    [queryKey]
   )
   const link = widget.viz === "stat" ? deepLinkFor(widget.query) : null
 
   return (
-    <div className="bg-card text-card-foreground flex h-full flex-col rounded-xl border shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card text-card-foreground shadow-sm">
       <div className="flex items-center gap-1 border-b px-3 py-1.5">
-        <GripVerticalIcon className="widget-drag-handle text-muted-foreground/60 size-3.5 shrink-0 cursor-grab active:cursor-grabbing" />
+        <HugeiconsIcon
+          icon={DragDropVerticalIcon}
+          className="widget-drag-handle size-3.5 shrink-0 cursor-grab text-muted-foreground/60 active:cursor-grabbing"
+        />
         <span className="truncate text-sm font-medium" title={widget.title}>
           {widget.title}
         </span>
         {link ? (
           <Link
             to={link}
-            className="text-muted-foreground hover:text-foreground shrink-0"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             title="Open matching list"
           >
-            <ArrowUpRightIcon className="size-3.5" />
+            <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3.5" />
           </Link>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center">
@@ -67,27 +74,39 @@ export function WidgetTile({
             onClick={reload}
             title="Refresh"
           >
-            <RefreshCwIcon className={cn("size-3.5", loading && "animate-spin")} />
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              className={cn("size-3.5", loading && "animate-spin")}
+            />
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-6">
-                <MoreVerticalIcon className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon" className="size-6">
+                  <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
+                </Button>
+              }
+            />
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={onEdit}>
-                <PencilIcon className="size-3.5" /> Edit widget
+                <HugeiconsIcon icon={PencilIcon} className="size-3.5" /> Edit
+                widget
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onDelete} variant="destructive">
-                <Trash2Icon className="size-3.5" /> Remove
+                <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />{" "}
+                Remove
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
       <div className="min-h-0 flex-1 p-3">
-        <TileBody loading={loading && !data} error={error} widget={widget} data={data} />
+        <TileBody
+          loading={loading && !data}
+          error={error}
+          widget={widget}
+          data={data}
+        />
       </div>
     </div>
   )
@@ -120,7 +139,7 @@ function TileBody({
           : error.message
         : "query failed"
     return (
-      <div className="text-destructive flex h-full items-center justify-center text-center text-xs">
+      <div className="flex h-full items-center justify-center text-center text-xs text-destructive">
         {msg}
       </div>
     )

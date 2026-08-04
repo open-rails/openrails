@@ -2,8 +2,9 @@
 // API. Tile registry + serialized Layout[] on react-grid-layout v2 — drag,
 // resize, add, edit, remove; the layout persists via PUT (debounced). First
 // load with no saved row shows the seeded default template.
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { PlusIcon } from "lucide-react"
 import { GridLayout, useContainerWidth, type Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
 
@@ -55,7 +56,11 @@ export function DashboardPage() {
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
   // seed pre-fills the editor for a NEW widget (ask evidence → add-as-widget).
-  const [seed, setSeed] = React.useState<{ title: string; viz: WidgetViz; query: MetricsQuery } | null>(null)
+  const [seed, setSeed] = React.useState<{
+    title: string
+    viz: WidgetViz
+    query: MetricsQuery
+  } | null>(null)
   const { width, containerRef, mounted } = useContainerWidth()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -71,7 +76,7 @@ export function DashboardPage() {
     () => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     },
-    [],
+    []
   )
 
   // Debounced persistence: drags/resizes coalesce into one PUT.
@@ -87,7 +92,7 @@ export function DashboardPage() {
       setWidgets(next)
       persist(next)
     },
-    [persist],
+    [persist]
   )
 
   const onLayoutChange = (layout: Layout) => {
@@ -97,7 +102,12 @@ export function DashboardPage() {
     const next = widgets.map((w) => {
       const l = byId.get(w.id)
       if (!l) return w
-      if (l.x !== w.grid.x || l.y !== w.grid.y || l.w !== w.grid.w || l.h !== w.grid.h) {
+      if (
+        l.x !== w.grid.x ||
+        l.y !== w.grid.y ||
+        l.w !== w.grid.w ||
+        l.h !== w.grid.h
+      ) {
         changed = true
         return { ...w, grid: { x: l.x, y: l.y, w: l.w, h: l.h } }
       }
@@ -106,19 +116,38 @@ export function DashboardPage() {
     if (changed) update(next)
   }
 
-  const addWidget = (draft: { title: string; viz: WidgetViz; query: MetricsQuery }) => {
+  const addWidget = (draft: {
+    title: string
+    viz: WidgetViz
+    query: MetricsQuery
+  }) => {
     if (!widgets) return
     const size = defaultSize(draft.viz)
     const y = widgets.reduce((max, w) => Math.max(max, w.grid.y + w.grid.h), 0)
     update([
       ...widgets,
-      { id: newWidgetId(), title: draft.title, viz: draft.viz, query: draft.query, grid: { x: 0, y, ...size } },
+      {
+        id: newWidgetId(),
+        title: draft.title,
+        viz: draft.viz,
+        query: draft.query,
+        grid: { x: 0, y, ...size },
+      },
     ])
   }
 
-  const editWidget = (id: string, draft: { title: string; viz: WidgetViz; query: MetricsQuery }) => {
+  const editWidget = (
+    id: string,
+    draft: { title: string; viz: WidgetViz; query: MetricsQuery }
+  ) => {
     if (!widgets) return
-    update(widgets.map((w) => (w.id === id ? { ...w, title: draft.title, viz: draft.viz, query: draft.query } : w)))
+    update(
+      widgets.map((w) =>
+        w.id === id
+          ? { ...w, title: draft.title, viz: draft.viz, query: draft.query }
+          : w
+      )
+    )
   }
 
   const removeWidget = (id: string) => {
@@ -161,11 +190,14 @@ export function DashboardPage() {
       />
       <div className="flex items-center gap-3">
         {data?.is_default ? (
-          <p className="text-muted-foreground text-sm">
-            Default template — rearrange, edit or add widgets and it saves as your own layout.
+          <p className="text-sm text-muted-foreground">
+            Default template — rearrange, edit or add widgets and it saves as
+            your own layout.
           </p>
         ) : (
-          <p className="text-muted-foreground text-sm">Changes save automatically.</p>
+          <p className="text-sm text-muted-foreground">
+            Changes save automatically.
+          </p>
         )}
         <Button
           size="sm"
@@ -176,7 +208,7 @@ export function DashboardPage() {
             setEditorOpen(true)
           }}
         >
-          <PlusIcon className="size-4" /> Add widget
+          <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
         </Button>
       </div>
 
@@ -205,7 +237,7 @@ export function DashboardPage() {
             ))}
           </GridLayout>
         ) : widgets.length === 0 ? (
-          <div className="text-muted-foreground flex h-48 items-center justify-center rounded-xl border border-dashed text-sm">
+          <div className="flex h-48 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
             No widgets — add one to get started.
           </div>
         ) : null}
@@ -217,7 +249,9 @@ export function DashboardPage() {
         initial={editing}
         seed={seed}
         nlEnabled={nlWidgetsEnabled()}
-        onSave={(draft) => (editing ? editWidget(editing.id, draft) : addWidget(draft))}
+        onSave={(draft) =>
+          editing ? editWidget(editing.id, draft) : addWidget(draft)
+        }
       />
     </div>
   )

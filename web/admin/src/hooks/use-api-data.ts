@@ -2,7 +2,10 @@ import * as React from "react"
 
 // useApiData: tiny fetch-on-deps hook; no cache layer (admin console reads
 // are cheap and always fresh).
-export function useApiData<T>(fn: () => Promise<T>, deps: React.DependencyList) {
+export function useApiData<T>(
+  fn: () => Promise<T>,
+  deps: React.DependencyList
+) {
   const [data, setData] = React.useState<T | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<unknown>(null)
@@ -25,7 +28,7 @@ export function useApiData<T>(fn: () => Promise<T>, deps: React.DependencyList) 
           setError(err)
           setLoading(false)
         }
-      },
+      }
     )
     return () => {
       cancelled = true

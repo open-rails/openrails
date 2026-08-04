@@ -24,12 +24,23 @@ const statusTabs = [
 ]
 
 const columns: ColumnDef<AdminSubscription, unknown>[] = [
-  { header: "Subscription", cell: ({ row }) => <span className="font-mono text-xs">{shortId(row.original.id, 13)}</span> },
-  { header: "Status", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  {
+    header: "Subscription",
+    cell: ({ row }) => (
+      <span className="text-xs">{shortId(row.original.id, 13)}</span>
+    ),
+  },
+  {
+    header: "Status",
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
   { header: "Rail", cell: ({ row }) => row.original.rail },
   { header: "Email", cell: ({ row }) => row.original.user_email ?? "—" },
   { header: "Started", cell: ({ row }) => formatDate(row.original.started_at) },
-  { header: "Period ends", cell: ({ row }) => formatDate(row.original.current_period_ends_at) },
+  {
+    header: "Period ends",
+    cell: ({ row }) => formatDate(row.original.current_period_ends_at),
+  },
   {
     header: "Retries",
     cell: ({ row }) =>
@@ -47,7 +58,7 @@ export function SubscriptionsPage() {
 
   const { data, loading, error } = useApiData(
     () => listSubscriptions(status ? { status } : {}, PAGE, offset),
-    [status, offset],
+    [status, offset]
   )
   React.useEffect(() => {
     if (error) toastApiError(error, "Load subscriptions")

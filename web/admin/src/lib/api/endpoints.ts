@@ -44,37 +44,55 @@ import type {
 // --- Customers ---
 
 export const listCustomers = (q: string, limit: number, offset: number) =>
-  api<ListEnvelope<CustomerSummary>>("/merchant/customers", { query: { q, limit, offset } })
+  api<ListEnvelope<CustomerSummary>>("/merchant/customers", {
+    query: { q, limit, offset },
+  })
 
 export const getCustomerProfile = (customerId: string) =>
   api<CustomerBillingProfile>(`/merchant/customers/${customerId}`)
 
 export const getCustomerPaymentMethods = (customerId: string) =>
   api<{ object: "list"; data: PaymentMethodResponse[] }>(
-    `/merchant/customers/${customerId}/payment-methods`,
+    `/merchant/customers/${customerId}/payment-methods`
   )
 
-export const grantEntitlement = (customerId: string, entitlement: string, hours?: number) =>
+export const grantEntitlement = (
+  customerId: string,
+  entitlement: string,
+  hours?: number
+) =>
   api<RawEntitlement>(`/merchant/customers/${customerId}/entitlements`, {
     method: "POST",
     body: hours ? { entitlement, hours } : { entitlement },
   })
 
 export const revokeEntitlement = (customerId: string, entitlementId: string) =>
-  api<{ message: string }>(`/merchant/customers/${customerId}/entitlements/${entitlementId}`, {
-    method: "DELETE",
-  })
+  api<{ message: string }>(
+    `/merchant/customers/${customerId}/entitlements/${entitlementId}`,
+    {
+      method: "DELETE",
+    }
+  )
 
-export const grantProductAccess = (customerId: string, productId: string, endsAt?: string) =>
+export const grantProductAccess = (
+  customerId: string,
+  productId: string,
+  endsAt?: string
+) =>
   api<unknown>(`/merchant/customers/${customerId}/product-access`, {
     method: "POST",
-    body: endsAt ? { product_id: productId, ends_at: endsAt } : { product_id: productId },
+    body: endsAt
+      ? { product_id: productId, ends_at: endsAt }
+      : { product_id: productId },
   })
 
 export const revokeProductAccess = (customerId: string, grantId: string) =>
-  api<{ message: string }>(`/merchant/customers/${customerId}/product-access/${grantId}`, {
-    method: "DELETE",
-  })
+  api<{ message: string }>(
+    `/merchant/customers/${customerId}/product-access/${grantId}`,
+    {
+      method: "DELETE",
+    }
+  )
 
 export interface OffChannelPaymentRequest {
   price_id: string
@@ -86,10 +104,13 @@ export interface OffChannelPaymentRequest {
   discount_reason?: string
 }
 
-export const createOffChannelPayment = (customerId: string, body: OffChannelPaymentRequest) =>
+export const createOffChannelPayment = (
+  customerId: string,
+  body: OffChannelPaymentRequest
+) =>
   api<{ payment_id: string; status?: string; entitlements?: string[] }>(
     `/merchant/customers/${customerId}/payments/off-channel`,
-    { method: "POST", body },
+    { method: "POST", body }
   )
 
 // --- Subscriptions ---
@@ -103,27 +124,45 @@ export interface SubscriptionFilters {
   sort_order?: string
 }
 
-export const listSubscriptions = (filters: SubscriptionFilters, limit: number, offset: number) =>
+export const listSubscriptions = (
+  filters: SubscriptionFilters,
+  limit: number,
+  offset: number
+) =>
   api<ListEnvelope<AdminSubscription>>("/merchant/subscriptions", {
     query: { ...filters, limit, offset },
   })
 
-export const getSubscription = (id: string) => api<AdminSubscription>(`/merchant/subscriptions/${id}`)
+export const getSubscription = (id: string) =>
+  api<AdminSubscription>(`/merchant/subscriptions/${id}`)
 
-export const cancelSubscription = (id: string, reason: string, revokeAccess: boolean) =>
+export const cancelSubscription = (
+  id: string,
+  reason: string,
+  revokeAccess: boolean
+) =>
   api<{ message: string }>(`/merchant/subscriptions/${id}/cancel`, {
     method: "POST",
     body: { reason, revoke_access: revokeAccess },
   })
 
 export const resumeSubscription = (id: string) =>
-  api<{ status: string }>(`/merchant/subscriptions/${id}/resume`, { method: "POST", body: {} })
-
-export const changeSubscriptionPaymentMethod = (id: string, paymentMethodId: string) =>
-  api<{ success: boolean; message: string }>(`/merchant/subscriptions/${id}/payment-method`, {
-    method: "PUT",
-    body: { payment_method_id: paymentMethodId },
+  api<{ status: string }>(`/merchant/subscriptions/${id}/resume`, {
+    method: "POST",
+    body: {},
   })
+
+export const changeSubscriptionPaymentMethod = (
+  id: string,
+  paymentMethodId: string
+) =>
+  api<{ success: boolean; message: string }>(
+    `/merchant/subscriptions/${id}/payment-method`,
+    {
+      method: "PUT",
+      body: { payment_method_id: paymentMethodId },
+    }
+  )
 
 // --- Payments ---
 
@@ -137,14 +176,24 @@ export interface PaymentFilters {
   sort_order?: string
 }
 
-export const listPayments = (filters: PaymentFilters, limit: number, offset: number) =>
+export const listPayments = (
+  filters: PaymentFilters,
+  limit: number,
+  offset: number
+) =>
   api<ListEnvelope<PaymentObject>>("/merchant/payments", {
     query: { ...filters, limit, offset },
   })
 
-export const getPayment = (id: string) => api<PaymentObject>(`/merchant/payments/${id}`)
+export const getPayment = (id: string) =>
+  api<PaymentObject>(`/merchant/payments/${id}`)
 
-export const refundPayment = (id: string, amount: number, reason: string, revokeAccess: boolean) =>
+export const refundPayment = (
+  id: string,
+  amount: number,
+  reason: string,
+  revokeAccess: boolean
+) =>
   api<PaymentObject>(`/merchant/payments/${id}/refunds`, {
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
@@ -156,12 +205,17 @@ export const REFUNDABLE_RAILS = ["nmi", "ccbill", "stripe"]
 
 // --- Catalog ---
 
-export const listProducts = (limit: number, offset: number, activeOnly?: boolean) =>
+export const listProducts = (
+  limit: number,
+  offset: number,
+  activeOnly?: boolean
+) =>
   api<ItemsEnvelope<CatalogProduct>>("/merchant/catalog/products", {
     query: { limit, offset, active_only: activeOnly },
   })
 
-export const getProduct = (id: string) => api<CatalogProduct>(`/merchant/catalog/products/${id}`)
+export const getProduct = (id: string) =>
+  api<CatalogProduct>(`/merchant/catalog/products/${id}`)
 
 export interface ProductRequest {
   key: string
@@ -177,14 +231,22 @@ export const createProduct = (body: ProductRequest) =>
 
 export const updateProduct = (
   id: string,
-  body: Partial<ProductRequest> & { set_entitlements?: boolean },
-) => api<CatalogProduct>(`/merchant/catalog/products/${id}`, { method: "PATCH", body })
+  body: Partial<ProductRequest> & { set_entitlements?: boolean }
+) =>
+  api<CatalogProduct>(`/merchant/catalog/products/${id}`, {
+    method: "PATCH",
+    body,
+  })
 
 export const activateProduct = (id: string) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}/activate`, { method: "POST" })
+  api<CatalogProduct>(`/merchant/catalog/products/${id}/activate`, {
+    method: "POST",
+  })
 
 export const deactivateProduct = (id: string) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}/deactivate`, { method: "POST" })
+  api<CatalogProduct>(`/merchant/catalog/products/${id}/deactivate`, {
+    method: "POST",
+  })
 
 export const listPrices = (productId?: string) =>
   api<ItemsEnvelope<CatalogPrice>>("/merchant/catalog/prices", {
@@ -212,23 +274,30 @@ export interface PriceRequest {
 export const createPrice = (body: PriceRequest) =>
   api<CatalogPrice>("/merchant/catalog/prices", { method: "POST", body })
 
-export const getPrice = (id: string) => api<CatalogPrice>(`/merchant/catalog/prices/${id}`)
+export const getPrice = (id: string) =>
+  api<CatalogPrice>(`/merchant/catalog/prices/${id}`)
 
 export const getPriceByKey = (key: string) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`)
+  api<CatalogPrice>(
+    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`
+  )
 
 export const activatePrice = (id: string) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/${id}/activate`, { method: "POST" })
+  api<CatalogPrice>(`/merchant/catalog/prices/${id}/activate`, {
+    method: "POST",
+  })
 
 export const deactivatePrice = (id: string) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/${id}/deactivate`, { method: "POST" })
+  api<CatalogPrice>(`/merchant/catalog/prices/${id}/deactivate`, {
+    method: "POST",
+  })
 
 // getPriceKeyHistory returns a price key's version chain (most-recent-first),
 // resolved server-side from the #774 pointer-movement log — the price
 // detail page's "version chain with dates" (#777).
 export const getPriceKeyHistory = (key: string) =>
   api<ItemsEnvelope<PriceKeyHistoryEntry>>(
-    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`,
+    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`
   )
 
 // --- Repricing / migration (#773 primitive, #777 console wizard) ---
@@ -237,13 +306,19 @@ export const getPriceKeyHistory = (key: string) =>
 // preview: a READ-ONLY dry run, called BEFORE the price edit lands (so it
 // never mutates, unlike repriceAllPriorVersions below).
 export const previewRepriceAllPriorVersions = (priceKey: string) =>
-  api<RepricePreviewResult>("/merchant/catalog/reprice-all-prior-versions/preview", {
-    query: { price_key: priceKey },
-  })
+  api<RepricePreviewResult>(
+    "/merchant/catalog/reprice-all-prior-versions/preview",
+    {
+      query: { price_key: priceKey },
+    }
+  )
 
 // repriceAllPriorVersions bulk-schedules every active subscription pinned to
 // a prior version of priceKey to move to its current price at effectiveAt.
-export const repriceAllPriorVersions = (priceKey: string, effectiveAt: string) =>
+export const repriceAllPriorVersions = (
+  priceKey: string,
+  effectiveAt: string
+) =>
   api<RepriceBatchResult>("/merchant/catalog/reprice-all-prior-versions", {
     method: "POST",
     body: { price_key: priceKey, effective_at: effectiveAt },
@@ -263,22 +338,38 @@ export interface RepriceFilters {
   status?: RepriceStatus
 }
 
-export const listReprices = (filters: RepriceFilters, limit = 100, offset = 0) =>
+export const listReprices = (
+  filters: RepriceFilters,
+  limit = 100,
+  offset = 0
+) =>
   api<ItemsEnvelope<SubscriptionReprice>>("/merchant/reprices", {
     query: { ...filters, limit, offset },
   })
 
 export const cancelReprice = (id: string) =>
-  api<{ message: string }>(`/merchant/reprices/${id}/cancel`, { method: "POST" })
+  api<{ message: string }>(`/merchant/reprices/${id}/cancel`, {
+    method: "POST",
+  })
 
-export const publishCatalog = (manifest: unknown, opts: { plan_only?: boolean; insert?: boolean; overwrite?: boolean; prune?: boolean }) =>
+export const publishCatalog = (
+  manifest: unknown,
+  opts: {
+    plan_only?: boolean
+    insert?: boolean
+    overwrite?: boolean
+    prune?: boolean
+  }
+) =>
   api<{ plan: unknown; result?: unknown }>("/merchant/catalog/publish", {
     method: "POST",
     body: { catalog: manifest, ...opts },
   })
 
 export const listCatalogDrift = (limit: number, offset: number) =>
-  api<ItemsEnvelope<CatalogDriftEvent>>("/merchant/catalog/drift", { query: { limit, offset } })
+  api<ItemsEnvelope<CatalogDriftEvent>>("/merchant/catalog/drift", {
+    query: { limit, offset },
+  })
 
 export const refreshCatalogDrift = () =>
   api<CatalogDriftReport>("/merchant/catalog/drift/refresh", { method: "POST" })
@@ -288,25 +379,37 @@ export const refreshCatalogDrift = () =>
 export const listFindings = (
   filters: { status?: string; severity?: string },
   limit: number,
-  offset: number,
-) => api<FindingsListResponse>("/merchant/findings", { query: { ...filters, limit, offset } })
+  offset: number
+) =>
+  api<FindingsListResponse>("/merchant/findings", {
+    query: { ...filters, limit, offset },
+  })
 
-export const getFinding = (id: string) => api<Finding>(`/merchant/findings/${id}`)
+export const getFinding = (id: string) =>
+  api<Finding>(`/merchant/findings/${id}`)
 
-export const resolveFinding = (id: string, outcome: "approve" | "ignore", notes: string) =>
+export const resolveFinding = (
+  id: string,
+  outcome: "approve" | "ignore",
+  notes: string
+) =>
   api<{ finding: Finding; execution?: Record<string, unknown> }>(
     `/merchant/findings/${id}/resolve`,
-    { method: "POST", body: { outcome, notes } },
+    { method: "POST", body: { outcome, notes } }
   )
 
 export const listRepairAlerts = (limit: number, offset: number) =>
-  api<ListEnvelope<RepairAlert>>("/merchant/repair-alerts", { query: { limit, offset } })
+  api<ListEnvelope<RepairAlert>>("/merchant/repair-alerts", {
+    query: { limit, offset },
+  })
 
-export const listWorkerHealth = () => api<WorkerHealth[]>("/merchant/worker-health")
+export const listWorkerHealth = () =>
+  api<WorkerHealth[]>("/merchant/worker-health")
 
 // --- Settings ---
 
-export const getMerchantSettings = () => api<MerchantSettings>("/merchant/settings")
+export const getMerchantSettings = () =>
+  api<MerchantSettings>("/merchant/settings")
 
 export const putMerchantSettings = (body: MerchantSettings) =>
   api<{ message: string }>("/merchant/settings", { method: "PUT", body })
@@ -325,39 +428,59 @@ export interface UpsertProviderRequest {
 }
 
 export const putPaymentProvider = (rail: string, body: UpsertProviderRequest) =>
-  api<{ payment_provider: PaymentProviderConfig }>(`/merchant/payment-providers/${rail}`, {
-    method: "PUT",
-    body,
-  })
+  api<{ payment_provider: PaymentProviderConfig }>(
+    `/merchant/payment-providers/${rail}`,
+    {
+      method: "PUT",
+      body,
+    }
+  )
 
 export const deletePaymentProvider = (rail: string, environment?: string) =>
-  api<{ payment_provider: PaymentProviderConfig }>(`/merchant/payment-providers/${rail}`, {
-    method: "DELETE",
-    query: environment ? { environment } : undefined,
-  })
+  api<{ payment_provider: PaymentProviderConfig }>(
+    `/merchant/payment-providers/${rail}`,
+    {
+      method: "DELETE",
+      query: environment ? { environment } : undefined,
+    }
+  )
 
 // --- API keys (#757) ---
 
-export const listApiKeys = () => api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys")
+export const listApiKeys = () =>
+  api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys")
 
 export const createApiKey = (name: string, role: string) =>
-  api<MintedAPIKey>("/merchant/api-keys", { method: "POST", body: { name, role } })
+  api<MintedAPIKey>("/merchant/api-keys", {
+    method: "POST",
+    body: { name, role },
+  })
 
 export const revokeApiKey = (id: string) =>
-  api<{ revoked: boolean; id: string }>(`/merchant/api-keys/${id}`, { method: "DELETE" })
+  api<{ revoked: boolean; id: string }>(`/merchant/api-keys/${id}`, {
+    method: "DELETE",
+  })
 
 // --- Team management (#760) ---
 
-export const listTeam = () => api<{ data: TeamMember[] | null }>("/merchant/team")
+export const listTeam = () =>
+  api<{ data: TeamMember[] | null }>("/merchant/team")
 
 export const listTeamInvites = () =>
-  api<{ data: TeamInvite[] | null; invites_enabled: boolean }>("/merchant/team/invites")
+  api<{ data: TeamInvite[] | null; invites_enabled: boolean }>(
+    "/merchant/team/invites"
+  )
 
 export const inviteTeamMember = (email: string, role: string) =>
-  api<TeamInviteResult>("/merchant/team/invites", { method: "POST", body: { email, role } })
+  api<TeamInviteResult>("/merchant/team/invites", {
+    method: "POST",
+    body: { email, role },
+  })
 
 export const revokeTeamInvite = (id: string) =>
-  api<{ revoked: boolean; id: string }>(`/merchant/team/invites/${id}`, { method: "DELETE" })
+  api<{ revoked: boolean; id: string }>(`/merchant/team/invites/${id}`, {
+    method: "DELETE",
+  })
 
 export const changeTeamRole = (userId: string, role: string) =>
   api<{ user_id: string; role: string }>(`/merchant/team/${userId}`, {
@@ -366,14 +489,23 @@ export const changeTeamRole = (userId: string, role: string) =>
   })
 
 export const removeTeamMember = (userId: string) =>
-  api<{ removed: boolean; user_id: string }>(`/merchant/team/${userId}`, { method: "DELETE" })
-
-export const getCreditLimit = (customerId: string, currency: string) =>
-  api<{ currency: string; credit_limit_amount: number }>("/merchant/credit-limit", {
-    query: { customer_id: customerId, currency },
+  api<{ removed: boolean; user_id: string }>(`/merchant/team/${userId}`, {
+    method: "DELETE",
   })
 
-export const setCreditLimit = (customerId: string, currency: string, amount: number) =>
+export const getCreditLimit = (customerId: string, currency: string) =>
+  api<{ currency: string; credit_limit_amount: number }>(
+    "/merchant/credit-limit",
+    {
+      query: { customer_id: customerId, currency },
+    }
+  )
+
+export const setCreditLimit = (
+  customerId: string,
+  currency: string,
+  amount: number
+) =>
   api<{ message: string }>("/merchant/credit-limit", {
     method: "PUT",
     body: { customer_id: customerId, currency, credit_limit_amount: amount },
@@ -401,7 +533,8 @@ export interface AlertRuleRequest {
   enabled: boolean
 }
 
-export const listAlertRules = () => api<{ data: AlertRule[] | null }>("/merchant/alerts/rules")
+export const listAlertRules = () =>
+  api<{ data: AlertRule[] | null }>("/merchant/alerts/rules")
 
 export const createAlertRule = (body: AlertRuleRequest) =>
   api<AlertRule>("/merchant/alerts/rules", { method: "POST", body })
@@ -410,7 +543,9 @@ export const updateAlertRule = (id: string, body: Partial<AlertRuleRequest>) =>
   api<AlertRule>(`/merchant/alerts/rules/${id}`, { method: "PATCH", body })
 
 export const deleteAlertRule = (id: string) =>
-  api<{ deleted: boolean; id: string }>(`/merchant/alerts/rules/${id}`, { method: "DELETE" })
+  api<{ deleted: boolean; id: string }>(`/merchant/alerts/rules/${id}`, {
+    method: "DELETE",
+  })
 
 // testAlertRule fires one test delivery through the rule's real channels —
 // the ONLY test-fire surface (there is no per-webhook test endpoint).
@@ -429,13 +564,16 @@ export interface WebhookRequest {
   enabled?: boolean
 }
 
-export const listWebhooks = () => api<{ data: MerchantWebhook[] | null }>("/merchant/webhooks")
+export const listWebhooks = () =>
+  api<{ data: MerchantWebhook[] | null }>("/merchant/webhooks")
 
 export const createWebhook = (body: WebhookRequest) =>
   api<MerchantWebhook>("/merchant/webhooks", { method: "POST", body })
 
 export const deleteWebhook = (id: string) =>
-  api<{ deleted: boolean; id: string }>(`/merchant/webhooks/${id}`, { method: "DELETE" })
+  api<{ deleted: boolean; id: string }>(`/merchant/webhooks/${id}`, {
+    method: "DELETE",
+  })
 
 // --- Alerting: notifications (in_app store / header bell, #736) ---
 
@@ -450,4 +588,5 @@ export const markNotificationRead = (id: string) =>
     body: {},
   })
 
-export const getUnreadCount = () => api<{ unread: number }>("/merchant/notifications/unread-count")
+export const getUnreadCount = () =>
+  api<{ unread: number }>("/merchant/notifications/unread-count")

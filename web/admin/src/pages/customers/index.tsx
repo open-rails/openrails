@@ -1,5 +1,6 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Search01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { SearchIcon } from "lucide-react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 
@@ -14,11 +15,25 @@ import { toastApiError } from "@/lib/toast"
 const PAGE = 50
 
 const columns: ColumnDef<CustomerSummary, unknown>[] = [
-  { header: "Customer", cell: ({ row }) => <span className="font-mono text-xs">{shortId(row.original.id, 13)}</span> },
-  { header: "Subject / external ref", cell: ({ row }) => row.original.subject ?? "—" },
+  {
+    header: "Customer",
+    cell: ({ row }) => (
+      <span className="text-xs">{shortId(row.original.id, 13)}</span>
+    ),
+  },
+  {
+    header: "Subject / external ref",
+    cell: ({ row }) => row.original.subject ?? "—",
+  },
   { header: "Email", cell: ({ row }) => row.original.email ?? "—" },
-  { header: "First seen", cell: ({ row }) => formatDate(row.original.created_at) },
-  { header: "Last seen", cell: ({ row }) => formatDate(row.original.last_seen_at) },
+  {
+    header: "First seen",
+    cell: ({ row }) => formatDate(row.original.created_at),
+  },
+  {
+    header: "Last seen",
+    cell: ({ row }) => formatDate(row.original.last_seen_at),
+  },
 ]
 
 export function CustomersPage() {
@@ -30,7 +45,7 @@ export function CustomersPage() {
 
   const { data, loading, error } = useApiData(
     () => listCustomers(q, PAGE, offset),
-    [q, offset],
+    [q, offset]
   )
   React.useEffect(() => {
     if (error) toastApiError(error, "Load customers")
@@ -45,7 +60,10 @@ export function CustomersPage() {
           setParams(input ? { q: input } : {})
         }}
       >
-        <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <HugeiconsIcon
+          icon={Search01Icon}
+          className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+        />
         <Input
           className="pl-8"
           placeholder="Search by email, external ref, or id prefix…"

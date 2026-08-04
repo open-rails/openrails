@@ -5,7 +5,10 @@ import { formatMicros } from "@/lib/format"
 
 export type PriceDirection = "increase" | "decrease" | "unchanged"
 
-export function detectDirection(newAmount: number, currentAmount: number): PriceDirection {
+export function detectDirection(
+  newAmount: number,
+  currentAmount: number
+): PriceDirection {
   if (newAmount > currentAmount) return "increase"
   if (newAmount < currentAmount) return "decrease"
   return "unchanged"
@@ -34,7 +37,11 @@ export function defaultMigrationMode(direction: PriceDirection): MigrationMode {
 // minEffectiveDate returns the earliest allowed migration date, or null when
 // there is no minimum (decreases may move everyone at next renewal starting
 // now — notice is optional goodwill, not a requirement).
-export function minEffectiveDate(direction: PriceDirection, now: Date, noticeWindowDays: number): Date | null {
+export function minEffectiveDate(
+  direction: PriceDirection,
+  now: Date,
+  noticeWindowDays: number
+): Date | null {
   if (direction !== "increase") return null
   const min = new Date(now)
   min.setUTCDate(min.getUTCDate() + noticeWindowDays)
@@ -43,13 +50,22 @@ export function minEffectiveDate(direction: PriceDirection, now: Date, noticeWin
 
 // defaultEffectiveDate is Step 2's pre-filled migration date: the notice
 // window's floor for an increase, "now" for a decrease.
-export function defaultEffectiveDate(direction: PriceDirection, now: Date, noticeWindowDays: number): Date {
+export function defaultEffectiveDate(
+  direction: PriceDirection,
+  now: Date,
+  noticeWindowDays: number
+): Date {
   return minEffectiveDate(direction, now, noticeWindowDays) ?? now
 }
 
 // isEffectiveDateValid enforces the console-side notice-window gate: an
 // increase+migrate plan may not pick a date inside the notice window.
-export function isEffectiveDateValid(direction: PriceDirection, effectiveAt: Date, now: Date, noticeWindowDays: number): boolean {
+export function isEffectiveDateValid(
+  direction: PriceDirection,
+  effectiveAt: Date,
+  now: Date,
+  noticeWindowDays: number
+): boolean {
   const min = minEffectiveDate(direction, now, noticeWindowDays)
   return !min || effectiveAt.getTime() >= min.getTime()
 }
@@ -61,7 +77,11 @@ export interface MigrationPlan {
 }
 
 const dateLabel = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+  new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
 
 // buildReviewText renders Step 3's "plan in words" exactly per the #777 spec
 // phrasing: "New subscribers pay $12 immediately. 1,204 existing subscribers
@@ -75,7 +95,8 @@ export function buildReviewText(params: {
   plan: MigrationPlan
   now: Date
 }): string {
-  const { newAmount, currentAmount, currency, affectedCount, plan, now } = params
+  const { newAmount, currentAmount, currency, affectedCount, plan, now } =
+    params
   const newLabel = formatMicros(newAmount, currency)
   const oldLabel = formatMicros(currentAmount, currency)
   const lead = `New subscribers pay ${newLabel} immediately.`

@@ -1,13 +1,13 @@
 // Server-paginated data table on @tanstack/react-table v8 + the shadcn Table
 // primitives (shadcn Data Table pattern).
+import { HugeiconsIcon } from "@hugeicons/react"
+import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons"
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table"
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
-
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -48,7 +48,11 @@ export function DataTable<TData>({
     manualPagination: true,
   })
 
-  const paged = onPageChange && limit !== undefined && offset !== undefined && total !== undefined
+  const paged =
+    onPageChange &&
+    limit !== undefined &&
+    offset !== undefined &&
+    total !== undefined
 
   return (
     <div className="flex flex-col gap-3">
@@ -61,7 +65,10 @@ export function DataTable<TData>({
                   <TableHead key={header.id}>
                     {header.isPlaceholder
                       ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
                   </TableHead>
                 ))}
               </TableRow>
@@ -70,7 +77,10 @@ export function DataTable<TData>({
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center text-muted-foreground"
+                >
                   Loading…
                 </TableCell>
               </TableRow>
@@ -78,19 +88,27 @@ export function DataTable<TData>({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                  onClick={
+                    onRowClick ? () => onRowClick(row.original) : undefined
+                  }
                   className={onRowClick ? "cursor-pointer" : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center text-muted-foreground"
+                >
                   {emptyMessage}
                 </TableCell>
               </TableRow>
@@ -101,7 +119,10 @@ export function DataTable<TData>({
       {paged && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {total === 0 ? "0" : `${offset + 1}–${Math.min(offset + limit, total)}`} of {total}
+            {total === 0
+              ? "0"
+              : `${offset + 1}–${Math.min(offset + limit, total)}`}{" "}
+            of {total}
           </span>
           <div className="flex gap-2">
             <Button
@@ -110,7 +131,7 @@ export function DataTable<TData>({
               disabled={offset <= 0 || loading}
               onClick={() => onPageChange(Math.max(0, offset - limit))}
             >
-              <ChevronLeftIcon className="size-4" /> Prev
+              <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" /> Prev
             </Button>
             <Button
               variant="outline"
@@ -118,7 +139,7 @@ export function DataTable<TData>({
               disabled={offset + limit >= total || loading}
               onClick={() => onPageChange(offset + limit)}
             >
-              Next <ChevronRightIcon className="size-4" />
+              Next <HugeiconsIcon icon={ArrowRight01Icon} className="size-4" />
             </Button>
           </div>
         </div>

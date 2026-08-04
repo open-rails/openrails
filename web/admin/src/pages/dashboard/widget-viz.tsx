@@ -1,7 +1,8 @@
 // Viz renderers: stat tile (section-cards pattern w/ compare delta),
 // line/area/bar (shadcn chart on recharts 3, var(--chart-N) tokens), donut,
 // table. Input is the raw #733 tabular result — no client-side re-querying.
-import { TrendingDownIcon, TrendingUpIcon } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { AnalyticsDownIcon, AnalyticsUpIcon } from "@hugeicons/core-free-icons"
 import {
   Area,
   AreaChart,
@@ -42,7 +43,13 @@ import {
   pivotTimeSeries,
 } from "./lib"
 
-export function WidgetVizView({ viz, result }: { viz: VizType; result: MetricsResult }) {
+export function WidgetVizView({
+  viz,
+  result,
+}: {
+  viz: VizType
+  result: MetricsResult
+}) {
   switch (viz) {
     case "stat":
       return <StatViz result={result} />
@@ -59,7 +66,7 @@ export function WidgetVizView({ viz, result }: { viz: VizType; result: MetricsRe
 
 function Empty({ label }: { label: string }) {
   return (
-    <div className="text-muted-foreground flex h-full min-h-16 items-center justify-center text-sm">
+    <div className="flex h-full min-h-16 items-center justify-center text-sm text-muted-foreground">
       {label}
     </div>
   )
@@ -76,7 +83,11 @@ function StatViz({ result }: { result: MetricsResult }) {
   const primary = idx.measures[0]
   if (!primary) return <Empty label="no measure" />
   if (result.rows.length === 0) {
-    return <div className="text-2xl font-semibold tabular-nums">{formatMeasure(0, primary.unit)}</div>
+    return (
+      <div className="text-2xl font-semibold tabular-nums">
+        {formatMeasure(0, primary.unit)}
+      </div>
+    )
   }
   // One rendered value per row (rows differ by dims — usually currency).
   const rows = result.rows.slice(0, 3)
@@ -84,31 +95,50 @@ function StatViz({ result }: { result: MetricsResult }) {
   return (
     <div className="flex h-full flex-col justify-center gap-1">
       {rows.map((row, i) => {
-        const currency = idx.currency >= 0 ? String(row[idx.currency] ?? "") : undefined
+        const currency =
+          idx.currency >= 0 ? String(row[idx.currency] ?? "") : undefined
         const dimLabel =
           rows.length > 1
-            ? idx.dims.map((d) => String(row[d.index] ?? "")).filter(Boolean).join(" · ")
+            ? idx.dims
+                .map((d) => String(row[d.index] ?? ""))
+                .filter(Boolean)
+                .join(" · ")
             : ""
         return (
           <div key={i} className="flex items-baseline gap-2">
-            <span className={cn("font-semibold tabular-nums", rows.length > 1 ? "text-lg" : "text-3xl")}>
+            <span
+              className={cn(
+                "font-semibold tabular-nums",
+                rows.length > 1 ? "text-lg" : "text-3xl"
+              )}
+            >
               {formatMeasure(row[primary.index], primary.unit, currency)}
             </span>
-            {dimLabel ? <span className="text-muted-foreground text-xs">{dimLabel}</span> : null}
+            {dimLabel ? (
+              <span className="text-xs text-muted-foreground">{dimLabel}</span>
+            ) : null}
           </div>
         )
       })}
       {result.rows.length > 3 ? (
-        <span className="text-muted-foreground text-xs">+{result.rows.length - 3} more</span>
+        <span className="text-xs text-muted-foreground">
+          +{result.rows.length - 3} more
+        </span>
       ) : null}
       {delta !== null ? (
         <span
           className={cn(
             "flex items-center gap-1 text-xs font-medium",
-            delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400",
+            delta >= 0
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-600 dark:text-red-400"
           )}
         >
-          {delta >= 0 ? <TrendingUpIcon className="size-3" /> : <TrendingDownIcon className="size-3" />}
+          {delta >= 0 ? (
+            <HugeiconsIcon icon={AnalyticsUpIcon} className="size-3" />
+          ) : (
+            <HugeiconsIcon icon={AnalyticsDownIcon} className="size-3" />
+          )}
           {`${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs previous period`}
         </span>
       ) : null}
@@ -126,21 +156,40 @@ function statDelta(result: MetricsResult, measureIndex: number): number | null {
 
 // --- time series -----------------------------------------------------------------
 
-function TimeSeriesViz({ viz, result }: { viz: "line" | "area" | "bar"; result: MetricsResult }) {
+function TimeSeriesViz({
+  viz,
+  result,
+}: {
+  viz: "line" | "area" | "bar"
+  result: MetricsResult
+}) {
   const { data, series } = pivotTimeSeries(result)
-  if (data.length === 0 || series.length === 0) return <Empty label="no data in range" />
+  if (data.length === 0 || series.length === 0)
+    return <Empty label="no data in range" />
   const config: ChartConfig = {}
   series.forEach((s, i) => {
     config[s.key] = { label: s.key, color: chartColor(i) }
   })
   const unit = series[0]?.unit
-  const tickFormatter = (v: number) => formatMeasure(v, unit).replace(/\.\d+/, "")
+  const tickFormatter = (v: number) =>
+    formatMeasure(v, unit).replace(/\.\d+/, "")
   const chartProps = { data, margin: { left: 4, right: 4, top: 4, bottom: 0 } }
   const axes = (
     <>
       <CartesianGrid vertical={false} strokeOpacity={0.4} />
-      <XAxis dataKey="bucket" tickLine={false} axisLine={false} tickMargin={6} minTickGap={24} />
-      <YAxis tickLine={false} axisLine={false} width={52} tickFormatter={tickFormatter} />
+      <XAxis
+        dataKey="bucket"
+        tickLine={false}
+        axisLine={false}
+        tickMargin={6}
+        minTickGap={24}
+      />
+      <YAxis
+        tickLine={false}
+        axisLine={false}
+        width={52}
+        tickFormatter={tickFormatter}
+      />
     </>
   )
   const tooltip = <ChartTooltip content={<ChartTooltipContent />} />
@@ -151,7 +200,14 @@ function TimeSeriesViz({ viz, result }: { viz: "line" | "area" | "bar"; result: 
           {axes}
           {tooltip}
           {series.map((s, i) => (
-            <Line key={s.key} dataKey={s.key} type="monotone" stroke={chartColor(i)} strokeWidth={2} dot={false} />
+            <Line
+              key={s.key}
+              dataKey={s.key}
+              type="monotone"
+              stroke={chartColor(i)}
+              strokeWidth={2}
+              dot={false}
+            />
           ))}
         </LineChart>
       ) : viz === "area" ? (
@@ -175,7 +231,13 @@ function TimeSeriesViz({ viz, result }: { viz: "line" | "area" | "bar"; result: 
           {axes}
           {tooltip}
           {series.map((s, i) => (
-            <Bar key={s.key} dataKey={s.key} stackId="a" fill={chartColor(i)} radius={2} />
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              stackId="a"
+              fill={chartColor(i)}
+              radius={2}
+            />
           ))}
         </BarChart>
       )}
@@ -192,7 +254,10 @@ function DonutViz({ result }: { result: MetricsResult }) {
   const slices = result.rows
     .map((row) => ({
       name:
-        idx.dims.map((d) => String(row[d.index] ?? "")).filter(Boolean).join(" · ") || primary.name,
+        idx.dims
+          .map((d) => String(row[d.index] ?? ""))
+          .filter(Boolean)
+          .join(" · ") || primary.name,
       value: Number(row[primary.index] ?? 0),
     }))
     .filter((s) => s.value !== 0)
@@ -205,7 +270,13 @@ function DonutViz({ result }: { result: MetricsResult }) {
     <ChartContainer config={config} className="h-full min-h-24 w-full">
       <PieChart>
         <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
-        <Pie data={slices} dataKey="value" nameKey="name" innerRadius="55%" strokeWidth={2}>
+        <Pie
+          data={slices}
+          dataKey="value"
+          nameKey="name"
+          innerRadius="55%"
+          strokeWidth={2}
+        >
           {slices.map((s, i) => (
             <Cell key={s.name} fill={chartColor(i)} />
           ))}
@@ -226,7 +297,7 @@ function TableViz({ result }: { result: MetricsResult }) {
         <TableHeader>
           <TableRow>
             {result.columns.map((c) => (
-              <TableHead key={c.name} className="whitespace-nowrap text-xs">
+              <TableHead key={c.name} className="text-xs whitespace-nowrap">
                 {c.name}
               </TableHead>
             ))}
@@ -238,15 +309,23 @@ function TableViz({ result }: { result: MetricsResult }) {
               {result.columns.map((c, ci) => {
                 const cell = row[ci]
                 let rendered: string
-                if (c.kind === "time") rendered = formatBucket(String(cell), result.grain)
+                if (c.kind === "time")
+                  rendered = formatBucket(String(cell), result.grain)
                 else if (c.kind === "measure") {
-                  const currency = idx.currency >= 0 ? String(row[idx.currency] ?? "") : undefined
+                  const currency =
+                    idx.currency >= 0
+                      ? String(row[idx.currency] ?? "")
+                      : undefined
                   rendered = formatMeasure(cell, c.unit, currency)
-                } else rendered = cell === null || cell === "" ? "—" : String(cell)
+                } else
+                  rendered = cell === null || cell === "" ? "—" : String(cell)
                 return (
                   <TableCell
                     key={c.name}
-                    className={cn("text-xs", c.kind === "measure" && "tabular-nums")}
+                    className={cn(
+                      "text-xs",
+                      c.kind === "measure" && "tabular-nums"
+                    )}
                   >
                     {rendered}
                   </TableCell>

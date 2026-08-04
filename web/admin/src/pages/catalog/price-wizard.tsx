@@ -15,7 +15,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { confirmCopilotDraft, type PriceChangeDraft } from "@/lib/api/copilot"
-import { createPrice, getMerchantSettings, previewRepriceAllPriorVersions, repriceAllPriorVersions } from "@/lib/api/endpoints"
+import {
+  createPrice,
+  getMerchantSettings,
+  previewRepriceAllPriorVersions,
+  repriceAllPriorVersions,
+} from "@/lib/api/endpoints"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -59,21 +64,27 @@ export function PriceChangeWizard({
   const [open, setOpen] = React.useState(() => !!draft)
   const [step, setStep] = React.useState<1 | 2 | 3>(() => (draft ? 3 : 1))
   const [amountInput, setAmountInput] = React.useState(() =>
-    String((draft?.new_amount ?? price.unit_amount) / 1_000_000),
+    String((draft?.new_amount ?? price.unit_amount) / 1_000_000)
   )
-  const [mode, setMode] = React.useState<MigrationMode>(() => draft?.migration_mode ?? "grandfather")
+  const [mode, setMode] = React.useState<MigrationMode>(
+    () => draft?.migration_mode ?? "grandfather"
+  )
   const [effectiveAt, setEffectiveAt] = React.useState(() =>
-    draft?.reprice ? toDateInputValue(new Date(draft.reprice.effective_at)) : "",
+    draft?.reprice ? toDateInputValue(new Date(draft.reprice.effective_at)) : ""
   )
   const [previewLoading, setPreviewLoading] = React.useState(false)
-  const [affectedCount, setAffectedCount] = React.useState<number | null>(draft?.affected_count ?? null)
+  const [affectedCount, setAffectedCount] = React.useState<number | null>(
+    draft?.affected_count ?? null
+  )
   const [busy, setBusy] = React.useState(false)
   // #781: the merchant-configurable notice window, read from the API (the
   // console used to hard-code 30 days here; the server is now the actual
   // boundary — GET /v1/merchant/settings — this is only the fail-fast UX
   // gate). DEFAULT_NOTICE_WINDOW_DAYS covers the brief window before the
   // fetch resolves.
-  const [noticeWindowDays, setNoticeWindowDays] = React.useState(DEFAULT_NOTICE_WINDOW_DAYS)
+  const [noticeWindowDays, setNoticeWindowDays] = React.useState(
+    DEFAULT_NOTICE_WINDOW_DAYS
+  )
 
   const [now] = React.useState(() => new Date())
   const newAmount = microsFromInput(amountInput) ?? price.unit_amount
@@ -92,7 +103,11 @@ export function PriceChangeWizard({
       reset()
     } else {
       getMerchantSettings()
-        .then((settings) => setNoticeWindowDays(settings.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS))
+        .then((settings) =>
+          setNoticeWindowDays(
+            settings.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
+          )
+        )
         .catch(() => {
           /* fail-soft: keep the default fallback — the server enforces the real window regardless. */
         })
@@ -102,7 +117,9 @@ export function PriceChangeWizard({
 
   const enterStep2 = () => {
     setMode(defaultMigrationMode(direction))
-    setEffectiveAt(toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays)))
+    setEffectiveAt(
+      toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays))
+    )
     setStep(2)
     setPreviewLoading(true)
     setAffectedCount(null)
@@ -114,14 +131,26 @@ export function PriceChangeWizard({
 
   const minDate = minEffectiveDate(direction, now, noticeWindowDays)
   const dateValid =
-    mode !== "migrate" || (!!effectiveAt && isEffectiveDateValid(direction, new Date(effectiveAt), now, noticeWindowDays))
+    mode !== "migrate" ||
+    (!!effectiveAt &&
+      isEffectiveDateValid(
+        direction,
+        new Date(effectiveAt),
+        now,
+        noticeWindowDays
+      ))
 
   // Archived (prior-version) rows are history, not the editable current
   // price — editing rides the key's CURRENT row (GET .../prices/by-key/:key
   // always resolves it) so there is exactly one live edit target per key.
   if (price.archived) {
     return (
-      <Button variant="outline" size="sm" disabled title="This is an archived prior version — change the current price for this key instead.">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        title="This is an archived prior version — change the current price for this key instead."
+      >
         Change price
       </Button>
     )
@@ -142,19 +171,28 @@ export function PriceChangeWizard({
         providers: Object.keys(price.providers ?? {}),
       })
       if (mode === "migrate") {
-        await repriceAllPriorVersions(price.key, new Date(effectiveAt).toISOString())
+        await repriceAllPriorVersions(
+          price.key,
+          new Date(effectiveAt).toISOString()
+        )
       }
       if (created.pending_manual_actions?.length) {
         toast.warning(
-          `Price updated — manual step needed: ${created.pending_manual_actions.map((a) => `${a.provider}: ${a.hint}`).join("; ")}`,
+          `Price updated — manual step needed: ${created.pending_manual_actions.map((a) => `${a.provider}: ${a.hint}`).join("; ")}`
         )
       } else {
-        toast.success(mode === "migrate" ? "Price updated and migration scheduled" : "Price updated")
+        toast.success(
+          mode === "migrate"
+            ? "Price updated and migration scheduled"
+            : "Price updated"
+        )
       }
       // Best-effort audit-provenance log: fires AFTER the real confirm above
       // already succeeded, never blocks or affects it.
       if (draft) {
-        confirmCopilotDraft(draft.draft_id, "price_change", price.key).catch(() => {})
+        confirmCopilotDraft(draft.draft_id, "price_change", price.key).catch(
+          () => {}
+        )
       }
       handleOpenChange(false)
       onDone()
@@ -168,11 +206,13 @@ export function PriceChangeWizard({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {!draft && (
-        <DialogTrigger asChild>
-          <Button variant="outline" size="sm">
-            Change price
-          </Button>
-        </DialogTrigger>
+        <DialogTrigger
+          render={
+            <Button variant="outline" size="sm">
+              Change price
+            </Button>
+          }
+        />
       )}
       <DialogContent className="max-w-lg">
         <DialogHeader>
@@ -181,7 +221,12 @@ export function PriceChangeWizard({
             {draft && <Badge variant="secondary">drafted by copilot</Badge>}
           </DialogTitle>
           <DialogDescription>
-            Step {step} of 3: {step === 1 ? "new amount" : step === 2 ? "migration plan" : "review"}
+            Step {step} of 3:{" "}
+            {step === 1
+              ? "new amount"
+              : step === 2
+                ? "migration plan"
+                : "review"}
           </DialogDescription>
         </DialogHeader>
 
@@ -189,11 +234,17 @@ export function PriceChangeWizard({
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <p className="text-xs text-muted-foreground uppercase">Current amount</p>
-                <p className="font-medium">{formatMicros(price.unit_amount, price.currency)}</p>
+                <p className="text-xs text-muted-foreground uppercase">
+                  Current amount
+                </p>
+                <p className="font-medium">
+                  {formatMicros(price.unit_amount, price.currency)}
+                </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground uppercase">Currency · interval</p>
+                <p className="text-xs text-muted-foreground uppercase">
+                  Currency · interval
+                </p>
                 <p className="font-medium">
                   {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
                 </p>
@@ -214,8 +265,10 @@ export function PriceChangeWizard({
             {direction !== "unchanged" && (
               <p className="text-sm text-muted-foreground">
                 This is a price{" "}
-                <span className="font-medium text-foreground">{direction === "increase" ? "increase" : "decrease"}</span>.
-                Currency and interval stay locked to the current price.
+                <span className="font-medium text-foreground">
+                  {direction === "increase" ? "increase" : "decrease"}
+                </span>
+                . Currency and interval stay locked to the current price.
               </p>
             )}
           </div>
@@ -238,8 +291,13 @@ export function PriceChangeWizard({
                   onChange={() => setMode("grandfather")}
                 />
                 <span>
-                  <span className="font-medium">Grandfather</span> — existing subscribers keep the current price.
-                  {direction === "increase" && <Badge variant="secondary" className="ml-2">default</Badge>}
+                  <span className="font-medium">Grandfather</span> — existing
+                  subscribers keep the current price.
+                  {direction === "increase" && (
+                    <Badge variant="secondary" className="ml-2">
+                      default
+                    </Badge>
+                  )}
                 </span>
               </label>
               <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
@@ -251,9 +309,13 @@ export function PriceChangeWizard({
                   onChange={() => setMode("migrate")}
                 />
                 <span>
-                  <span className="font-medium">Migrate</span> — move everyone to the new price at their next renewal
-                  on/after a date.
-                  {direction === "decrease" && <Badge variant="secondary" className="ml-2">default</Badge>}
+                  <span className="font-medium">Migrate</span> — move everyone
+                  to the new price at their next renewal on/after a date.
+                  {direction === "decrease" && (
+                    <Badge variant="secondary" className="ml-2">
+                      default
+                    </Badge>
+                  )}
                 </span>
               </label>
             </div>
@@ -269,17 +331,21 @@ export function PriceChangeWizard({
                 />
                 {direction === "increase" ? (
                   <p className="text-xs text-muted-foreground">
-                    Must be at least {noticeWindowDays} days out (card-network advance-notice window for amount
-                    increases — configurable in Settings; enforced by the API).
+                    Must be at least {noticeWindowDays} days out (card-network
+                    advance-notice window for amount increases — configurable in
+                    Settings; enforced by the API).
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Decreases have no notice requirement — today is fine.
                   </p>
                 )}
-                {!dateValid && <p className="text-xs text-destructive">Pick a later date.</p>}
+                {!dateValid && (
+                  <p className="text-xs text-destructive">Pick a later date.</p>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  A reprice_scheduled notice is queued for every affected subscriber as soon as you confirm.
+                  A reprice_scheduled notice is queued for every affected
+                  subscriber as soon as you confirm.
                 </p>
               </div>
             )}
@@ -294,7 +360,13 @@ export function PriceChangeWizard({
                 currentAmount: price.unit_amount,
                 currency: price.currency,
                 affectedCount: affectedCount ?? 0,
-                plan: { mode, effectiveAt: mode === "migrate" ? new Date(effectiveAt).toISOString() : "" },
+                plan: {
+                  mode,
+                  effectiveAt:
+                    mode === "migrate"
+                      ? new Date(effectiveAt).toISOString()
+                      : "",
+                },
                 now,
               })}
             </p>
@@ -303,17 +375,29 @@ export function PriceChangeWizard({
 
         <DialogFooter>
           {step > 1 && (
-            <Button variant="outline" disabled={busy} onClick={() => setStep((s) => (s - 1) as 1 | 2)}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setStep((s) => (s - 1) as 1 | 2)}
+            >
               Back
             </Button>
           )}
           {step === 1 && (
-            <Button disabled={!amountInput || direction === "unchanged" || newAmount <= 0} onClick={enterStep2}>
+            <Button
+              disabled={
+                !amountInput || direction === "unchanged" || newAmount <= 0
+              }
+              onClick={enterStep2}
+            >
               Next
             </Button>
           )}
           {step === 2 && (
-            <Button disabled={!dateValid || previewLoading} onClick={() => setStep(3)}>
+            <Button
+              disabled={!dateValid || previewLoading}
+              onClick={() => setStep(3)}
+            >
               Next
             </Button>
           )}

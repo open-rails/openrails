@@ -41,7 +41,7 @@ const router = createBrowserRouter(
       ],
     },
   ],
-  { basename: "/admin" },
+  { basename: "/admin" }
 )
 
 createRoot(document.getElementById("root")!).render(
@@ -52,5 +52,5 @@ createRoot(document.getElementById("root")!).render(
         <Toaster />
       </AuthProvider>
     </ThemeProvider>
-  </StrictMode>,
+  </StrictMode>
 )

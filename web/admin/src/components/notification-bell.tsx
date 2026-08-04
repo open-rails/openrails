@@ -1,5 +1,10 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Alert01Icon,
+  AlertCircleIcon,
+  Notification01Icon,
+} from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { BellIcon, CircleAlertIcon, TriangleAlertIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
@@ -83,7 +88,11 @@ export function NotificationBell() {
     if (isUnread(n)) {
       try {
         await markNotificationRead(n.id)
-        setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)))
+        setItems((prev) =>
+          prev.map((x) =>
+            x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x
+          )
+        )
         setCount((c) => Math.max(0, c - 1))
       } catch {
         /* best effort */
@@ -100,40 +109,62 @@ export function NotificationBell() {
     if (unread.length === 0) return
     await Promise.allSettled(unread.map((n) => markNotificationRead(n.id)))
     const now = new Date().toISOString()
-    setItems((prev) => prev.map((x) => (x.read_at ? x : { ...x, read_at: now })))
+    setItems((prev) =>
+      prev.map((x) => (x.read_at ? x : { ...x, read_at: now }))
+    )
     setCount(0)
   }
 
   return (
     <DropdownMenu open={open} onOpenChange={handleOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
-          <BellIcon className="size-4" />
-          {count > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-white">
-              {count > 9 ? "9+" : count}
-            </span>
-          )}
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Notifications"
+            className="relative"
+          >
+            <HugeiconsIcon icon={Notification01Icon} className="size-4" />
+            {count > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-white">
+                {count > 9 ? "9+" : count}
+              </span>
+            )}
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end" className="w-80 p-0 sm:w-96">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-sm font-medium">Notifications</span>
           {items.some(isUnread) && (
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={markAll}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={markAll}
+            >
               Mark all read
             </Button>
           )}
         </div>
         <div className="max-h-96 overflow-y-auto">
           {loading ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">Loading…</p>
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              Loading…
+            </p>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-1 px-3 py-8 text-center">
-              <BellIcon className="size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">You&apos;re all caught up.</p>
+              <HugeiconsIcon
+                icon={Notification01Icon}
+                className="size-5 text-muted-foreground"
+              />
+              <p className="text-sm text-muted-foreground">
+                You&apos;re all caught up.
+              </p>
               <p className="max-w-[16rem] text-xs text-muted-foreground">
-                Threshold alerts land here. Configure rules in Settings → Alerts.
+                Threshold alerts land here. Configure rules in Settings →
+                Alerts.
               </p>
             </div>
           ) : (
@@ -144,19 +175,30 @@ export function NotificationBell() {
                 onClick={() => onItemClick(n)}
                 className={cn(
                   "flex w-full items-start gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/50",
-                  isUnread(n) && "bg-primary/[0.04]",
+                  isUnread(n) && "bg-primary/[0.04]"
                 )}
               >
                 <span className="mt-0.5 shrink-0">
                   {n.severity === "critical" ? (
-                    <CircleAlertIcon className="size-4 text-red-500" />
+                    <HugeiconsIcon
+                      icon={AlertCircleIcon}
+                      className="size-4 text-red-500"
+                    />
                   ) : (
-                    <TriangleAlertIcon className="size-4 text-amber-500" />
+                    <HugeiconsIcon
+                      icon={Alert01Icon}
+                      className="size-4 text-amber-500"
+                    />
                   )}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2">
-                    <span className={cn("truncate text-sm", isUnread(n) && "font-medium")}>
+                    <span
+                      className={cn(
+                        "truncate text-sm",
+                        isUnread(n) && "font-medium"
+                      )}
+                    >
                       {n.title}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
@@ -170,7 +212,10 @@ export function NotificationBell() {
                   )}
                 </span>
                 {isUnread(n) && (
-                  <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
+                  <span
+                    className="mt-1.5 size-2 shrink-0 rounded-full bg-primary"
+                    aria-label="unread"
+                  />
                 )}
               </button>
             ))

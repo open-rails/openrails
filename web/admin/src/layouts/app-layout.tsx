@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { useAuth } from "@/lib/auth"
 
 const titles: [string, string][] = [
@@ -39,17 +40,22 @@ export function AppLayout() {
     return <Navigate to="/login" replace />
   }
 
-  const title = titles.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? "Dashboard"
+  const title =
+    titles.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? "Dashboard"
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <SiteHeader title={title} />
-        <main className="flex flex-1 flex-col gap-4 p-4 md:p-6">
-          <Outlet />
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <TooltipProvider>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <SiteHeader title={title} />
+          <main className="flex flex-1 flex-col p-4 md:p-8">
+            <div className="mx-auto w-full max-w-5xl">
+              <Outlet />
+            </div>
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   )
 }

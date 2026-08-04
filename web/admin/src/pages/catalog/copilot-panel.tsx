@@ -4,9 +4,14 @@
 // flag-gated): the model never mutates anything — a draft only opens,
 // pre-filled, in the normal #777 wizard (price change) or a plain
 // create-price call (new tier) for a human to explicitly confirm.
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  BubbleChatQuestionIcon,
+  Cancel01Icon,
+  Loading02Icon,
+  SparklesIcon,
+} from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Loader2Icon, MessageCircleQuestionIcon, SparklesIcon, XIcon } from "lucide-react"
-
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -59,8 +64,10 @@ export function CatalogCopilotPanel({
 
   if (!enabled) {
     return (
-      <div className="text-muted-foreground rounded-xl border border-dashed p-4 text-xs">
-        <span className="text-foreground mr-1 font-medium">Catalog copilot:</span>
+      <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
+        <span className="mr-1 font-medium text-foreground">
+          Catalog copilot:
+        </span>
         {DISABLED_MESSAGE}
       </div>
     )
@@ -75,7 +82,10 @@ export function CatalogCopilotPanel({
           void ask()
         }}
       >
-        <MessageCircleQuestionIcon className="text-muted-foreground size-4 shrink-0" />
+        <HugeiconsIcon
+          icon={BubbleChatQuestionIcon}
+          className="size-4 shrink-0 text-muted-foreground"
+        />
         <Input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
@@ -87,13 +97,22 @@ export function CatalogCopilotPanel({
           className="flex-1"
         />
         <Button type="submit" size="sm" disabled={asking || !question.trim()}>
-          {asking ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+          {asking ? (
+            <HugeiconsIcon
+              icon={Loading02Icon}
+              className="size-3.5 animate-spin"
+            />
+          ) : null}
           Ask
         </Button>
       </form>
 
-      {asking ? <p className="text-muted-foreground text-xs">Checking your catalog…</p> : null}
-      {error ? <p className="text-destructive text-xs whitespace-pre-wrap">{error}</p> : null}
+      {asking ? (
+        <p className="text-xs text-muted-foreground">Checking your catalog…</p>
+      ) : null}
+      {error ? (
+        <p className="text-xs whitespace-pre-wrap text-destructive">{error}</p>
+      ) : null}
 
       {result ? (
         <div className="flex flex-col gap-3">
@@ -109,23 +128,31 @@ export function CatalogCopilotPanel({
                 setError(null)
               }}
             >
-              <XIcon className="size-3.5" />
+              <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
             </Button>
           </div>
 
           {result.evidence.length > 0 && (
             <div className="flex flex-col gap-2">
               {result.evidence.map((ev, i) => (
-                <div key={i} className="bg-muted/30 rounded-lg border p-2">
-                  <span className="text-muted-foreground mb-1 block text-xs font-medium uppercase">{ev.tool}</span>
-                  <pre className="max-h-48 overflow-auto text-xs whitespace-pre-wrap">{ev.summary}</pre>
+                <div key={i} className="rounded-lg border bg-muted/30 p-2">
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground uppercase">
+                    {ev.tool}
+                  </span>
+                  <pre className="max-h-48 overflow-auto text-xs whitespace-pre-wrap">
+                    {ev.summary}
+                  </pre>
                 </div>
               ))}
             </div>
           )}
 
           {result.drafts?.map((draft, i) => (
-            <DraftCard key={i} draft={draft} onCatalogChanged={onCatalogChanged} />
+            <DraftCard
+              key={i}
+              draft={draft}
+              onCatalogChanged={onCatalogChanged}
+            />
           ))}
         </div>
       ) : null}
@@ -133,7 +160,13 @@ export function CatalogCopilotPanel({
   )
 }
 
-function DraftCard({ draft, onCatalogChanged }: { draft: CopilotDraft; onCatalogChanged: () => void }) {
+function DraftCard({
+  draft,
+  onCatalogChanged,
+}: {
+  draft: CopilotDraft
+  onCatalogChanged: () => void
+}) {
   if (draft.kind === "refused" && draft.refusal) {
     return (
       <div className="rounded-lg border border-dashed p-3 text-xs">
@@ -146,10 +179,20 @@ function DraftCard({ draft, onCatalogChanged }: { draft: CopilotDraft; onCatalog
     )
   }
   if (draft.kind === "price_change" && draft.price_change) {
-    return <PriceChangeDraftCard draft={draft.price_change} onCatalogChanged={onCatalogChanged} />
+    return (
+      <PriceChangeDraftCard
+        draft={draft.price_change}
+        onCatalogChanged={onCatalogChanged}
+      />
+    )
   }
   if (draft.kind === "catalog_diff" && draft.catalog_diff) {
-    return <CatalogDiffDraftCard draft={draft.catalog_diff} onCatalogChanged={onCatalogChanged} />
+    return (
+      <CatalogDiffDraftCard
+        draft={draft.catalog_diff}
+        onCatalogChanged={onCatalogChanged}
+      />
+    )
   }
   return null
 }
@@ -158,7 +201,13 @@ function DraftCard({ draft, onCatalogChanged }: { draft: CopilotDraft; onCatalog
 // product name, then opens the SAME #777 wizard used everywhere else,
 // pre-filled at Step 3 — the human reviews and clicks Confirm exactly as
 // they would for a hand-typed change.
-function PriceChangeDraftCard({ draft, onCatalogChanged }: { draft: PriceChangeDraft; onCatalogChanged: () => void }) {
+function PriceChangeDraftCard({
+  draft,
+  onCatalogChanged,
+}: {
+  draft: PriceChangeDraft
+  onCatalogChanged: () => void
+}) {
   const [reviewing, setReviewing] = React.useState(false)
   const [price, setPrice] = React.useState<CatalogPrice | null>(null)
   const [productName, setProductName] = React.useState("")
@@ -180,16 +229,23 @@ function PriceChangeDraftCard({ draft, onCatalogChanged }: { draft: PriceChangeD
   }
 
   return (
-    <div className="bg-muted/30 rounded-lg border p-3 text-sm">
+    <div className="rounded-lg border bg-muted/30 p-3 text-sm">
       <div className="mb-1 flex items-center gap-2">
-        <SparklesIcon className="text-muted-foreground size-3.5" />
-        <span className="text-muted-foreground text-xs font-medium uppercase">Draft: price change</span>
+        <HugeiconsIcon
+          icon={SparklesIcon}
+          className="size-3.5 text-muted-foreground"
+        />
+        <span className="text-xs font-medium text-muted-foreground uppercase">
+          Draft: price change
+        </span>
         <Badge variant="secondary">{draft.direction}</Badge>
       </div>
       <p>{draft.review_text}</p>
-      <p className="text-muted-foreground mt-1 text-xs">
-        {formatMicros(draft.current_amount, draft.currency)} → {formatMicros(draft.new_amount, draft.currency)} ·{" "}
-        {draft.affected_count.toLocaleString()} affected · requires human confirm
+      <p className="mt-1 text-xs text-muted-foreground">
+        {formatMicros(draft.current_amount, draft.currency)} →{" "}
+        {formatMicros(draft.new_amount, draft.currency)} ·{" "}
+        {draft.affected_count.toLocaleString()} affected · requires human
+        confirm
       </p>
       {reviewing && price ? (
         <PriceChangeWizard
@@ -202,7 +258,12 @@ function PriceChangeDraftCard({ draft, onCatalogChanged }: { draft: PriceChangeD
           }}
         />
       ) : (
-        <Button size="sm" className="mt-2" disabled={loading} onClick={openWizard}>
+        <Button
+          size="sm"
+          className="mt-2"
+          disabled={loading}
+          onClick={openWizard}
+        >
           {loading ? "Loading…" : "Review in wizard"}
         </Button>
       )}
@@ -213,7 +274,13 @@ function PriceChangeDraftCard({ draft, onCatalogChanged }: { draft: PriceChangeD
 // CatalogDiffDraftCard: "Create this price" calls the SAME createPrice the
 // New Price form uses — a plain, explicit human confirm, never triggered by
 // the tool layer itself.
-function CatalogDiffDraftCard({ draft, onCatalogChanged }: { draft: CatalogDiffDraft; onCatalogChanged: () => void }) {
+function CatalogDiffDraftCard({
+  draft,
+  onCatalogChanged,
+}: {
+  draft: CatalogDiffDraft
+  onCatalogChanged: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   const [created, setCreated] = React.useState(false)
 
@@ -221,7 +288,11 @@ function CatalogDiffDraftCard({ draft, onCatalogChanged }: { draft: CatalogDiffD
     setBusy(true)
     try {
       await createPrice(draft.create_price)
-      confirmCopilotDraft(draft.draft_id, "catalog_diff", draft.create_price.key).catch(() => {})
+      confirmCopilotDraft(
+        draft.draft_id,
+        "catalog_diff",
+        draft.create_price.key
+      ).catch(() => {})
       setCreated(true)
       onCatalogChanged()
     } catch (err) {
@@ -232,16 +303,30 @@ function CatalogDiffDraftCard({ draft, onCatalogChanged }: { draft: CatalogDiffD
   }
 
   return (
-    <div className="bg-muted/30 rounded-lg border p-3 text-sm">
+    <div className="rounded-lg border bg-muted/30 p-3 text-sm">
       <div className="mb-1 flex items-center gap-2">
-        <SparklesIcon className="text-muted-foreground size-3.5" />
-        <span className="text-muted-foreground text-xs font-medium uppercase">Draft: new price</span>
+        <HugeiconsIcon
+          icon={SparklesIcon}
+          className="size-3.5 text-muted-foreground"
+        />
+        <span className="text-xs font-medium text-muted-foreground uppercase">
+          Draft: new price
+        </span>
       </div>
       <p>{draft.review_text}</p>
-      <p className="text-muted-foreground mt-1 font-mono text-xs">
-        key: {draft.create_price.key} · {formatMicros(draft.create_price.unit_amount, draft.create_price.currency)}
+      <p className="mt-1 text-xs text-muted-foreground">
+        key: {draft.create_price.key} ·{" "}
+        {formatMicros(
+          draft.create_price.unit_amount,
+          draft.create_price.currency
+        )}
       </p>
-      <Button size="sm" className="mt-2" disabled={busy || created} onClick={confirm}>
+      <Button
+        size="sm"
+        className="mt-2"
+        disabled={busy || created}
+        onClick={confirm}
+      >
         {created ? "Created" : busy ? "Creating…" : "Create this price"}
       </Button>
     </div>
