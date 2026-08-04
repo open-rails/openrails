@@ -73,9 +73,10 @@ export function ApiKeysTab() {
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Scoped credentials for agents and integrations. A key holds one role of the
-          merchant catalog; least privilege (Viewer) is the default. The secret is
-          shown once at creation and can never be retrieved again — only revoked.
+          Scoped credentials for agents and integrations. A key holds one role
+          of the merchant catalog; least privilege (Viewer) is the default. The
+          secret is shown once at creation and can never be retrieved again —
+          only revoked.
         </p>
         <CreateKeyDialog onDone={reload} />
       </div>
@@ -109,11 +110,18 @@ export function ApiKeysTab() {
 
 function keyStatus(k: MerchantAPIKey): "active" | "revoked" | "expired" {
   if (k.revoked_at) return "revoked"
-  if (k.expires_at && new Date(k.expires_at).getTime() <= Date.now()) return "expired"
+  if (k.expires_at && new Date(k.expires_at).getTime() <= Date.now())
+    return "expired"
   return "active"
 }
 
-function KeyRow({ apiKey, onDone }: { apiKey: MerchantAPIKey; onDone: () => void }) {
+function KeyRow({
+  apiKey,
+  onDone,
+}: {
+  apiKey: MerchantAPIKey
+  onDone: () => void
+}) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const status = keyStatus(apiKey)
   return (
@@ -122,12 +130,17 @@ function KeyRow({ apiKey, onDone }: { apiKey: MerchantAPIKey; onDone: () => void
       <TableCell>
         <Badge variant="secondary">{apiKey.role}</Badge>
       </TableCell>
-      <TableCell className="font-mono text-xs">{apiKey.prefix}…</TableCell>
+      <TableCell className="text-xs">{apiKey.prefix}…</TableCell>
       <TableCell>{formatDate(apiKey.created_at)}</TableCell>
-      <TableCell>{apiKey.last_used_at ? formatDate(apiKey.last_used_at) : "never"}</TableCell>
+      <TableCell>
+        {apiKey.last_used_at ? formatDate(apiKey.last_used_at) : "never"}
+      </TableCell>
       <TableCell>
         {status === "active" ? (
-          <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+          <Badge
+            variant="secondary"
+            className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          >
             active
           </Badge>
         ) : (
@@ -137,7 +150,11 @@ function KeyRow({ apiKey, onDone }: { apiKey: MerchantAPIKey; onDone: () => void
       <TableCell className="text-right">
         {status === "active" && (
           <>
-            <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+            >
               Revoke
             </Button>
             <TypedConfirmDialog
@@ -182,19 +199,20 @@ function CreateKeyDialog({ onDone }: { onDone: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm">Create API key</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm">Create API key</Button>} />
       <DialogContent>
         {minted ? (
-          <ShowOnceSecret minted={minted} onClose={() => handleOpenChange(false)} />
+          <ShowOnceSecret
+            minted={minted}
+            onClose={() => handleOpenChange(false)}
+          />
         ) : (
           <>
             <DialogHeader>
               <DialogTitle>Create API key</DialogTitle>
               <DialogDescription>
-                Pick the least-privileged role that can do the job — you can always
-                mint another key with more authority later.
+                Pick the least-privileged role that can do the job — you can
+                always mint another key with more authority later.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-3">
@@ -218,11 +236,15 @@ function CreateKeyDialog({ onDone }: { onDone: () => void }) {
                       aria-pressed={role === r.value}
                       className={cn(
                         "rounded-md border p-3 text-left transition-colors",
-                        role === r.value ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                        role === r.value
+                          ? "border-primary bg-primary/5"
+                          : "hover:bg-muted/50"
                       )}
                     >
                       <p className="text-sm font-medium">{r.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{r.description}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {r.description}
+                      </p>
                     </button>
                   ))}
                 </div>
@@ -254,7 +276,13 @@ function CreateKeyDialog({ onDone }: { onDone: () => void }) {
   )
 }
 
-function ShowOnceSecret({ minted, onClose }: { minted: MintedAPIKey; onClose: () => void }) {
+function ShowOnceSecret({
+  minted,
+  onClose,
+}: {
+  minted: MintedAPIKey
+  onClose: () => void
+}) {
   const [copied, setCopied] = React.useState(false)
   return (
     <>
@@ -274,7 +302,7 @@ function ShowOnceSecret({ minted, onClose }: { minted: MintedAPIKey; onClose: ()
           <Badge variant="secondary">{minted.role}</Badge>
         </p>
         <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2 text-xs whitespace-nowrap">
             {minted.secret}
           </code>
           <Button
@@ -294,7 +322,8 @@ function ShowOnceSecret({ minted, onClose }: { minted: MintedAPIKey; onClose: ()
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Use it as a Bearer token: <code className="font-mono">Authorization: Bearer {minted.prefix}…</code>
+          Use it as a Bearer token:{" "}
+          <code>Authorization: Bearer {minted.prefix}…</code>
         </p>
       </div>
       <DialogFooter>

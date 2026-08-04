@@ -6,9 +6,9 @@
 // like "make it weekly" refine instead of starting over; direct title/viz
 // edits never touch the LLM. With no LLM configured, creation shows a pointed
 // empty-state (existing widgets stay directly editable).
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Loading02Icon, SparklesIcon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Loader2Icon, SparklesIcon } from "lucide-react"
-
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -148,7 +148,7 @@ export function WidgetEditor({
         </DialogHeader>
 
         {keylessCreate ? (
-          <div className="text-muted-foreground flex min-h-32 items-center justify-center rounded-lg border border-dashed p-6 text-center text-sm">
+          <div className="flex min-h-32 items-center justify-center rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
             {KEYLESS_MESSAGE}
           </div>
         ) : (
@@ -166,24 +166,35 @@ export function WidgetEditor({
                   rows={3}
                 />
                 <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={generate} disabled={generating || !prompt.trim()}>
+                  <Button
+                    size="sm"
+                    onClick={generate}
+                    disabled={generating || !prompt.trim()}
+                  >
                     {generating ? (
-                      <Loader2Icon className="size-3.5 animate-spin" />
+                      <HugeiconsIcon
+                        icon={Loading02Icon}
+                        className="size-3.5 animate-spin"
+                      />
                     ) : (
-                      <SparklesIcon className="size-3.5" />
+                      <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
                     )}
                     {query ? "Refine" : "Generate"}
                   </Button>
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-xs text-muted-foreground">
                     {query
                       ? "The instruction edits the current query — the preview updates."
                       : "The generated widget previews below — adjust title and viz before saving."}
                   </span>
                 </div>
-                {genError ? <p className="text-destructive text-xs whitespace-pre-wrap">{genError}</p> : null}
+                {genError ? (
+                  <p className="text-xs whitespace-pre-wrap text-destructive">
+                    {genError}
+                  </p>
+                ) : null}
               </div>
             ) : (
-              <p className="text-muted-foreground rounded-md border border-dashed p-2 text-xs">
+              <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
                 {KEYLESS_MESSAGE}. Title and viz stay editable below.
               </p>
             )}
@@ -202,7 +213,10 @@ export function WidgetEditor({
                   </div>
                   <div className="flex flex-col gap-1">
                     <Label>Viz</Label>
-                    <Select value={viz} onValueChange={(v) => setViz(v as WidgetViz)}>
+                    <Select
+                      value={viz}
+                      onValueChange={(v) => setViz(v as WidgetViz)}
+                    >
                       <SelectTrigger className="w-28">
                         <SelectValue />
                       </SelectTrigger>
@@ -217,41 +231,52 @@ export function WidgetEditor({
                   </div>
                 </div>
 
-                <div className="bg-muted/30 flex min-h-56 flex-1 flex-col rounded-lg border p-3">
+                <div className="flex min-h-56 flex-1 flex-col rounded-lg border bg-muted/30 p-3">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-muted-foreground text-xs font-medium uppercase">Preview</span>
+                    <span className="text-xs font-medium text-muted-foreground uppercase">
+                      Preview
+                    </span>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => void runPreview(query)}
                       disabled={previewing}
                     >
-                      {previewing ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+                      {previewing ? (
+                        <HugeiconsIcon
+                          icon={Loading02Icon}
+                          className="size-3.5 animate-spin"
+                        />
+                      ) : null}
                       Refresh
                     </Button>
                   </div>
                   <div className="min-h-0 flex-1">
                     {previewError ? (
-                      <p className="text-destructive text-xs whitespace-pre-wrap">{previewError}</p>
+                      <p className="text-xs whitespace-pre-wrap text-destructive">
+                        {previewError}
+                      </p>
                     ) : preview ? (
                       <WidgetVizView viz={viz} result={preview} />
                     ) : (
-                      <p className="text-muted-foreground flex h-full items-center justify-center text-xs">
+                      <p className="flex h-full items-center justify-center text-xs text-muted-foreground">
                         {previewing ? "Running…" : "No preview yet"}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <details className="text-muted-foreground text-xs">
-                  <summary className="cursor-pointer select-none">Query JSON</summary>
-                  <pre className="bg-muted/30 mt-1 overflow-x-auto rounded-md border p-2">
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">
+                    Query JSON
+                  </summary>
+                  <pre className="mt-1 overflow-x-auto rounded-md border bg-muted/30 p-2">
                     {JSON.stringify(query, null, 2)}
                   </pre>
                 </details>
               </>
             ) : nlEnabled ? (
-              <div className="text-muted-foreground flex min-h-32 items-center justify-center rounded-lg border border-dashed text-xs">
+              <div className="flex min-h-32 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
                 Describe the widget above to generate a preview.
               </div>
             ) : null}

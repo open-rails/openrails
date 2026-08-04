@@ -8,12 +8,16 @@ import { ApiError } from "@/lib/api/client"
 export function toastApiError(err: unknown, action: string) {
   if (err instanceof ApiError) {
     if (err.isPermissionDenied) {
-      toast.error(`${action}: your role lacks permission`, { description: err.message })
+      toast.error(`${action}: your role lacks permission`, {
+        description: err.message,
+      })
       return
     }
     const label = err.code ? `${action} (${err.code})` : action
     toast.error(label, { description: err.message })
     return
   }
-  toast.error(action, { description: err instanceof Error ? err.message : String(err) })
+  toast.error(action, {
+    description: err instanceof Error ? err.message : String(err),
+  })
 }

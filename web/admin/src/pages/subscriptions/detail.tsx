@@ -1,5 +1,6 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { ArrowLeftIcon } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -8,12 +9,7 @@ import { StatusBadge } from "@/components/status-badge"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -59,12 +55,20 @@ import { toastApiError } from "@/lib/toast"
 export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { data: sub, loading, error, reload } = useApiData(() => getSubscription(id), [id])
+  const {
+    data: sub,
+    loading,
+    error,
+    reload,
+  } = useApiData(() => getSubscription(id), [id])
   // #777: pending-reprice badge — at most one scheduled reprice can exist per
   // subscription at a time.
   const { data: scheduledReprices, reload: reloadReprices } = useApiData(
-    () => (id ? listReprices({ subscription_id: id, status: "scheduled" }) : Promise.resolve(null)),
-    [id],
+    () =>
+      id
+        ? listReprices({ subscription_id: id, status: "scheduled" })
+        : Promise.resolve(null),
+    [id]
   )
   const pendingReprice = scheduledReprices?.items?.[0]
   React.useEffect(() => {
@@ -72,19 +76,30 @@ export function SubscriptionDetailPage() {
   }, [error])
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!sub) return <p className="text-sm text-muted-foreground">Subscription not found.</p>
+  if (!sub)
+    return (
+      <p className="text-sm text-muted-foreground">Subscription not found.</p>
+    )
 
-  const cancellable = sub.status === "active" || sub.status === "past_due" || sub.status === "unknown"
+  const cancellable =
+    sub.status === "active" ||
+    sub.status === "past_due" ||
+    sub.status === "unknown"
   const resumable = sub.status === "cancelled" || sub.status === "past_due"
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
-          <ArrowLeftIcon className="size-4" />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate(-1)}
+          aria-label="Back"
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
         <div>
-          <h2 className="flex items-center gap-2 font-mono text-sm">
+          <h2 className="flex items-center gap-2 text-sm">
             {sub.id} <StatusBadge status={sub.status} />
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -106,7 +121,10 @@ export function SubscriptionDetailPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="Customer">
           {sub.customer_id ? (
-            <Link className="font-mono text-xs underline-offset-2 hover:underline" to={`/customers/${sub.customer_id}`}>
+            <Link
+              className="text-xs underline-offset-2 hover:underline"
+              to={`/customers/${sub.customer_id}`}
+            >
               {shortId(sub.customer_id, 13)}
             </Link>
           ) : (
@@ -116,27 +134,41 @@ export function SubscriptionDetailPage() {
         <Fact label="Email">{sub.user_email ?? "—"}</Fact>
         <Fact label="Started">{formatDate(sub.started_at)}</Fact>
         <Fact label="Current period">
-          {formatDate(sub.current_period_starts_at)} → {formatDate(sub.current_period_ends_at)}
+          {formatDate(sub.current_period_starts_at)} →{" "}
+          {formatDate(sub.current_period_ends_at)}
         </Fact>
         <Fact label="Price">
           <div className="flex flex-col gap-1">
             <span className="flex items-center gap-2">
               {sub.price?.amount !== undefined && sub.price?.currency ? (
-                <Link className="underline-offset-2 hover:underline" to={`/catalog/prices/${sub.price_id}`}>
+                <Link
+                  className="underline-offset-2 hover:underline"
+                  to={`/catalog/prices/${sub.price_id}`}
+                >
                   {formatMicros(sub.price.amount, sub.price.currency)}
                 </Link>
               ) : (
-                <Link className="font-mono text-xs underline-offset-2 hover:underline" to={`/catalog/prices/${sub.price_id}`}>
+                <Link
+                  className="text-xs underline-offset-2 hover:underline"
+                  to={`/catalog/prices/${sub.price_id}`}
+                >
                   {shortId(sub.price_id ?? "—", 13)}
                 </Link>
               )}
               {sub.price?.archived && (
-                <Badge variant="secondary" title="Pinned to an archived (prior) version">
+                <Badge
+                  variant="secondary"
+                  title="Pinned to an archived (prior) version"
+                >
                   prior version
                 </Badge>
               )}
             </span>
-            {sub.price?.key && <span className="font-mono text-xs text-muted-foreground">{sub.price.key}</span>}
+            {sub.price?.key && (
+              <span className="text-xs text-muted-foreground">
+                {sub.price.key}
+              </span>
+            )}
             {pendingReprice && (
               <PendingRepriceBadge
                 reprice={pendingReprice}
@@ -153,7 +185,9 @@ export function SubscriptionDetailPage() {
           {sub.retry_attempts ?? 0} · next {formatDate(sub.next_retry_at)}
         </Fact>
         <Fact label="Cancelled">
-          {sub.cancelled_at ? `${formatDate(sub.cancelled_at)} (${sub.cancel_type ?? "?"})` : "—"}
+          {sub.cancelled_at
+            ? `${formatDate(sub.cancelled_at)} (${sub.cancel_type ?? "?"})`
+            : "—"}
         </Fact>
       </div>
 
@@ -163,7 +197,9 @@ export function SubscriptionDetailPage() {
         </CardHeader>
         <CardContent>
           {!sub.payments?.length ? (
-            <p className="text-sm text-muted-foreground">No payments recorded.</p>
+            <p className="text-sm text-muted-foreground">
+              No payments recorded.
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -178,11 +214,16 @@ export function SubscriptionDetailPage() {
                 {sub.payments.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
-                      <Link className="font-mono text-xs underline-offset-2 hover:underline" to={`/payments/${p.id}`}>
+                      <Link
+                        className="text-xs underline-offset-2 hover:underline"
+                        to={`/payments/${p.id}`}
+                      >
                         {shortId(p.id, 13)}
                       </Link>
                     </TableCell>
-                    <TableCell><StatusBadge status={p.status} /></TableCell>
+                    <TableCell>
+                      <StatusBadge status={p.status} />
+                    </TableCell>
                     <TableCell>{formatMicros(p.amount, p.currency)}</TableCell>
                     <TableCell>{formatDate(p.purchased_at)}</TableCell>
                   </TableRow>
@@ -226,11 +267,22 @@ function CancelDialog({ id, onDone }: { id: string; onDone: () => void }) {
         <div className="grid gap-3">
           <div className="grid gap-1.5">
             <Label htmlFor="cancel-reason">Reason</Label>
-            <Input id="cancel-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="why is this being cancelled?" />
+            <Input
+              id="cancel-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="why is this being cancelled?"
+            />
           </div>
           <div className="flex items-center gap-2">
-            <Switch id="cancel-revoke" checked={revokeAccess} onCheckedChange={setRevokeAccess} />
-            <Label htmlFor="cancel-revoke">Also revoke access immediately</Label>
+            <Switch
+              id="cancel-revoke"
+              checked={revokeAccess}
+              onCheckedChange={setRevokeAccess}
+            />
+            <Label htmlFor="cancel-revoke">
+              Also revoke access immediately
+            </Label>
           </div>
         </div>
       </TypedConfirmDialog>
@@ -278,30 +330,47 @@ function ChangePaymentMethodDialog({
   const [paymentMethodId, setPaymentMethodId] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const { data: pms } = useApiData(
-    () => (open && customerId ? getCustomerPaymentMethods(customerId) : Promise.resolve(null)),
-    [open, customerId],
+    () =>
+      open && customerId
+        ? getCustomerPaymentMethods(customerId)
+        : Promise.resolve(null),
+    [open, customerId]
   )
   // Payment-method swap is an NMI-only operation today (see
   // update_subscription_payment_method.go); other rails 400.
   const supported = rail === "nmi"
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={!supported} title={supported ? undefined : `Payment-method change is not supported on ${rail}`}>
-          Change payment method
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!supported}
+            title={
+              supported
+                ? undefined
+                : `Payment-method change is not supported on ${rail}`
+            }
+          >
+            Change payment method
+          </Button>
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Change payment method</DialogTitle>
           <DialogDescription>
-            Points future renewals of this subscription at another stored payment method
-            (same rail).
+            Points future renewals of this subscription at another stored
+            payment method (same rail).
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-1.5">
           <Label>Payment method</Label>
-          <Select value={paymentMethodId} onValueChange={setPaymentMethodId}>
+          <Select
+            value={paymentMethodId}
+            onValueChange={(value) => setPaymentMethodId(value ?? "")}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Pick a stored payment method" />
             </SelectTrigger>
@@ -310,7 +379,8 @@ function ChangePaymentMethodDialog({
                 .filter((pm) => pm.rail === rail)
                 .map((pm) => (
                   <SelectItem key={pm.id} value={pm.id}>
-                    {pm.card?.brand ?? pm.type} •••• {pm.card?.last4 ?? "????"} ({pm.rail})
+                    {pm.card?.brand ?? pm.type} •••• {pm.card?.last4 ?? "????"}{" "}
+                    ({pm.rail})
                   </SelectItem>
                 ))}
             </SelectContent>
@@ -322,7 +392,10 @@ function ChangePaymentMethodDialog({
             onClick={async () => {
               setBusy(true)
               try {
-                await changeSubscriptionPaymentMethod(subscriptionId, paymentMethodId)
+                await changeSubscriptionPaymentMethod(
+                  subscriptionId,
+                  paymentMethodId
+                )
                 toast.success("Payment method updated")
                 setOpen(false)
                 onDone()
@@ -346,14 +419,26 @@ function ChangePaymentMethodDialog({
 // wizard) with an inline cancel — allowed until the effective date; an
 // already-applied reprice cannot reach this badge (it's filtered to
 // status=scheduled by the caller).
-function PendingRepriceBadge({ reprice, onCancelled }: { reprice: SubscriptionReprice; onCancelled: () => void }) {
-  const { data: toPrice } = useApiData(() => getPrice(reprice.to_price_id), [reprice.to_price_id])
+function PendingRepriceBadge({
+  reprice,
+  onCancelled,
+}: {
+  reprice: SubscriptionReprice
+  onCancelled: () => void
+}) {
+  const { data: toPrice } = useApiData(
+    () => getPrice(reprice.to_price_id),
+    [reprice.to_price_id]
+  )
   const [busy, setBusy] = React.useState(false)
   return (
     <span className="flex items-center gap-1.5">
       <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
-        moves to {toPrice ? formatMicros(toPrice.unit_amount, toPrice.currency) : shortId(reprice.to_price_id, 9)} on{" "}
-        {formatDate(reprice.effective_at)}
+        moves to{" "}
+        {toPrice
+          ? formatMicros(toPrice.unit_amount, toPrice.currency)
+          : shortId(reprice.to_price_id, 9)}{" "}
+        on {formatDate(reprice.effective_at)}
       </Badge>
       <Button
         variant="ghost"

@@ -17,12 +17,12 @@ func DefaultWidgets(hasUsage bool) []Widget {
 			Grid:  Grid{X: 0, Y: 0, W: 3, H: 2},
 		},
 		{
-			ID: "net-revenue", Title: "Net revenue (30d)", Viz: "stat",
+			ID: "net-revenue", Title: "Net revenue", Viz: "stat",
 			Query: metrics.Query{Measures: []string{"net_revenue"}, Range: last30, Compare: "previous_period"},
 			Grid:  Grid{X: 3, Y: 0, W: 3, H: 2},
 		},
 		{
-			ID: "churn-rate", Title: "Churn rate (30d)", Viz: "stat",
+			ID: "churn-rate", Title: "Churn rate", Viz: "stat",
 			Query: metrics.Query{Measures: []string{"churn_rate"}, Range: last30, Compare: "previous_period"},
 			Grid:  Grid{X: 6, Y: 0, W: 3, H: 2},
 		},

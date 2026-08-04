@@ -51,7 +51,8 @@ export function TypedConfirmDialog({
         {children}
         <div className="grid gap-2">
           <Label htmlFor="typed-confirm">
-            Type <span className="font-mono font-semibold">{confirmationWord}</span> to confirm
+            Type <span className="font-semibold">{confirmationWord}</span> to
+            confirm
           </Label>
           <Input
             id="typed-confirm"
@@ -61,7 +62,11 @@ export function TypedConfirmDialog({
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={busy}>
+          <Button
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={busy}
+          >
             Keep it
           </Button>
           <Button

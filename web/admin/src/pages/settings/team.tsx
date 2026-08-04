@@ -90,10 +90,13 @@ export function TeamTab() {
     invites.reload()
   }
 
-  if (members.loading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (members.loading)
+    return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const team = members.data?.data ?? []
-  const pending = (invites.data?.data ?? []).filter((i) => !i.redeemed_at && !i.revoked_at)
+  const pending = (invites.data?.data ?? []).filter(
+    (i) => !i.redeemed_at && !i.revoked_at
+  )
   const ownerCount = team.filter((m) => m.role === "owner").length
 
   return (
@@ -101,10 +104,14 @@ export function TeamTab() {
       <div className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-4">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            People who can sign in to this merchant console. Each teammate holds one role;
-            only owners can manage the team. A merchant must always keep at least one owner.
+            People who can sign in to this merchant console. Each teammate holds
+            one role; only owners can manage the team. A merchant must always
+            keep at least one owner.
           </p>
-          <InviteDialog invitesEnabled={invites.data?.invites_enabled ?? false} onDone={reload} />
+          <InviteDialog
+            invitesEnabled={invites.data?.invites_enabled ?? false}
+            onDone={reload}
+          />
         </div>
         {team.length === 0 ? (
           <p className="text-sm text-muted-foreground">No team members yet.</p>
@@ -175,14 +182,18 @@ function MemberRow({
       <TableCell className="font-medium">
         {label}
         {member.username && member.email && (
-          <span className="ml-2 text-xs text-muted-foreground">{member.username}</span>
+          <span className="ml-2 text-xs text-muted-foreground">
+            {member.username}
+          </span>
         )}
       </TableCell>
       <TableCell>
         <RoleSelect
           value={member.role}
           disabled={isLastOwner}
-          disabledTitle={isLastOwner ? "The last owner cannot be demoted" : undefined}
+          disabledTitle={
+            isLastOwner ? "The last owner cannot be demoted" : undefined
+          }
           onChange={async (role) => {
             try {
               await changeTeamRole(member.user_id, role)
@@ -242,7 +253,7 @@ function RoleSelect({
       value={value}
       disabled={disabled}
       onValueChange={(next) => {
-        if (next !== value) onChange(next)
+        if (next && next !== value) onChange(next)
       }}
     >
       <SelectTrigger className="w-[132px]" title={disabledTitle}>
@@ -259,7 +270,13 @@ function RoleSelect({
   )
 }
 
-function InviteRow({ invite, onDone }: { invite: TeamInvite; onDone: () => void }) {
+function InviteRow({
+  invite,
+  onDone,
+}: {
+  invite: TeamInvite
+  onDone: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   return (
     <TableRow>
@@ -267,7 +284,9 @@ function InviteRow({ invite, onDone }: { invite: TeamInvite; onDone: () => void 
         <Badge variant="secondary">{roleLabel(invite.role)}</Badge>
       </TableCell>
       <TableCell>{formatDate(invite.created_at)}</TableCell>
-      <TableCell>{invite.expires_at ? formatDate(invite.expires_at) : "never"}</TableCell>
+      <TableCell>
+        {invite.expires_at ? formatDate(invite.expires_at) : "never"}
+      </TableCell>
       <TableCell className="text-right">
         <Button
           variant="outline"
@@ -317,18 +336,20 @@ function InviteDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm">Invite member</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm">Invite member</Button>} />
       <DialogContent>
         {minted?.url ? (
-          <ShowInviteLink result={minted} onClose={() => handleOpenChange(false)} />
+          <ShowInviteLink
+            result={minted}
+            onClose={() => handleOpenChange(false)}
+          />
         ) : (
           <>
             <DialogHeader>
               <DialogTitle>Invite a teammate</DialogTitle>
               <DialogDescription>
-                If the email already has an account, they&apos;re added to the team right away.
+                If the email already has an account, they&apos;re added to the
+                team right away.
                 {invitesEnabled
                   ? " Otherwise you get a single-use link to send them."
                   : " New emails without an account can't be invited on this deployment — the account must be provisioned first."}
@@ -356,11 +377,15 @@ function InviteDialog({
                       aria-pressed={role === r.value}
                       className={cn(
                         "rounded-md border p-3 text-left transition-colors",
-                        role === r.value ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                        role === r.value
+                          ? "border-primary bg-primary/5"
+                          : "hover:bg-muted/50"
                       )}
                     >
                       <p className="text-sm font-medium">{r.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{r.description}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {r.description}
+                      </p>
                     </button>
                   ))}
                 </div>
@@ -374,7 +399,9 @@ function InviteDialog({
                   try {
                     const result = await inviteTeamMember(email.trim(), role)
                     if (result.added) {
-                      toast.success(`${result.member?.email || email.trim()} added to the team`)
+                      toast.success(
+                        `${result.member?.email || email.trim()} added to the team`
+                      )
                       onDone()
                       handleOpenChange(false)
                     } else {
@@ -399,7 +426,13 @@ function InviteDialog({
   )
 }
 
-function ShowInviteLink({ result, onClose }: { result: TeamInviteResult; onClose: () => void }) {
+function ShowInviteLink({
+  result,
+  onClose,
+}: {
+  result: TeamInviteResult
+  onClose: () => void
+}) {
   const [copied, setCopied] = React.useState(false)
   const url = result.url ?? ""
   return (
@@ -407,13 +440,19 @@ function ShowInviteLink({ result, onClose }: { result: TeamInviteResult; onClose
       <DialogHeader>
         <DialogTitle>Invite link created</DialogTitle>
         <DialogDescription>
-          Send this single-use link to the invitee. They register with it and join as{" "}
-          <span className="font-semibold text-foreground">{roleLabel(result.invite?.role ?? "")}</span>.{" "}
-          <span className="font-semibold text-foreground">You won&apos;t see it again.</span>
+          Send this single-use link to the invitee. They register with it and
+          join as{" "}
+          <span className="font-semibold text-foreground">
+            {roleLabel(result.invite?.role ?? "")}
+          </span>
+          .{" "}
+          <span className="font-semibold text-foreground">
+            You won&apos;t see it again.
+          </span>
         </DialogDescription>
       </DialogHeader>
       <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+        <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2 text-xs whitespace-nowrap">
           {url}
         </code>
         <Button

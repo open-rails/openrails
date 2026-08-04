@@ -101,9 +101,16 @@ function MerchantSettingsTab() {
 function MerchantProfileForm({
   initial,
 }: {
-  initial?: { display_name?: string; from_email?: string; support_url?: string; logo_url?: string }
+  initial?: {
+    display_name?: string
+    from_email?: string
+    support_url?: string
+    logo_url?: string
+  }
 }) {
-  const [displayName, setDisplayName] = React.useState(initial?.display_name ?? "")
+  const [displayName, setDisplayName] = React.useState(
+    initial?.display_name ?? ""
+  )
   const [fromEmail, setFromEmail] = React.useState(initial?.from_email ?? "")
   const [supportURL, setSupportURL] = React.useState(initial?.support_url ?? "")
   const [logoURL, setLogoURL] = React.useState(initial?.logo_url ?? "")
@@ -113,20 +120,39 @@ function MerchantProfileForm({
     <Card className="max-w-xl">
       <CardHeader>
         <CardTitle className="text-sm">Merchant profile</CardTitle>
-        <CardDescription>Shown on invoices and customer-facing emails.</CardDescription>
+        <CardDescription>
+          Shown on invoices and customer-facing emails.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <Field label="Display name" id="s-name">
-          <Input id="s-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          <Input
+            id="s-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+          />
         </Field>
         <Field label="From email" id="s-email">
-          <Input id="s-email" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} />
+          <Input
+            id="s-email"
+            type="email"
+            value={fromEmail}
+            onChange={(e) => setFromEmail(e.target.value)}
+          />
         </Field>
         <Field label="Support URL" id="s-support">
-          <Input id="s-support" value={supportURL} onChange={(e) => setSupportURL(e.target.value)} />
+          <Input
+            id="s-support"
+            value={supportURL}
+            onChange={(e) => setSupportURL(e.target.value)}
+          />
         </Field>
         <Field label="Logo URL" id="s-logo">
-          <Input id="s-logo" value={logoURL} onChange={(e) => setLogoURL(e.target.value)} />
+          <Input
+            id="s-logo"
+            value={logoURL}
+            onChange={(e) => setLogoURL(e.target.value)}
+          />
         </Field>
         <div>
           <Button
@@ -174,8 +200,9 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
       <CardHeader>
         <CardTitle className="text-sm">Price-increase notice window</CardTitle>
         <CardDescription>
-          Minimum days' advance notice a scheduled subscription price INCREASE must give existing
-          subscribers before it takes effect. Decreases are never gated. Default 30 days.
+          Minimum days' advance notice a scheduled subscription price INCREASE
+          must give existing subscribers before it takes effect. Decreases are
+          never gated. Default 30 days.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -195,7 +222,9 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
             onClick={async () => {
               setBusy(true)
               try {
-                await putMerchantSettings({ reprice_notice_window_days: parsed })
+                await putMerchantSettings({
+                  reprice_notice_window_days: parsed,
+                })
                 toast.success("Settings saved")
               } catch (err) {
                 toastApiError(err, "Save settings")
@@ -213,7 +242,10 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
 }
 
 function ProvidersTab() {
-  const { data, loading, error, reload } = useApiData(() => listPaymentProviders(), [])
+  const { data, loading, error, reload } = useApiData(
+    () => listPaymentProviders(),
+    []
+  )
   React.useEffect(() => {
     if (error) toastApiError(error, "Load payment providers")
   }, [error])
@@ -229,7 +261,9 @@ function ProvidersTab() {
         />
       </div>
       {!data?.data?.length ? (
-        <p className="text-sm text-muted-foreground">No payment providers configured.</p>
+        <p className="text-sm text-muted-foreground">
+          No payment providers configured.
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <Table>
@@ -255,21 +289,35 @@ function ProvidersTab() {
   )
 }
 
-function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; onDone: () => void }) {
+function ProviderRow({
+  provider,
+  onDone,
+}: {
+  provider: PaymentProviderConfig
+  onDone: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   return (
     <TableRow className={provider.archived ? "opacity-60" : undefined}>
       <TableCell className="font-medium">{provider.rail}</TableCell>
       <TableCell>{provider.environment}</TableCell>
-      <TableCell className="font-mono text-xs">{provider.account_id}</TableCell>
+      <TableCell className="text-xs">{provider.account_id}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
           {Object.entries(provider.credentials).map(([name, c]) => (
             <Badge
               key={name}
               variant="secondary"
-              className={c.configured ? "" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}
-              title={c.last_validated_at ? `validated ${formatDate(c.last_validated_at)}` : undefined}
+              className={
+                c.configured
+                  ? ""
+                  : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+              }
+              title={
+                c.last_validated_at
+                  ? `validated ${formatDate(c.last_validated_at)}`
+                  : undefined
+              }
             >
               {name}
             </Badge>
@@ -280,11 +328,17 @@ function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; on
         {provider.archived ? (
           <Badge variant="secondary">archived</Badge>
         ) : provider.drained ? (
-          <Badge variant="secondary" className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
+          <Badge
+            variant="secondary"
+            className="bg-amber-500/15 text-amber-600 dark:text-amber-400"
+          >
             draining ({provider.open_obligations})
           </Badge>
         ) : (
-          <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+          <Badge
+            variant="secondary"
+            className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          >
             active
           </Badge>
         )}
@@ -336,9 +390,7 @@ function ProviderDialog({
   )
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">Configure provider</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm">Configure provider</Button>} />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Configure payment provider</DialogTitle>
@@ -368,10 +420,21 @@ function ProviderDialog({
             </select>
           </Field>
           <Field label="Account id" id="pv-acct">
-            <Input id="pv-acct" value={accountID} onChange={(e) => setAccountID(e.target.value)} />
+            <Input
+              id="pv-acct"
+              value={accountID}
+              onChange={(e) => setAccountID(e.target.value)}
+            />
           </Field>
-          <Field label="Environment (live | test, empty = deployment default)" id="pv-env">
-            <Input id="pv-env" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+          <Field
+            label="Environment (live | test, empty = deployment default)"
+            id="pv-env"
+          >
+            <Input
+              id="pv-env"
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value)}
+            />
           </Field>
           {selectedProvider?.credential_keys.map((name) => (
             <Field key={name} label={name} id={`pv-credential-${name}`}>
@@ -426,7 +489,10 @@ function ProviderDialog({
 function CustomerControlsTab() {
   const [customerID, setCustomerID] = React.useState("")
   const [currency, setCurrency] = React.useState("usd")
-  const [result, setResult] = React.useState<{ creditLimit: number; trustLevel: string }>()
+  const [result, setResult] = React.useState<{
+    creditLimit: number
+    trustLevel: string
+  }>()
   const [newLimit, setNewLimit] = React.useState("")
   const [busy, setBusy] = React.useState(false)
 
@@ -437,7 +503,10 @@ function CustomerControlsTab() {
         getCreditLimit(customerID.trim(), currency.trim()),
         getTrustLevel(customerID.trim(), currency.trim()),
       ])
-      setResult({ creditLimit: cl.credit_limit_amount, trustLevel: tt.trust_level })
+      setResult({
+        creditLimit: cl.credit_limit_amount,
+        trustLevel: tt.trust_level,
+      })
     } catch (err) {
       toastApiError(err, "Lookup customer controls")
       setResult(undefined)
@@ -451,26 +520,43 @@ function CustomerControlsTab() {
       <CardHeader>
         <CardTitle className="text-sm">Credit limit & trust level</CardTitle>
         <CardDescription>
-          Per-customer, per-currency: the arrears credit limit is writable; the trust level
-          is graduated by spend history (read-only here).
+          Per-customer, per-currency: the arrears credit limit is writable; the
+          trust level is graduated by spend history (read-only here).
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <div className="grid grid-cols-[1fr_8rem_auto] gap-2">
-          <Input placeholder="customer id (UUID)" value={customerID} onChange={(e) => setCustomerID(e.target.value)} />
-          <Input placeholder="currency" value={currency} onChange={(e) => setCurrency(e.target.value)} />
-          <Button variant="outline" disabled={busy || !customerID.trim() || !currency.trim()} onClick={lookup}>
+          <Input
+            placeholder="customer id (UUID)"
+            value={customerID}
+            onChange={(e) => setCustomerID(e.target.value)}
+          />
+          <Input
+            placeholder="currency"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+          />
+          <Button
+            variant="outline"
+            disabled={busy || !customerID.trim() || !currency.trim()}
+            onClick={lookup}
+          >
             Look up
           </Button>
         </div>
         {result && (
           <div className="grid gap-3 rounded-md border p-3 text-sm">
             <p>
-              Trust level: <Badge variant="secondary">{result.trustLevel || "default"}</Badge>
+              Trust level:{" "}
+              <Badge variant="secondary">
+                {result.trustLevel || "default"}
+              </Badge>
             </p>
             <p>
               Credit limit:{" "}
-              {result.creditLimit ? formatMicros(result.creditLimit, currency) : "off (0)"}
+              {result.creditLimit
+                ? formatMicros(result.creditLimit, currency)
+                : "off (0)"}
             </p>
             <div className="grid grid-cols-[1fr_auto] gap-2">
               <Input
@@ -482,11 +568,17 @@ function CustomerControlsTab() {
                 onChange={(e) => setNewLimit(e.target.value)}
               />
               <Button
-                disabled={busy || newLimit === "" || microsFromInput(newLimit) === null}
+                disabled={
+                  busy || newLimit === "" || microsFromInput(newLimit) === null
+                }
                 onClick={async () => {
                   setBusy(true)
                   try {
-                    await setCreditLimit(customerID.trim(), currency.trim(), microsFromInput(newLimit) ?? 0)
+                    await setCreditLimit(
+                      customerID.trim(),
+                      currency.trim(),
+                      microsFromInput(newLimit) ?? 0
+                    )
                     toast.success("Credit limit updated")
                     lookup()
                   } catch (err) {
@@ -506,7 +598,15 @@ function CustomerControlsTab() {
   )
 }
 
-function Field({ label, id, children }: { label: string; id: string; children: React.ReactNode }) {
+function Field({
+  label,
+  id,
+  children,
+}: {
+  label: string
+  id: string
+  children: React.ReactNode
+}) {
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>

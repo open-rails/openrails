@@ -49,7 +49,14 @@ export interface MetricsResult {
 
 export type WidgetViz = "stat" | "line" | "area" | "bar" | "donut" | "table"
 
-export const WIDGET_VIZ: WidgetViz[] = ["stat", "line", "area", "bar", "donut", "table"]
+export const WIDGET_VIZ: WidgetViz[] = [
+  "stat",
+  "line",
+  "area",
+  "bar",
+  "donut",
+  "table",
+]
 
 export interface WidgetGrid {
   x: number
@@ -113,4 +120,7 @@ export interface AskResponse {
 // askMetrics: free-form question → LLM-run metrics queries + answer. 501 when
 // llm.ask_enabled / the LLM key are not configured.
 export const askMetrics = (question: string) =>
-  api<AskResponse>("/merchant/metrics/ask", { method: "POST", body: { question } })
+  api<AskResponse>("/merchant/metrics/ask", {
+    method: "POST",
+    body: { question },
+  })
