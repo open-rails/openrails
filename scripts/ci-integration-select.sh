@@ -20,10 +20,9 @@
 # and never crosses one. What sharding buys is wall clock: the serial run was
 # ~360s and the pipeline's sole long pole.
 #
-# Balancing uses recorded runtimes (scripts/ci-integration-weights.txt) and
-# longest-processing-time-first bin packing, plus a flat per-package constant
-# standing for compiling and linking that package's test binary. A package with
-# no recorded time still runs; it just gets the default weight.
+# Balancing is delegated to scripts/ci-shard.sh (recorded runtimes + LPT bin
+# packing), which the unit suite uses too — one implementation, two weight
+# tables.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -68,31 +67,6 @@ if [ "${BROAD:-}" != "true" ] && [ -n "${CHANGED_FILES:-}" ]; then
   fi
 fi
 
-awk -v shards="${SHARDS:-1}" -v pick="${SHARD:-1}" \
-    -v build_cost="$per_package_build_cost" -v default_runtime="$default_runtime" \
-    -v weights_file="$weights_file" '
-  BEGIN {
-    while ((getline line < weights_file) > 0) {
-      if (line ~ /^#/ || line == "") continue
-      split(line, kv, "\t")
-      recorded[kv[1]] = kv[2] + 0
-    }
-  }
-  { pkg[NR] = $1; w[NR] = build_cost + (($1 in recorded) ? recorded[$1] : default_runtime) }
-  END {
-    # Heaviest first (insertion sort over a list this small), then each package
-    # onto the lightest shard so far.
-    for (i = 1; i <= NR; i++) order[i] = i
-    for (i = 2; i <= NR; i++) {
-      k = order[i]
-      for (j = i - 1; j >= 1 && w[order[j]] < w[k]; j--) order[j + 1] = order[j]
-      order[j + 1] = k
-    }
-    for (i = 1; i <= NR; i++) {
-      p = order[i]; best = 1
-      for (s = 2; s <= shards; s++) if (load[s] < load[best]) best = s
-      load[best] += w[p]
-      if (best == pick) print "./" pkg[p]
-    }
-  }
-' <<<"$packages" | sort
+printf '%s\n' "$packages" | SHARDS="${SHARDS:-1}" SHARD="${SHARD:-1}" \
+  bash scripts/ci-shard.sh scripts/ci-integration-weights.txt |
+  sed 's|^|./|' | sort

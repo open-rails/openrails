@@ -139,6 +139,11 @@ jobs:
   # stack, so unlike the integration suite there is nothing for a subset to
   # depend on. The `race` build cache is shared across the shards, so the
   # duplicated compilation is cache hits rather than work.
+  #
+  # Balanced by recorded runtimes, not round-robin: pkg/service (73s) and
+  # internal/modules/solana/recurring (57s) are 130s of a 240s suite, and
+  # round-robin put both in one shard — 136s against 64s and 65s. 4 shards buys
+  # nothing; pkg/service alone is the floor.
   unit-shard:
     name: unit shard ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
@@ -171,8 +176,8 @@ jobs:
           SHARDS: "3"
           SHARD: ${{ matrix.shard }}
         run: |
-          mapfile -t pkgs < <(go list ./... | sort |
-                              awk -v n="$SHARDS" -v p="$SHARD" 'NR % n == p % n')
+          mapfile -t pkgs < <(go list ./... |
+                              bash scripts/ci-shard.sh scripts/ci-unit-weights.txt)
           echo "shard ${SHARD}/${SHARDS}: ${#pkgs[@]} packages"
           [ "${#pkgs[@]}" -gt 0 ] || exit 0
           go test -count=1 -race "${pkgs[@]}"
