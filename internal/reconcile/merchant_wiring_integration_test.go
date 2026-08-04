@@ -107,7 +107,7 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 
 	// Account row declared, but the security_key secret was never seeded.
 	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{
-		AccountID:   "8833" + sfx,
+		AccountID: "8833" + sfx,
 	})
 	require.NoError(t, err)
 
