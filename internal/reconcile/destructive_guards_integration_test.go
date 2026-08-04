@@ -299,7 +299,11 @@ func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 		Local:     &PGLocalStateLoader{DB: appDB},
 		Writer:    &PGLocalWriter{DB: appDB},
 		Decisions: NewDecisionApplier(appDB, nil),
-		Now:       func() time.Time { return now },
+		// Wired so a regression fails on THIS test's assertion (the sibling PSP's
+		// book was cancelled) rather than on or#859's no-bypass gate, which would
+		// otherwise refuse the pass first and hide what broke.
+		Runs: &PGDestructiveRunRecorder{DB: appDB},
+		Now:  func() time.Time { return now },
 	}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {

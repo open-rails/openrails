@@ -657,7 +657,7 @@ func renderPullProviderStdout(w io.Writer, format, logPath string, run reconcile
 		fmt.Fprintf(w, "prune: %s\n", formatPruneCounts(pruneCounts))
 		for _, pl := range pruneLogs {
 			if pl.Applied && pl.Result.RunID != uuid.Nil {
-				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails prune rollback --merchant <slug> --run %s`, then re-pull and converge\n",
+				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails undo-run --merchant <slug> --run %s`, then re-pull and converge\n",
 					pl.Provider, pl.Binding.AccountID, pl.Result.RunID, pl.Result.RunID)
 			}
 		}

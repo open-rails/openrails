@@ -150,7 +150,7 @@ type ProviderReport struct {
 	Provider Provider `json:"provider"`
 	PspID    string   `json:"psp_id,omitempty"`
 	// DestructiveRunID is set when this provider's enforce pass overwrote
-	// subscription state: the handle `openrails converge rollback --run <id>`
+	// subscription state: the handle `openrails undo-run --run <id>`
 	// reverses (or#859).
 	DestructiveRunID     string            `json:"destructive_run_id,omitempty"`
 	Aborted              bool              `json:"aborted,omitempty"`

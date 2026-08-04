@@ -48,7 +48,7 @@ func newPullProviderCmd() *cobra.Command {
 			"that are ABSENT from the provider source — SOFT-deleted and reversible, never row-deleted (or#858). The remote rails are NEVER mutated.\n\n" +
 			"`--prune` alone is a PLAN: it reports what it would remove and writes nothing. Applying needs the typed confirmation " +
 			"`--expect-rows N`, which must equal the number the plan reported; an empty provider roster refuses outright rather than " +
-			"matching everything. An applied prune is reversible in one step with `openrails prune rollback --run <id>`.",
+			"matching everything. An applied prune is reversible in one step with `openrails undo-run --run <id>`.",
 		RunE: func(c *cobra.Command, _ []string) error {
 			var expect *int
 			if c.Flags().Changed("expect-rows") {
@@ -117,21 +117,22 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 	})
 }
 
-// newPruneCmd wires the or#858 reversal surface:
+// newPruneCmd wires the or#858 inspection surface:
 //
-//	openrails prune list     --merchant <slug>
-//	openrails prune rollback --merchant <slug> --run <id>
+//	openrails prune list --merchant <slug>
 //
 // A prune no longer deletes rows — it soft-deletes them and stamps each one
 // with the destructive run that took it, so an operator who pruned against a
-// bad snapshot gets the book back with one command.
+// bad snapshot gets the book back with one command. That command is
+// `openrails undo-run` (or#859): the reversal is one verb over the whole run
+// ledger, kind-dispatched, so nobody can reverse the wrong way round.
 func newPruneCmd() *cobra.Command {
-	var merchantSlug, runID, format string
+	var merchantSlug, format string
 	var limit int
 
 	cmd := &cobra.Command{
 		Use:   "prune",
-		Short: "Inspect and reverse `pull-provider --prune` runs (or#858)",
+		Short: "Inspect `pull-provider --prune` runs (or#858); reverse them with `openrails undo-run`",
 	}
 
 	listCmd := &cobra.Command{
@@ -148,25 +149,7 @@ func newPruneCmd() *cobra.Command {
 	listCmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")
 	listCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 
-	rollbackCmd := &cobra.Command{
-		Use:   "rollback",
-		Short: "Reverse one prune run by id — restores every row it soft-deleted",
-		Long: "Reverse one prune run by id. Every subscription, payment, checkout session and entitlement that run\n" +
-			"soft-deleted is restored in a single transaction; rows soft-deleted by anything else are untouched.\n\n" +
-			"A rollback is not a complete operation: it puts local state back to before the run while the provider\n" +
-			"has moved on. Follow it with `openrails pull-provider --insert --overwrite` to re-converge.",
-		RunE: func(c *cobra.Command, _ []string) error {
-			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
-			return embedded.PruneRollback(c.Context(), embedded.PruneRollbackOptions{
-				Config: cfg, MerchantSlug: merchantSlug, RunID: runID, Actor: cliActor(), Format: format, Out: os.Stdout,
-			})
-		},
-	}
-	rollbackCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
-	rollbackCmd.Flags().StringVar(&runID, "run", "", "Destructive run id to reverse (required; see `openrails prune list`)")
-	rollbackCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-
-	cmd.AddCommand(listCmd, rollbackCmd)
+	cmd.AddCommand(listCmd)
 	return cmd
 }
 
