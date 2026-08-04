@@ -9,6 +9,7 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -56,13 +57,16 @@ export function DataTable<TData>({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-x-auto rounded-md border">
+      <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
+              <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
+                  <TableHead
+                    key={header.id}
+                    className="text-muted-foreground"
+                  >
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -76,14 +80,15 @@ export function DataTable<TData>({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-24 text-center text-muted-foreground"
-                >
-                  Loading…
-                </TableCell>
-              </TableRow>
+              Array.from({ length: 5 }).map((_, ri) => (
+                <TableRow key={ri} className="hover:bg-transparent">
+                  {columns.map((_, ci) => (
+                    <TableCell key={ci} className="py-3.5">
+                      <Skeleton className="h-4 w-full max-w-28" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
             ) : table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
@@ -94,7 +99,7 @@ export function DataTable<TData>({
                   className={onRowClick ? "cursor-pointer" : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className="py-3.5">
                       {flexRender(
                         cell.column.columnDef.cell,
                         cell.getContext()
@@ -104,10 +109,10 @@ export function DataTable<TData>({
                 </TableRow>
               ))
             ) : (
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableCell
                   colSpan={columns.length}
-                  className="h-24 text-center text-muted-foreground"
+                  className="h-40 text-center text-muted-foreground"
                 >
                   {emptyMessage}
                 </TableCell>
@@ -118,28 +123,30 @@ export function DataTable<TData>({
       </div>
       {paged && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
+          <span className="tabular-nums">
             {total === 0
               ? "0"
               : `${offset + 1}–${Math.min(offset + limit, total)}`}{" "}
             of {total}
           </span>
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="icon"
+              aria-label="Previous page"
               disabled={offset <= 0 || loading}
               onClick={() => onPageChange(Math.max(0, offset - limit))}
             >
-              <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" /> Prev
+              <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
             </Button>
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="icon"
+              aria-label="Next page"
               disabled={offset + limit >= total || loading}
               onClick={() => onPageChange(offset + limit)}
             >
-              Next <HugeiconsIcon icon={ArrowRight01Icon} className="size-4" />
+              <HugeiconsIcon icon={ArrowRight01Icon} className="size-4" />
             </Button>
           </div>
         </div>

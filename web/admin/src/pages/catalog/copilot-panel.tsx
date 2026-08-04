@@ -14,6 +14,7 @@ import {
 import * as React from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
   askCatalogCopilot,
@@ -29,9 +30,6 @@ import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
-
-const DISABLED_MESSAGE =
-  "The catalog copilot needs explicit consent: set llm.catalog_copilot_enabled (env LLM_CATALOG_COPILOT_ENABLED=true) plus an LLM key (llm.api_key / env LLM_API_KEY) — answers send aggregate catalog/subscriber data to the LLM provider. See docs/admin-console.md."
 
 export function CatalogCopilotPanel({
   enabled,
@@ -62,101 +60,102 @@ export function CatalogCopilotPanel({
     }
   }
 
+  // Enabling the copilot is an operator setup step (see docs/admin-console.md);
+  // an unconfigured feature is not page furniture, so render nothing.
   if (!enabled) {
-    return (
-      <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
-        <span className="mr-1 font-medium text-foreground">
-          Catalog copilot:
-        </span>
-        {DISABLED_MESSAGE}
-      </div>
-    )
+    return null
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border p-4">
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void ask()
-        }}
-      >
-        <HugeiconsIcon
-          icon={BubbleChatQuestionIcon}
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <Input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder={
-            draftingEnabled
-              ? 'Ask about your catalog, or ask for a change — e.g. "who is still on the old premium price?" or "raise premium to $12"'
-              : 'Ask about your catalog — e.g. "what do we sell?" or "who is still on the old premium price?"'
-          }
-          className="flex-1"
-        />
-        <Button type="submit" size="sm" disabled={asking || !question.trim()}>
-          {asking ? (
-            <HugeiconsIcon
-              icon={Loading02Icon}
-              className="size-3.5 animate-spin"
-            />
-          ) : null}
-          Ask
-        </Button>
-      </form>
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void ask()
+          }}
+        >
+          <HugeiconsIcon
+            icon={BubbleChatQuestionIcon}
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+          <Input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder={
+              draftingEnabled
+                ? 'Ask about your catalog, or ask for a change — e.g. "who is still on the old premium price?" or "raise premium to $12"'
+                : 'Ask about your catalog — e.g. "what do we sell?" or "who is still on the old premium price?"'
+            }
+            className="flex-1"
+          />
+          <Button type="submit" size="sm" disabled={asking || !question.trim()}>
+            {asking ? (
+              <HugeiconsIcon
+                icon={Loading02Icon}
+                className="size-3.5 animate-spin"
+              />
+            ) : null}
+            Ask
+          </Button>
+        </form>
 
-      {asking ? (
-        <p className="text-xs text-muted-foreground">Checking your catalog…</p>
-      ) : null}
-      {error ? (
-        <p className="text-xs whitespace-pre-wrap text-destructive">{error}</p>
-      ) : null}
+        {asking ? (
+          <p className="text-xs text-muted-foreground">
+            Checking your catalog…
+          </p>
+        ) : null}
+        {error ? (
+          <p className="text-xs whitespace-pre-wrap text-destructive">
+            {error}
+          </p>
+        ) : null}
 
-      {result ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm whitespace-pre-wrap">{result.answer}</p>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 shrink-0"
-              aria-label="Dismiss answer"
-              onClick={() => {
-                setResult(null)
-                setError(null)
-              }}
-            >
-              <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
-            </Button>
-          </div>
-
-          {result.evidence.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {result.evidence.map((ev, i) => (
-                <div key={i} className="rounded-lg border bg-muted/30 p-2">
-                  <span className="mb-1 block text-xs font-medium text-muted-foreground uppercase">
-                    {ev.tool}
-                  </span>
-                  <pre className="max-h-48 overflow-auto text-xs whitespace-pre-wrap">
-                    {ev.summary}
-                  </pre>
-                </div>
-              ))}
+        {result ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm whitespace-pre-wrap">{result.answer}</p>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6 shrink-0"
+                aria-label="Dismiss answer"
+                onClick={() => {
+                  setResult(null)
+                  setError(null)
+                }}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
+              </Button>
             </div>
-          )}
 
-          {result.drafts?.map((draft, i) => (
-            <DraftCard
-              key={i}
-              draft={draft}
-              onCatalogChanged={onCatalogChanged}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
+            {result.evidence.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {result.evidence.map((ev, i) => (
+                  <div key={i} className="rounded-lg border bg-muted/30 p-2">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground uppercase">
+                      {ev.tool}
+                    </span>
+                    <pre className="max-h-48 overflow-auto text-xs whitespace-pre-wrap">
+                      {ev.summary}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {result.drafts?.map((draft, i) => (
+              <DraftCard
+                key={i}
+                draft={draft}
+                onCatalogChanged={onCatalogChanged}
+              />
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }
 

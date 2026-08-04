@@ -5,7 +5,7 @@ import {
   Upload01Icon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { StatusBadge } from "@/components/status-badge"
@@ -22,6 +22,14 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
   Table,
@@ -61,6 +69,9 @@ import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 
+const LINE_TAB =
+  "flex-none px-0 group-data-horizontal/tabs:after:bottom-[-1px]"
+
 function catalogCopilotEnabled(): boolean {
   try {
     return getBootstrap().catalog_copilot_enabled
@@ -82,19 +93,40 @@ export function CatalogPage() {
   // tabs refetch and reflect the change — the SAME reload path a hand-typed
   // edit already triggers via each tab's own onDone.
   const [refreshKey, setRefreshKey] = React.useState(0)
+  const [params, setParams] = useSearchParams()
+  const tab = params.get("tab") || "products"
 
   return (
     <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
       <CatalogCopilotPanel
         enabled={catalogCopilotEnabled()}
         draftingEnabled={catalogDraftingEnabled()}
         onCatalogChanged={() => setRefreshKey((k) => k + 1)}
       />
-      <Tabs defaultValue="products" className="flex flex-col gap-4">
-        <TabsList>
-          <TabsTrigger value="products">Products</TabsTrigger>
-          <TabsTrigger value="prices">Prices</TabsTrigger>
-          <TabsTrigger value="drift">Drift</TabsTrigger>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          const p = new URLSearchParams(params)
+          if (!v || v === "products") p.delete("tab")
+          else p.set("tab", v)
+          setParams(p)
+        }}
+        className="flex flex-col gap-4"
+      >
+        <TabsList
+          variant="line"
+          className="w-full justify-start gap-6 rounded-none border-b border-border p-0"
+        >
+          <TabsTrigger value="products" className={LINE_TAB}>
+            Products
+          </TabsTrigger>
+          <TabsTrigger value="prices" className={LINE_TAB}>
+            Prices
+          </TabsTrigger>
+          <TabsTrigger value="drift" className={LINE_TAB}>
+            Drift
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="products">
           <ProductsTab key={refreshKey} />
@@ -126,12 +158,16 @@ function ProductsTab() {
         <ProductDialog onDone={reload} />
       </div>
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div className="flex flex-col gap-3 py-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead>Product</TableHead>
                 <TableHead>Key</TableHead>
                 <TableHead>Tier</TableHead>
@@ -188,7 +224,7 @@ function ProductRow({
   return (
     <TableRow className={product.archived ? "opacity-60" : undefined}>
       <TableCell className="font-medium">{product.display_name}</TableCell>
-      <TableCell className="text-xs">{product.key}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{product.key}</TableCell>
       <TableCell>
         {product.tier_group
           ? `${product.tier_group} #${product.tier_rank}`
@@ -381,12 +417,16 @@ function PricesTab() {
         <PriceDialog products={products?.items ?? []} onDone={reload} />
       </div>
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div className="flex flex-col gap-3 py-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead>Price</TableHead>
                 <TableHead>Product</TableHead>
                 <TableHead>Amount</TableHead>
@@ -448,7 +488,7 @@ function PriceRow({
   }
   return (
     <TableRow className={price.archived ? "opacity-60" : undefined}>
-      <TableCell className="text-xs">
+      <TableCell className="text-xs text-muted-foreground">
         <Link
           className="underline-offset-2 hover:underline"
           to={`/catalog/prices/${price.id}`}
@@ -456,8 +496,10 @@ function PriceRow({
           {shortId(price.id, 13)}
         </Link>
       </TableCell>
-      <TableCell>{productName}</TableCell>
-      <TableCell>{formatMicros(price.unit_amount, price.currency)}</TableCell>
+      <TableCell className="font-medium">{productName}</TableCell>
+      <TableCell className="tabular-nums">
+        {formatMicros(price.unit_amount, price.currency)}
+      </TableCell>
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
@@ -527,25 +569,31 @@ function PriceDialog({
         <DialogHeader>
           <DialogTitle>New price</DialogTitle>
           <DialogDescription>
-            Financial terms are immutable after creation — a price change is a
+            Financial terms are immutable after creation: a price change is a
             new price plus archiving the old one.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <Field label="Product" id="pr-prod">
-            <select
-              id="pr-prod"
-              className="h-9 rounded-md border bg-transparent px-3 text-sm"
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+            <Select
+              items={products.map((p) => ({
+                value: p.id,
+                label: `${p.display_name} (${p.key})`,
+              }))}
+              value={productId || null}
+              onValueChange={(v) => setProductId(v ?? "")}
             >
-              <option value="">Pick a product…</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.display_name} ({p.key})
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="pr-prod" className="w-full">
+                <SelectValue placeholder="Pick a product…" />
+              </SelectTrigger>
+              <SelectContent>
+                {products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.display_name} ({p.key})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Amount (major units)" id="pr-amount">
@@ -659,16 +707,20 @@ function DriftTab() {
         </Button>
       </div>
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div className="flex flex-col gap-3 py-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
       ) : !data?.items?.length ? (
         <p className="text-sm text-muted-foreground">
-          No open drift events — catalog is in sync.
+          No open drift events. Catalog is in sync.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead>Provider</TableHead>
                 <TableHead>Kind</TableHead>
                 <TableHead>Resource</TableHead>
