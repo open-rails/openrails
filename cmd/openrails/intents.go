@@ -378,13 +378,9 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 
 func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, database *db.DB) error) error {
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	if cfg == nil || cfg.DB == nil {
-		return fmt.Errorf("config not loaded")
-	}
-
-	database, err := db.NewDB(cfg.DB)
+	database, err := openCLIDB(cmd.Context(), cfg)
 	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
+		return err
 	}
 	defer func() {
 		_ = database.Close()

@@ -94,6 +94,11 @@ func newRootCmd() *cobra.Command {
 		Short: "Start OpenRails background workers",
 	}
 
+	// migrate is the ONE deliberately RLS-posture-EXEMPT command (or#888): DDL
+	// requires the privileged owner role — it creates the merchant_isolation
+	// policies and the unprivileged openrails_app role the gate demands, so it
+	// cannot run behind that gate. It opens its own handle in internal/migrate;
+	// every other command that touches merchant rows goes through openCLIDB.
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Manage all database tables",
