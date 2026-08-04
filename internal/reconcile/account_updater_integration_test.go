@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -28,7 +27,10 @@ import (
 //   - and the next pass does not re-raise it as a discrepancy needing repair.
 func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	// Own merchant: this test runs an ENFORCE pass, which is a real mutation —
+	// on a shared merchant it would act on other tests' subscriptions.
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 
 	var (
 		seeded   seededState
@@ -36,13 +38,13 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 		methodID = uuid.New()
 	)
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seeded = seedReconcileFixtures(t, ctx, appDB)
+		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID())
 		_, err := appDB.Qx(ctx).Exec(ctx, `
 			INSERT INTO openrails.payment_methods
 			  (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
 			   initial_transaction_id, last_four, card_type, expiry_date)
 			VALUES ($1, $2, $3, 'nmi', $4, '', '', '1111', 'visa', '1226')`,
-			methodID, dbtest.TestMerchantID.UUID(), seeded.subjectID, vaultID)
+			methodID, mid.UUID(), seeded.subjectID, vaultID)
 		return err
 	}))
 	t.Cleanup(func() {

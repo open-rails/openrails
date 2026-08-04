@@ -36,6 +36,27 @@ func startReconcilePostgres(t *testing.T) *db.DB {
 	return appDB
 }
 
+// newReconcileMerchant creates a merchant owned by ONE test.
+//
+// The engine diffs the provider roster against every local subscription the
+// merchant has, so a test that exact-counts findings cannot share a merchant:
+// any active NMI subscription another test left behind is absent from this
+// test's snapshot and is CORRECTLY reported as local-active/remote-dead. That
+// is what made TestReconcileEngineIntegration order-dependent (PS-2 expected 1,
+// got 3 — passing alone, failing in a full-package run).
+//
+// It also keeps enforce passes honest: an enforce run is a real mutation, and
+// on a shared merchant it would act on rows belonging to other tests.
+func newReconcileMerchant(t *testing.T, appDB *db.DB) merchant.ID {
+	t.Helper()
+	id := merchant.ID(uuid.New())
+	_, err := appDB.Pool().Exec(context.Background(),
+		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')`,
+		id.UUID(), "reconcile-"+id.UUID().String()[:8])
+	require.NoError(t, err)
+	return id
+}
+
 type seededState struct {
 	subjectID uuid.UUID
 	productID uuid.UUID
@@ -48,7 +69,7 @@ type seededState struct {
 // seedReconcileFixtures inserts a product, price, tenant subject, and two NMI
 // subscriptions (one that the fake snapshot will keep alive, one that it
 // drops), plus a live subscription-sourced entitlement on each.
-func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seededState {
+func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merchantID uuid.UUID) seededState {
 	t.Helper()
 	s := seededState{
 		productID: uuid.New(),
@@ -57,7 +78,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		subDead:   uuid.New(),
 		entDeadID: uuid.New(),
 	}
-	s.subjectID = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+	s.subjectID = dbtest.EnsureCustomerIDPgxFor(ctx, t, appDB.Qx(ctx), merchantID, uuid.NewString())
 
 	suffix := uuid.NewString()[:8]
 	now := time.Now().UTC()
@@ -85,23 +106,23 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		entName := fmt.Sprintf("premium-%d", i)
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
-			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestMerchantID.UUID())
+			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
+		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
-			periodStart, periodEnd, s.subjectID, entName, dbtest.TestMerchantID.UUID())
+			periodStart, periodEnd, s.subjectID, entName, merchantID)
 		entID := uuid.New()
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
 		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
-			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestMerchantID.UUID())
+			entID, s.subjectID, entName, periodStart, periodEnd, subID, merchantID)
 	}
 	return s
 }
@@ -147,11 +168,14 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 
 func TestReconcileEngineIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	// Own merchant: the finding counts below are exact, so nothing another test
+	// seeded may be in scope (see newReconcileMerchant).
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 
 	var seeded seededState
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seeded = seedReconcileFixtures(t, ctx, appDB)
+		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID())
 		return nil
 	}))
 
