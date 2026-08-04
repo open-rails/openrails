@@ -2,6 +2,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -100,14 +101,15 @@ export function TeamTab() {
   const ownerCount = team.filter((m) => m.role === "owner").length
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-4">
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            People who can sign in to this merchant console. Each teammate holds
-            one role; only owners can manage the team. A merchant must always
-            keep at least one owner.
-          </p>
+    <div className="flex max-w-4xl flex-col gap-10">
+      <section className="grid gap-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="grid gap-1">
+            <h2 className="text-base font-semibold">Team members</h2>
+            <p className="text-sm text-muted-foreground">
+              Manage access and roles. At least one owner is required.
+            </p>
+          </div>
           <InviteDialog
             invitesEnabled={invites.data?.invites_enabled ?? false}
             onDone={reload}
@@ -116,51 +118,58 @@ export function TeamTab() {
         {team.length === 0 ? (
           <p className="text-sm text-muted-foreground">No team members yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Member</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {team.map((m) => (
-                  <MemberRow
-                    key={m.user_id}
-                    member={m}
-                    isLastOwner={m.role === "owner" && ownerCount <= 1}
-                    onDone={reload}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <Table className="min-w-[36rem]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-muted-foreground">Member</TableHead>
+                <TableHead className="w-40 text-muted-foreground">
+                  Role
+                </TableHead>
+                <TableHead className="w-24 text-right text-muted-foreground">
+                  Action
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {team.map((m) => (
+                <MemberRow
+                  key={m.user_id}
+                  member={m}
+                  isLastOwner={m.role === "owner" && ownerCount <= 1}
+                  onDone={reload}
+                />
+              ))}
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </section>
 
       {pending.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">Pending invites</h3>
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pending.map((inv) => (
-                  <InviteRow key={inv.id} invite={inv} onDone={reload} />
-                ))}
-              </TableBody>
-            </Table>
+        <section className="grid gap-5">
+          <div className="grid gap-1">
+            <h2 className="text-base font-semibold">Pending invites</h2>
+            <p className="text-sm text-muted-foreground">
+              Invitations awaiting acceptance.
+            </p>
           </div>
-        </div>
+          <Table className="min-w-[36rem]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-muted-foreground">Role</TableHead>
+                <TableHead className="text-muted-foreground">Created</TableHead>
+                <TableHead className="text-muted-foreground">Expires</TableHead>
+                <TableHead className="w-24 text-right text-muted-foreground">
+                  Action
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pending.map((inv) => (
+                <InviteRow key={inv.id} invite={inv} onDone={reload} />
+              ))}
+            </TableBody>
+          </Table>
+        </section>
       )}
     </div>
   )
@@ -177,17 +186,29 @@ function MemberRow({
 }) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const label = member.email || member.username || member.user_id
+  const initials = (member.username || member.email || "Member")
+    .slice(0, 2)
+    .toUpperCase()
   return (
     <TableRow>
-      <TableCell className="font-medium">
-        {label}
-        {member.username && member.email && (
-          <span className="ml-2 text-xs text-muted-foreground">
-            {member.username}
-          </span>
-        )}
+      <TableCell className="py-3">
+        <div className="flex items-center gap-3">
+          <Avatar className="size-8 rounded-lg">
+            <AvatarFallback className="rounded-lg text-xs">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="grid min-w-0 leading-tight">
+            <span className="truncate font-medium">{label}</span>
+            {member.username && member.email && (
+              <span className="truncate text-xs text-muted-foreground">
+                @{member.username}
+              </span>
+            )}
+          </div>
+        </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         <RoleSelect
           value={member.role}
           disabled={isLastOwner}
@@ -205,9 +226,9 @@ function MemberRow({
           }}
         />
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         <Button
-          variant="outline"
+          variant="destructive"
           size="sm"
           disabled={isLastOwner}
           title={isLastOwner ? "The last owner cannot be removed" : undefined}
@@ -280,16 +301,18 @@ function InviteRow({
   const [busy, setBusy] = React.useState(false)
   return (
     <TableRow>
-      <TableCell>
+      <TableCell className="py-3">
         <Badge variant="secondary">{roleLabel(invite.role)}</Badge>
       </TableCell>
-      <TableCell>{formatDate(invite.created_at)}</TableCell>
-      <TableCell>
+      <TableCell className="py-3 text-muted-foreground">
+        {formatDate(invite.created_at)}
+      </TableCell>
+      <TableCell className="py-3 text-muted-foreground">
         {invite.expires_at ? formatDate(invite.expires_at) : "never"}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         <Button
-          variant="outline"
+          variant="destructive"
           size="sm"
           disabled={busy}
           onClick={async () => {
