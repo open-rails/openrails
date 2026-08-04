@@ -29,8 +29,11 @@ import (
 func idemEnv(t *testing.T, seed int64) (*billingservice.Service, *money.MoneyService, *redis.Client, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	// The facade stands BELOW the layer that opens the merchant connection (the
+	// HTTP router / River worker), so the test has to supply the pin the way
+	// production's entry point does — an unpinned app-role handle is RLS-denied
+	// the moment Admit materializes the payable customer (or#782/or#868).
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)

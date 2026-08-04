@@ -176,6 +176,8 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewNMISaleIntentHandler(saleService)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	return &saleIntentFixture{
 		db: dbi, runner: runner, gateway: gateway,
@@ -268,7 +270,7 @@ func TestNMISaleIntent_DeclineIsTerminal(t *testing.T) {
 		"nmi_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType, &attemptKind))
 	require.Equal(t, "transaction_was_declined_by_processor", failureCode) // NMI 200, verbatim localization id
 	require.Equal(t, payments.FailureCardDeclined, failureReason)
-	require.Equal(t, "provider_vault", tokenType)
+	require.Equal(t, "psp_token", tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
 }
 

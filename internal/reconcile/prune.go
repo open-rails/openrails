@@ -368,6 +368,15 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 	if run.Status == "reversed" {
 		return res, fmt.Errorf("destructive run %s was already reversed", runID)
 	}
+	// The ledger is general (or#859 §5.1) but this reverse is not: it only knows
+	// how to clear soft-delete tombstones. A converge-enforce run destroyed row
+	// VALUES, not rows, so running this against one would restore nothing, leave
+	// its queued provider writes free to fire, and still mark the run reversed —
+	// a silent no-op wearing a success message.
+	if run.Kind != DestructiveRunKindPrune {
+		return res, fmt.Errorf("destructive run %s is kind %q; `prune rollback` only reverses %q runs. Use `openrails converge rollback --run %s`",
+			runID, run.Kind, DestructiveRunKindPrune, runID)
+	}
 	if actor == "" {
 		actor = "unknown"
 	}

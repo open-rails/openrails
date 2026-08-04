@@ -411,7 +411,8 @@ WHERE NOT EXISTS (
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
+    money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -419,7 +420,9 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id)
+    sqlc.arg(customer_id), sqlc.narg(psp_id),
+    -- or#827: the row mirrors a charge the rail actually settled.
+    'rail'
 )
 ON CONFLICT DO NOTHING;
 
@@ -429,7 +432,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind
+    customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -438,7 +441,9 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id), 'refund'
+    -- or#827: a refund is real (negative) money movement at the rail; the
+    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    sqlc.arg(customer_id), sqlc.narg(psp_id), 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING;
 

@@ -32,7 +32,7 @@ SET status = 'in_flight',
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimDueRailIntentsParams struct {
@@ -82,6 +82,7 @@ func (q *Queries) ClaimDueRailIntents(ctx context.Context, arg ClaimDueRailInten
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -108,7 +109,7 @@ SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimDueVerifyRailIntentsParams struct {
@@ -153,6 +154,7 @@ func (q *Queries) ClaimDueVerifyRailIntents(ctx context.Context, arg ClaimDueVer
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -176,7 +178,7 @@ WHERE pi.id = $2
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
   AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id
 `
 
 type ClaimRailIntentByIDParams struct {
@@ -218,6 +220,7 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -251,20 +254,20 @@ type CountDestructiveIntentsByActorSinceParams struct {
 }
 
 // ============================================================================
-// #732 anti-credential-compromise rate ceiling (per-actor + global)
+// #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
 // ============================================================================
 // The durable rail_intents ledger IS the counter (#674): every destructive
 // user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
-// created_at is the burst gauge. Scoped to origin IN ('user','admin') — the
-// credential-theft surface; origin='system' (automated dunning / decline
-// cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
-// CREATION (created_at), not execution: the ceiling stops the burst at the
-// producer chokepoint, before the write-ahead intent is even created. These run
-// cross-merchant (per-actor AND global) through migration 0021's SECURITY
-// DEFINER readers — NOT the base pool. The base pool is not privileged: it is
-// the same openrails_app role, so a GUC-less count is not cross-merchant, it is
-// EMPTY (or#824/or#860).
+// created_at is the burst gauge. Counts by CREATION (created_at), not execution:
+// the ceiling stops the burst at the producer chokepoint, before the write-ahead
+// intent is even created. Both readers are migration 0021/0028 SECURITY DEFINER
+// functions — NOT the base pool. The base pool is not privileged: it is the same
+// openrails_app role, so a GUC-less count is not "everything", it is EMPTY
+// (or#824/or#860).
 // Destructive user/admin intents THIS actor created in the rolling window.
+// Deliberately CROSS-MERCHANT and unchanged by or#866: one stolen credential
+// operating across merchants is exactly the shape this leg must see, and an
+// actor is not a tenant, so there is no cross-tenant budget to share here.
 func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg CountDestructiveIntentsByActorSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsByActorSince, arg.Actor, arg.IntentTypes, arg.Since)
 	var count_destructive_intents_by_actor_since int64
@@ -272,32 +275,43 @@ func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg C
 	return count_destructive_intents_by_actor_since, err
 }
 
-const countDestructiveIntentsGlobalSince = `-- name: CountDestructiveIntentsGlobalSince :one
-SELECT openrails.count_destructive_intents_since(
-    $1::text[],
-    $2::timestamptz)
+const countDestructiveIntentsForMerchantSince = `-- name: CountDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_destructive_intents_for_merchant_since(
+    $1::uuid,
+    $2::text[],
+    $3::text[],
+    $4::timestamptz)
 `
 
-type CountDestructiveIntentsGlobalSinceParams struct {
+type CountDestructiveIntentsForMerchantSinceParams struct {
+	MerchantID  uuid.UUID
+	Origins     []string
 	IntentTypes []string
 	Since       time.Time
 }
 
-// Destructive user/admin intents ALL actors + ALL merchants created in the
-// rolling window — the absolute frying-protection ceiling even if many actor
-// identities are forged.
+// ONE merchant's destructive intents in the rolling window, for a caller-supplied
+// origin set. Both walls of the ceiling are this same count (migration 0028):
+//   - origins {user,admin} — the anti-theft wall. It used to be DEPLOYMENT-wide,
+//     which made one merchant's ordinary customer cancellations refuse every
+//     other merchant's (or#866, cross-tenant DoS). A forged-identity burst is
+//     still walled at 15/h inside the merchant it targets.
+//   - origins {system} — the automation wall (or#842): a runaway convergence or
+//     poisoned roster inside ONE merchant, never a fleet-wide number that a
+//     thousand merchants converging their own books would legitimately exceed.
 //
-// or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
-// a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
-// openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
-// structurally never exceeded — a fail-OPEN safety control. The definer RAISES
-// when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
-// instead of silently permitting unlimited destructive intents.
-func (q *Queries) CountDestructiveIntentsGlobalSince(ctx context.Context, arg CountDestructiveIntentsGlobalSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDestructiveIntentsGlobalSince, arg.IntentTypes, arg.Since)
-	var count_destructive_intents_since int64
-	err := row.Scan(&count_destructive_intents_since)
-	return count_destructive_intents_since, err
+// System origin must never burn the anti-theft budget and vice versa: they are
+// separate windows over disjoint origin sets, counted separately.
+func (q *Queries) CountDestructiveIntentsForMerchantSince(ctx context.Context, arg CountDestructiveIntentsForMerchantSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDestructiveIntentsForMerchantSince,
+		arg.MerchantID,
+		arg.Origins,
+		arg.IntentTypes,
+		arg.Since,
+	)
+	var count_destructive_intents_for_merchant_since int64
+	err := row.Scan(&count_destructive_intents_for_merchant_since)
+	return count_destructive_intents_for_merchant_since, err
 }
 
 const countDestructiveRailIntentsExecutedSince = `-- name: CountDestructiveRailIntentsExecutedSince :one
@@ -360,32 +374,6 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 	return count, err
 }
 
-const countSystemDestructiveIntentsForMerchantSince = `-- name: CountSystemDestructiveIntentsForMerchantSince :one
-SELECT openrails.count_system_destructive_intents_for_merchant_since(
-    $1::uuid,
-    $2::text[],
-    $3::timestamptz)
-`
-
-type CountSystemDestructiveIntentsForMerchantSinceParams struct {
-	MerchantID  uuid.UUID
-	IntentTypes []string
-	Since       time.Time
-}
-
-// or#842: the AUTOMATED leg. The two counts above are deliberately blind to
-// origin='system', which left the ceiling absent for exactly the paths that
-// queue the most irreversible work with no human in the loop. System origin is
-// walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
-// survive fleet scale, a per-merchant window does, and one merchant's runaway
-// convergence is the shape this must see.
-func (q *Queries) CountSystemDestructiveIntentsForMerchantSince(ctx context.Context, arg CountSystemDestructiveIntentsForMerchantSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSystemDestructiveIntentsForMerchantSince, arg.MerchantID, arg.IntentTypes, arg.Since)
-	var count_system_destructive_intents_for_merchant_since int64
-	err := row.Scan(&count_system_destructive_intents_for_merchant_since)
-	return count_system_destructive_intents_for_merchant_since, err
-}
-
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
 
 
@@ -443,7 +431,7 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         ELSE openrails.rail_intents.last_failure_reason
     END,
     updated_at = now()
-RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id
 `
 
 type EnqueueRailIntentParams struct {
@@ -528,6 +516,7 @@ func (q *Queries) EnqueueRailIntent(ctx context.Context, arg EnqueueRailIntentPa
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -570,7 +559,7 @@ func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdu
 
 const getRailIntent = `-- name: GetRailIntent :one
 
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents WHERE id = $1
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents WHERE id = $1
 `
 
 // ============================================================================
@@ -603,6 +592,7 @@ func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRai
 		&i.ExecutedAt,
 		&i.UpdatedAt,
 		&i.PspID,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
@@ -725,7 +715,7 @@ func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg List
 }
 
 const listRailIntents = `-- name: ListRailIntents :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -783,6 +773,7 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -796,7 +787,7 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id FROM openrails.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id FROM openrails.rail_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
 ORDER BY created_at, id
@@ -849,6 +840,7 @@ func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailInt
 			&i.ExecutedAt,
 			&i.UpdatedAt,
 			&i.PspID,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}

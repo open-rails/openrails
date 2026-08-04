@@ -1,7 +1,9 @@
-// Package vaultedcard implements the rail-agnostic charge seam (#297 Phase B /
-// #795) for the neutral-vault card rail: Basis Theory's ephemeral detokenizing
-// proxy presents the stored card to the NMI DirectPost gateway. The PAN never
-// touches OpenRails (SAQ A); the engine holds only the BT token reference
+// Package nmiproxy implements the rail-agnostic charge seam (#297 Phase B /
+// #795) for NMI charges whose card is held by a third-party CUSTODIAN: Basis
+// Theory's ephemeral detokenizing proxy presents the stored card to the NMI
+// DirectPost gateway. Same rail as nmidirect, same decline taxonomy — only the
+// transport differs (or#879). The PAN never touches OpenRails (SAQ A); the
+// engine holds only the custodian token reference
 // (payment_methods.rail_method_ref) and the NMI security key.
 //
 // Anchor semantics are IDENTICAL to nmidirect: NMI's gateway transactionid is
@@ -13,7 +15,7 @@
 // the orderid verify leg. Ambiguous outcomes (basistheory.IsTransportAmbiguous
 // or nmi.IsTransportAmbiguous) must be VERIFIED, never blind-retried and never
 // treated as declines.
-package vaultedcard
+package nmiproxy
 
 import (
 	"context"
@@ -22,6 +24,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -29,12 +32,15 @@ import (
 )
 
 // Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
-const Rail = "vaulted_card"
+// It is NMI: the proxy changes how the card reaches the gateway, never which
+// gateway charges it (or#879).
+const Rail = string(models.RailNMI)
 
-// VaultProvider is the payment_methods.vault_provider value for BT rows.
-const VaultProvider = "basis_theory"
+// Custodian is the payment_methods.custodian value for these rows (or#880):
+// the PAN is held at Basis Theory while the processor stays NMI.
+const Custodian = models.CustodianBasisTheory
 
-// Charger charges BT-vaulted instruments through the seam. Source selects the
+// Charger charges custodian-held instruments through the seam. Source selects the
 // credential per charge (callers construct one Charger per charge site from
 // the instrument row); Instrument.MethodRef is the fallback token id when
 // Source is zero.
@@ -62,7 +68,7 @@ var _ charge.Charger = (*Charger)(nil)
 
 func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result, error) {
 	if c == nil || c.BT == nil {
-		return charge.Result{}, errors.New("vaultedcard charger not initialized")
+		return charge.Result{}, errors.New("nmiproxy charger not initialized")
 	}
 	src := c.Source
 	if strings.TrimSpace(src.TokenID) == "" && strings.TrimSpace(src.TokenIntentID) == "" {
@@ -79,7 +85,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		// orderid. Ambiguous outcomes never fall back — the charge may exist.
 		if canFallBackToPAN(err) && strings.TrimSpace(src.TokenID) != "" {
 			log.WithContext(ctx).WithError(err).WithField("network_token_id", src.NetworkTokenID).
-				Warn("vaultedcard: network-token charge failed pre-forward; falling back to pan_proxy in the same attempt")
+				Warn("nmiproxy: network-token charge failed pre-forward; falling back to pan_proxy in the same attempt")
 			fallback := src
 			fallback.Via = ViaPANProxy
 			return c.chargeThroughProxy(ctx, req, fallback, nil)
@@ -133,7 +139,7 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 		return charge.Result{}, err
 	}
 
-	tokenType := charge.TokenTypePANViaVault
+	tokenType := charge.TokenTypePANViaProxy
 	if src.via() == ViaNetworkToken {
 		tokenType = charge.TokenTypeNetworkToken
 	}

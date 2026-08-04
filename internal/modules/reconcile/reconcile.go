@@ -592,6 +592,8 @@ func ensureChargePayment(
 		ListAmount:    charge.Amount,
 		Currency:      currency,
 		Status:        payments.PaymentStatusCompletedValue,
+		// or#827: the row mirrors a charge Stripe actually settled.
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   now,
 		CreatedAt:     now,
 		Metadata: map[string]any{

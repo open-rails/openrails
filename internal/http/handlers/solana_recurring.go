@@ -399,7 +399,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		if err != nil {
 			return nil, http.StatusBadRequest, err.Error()
 		}
-		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol)
+		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
 		if err != nil {
 			status, msg := solanaClientError(err, http.StatusInternalServerError)
 			return nil, status, msg

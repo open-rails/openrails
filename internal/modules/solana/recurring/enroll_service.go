@@ -106,7 +106,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
-	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

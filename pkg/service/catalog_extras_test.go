@@ -199,7 +199,7 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
-	plans, err := fetchNMIPlans(client)
+	plans, err := fetchNMIPlans(context.Background(), client)
 	if err != nil {
 		t.Fatalf("fetch nmi plans: %v", err)
 	}

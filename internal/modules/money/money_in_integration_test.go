@@ -244,6 +244,8 @@ func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, resolver
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, resolver, nil)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
@@ -479,9 +481,11 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: pm,
 		AmountCents:     123,
-		Currency:        money.DefaultCurrency,
-		IdempotencyKey:  "scope-ok",
-		Description:     "invoice",
+		// or#864: nothing substitutes a currency before a charge — the caller
+		// states it, exactly as invoice collection does in production.
+		Currency:       money.DefaultCurrency,
+		IdempotencyKey: "scope-ok",
+		Description:    "invoice",
 	})
 	require.NoError(t, err)
 	require.Equal(t, string(models.RailNMI), res.Rail)
@@ -841,10 +845,14 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 
-	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	// Stripe's do_not_honor is or#870 bucket 2 — their card, fixable — so
+	// charging stops and the invoice is left exactly where the clock put it:
+	// OPEN, still owed, nothing terminated (or#828).
+	stopped, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "past_due", pastDue.Status)
-	require.Equal(t, int64(50_000), pastDue.AmountDue)
+	require.Equal(t, "open", stopped.Status)
+	require.Nil(t, stopped.NextCollectionAttemptAt)
+	require.Equal(t, int64(50_000), stopped.AmountDue)
 
 	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `

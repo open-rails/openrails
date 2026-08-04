@@ -109,6 +109,30 @@ jobs:
         if: needs.changes.outputs.go == 'true'
         run: go test -race ./...
 
+  # or#869: .golangci.yml existed for a year with nothing running it — and could
+  # not have run (v1 schema, which current golangci-lint refuses to load). The
+  # enabled rule set is exactly what passes today; deferred linters are recorded
+  # in the config header with counts. This job is REQUIRED, not advisory: an
+  # advisory gate is the same claim of coverage the file used to make.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.go == 'true'
+      - uses: actions/setup-go@v5
+        if: needs.changes.outputs.go == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        if: needs.changes.outputs.go == 'true'
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.6.0
+          args: --timeout=15m
+
   sqlc:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -135,9 +159,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Install Task
+      # or#855: `go install task@latest` + `go run sqlc@…` compiled both tools
+      # from source on every run — measured 61s and ~60s respectively, i.e.
+      # ~120s of a 144s job spent installing tools upstream already ships as
+      # binaries. Pinned + checksum-verified downloads take ~5s, and `@latest`
+      # pinned nothing to begin with.
+      - name: Install pinned tools (task, sqlc)
         if: needs.changes.outputs.go == 'true'
-        run: go install github.com/go-task/task/v3/cmd/task@latest
+        run: |
+          echo "TASK_BIN=$(scripts/ci-install-tool.sh task)" >> "$GITHUB_ENV"
+          echo "SQLC_BIN=$(scripts/ci-install-tool.sh sqlc)" >> "$GITHUB_ENV"
       # task sqlc-check builds a throwaway vet DB from migrations/ via
       # scripts/sqlc-vet-db.sh (defaults target the service container above),
       # regenerates internal/db/gen, PREPAREs every query (sqlc vet), fails if
@@ -148,7 +179,7 @@ jobs:
         if: needs.changes.outputs.go == 'true'
         env:
           POSTGRES_HOST_PORT: "5434"
-        run: task sqlc-check
+        run: "$TASK_BIN sqlc-check"
 
   # Admin console SPA (#754: dist is NOT committed, so nothing else compiles
   # web/admin) — lint + typecheck+build the frontend, then prove the tagged Go

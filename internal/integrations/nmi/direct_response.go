@@ -7,7 +7,7 @@ import (
 )
 
 // Exported classic Direct Post response surface for sibling rails (#795): the
-// vaulted_card rail receives NMI's classic urlencoded body through the BT
+// custodian-proxied transport receives NMI's classic urlencoded body through the BT
 // proxy and must parse it with the SAME parser and decline vocabulary as the
 // direct rail — one taxonomy, two transports.
 

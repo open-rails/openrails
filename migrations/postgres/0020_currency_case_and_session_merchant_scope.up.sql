@@ -32,7 +32,8 @@
 --    whole vocabulary. Case is the part that was actually drifting, and case is
 --    what this pins absolutely.
 
-BEGIN;
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 -- ---------------------------------------------------------------- part 1 ---
 
@@ -110,4 +111,3 @@ BEGIN
 END
 $$;
 
-COMMIT;

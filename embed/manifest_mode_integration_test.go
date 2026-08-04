@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -111,30 +112,47 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 	return rt, id
 }
 
+// inMerchantScope runs fn on a connection whose app.merchant_id is pinned for the
+// duration of ONE transaction — the read shape production uses. The pin is
+// transaction-local on purpose: a session-level set_config would ride the pooled
+// connection back out and silently scope somebody else's query.
+func inMerchantScope(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID, fn func(tx pgx.Tx)) {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	_, err = tx.Exec(ctx, "SELECT set_config('app.merchant_id', $1, true)", id.UUID().String())
+	require.NoError(t, err)
+	fn(tx)
+}
+
 func activePriceAmounts(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID) []int64 {
 	t.Helper()
-	conn, err := pool.Acquire(ctx)
-	require.NoError(t, err)
-	defer conn.Release()
-	_, err = conn.Exec(ctx, "SELECT set_config('app.merchant_id', $1, false)", id.UUID().String())
-	require.NoError(t, err)
-	rows, err := conn.Query(ctx, `SELECT amount FROM openrails.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
-	require.NoError(t, err)
-	defer rows.Close()
 	var out []int64
-	for rows.Next() {
-		var amount int64
-		require.NoError(t, rows.Scan(&amount))
-		out = append(out, amount)
-	}
-	require.NoError(t, rows.Err())
+	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
+		rows, err := tx.Query(ctx, `SELECT amount FROM openrails.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		for rows.Next() {
+			var amount int64
+			require.NoError(t, rows.Scan(&amount))
+			out = append(out, amount)
+		}
+		require.NoError(t, rows.Err())
+	})
 	return out
 }
 
+// merchantSecretRowCount counts under the merchant's OWN scope. openrails.merchant_secrets
+// is RLS-forced, so an unpinned count on the openrails_app role is always 0 — which
+// would make MODE 1's "wrote no secret" assertion vacuous and MODE 2's "persisted a
+// secret" assertion impossible.
 func merchantSecretRowCount(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID) int {
 	t.Helper()
 	var n int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+	})
 	return n
 }
 
@@ -177,7 +195,7 @@ func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, i
 		return err
 	}
 	require.True(t, ok, "declared+seeded NMI account must resolve a client")
-	_, err = client.RunSale(nmi.SaleParams{
+	_, err = client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID: "vault-manifest-mode",
 		Amount:          moneyutil.Cents(500),
 		Currency:        "USD",
@@ -261,8 +279,16 @@ func TestManifestMode_Loop(t *testing.T) {
 		Reason:      "#723 conformance",
 	})
 	require.NoError(t, err)
-	ents, err := svc.ListActiveEntitlements(mctx, userID, time.Now().UTC())
-	require.NoError(t, err)
+	// The read runs inside a merchant-scoped connection because it is a plain
+	// RLS-scoped SELECT (no MerchantTx of its own): in production the HTTP layer
+	// pins it, and this test stands in for that layer. Without the pin it reads
+	// the base pool and the openrails_app role answers with an empty list.
+	var ents []string
+	require.NoError(t, runtime.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		var err error
+		ents, err = svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
+		return err
+	}))
 	require.Contains(t, ents, "pro-access")
 
 	// Runtime writes against the plane are refused: rotation is file+reboot.

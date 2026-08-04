@@ -278,10 +278,13 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 	if token == "" {
 		return RateLimitDecision{Outcome: RateLimitCaptchaRequired, Headers: map[string]string{"X-Captcha-Required": "true"}}
 	}
-	if deps.Verifier == nil {
-		return RateLimitDecision{Outcome: RateLimitCaptchaInvalid, Headers: map[string]string{"X-Captcha-Required": "true"}, CaptchaMessage: "captcha verifier unavailable"}
-	}
-
+	// or#865: a `deps.Verifier == nil` leg used to sit here. It could not fire in
+	// any configuration — this function is only reached when captcha enforcement
+	// is on (captchaShouldEnforce ⇒ cfg.IsEnabled()), and captcha.NewVerifier
+	// returns nil only when that same flag is off. A branch that cannot fail is
+	// worse than none: it reads as protection and stops anyone looking. The
+	// coupling it silently depended on is now asserted where it CAN fail —
+	// TestEnabledCaptchaAlwaysHasVerifier in captcha_wiring_test.go.
 	result, err := deps.Verifier.Verify(r.Context(), captcha.VerifyRequest{Token: token, RemoteIP: clientIP, Bucket: bucket})
 	if err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("captcha verification failed")

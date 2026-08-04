@@ -141,7 +141,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 
 	// Money mover: any re-execution verifies by reading before sending again.
 	if intent.Attempts > 1 {
-		txnID, found, verr := client.FindSuccessfulSaleByOrderID(orderID)
+		txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 		if verr != nil {
 			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -161,7 +161,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	if p.StoredCredentialRef != "" {
 		citContext = charge.OneTimeReuse(p.StoredCredentialRef)
 	}
-	saleResp, err := client.RunSale(nmi.SaleParams{
+	saleResp, err := client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  p.CustomerVaultID,
 		BillingID:        p.BillingID,
 		Amount:           moneyutil.Cents(amountCents),
@@ -192,7 +192,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 				Currency:               p.Currency,
 				FailureCode:            nmidirect.FailureCode(pmErr),
 				AttemptKind:            payments.AttemptInitial,
-				TokenType:              charge.TokenTypeProviderVault,
+				TokenType:              charge.TokenTypePSPToken,
 			})
 			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
 				"declined":        true,
@@ -220,7 +220,7 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(orderID)
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}
@@ -254,7 +254,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 		Currency:      p.Currency,
 		Metadata:      metadata,
 		AttemptKind:   payments.AttemptInitial,
-		TokenType:     charge.TokenTypeProviderVault,
+		TokenType:     charge.TokenTypePSPToken,
 	})
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the

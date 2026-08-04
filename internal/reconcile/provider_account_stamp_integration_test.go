@@ -62,6 +62,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			ListAmount:    999,
 			Currency:      "USD",
 			Status:        "completed",
+			MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt:   now,
 			CreatedAt:     now,
 		}
@@ -77,7 +78,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 		pmt2 := &models.Payment{
 			ID: uuid.New(), CustomerID: customerID, PriceID: priceID, Rail: models.RailNMI,
 			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "USD",
-			Status: "completed", PurchasedAt: now, CreatedAt: now,
+			Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
 		}
 		require.NoError(t, payments.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))
 		got2, err := payments.NewPaymentRepo(appDB).GetByID(ctx, pmt2.ID)

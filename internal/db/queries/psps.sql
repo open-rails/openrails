@@ -119,3 +119,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = sqlc.arg(rail)::text
   AND archived = false
 ORDER BY account_id;
+
+-- or#879: the custody sibling of ResolvePSPOwnerByRailIdentity. A custodian
+-- (Basis Theory) sends its own instrument events carrying ITS tenant id, with
+-- no merchant context — same problem, same SECURITY DEFINER answer. The
+-- identity lives in the PSP's settings, indexed by uq_psps_custodian_identity.
+-- name: ResolvePSPOwnerByCustodianIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_custodian_identity(
+    lower(sqlc.arg(custodian)::text),
+    COALESCE(sqlc.narg(environment)::text, 'live'),
+    sqlc.arg(account_id)::text
+);

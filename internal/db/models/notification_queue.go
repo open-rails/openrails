@@ -23,6 +23,13 @@ const (
 	// One-off payment notifications
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // (8) Solana or other one-off purchase completed
 
+	// Invoice / arrears collection (or#828). The subscription analogue is
+	// premium_ended, which is wrong for an invoice: nothing was cancelled and
+	// no access was withdrawn — we stopped ATTEMPTING to collect, and the debt
+	// stands. data.reason is schedule_exhausted (we gave up) or
+	// non_recoverable (the issuer withdrew the mandate).
+	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
+
 	// System notifications (1 type)
 	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
 

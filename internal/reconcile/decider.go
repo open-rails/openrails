@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -72,6 +73,16 @@ type ChargeEvidence struct {
 	// merely "grace elapsed").
 	RetryAttempts      int
 	DunningMaxAttempts int
+	// LastAttemptAt DATES the two certainty legs above — the instant of the
+	// recorded non-retryable decline / final dunning attempt. It is what the
+	// #835 staleness floor measures a first-party cancel against.
+	//
+	// NO plane populates it today, because no plane populates the legs either
+	// (FailMembership decides inline at charge time). That makes first-party
+	// certainty UNDATED, and the floor refuses undated evidence rather than
+	// assuming it is fresh: a plane that starts producing these legs must date
+	// them in the same change.
+	LastAttemptAt time.Time
 }
 
 func (c ChargeEvidence) dunningExhausted() bool {
@@ -103,6 +114,37 @@ type EvidenceBundle struct {
 	// (provider, account) is newer than the lapsed period end — provider truth
 	// synced since the lapse and saw no renewal (#664 ownership leg).
 	WatermarkNewerThanPeriodEnd bool
+	// EvidenceFloor (#835) is the instant this deployment first completed a
+	// provider pull for this merchant
+	// (openrails.merchant_destructive_policy.first_pull_completed_at). Evidence
+	// OLDER than it was never corroborated by an observation this deployment
+	// made: on an imported legacy book it is inherited history, and inherited
+	// history is exactly what the arming gate could not protect against once an
+	// operator armed enforcement without reading the advisory findings.
+	//
+	// ZERO means no completed pull is on record. Nothing on file is then
+	// corroborated, so the floor falls back to THIS pass's own observation
+	// (Snapshot.FetchedAt) — a caller that forgets to supply the floor gets the
+	// STRICTER answer, never a permissive one. With neither a recorded first
+	// pull nor a dated snapshot there is nothing to measure against and the
+	// floor is inert; the only plane in that position (LIFE, which carries no
+	// snapshot) cannot reach a cancel at all.
+	//
+	// The declared import (#737) deliberately leaves it zero: its snapshot is
+	// dated at the operator's AsOf horizon, and the operator's declaration IS
+	// the observation.
+	EvidenceFloor time.Time
+}
+
+// evidenceFloor is the instant before which this bundle can vouch for nothing.
+func (ev EvidenceBundle) evidenceFloor() time.Time {
+	if !ev.EvidenceFloor.IsZero() {
+		return ev.EvidenceFloor
+	}
+	if ev.Snapshot != nil {
+		return ev.Snapshot.FetchedAt
+	}
+	return time.Time{}
 }
 
 // TransitionKind is the decider's transition vocabulary.
@@ -176,6 +218,16 @@ type Decision struct {
 	// the Certainty* constants. A TransitionCancel with an EMPTY Certainty is
 	// structurally impossible: Decide downgrades it to TransitionParkUnknown.
 	Certainty string
+	// EvidenceAt (#835) DATES the observation that justified the transition —
+	// the instant the staleness floor measures against. Zero = the leg carries
+	// no timestamp, which the floor treats as undated, never as fresh.
+	EvidenceAt time.Time
+	// EvidenceFloored (#835) records that the staleness floor downgraded a
+	// TransitionCancel to a park: the supporting evidence predates this
+	// deployment's first pull of the merchant (or carries no date at all). The
+	// planes turn it into an operator finding — a floored row must be visible,
+	// not a silent no-op.
+	EvidenceFloored bool
 	// Reason is a short cause slug for finding evidence / logs.
 	Reason string
 }
@@ -197,6 +249,11 @@ type Decision struct {
 //     unless a certainty leg (non-retryable decline / dunning exhausted)
 //     justifies the terminal cancel.
 //  3. Nothing → no-op. An `unknown` row without a snapshot stays unknown.
+//
+// Every cancel-shaped outcome then passes ONE chokepoint (gateCancelCertainty →
+// gateEvidenceFloor): the evidence must be of a kind that proves death (#821)
+// AND dated at/after this deployment's first pull of the merchant (#835).
+// Anything else parks as `unknown` with access intact.
 func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWindow time.Duration) Decision {
 	if dunningWindow <= 0 {
 		dunningWindow = DefaultDunningWindow
@@ -256,15 +313,88 @@ func gateCancelCertainty(d Decision, ev EvidenceBundle) Decision {
 	default:
 		d.Certainty = ev.Charge.certaintyLeg()
 	}
-	if d.Certainty != "" {
+	if d.Certainty == "" {
+		return parkCancel(d, "_no_certainty", false)
+	}
+	return gateEvidenceFloor(d, ev)
+}
+
+// gateEvidenceFloor is the #835 staleness floor and the SECOND half of the one
+// destructive chokepoint: it is reachable only from gateCancelCertainty, so no
+// plane can pass the certainty gate and skip the floor.
+//
+// Certainty says the evidence is the right KIND. The floor says the evidence is
+// ours: a destructive action may not rest on a record that predates the first
+// pull this deployment ever completed for the merchant. Such a record was never
+// corroborated by anything we observed — on an imported legacy book it is
+// inherited history that arrived with the data — and "no evidence, no action"
+// applies to inherited evidence exactly as it applies to missing evidence. The
+// arming gate covers the FIRST pass; this covers every pass after it, which is
+// the failure that survives an operator arming enforcement before reading the
+// advisory findings carefully.
+//
+// It gates the terminal cancel + entitlement revoke and the irreversible
+// provider delete they queue — nothing else. Reads, findings persistence,
+// renewals, period adoption, dunning entry and parking are untouched.
+func gateEvidenceFloor(d Decision, ev EvidenceBundle) Decision {
+	floor := ev.evidenceFloor()
+	if floor.IsZero() {
+		// Neither a recorded first pull nor a dated observation: there is
+		// nothing to measure against. Unreachable for a cancel on any wired
+		// plane — all of them either carry the merchant's floor or a dated
+		// provider snapshot.
 		return d
 	}
+	at := cancelEvidenceAt(d, ev)
+	switch {
+	case at.IsZero():
+		return parkCancel(d, "_evidence_undated", true)
+	case at.Before(floor):
+		return parkCancel(d, "_evidence_predates_first_pull", true)
+	}
+	d.EvidenceAt = at
+	return d
+}
+
+// cancelEvidenceAt dates the certainty leg that justified this cancel:
+//
+//	provider-confirmed dead  the roster read THIS pass performed — the
+//	                         provider's current word, whatever leg was named
+//	non-retryable decline    the declined attempt's OccurredAt (provider
+//	                         snapshot) or the recorded attempt (first-party)
+//	dunning exhausted        the final recorded dunning attempt
+func cancelEvidenceAt(d Decision, ev EvidenceBundle) time.Time {
+	if d.RemoteGone && ev.Snapshot != nil {
+		return ev.Snapshot.FetchedAt
+	}
+	if !d.EvidenceAt.IsZero() {
+		return d.EvidenceAt
+	}
+	return ev.Charge.LastAttemptAt
+}
+
+// parkCancel downgrades a refused cancel to the park every ungated transition
+// falls back to: access intact, provider verification resolves it. The reason
+// suffix names which half of the chokepoint refused it.
+func parkCancel(d Decision, suffix string, floored bool) Decision {
 	return Decision{
 		Kind:             TransitionParkUnknown,
 		Backfill:         d.Backfill,
 		RemoteCustomerID: d.RemoteCustomerID,
-		Reason:           d.Reason + "_no_certainty",
+		EvidenceAt:       d.EvidenceAt,
+		EvidenceFloored:  floored,
+		Reason:           d.Reason + suffix,
 	}
+}
+
+// EvidenceFloorFor reads the merchant's #835 staleness floor. Every plane that
+// can reach a destructive transition loads it HERE, from the merchant's own
+// destructive policy, instead of accepting it from a caller — a floor that has
+// to be passed in is a floor a call site can forget (or#842: a gate enforced at
+// exactly one site while the other paths walked around it). ctx must be
+// merchant-scoped.
+func EvidenceFloorFor(ctx context.Context, database *db.DB, merchantID uuid.UUID) time.Time {
+	return destructive.New(database).EvidenceFloor(ctx, merchantID)
 }
 
 // decideFromSnapshot is the provider-truth law (#632/#633 resolution core,
@@ -360,7 +490,10 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 		if now.Sub(periodEnd) <= dunningWindow {
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "declined_renewal_within_window"})
 		}
-		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "declined_renewal_beyond_window"}
+		// #835: the decline attempt itself dates this cancel. On an imported
+		// book the decline arrived with the data and can be years older than
+		// anything this deployment observed.
+		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, EvidenceAt: declineTxn.OccurredAt, Reason: "declined_renewal_beyond_window"}
 		if collection.ClassifyDecline(string(snap.Provider), declineTxn.DeclineCode) == collection.DeclineNonRecoverable {
 			d.Certainty = collection.CertaintyNonRetryableDecline
 		}
@@ -379,14 +512,15 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 		}
 		return with(Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "roster_past_due_beyond_window"})
 	}
-	// 5) The provider says cancelled/expired.
+	// 5) The provider says cancelled/expired. The evidence is the roster read
+	//    itself, so it dates from this pass (#835).
 	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCancelled || remoteSub.Status == SubscriptionStatusExpired) {
-		return with(Decision{Kind: TransitionCancel, RemoteGone: true, Reason: "roster_dead"})
+		return with(Decision{Kind: TransitionCancel, RemoteGone: true, EvidenceAt: snap.FetchedAt, Reason: "roster_dead"})
 	}
 	// 6) The sub is absent AND the pull exhaustively covered subscriptions → it
 	//    was deleted at the provider (coverage-absence proof).
 	if remoteSub == nil && snap.Coverage.SubscriptionsExhaustive {
-		return with(Decision{Kind: TransitionCancel, RemoteGone: true, Reason: "absent_from_exhaustive_roster"})
+		return with(Decision{Kind: TransitionCancel, RemoteGone: true, EvidenceAt: snap.FetchedAt, Reason: "absent_from_exhaustive_roster"})
 	}
 	// 7) No conclusive provider evidence.
 	return base
@@ -423,7 +557,10 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 			// (FailMembership owns the inline decision), so convergence still
 			// only ever parks — structurally.
 			if leg := ev.Charge.certaintyLeg(); leg != "" {
-				return Decision{Kind: TransitionCancel, Certainty: leg, Reason: "dunning_exhausted_certainty"}
+				// #835: dated by the recorded attempt. Nothing populates
+				// LastAttemptAt today, so this leg is undated and the floor
+				// refuses it — see ChargeEvidence.LastAttemptAt.
+				return Decision{Kind: TransitionCancel, Certainty: leg, EvidenceAt: ev.Charge.LastAttemptAt, Reason: "dunning_exhausted_certainty"}
 			}
 			return Decision{Kind: TransitionParkUnknown, Reason: "dunning_stalled_past_grace"}
 		}

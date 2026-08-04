@@ -5,27 +5,46 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// merchantOwnedTables are the openrails.* tables that carry the persisted tenant_id
-// column. Merchant deletion purges these rows for the target merchant. Kept in
-// sync with the consolidated schema's merchant-owned table set AND with
-// queries/tenant_lifecycle.sql + the dispatch switches below (#334: each table
-// has a STATIC generated count/purge query — no runtime SQL assembly).
+// DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
+// openrails.destructive_runs ledger (or#859 §5.1 — the same ledger --prune
+// writes, so one query answers "what did this deployment destroy, and who
+// asked for it").
+const DestructiveRunKindMerchantPurge = "merchant_purge"
+
+// merchantOwnedTables are the openrails.* tables that carry the persisted
+// merchant_id column, IN PURGE ORDER: children before the rows they reference.
+//
+// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices,
+// checkout_sessions→payments and rail_mutation_logs→rail_intents are all
+// RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
+// whole purge (SQLSTATE 23001) for any merchant that owned a product with a
+// price — i.e. every real one. Nothing caught it because the only test seeded a
+// single entitlement row.
+//
+// Kept in sync with queries/merchant_lifecycle.sql + the dispatch switches
+// below (#334: each table has a STATIC generated count/purge query — no runtime
+// SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
-	"products", "prices", "catalog_drift_events", "payment_methods",
-	"subscriptions", "entitlements", "payments",
-	"notification_queue", "rail_customer_accounts",
-	"checkout_sessions", "rail_mutation_logs", "rail_intents",
+	"notification_queue", "catalog_drift_events",
+	"rail_mutation_logs", "rail_intents",
+	"checkout_sessions", "entitlements", "payments", "subscriptions",
+	"money_settings", "payment_methods", "rail_customer_accounts",
+	"prices", "products",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
-	// (REVOKE DELETE) and intentionally NOT row-purged here.
-	"money_settings",
+	// (REVOKE DELETE) and intentionally NOT row-purged here — which is also why a
+	// merchant whose grants pin payments/products cannot be purged at all; see
+	// ErrPurgeBlockedByRetainedHistory.
 }
 
 // countMerchantRows dispatches to the table's generated count query.
@@ -96,89 +115,282 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 	}
 }
 
-// Export performs a merchant-scoped logical export and records a completed
-// openrails.merchant_exports row (issue #225). The export here is a row-count
-// manifest plus a Vault-side secret-name enumeration (values are NEVER exported
-// in plaintext) — enough to satisfy export-before-delete and give a portability
-// manifest.
+// PurgeInventory is the manifest of what a merchant purge is ABOUT TO DESTROY.
 //
-// Returns the export id. Delete is gated on at least one completed export.
-func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[string]int, error) {
-	if _, err := s.merchantByID(ctx, id); err != nil {
-		return "", nil, err
+// IT IS NOT A BACKUP AND IT RESTORES NOTHING. It holds counts, secret NAMES and
+// an explicit list of everything it does not capture — no customer, subscription,
+// payment, entitlement or catalog row is copied anywhere, and no secret VALUE
+// ever leaves its store. Its whole job is to put the blast radius in front of
+// the operator before they type the confirmation.
+//
+// The only restore path for a purged merchant is Postgres point-in-time recovery
+// plus the ENCRYPTION_MASTER_KEY plus Vault — see docs/backup-and-recovery.md. A
+// real per-merchant archive is or#859 phase 2 (`openrails merchant snapshot`);
+// until that exists, a purge is one-way.
+type PurgeInventory struct {
+	// ID is the openrails.merchant_purge_inventories row id.
+	ID string
+	// MerchantSlug is the merchant this inventory describes.
+	MerchantSlug string
+	// RowCounts is per-table, including rows a previous prune soft-deleted: the
+	// purge hard-deletes those too, so they belong in the blast radius.
+	RowCounts map[string]int
+	// TotalRows is the number Delete requires the operator to type back.
+	TotalRows int
+	// SecretNames are the merchant's secret names. Values are never read.
+	SecretNames []string
+	// NotCaptured spells out, in operator-facing prose, everything this
+	// inventory does not and cannot bring back.
+	NotCaptured []string
+}
+
+// IsBackup answers the question the old name invited. It is always false.
+func (PurgeInventory) IsBackup() bool { return false }
+
+// notCaptured builds the honest list. Some entries are quantified from the
+// inventory itself so the sentence names a number the operator can check.
+func notCaptured(counts map[string]int, secrets int) []string {
+	out := []string{
+		"ROW DATA. This inventory holds counts, not rows. Not one customer, subscription, " +
+			"payment, entitlement, price or product row is copied anywhere by taking it.",
+		fmt.Sprintf("SECRET VALUES. %d secret NAMES are listed; no value is ever read or written out. "+
+			"A purge deletes the merchant's secrets from Vault and from the DB-encrypted store, "+
+			"and nothing here can recreate them.", secrets),
+		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants and " +
+			"subscription_status_transitions are not purged (the app role holds no DELETE on them) " +
+			"and are not captured here either. After a purge they outlive the control-plane rows " +
+			"they referenced.",
+	}
+	if n := counts["payment_methods"]; n > 0 {
+		out = append(out, fmt.Sprintf(
+			"STORED PAYMENT METHODS (%d). The purge drops the LOCAL custody mirror only. The "+
+				"instruments themselves stay at the PSP and are NOT revoked — after this you no longer "+
+				"know which vault tokens exist to be revoked. Only the end user deletes their own "+
+				"instrument; a purge must not be used as a way to.", n))
+	}
+	if n := counts["rail_intents"] + counts["rail_mutation_logs"]; n > 0 {
+		out = append(out, fmt.Sprintf(
+			"THE PROVIDER-WRITE AUDIT TRAIL (%d rows across rail_intents and rail_mutation_logs). "+
+				"The record of every external write this deployment attempted for the merchant is "+
+				"destroyed with it, including intents queued but never fired.", n))
+	}
+	out = append(out,
+		"PROVIDER-SIDE STATE. Subscriptions, plans, customer vaults and webhook endpoints at "+
+			"NMI / Stripe / CCBill / Solana are untouched by a purge and unreachable afterwards: "+
+			"the local rows naming them are gone, so nothing remains to reconcile against.",
+		"THE RESTORE PATH. There is exactly one — Postgres point-in-time recovery, with the "+
+			"ENCRYPTION_MASTER_KEY and Vault restored alongside it (docs/backup-and-recovery.md). "+
+			"If you do not have PITR configured and tested, a purge is final.")
+	return out
+}
+
+// TakePurgeInventory records what a purge of this merchant would destroy and
+// returns it. It writes an openrails.merchant_purge_inventories row that Delete
+// then requires — the gate exists so the operator has SEEN the blast radius,
+// not because the inventory can undo anything. See PurgeInventory.
+//
+// Was Export (#225). The old name promised a restore point that never existed.
+func (s *Service) TakePurgeInventory(ctx context.Context, id merchant.ID) (PurgeInventory, error) {
+	m, err := s.merchantByID(ctx, id)
+	if err != nil {
+		return PurgeInventory{}, err
 	}
 
 	tables, err := s.existingMerchantTables(ctx)
 	if err != nil {
-		return "", nil, err
+		return PurgeInventory{}, err
 	}
+	counts, total, err := s.countMerchantOwnedRows(ctx, id, tables)
+	if err != nil {
+		return PurgeInventory{}, err
+	}
+
+	// Enumerate per-merchant secret NAMES (never values).
+	var secretNames []string
+	if s.secrets != nil {
+		names, err := s.secrets.List(ctx, id)
+		if err != nil {
+			return PurgeInventory{}, fmt.Errorf("merchants: purge inventory enumerate secrets: %w", err)
+		}
+		secretNames = append(secretNames, names...)
+		sort.Strings(secretNames)
+	}
+
+	inv := PurgeInventory{
+		MerchantSlug: m.Slug,
+		RowCounts:    counts,
+		TotalRows:    total,
+		SecretNames:  secretNames,
+		NotCaptured:  notCaptured(counts, len(secretNames)),
+	}
+
+	manifestJSON, err := json.Marshal(map[string]any{
+		"kind":          "purge_inventory",
+		"is_backup":     false,
+		"restores":      "nothing",
+		"merchant_slug": inv.MerchantSlug,
+		"row_counts":    inv.RowCounts,
+		"total_rows":    inv.TotalRows,
+		"secret_names":  inv.SecretNames,
+		"not_captured":  inv.NotCaptured,
+		"restore_path": "Postgres point-in-time recovery + ENCRYPTION_MASTER_KEY + Vault " +
+			"(docs/backup-and-recovery.md). This inventory restores nothing.",
+	})
+	if err != nil {
+		return PurgeInventory{}, fmt.Errorf("merchants: marshal purge inventory: %w", err)
+	}
+
+	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			INSERT INTO openrails.merchant_purge_inventories (merchant_id, status, manifest, completed_at)
+			VALUES ($1::uuid, 'completed', $2::jsonb, current_timestamp)
+			RETURNING id::text
+		`, id.String(), string(manifestJSON)).Scan(&inv.ID)
+	}); err != nil {
+		return PurgeInventory{}, fmt.Errorf("merchants: record purge inventory: %w", err)
+	}
+	return inv, nil
+}
+
+// countMerchantOwnedRows returns per-table counts and the total. Counts are
+// deliberately unfiltered by deleted_at: a purge hard-deletes soft-deleted rows
+// too, so they are part of the blast radius.
+func (s *Service) countMerchantOwnedRows(ctx context.Context, id merchant.ID, tables []string) (map[string]int, int, error) {
 	counts := make(map[string]int, len(tables))
+	total := 0
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		for _, tbl := range tables {
 			n, err := countMerchantRows(ctx, q, tbl, id.UUID())
 			if err != nil {
-				return fmt.Errorf("merchants: export count %s: %w", tbl, err)
+				return fmt.Errorf("merchants: count %s: %w", tbl, err)
 			}
 			counts[tbl] = int(n)
+			total += int(n)
 		}
 		return nil
 	}); err != nil {
-		return "", nil, err
+		return nil, 0, err
 	}
-
-	// Enumerate per-merchant secret NAMES (never values) for the portability manifest.
-	var secretNames []string
-	if s.secrets != nil {
-		names, err := s.secrets.List(ctx, id)
-		if err != nil {
-			return "", nil, fmt.Errorf("merchants: export enumerate secrets: %w", err)
-		}
-		secretNames = names
-	}
-
-	manifest := map[string]any{"row_counts": counts, "secret_names": secretNames}
-	manifestJSON, err := json.Marshal(manifest)
-	if err != nil {
-		return "", nil, fmt.Errorf("merchants: marshal export manifest: %w", err)
-	}
-
-	var exportID string
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			INSERT INTO openrails.merchant_exports (merchant_id, status, row_counts, completed_at)
-			VALUES ($1::uuid, 'completed', $2::jsonb, current_timestamp)
-			RETURNING id::text
-		`, id.String(), string(manifestJSON)).Scan(&exportID)
-	})
-	if err != nil {
-		return "", nil, fmt.Errorf("merchants: record export: %w", err)
-	}
-	return exportID, counts, nil
+	return counts, total, nil
 }
 
-// DeleteOptions parameterizes a merchant delete.
+// PurgeConfirmPhrase is the exact string DeleteOptions.ConfirmPhrase must carry.
+// Typing it is the point: the sentence states the true situation, so an operator
+// cannot authorise a purge without asserting in their own keystrokes that no
+// backup exists.
+func PurgeConfirmPhrase(slug string) string {
+	return fmt.Sprintf("purge merchant %s permanently, no backup exists", slug)
+}
+
+// DeleteOptions parameterizes a merchant purge. A bare boolean is not a
+// confirmation: it authorises a blast radius the operator never saw.
 type DeleteOptions struct {
-	// Confirm must be true: deletion is a gated purge. A false Confirm returns an
-	// error so an accidental call cannot purge merchant data.
-	Confirm bool
+	// ConfirmPhrase must equal PurgeConfirmPhrase(slug) exactly.
+	ConfirmPhrase string
+	// ExpectRows is the operator's typed blast radius — the total merchant-owned
+	// row count they believe they are destroying. It must match what the purge
+	// discovers, or nothing is written.
+	ExpectRows *int
+	// Actor is who asked for it; recorded on the destructive run.
+	Actor string
 }
 
-// Delete performs the gated purge of a merchant (issue #225):
-//
-//   - requires Confirm (confirmation gate),
-//   - requires a completed export (export-before-delete enforced),
-//   - purges every merchant-owned openrails.* row, the merchant's cached secrets, and
-//     credential/audit/export bookkeeping, then tombstones the directory row
-//     (status='deleted', deleted_at set) inside ONE transaction.
-//
-// Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound (the
-// active-row lookup misses), so the purge itself is not re-run.
-func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
-	if !opts.Confirm {
-		return errors.New("merchants: delete requires confirmation")
+// ErrPurgeNotConfirmed: the typed confirmation was absent or wrong. Its message
+// carries the true blast radius and the exact phrase required.
+type ErrPurgeNotConfirmed struct {
+	Slug      string
+	TotalRows int
+	Want      string
+}
+
+func (e *ErrPurgeNotConfirmed) Error() string {
+	return fmt.Sprintf(
+		"refusing to purge merchant %s: this destroys %d rows across every merchant-owned table and is NOT reversible — "+
+			"the purge inventory is not a backup, and only Postgres PITR can bring the merchant back. "+
+			"To proceed, take a fresh inventory and pass ConfirmPhrase=%q with ExpectRows=%d",
+		e.Slug, e.TotalRows, e.Want, e.TotalRows)
+}
+
+// ErrPurgeRowCountMismatch: the typed row count disagrees with what the purge
+// found. Nothing is written.
+type ErrPurgeRowCountMismatch struct {
+	Expected *int
+	Found    int
+}
+
+func (e *ErrPurgeRowCountMismatch) Error() string {
+	if e.Expected == nil {
+		return fmt.Sprintf("refusing to purge: ExpectRows is required. This merchant holds %d rows; take a purge inventory, read it, then confirm %d", e.Found, e.Found)
 	}
-	if _, err := s.merchantByID(ctx, id); err != nil {
+	return fmt.Sprintf("refusing to purge: ExpectRows says %d, this merchant holds %d. Take a fresh purge inventory and confirm the number it reports", *e.Expected, e.Found)
+}
+
+// ErrPurgeInventoryStale: no inventory exists for the merchant's CURRENT row
+// count. An inventory taken before the book changed proves the operator looked
+// at a state that no longer exists.
+type ErrPurgeInventoryStale struct {
+	Slug      string
+	TotalRows int
+}
+
+func (e *ErrPurgeInventoryStale) Error() string {
+	return fmt.Sprintf(
+		"refusing to purge merchant %s: no purge inventory matches its current %d rows. "+
+			"Take a fresh inventory (TakePurgeInventory), read what it says is NOT captured, then purge. "+
+			"The inventory is not a backup — it exists so the blast radius is seen, not so the data can come back",
+		e.Slug, e.TotalRows)
+}
+
+// ErrPurgeBlockedByRetainedHistory: a row the purge tried to delete is pinned by
+// a table the purge deliberately does not touch — most often the append-only
+// grant log, which FK-references the payments and products it justifies.
+//
+// This is a refusal, not a partial purge: the whole transaction rolls back, so
+// the merchant is untouched. It is the correct outcome. Removing the pin would
+// mean deleting the append-only record that entitlements are derived from,
+// which is not something a purge may do.
+type ErrPurgeBlockedByRetainedHistory struct {
+	Slug       string
+	Constraint string
+	Detail     string
+}
+
+func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
+	return fmt.Sprintf(
+		"refusing to purge merchant %s: its retained history pins rows the purge would have to delete (constraint %q: %s). "+
+			"NOTHING was deleted — the transaction rolled back. The append-only ledger, grant log and status-transition history are "+
+			"never purged, and they reference the payments/products/prices they justify, so a merchant with real billing history "+
+			"cannot be purged this way. Retire the merchant (status/archived) instead, or take the question to a real per-merchant "+
+			"archive (or#859)",
+		e.Slug, e.Constraint, e.Detail)
+}
+
+// Delete performs the gated purge of a merchant. It is one-way: read
+// PurgeInventory before wiring anything to this.
+//
+// Five refusals stand in front of it, in order:
+//
+//   - the destructive-action gate (#836/#835) — the same instance kill switch and
+//     per-merchant policy that hold a mass cancellation. A nil gate DENIES.
+//   - a typed confirmation phrase naming the merchant and stating that no backup
+//     exists (PurgeConfirmPhrase).
+//   - a typed row count that must equal the true blast radius.
+//   - a purge inventory whose recorded total still matches that count, so the
+//     operator demonstrably looked at THIS state.
+//   - Confirm-by-construction: DeleteOptions cannot be satisfied by a boolean.
+//
+// It then purges every merchant-owned openrails.* row, the merchant's secrets,
+// and tombstones the directory row (status='deleted', deleted_at) inside ONE
+// transaction, stamped with a destructive_runs row (kind=merchant_purge). The
+// run is opened and closed inside that transaction deliberately: unlike a prune,
+// a purge is atomic, so either the damage and its record both exist or neither
+// does.
+//
+// Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound.
+func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
+	m, err := s.merchantByID(ctx, id)
+	if err != nil {
 		return err
 	}
 
@@ -190,20 +402,74 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		return err
 	}
 
+	// The true blast radius, measured before any confirmation is judged, so every
+	// refusal below can state it.
+	counts, total, err := s.countMerchantOwnedRows(ctx, id, tables)
+	if err != nil {
+		return err
+	}
+
+	want := PurgeConfirmPhrase(m.Slug)
+	if opts.ConfirmPhrase != want {
+		return &ErrPurgeNotConfirmed{Slug: m.Slug, TotalRows: total, Want: want}
+	}
+	if opts.ExpectRows == nil || *opts.ExpectRows != total {
+		return &ErrPurgeRowCountMismatch{Expected: opts.ExpectRows, Found: total}
+	}
+
+	// The gate is the LAST wall, deliberately after the read-only checks above:
+	// every refusal an operator can still act on states the true blast radius,
+	// and the gate then stands between a fully-typed request and the first write.
+	// Fail-closed — an unwired gate denies.
+	gate := s.destructive
+	if gate == nil {
+		gate = deniedPolicy{}
+	}
+	if allowed, reason := gate.AllowDestructive(ctx, id.UUID()); !allowed {
+		return fmt.Errorf("merchants: refusing to purge merchant %s: %s", m.Slug, reason)
+	}
+
+	actor := opts.Actor
+	if actor == "" {
+		actor = "unknown"
+	}
+	runID := uuid.New()
+	expected := int64(total)
+	note := fmt.Sprintf("merchant purge %s (%d rows) — one-way; restore path is PITR only", m.Slug, total)
+	inventoryProof, err := json.Marshal(map[string]any{
+		"kind":       "merchant_purge",
+		"is_backup":  false,
+		"row_counts": counts,
+		"total_rows": total,
+	})
+	if err != nil {
+		return fmt.Errorf("merchants: marshal purge proof: %w", err)
+	}
+
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		// export-before-delete: require at least one completed export.
-		var exportCount int
+		// inventory-before-purge: an inventory for the merchant's CURRENT row
+		// count. A stale one proves nothing about what is about to be destroyed.
+		var matching int
 		if err := tx.QueryRow(ctx, `
-			SELECT count(*) FROM openrails.merchant_exports
+			SELECT count(*) FROM openrails.merchant_purge_inventories
 			 WHERE merchant_id = $1::uuid AND status = 'completed'
-		`, id.String()).Scan(&exportCount); err != nil {
-			return fmt.Errorf("merchants: check export-before-delete: %w", err)
+			   AND (manifest->>'total_rows')::bigint = $2::bigint
+		`, id.String(), int64(total)).Scan(&matching); err != nil {
+			return fmt.Errorf("merchants: check inventory-before-purge: %w", err)
 		}
-		if exportCount == 0 {
-			return ErrExportRequired
+		if matching == 0 {
+			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
 		}
 
 		txq := gen.New(tx)
+		if _, err := txq.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
+			ID: runID, MerchantID: id.UUID(), Kind: DestructiveRunKindMerchantPurge,
+			Actor: actor, DryRun: false, Coverage: inventoryProof,
+			ExpectedRows: &expected, Note: &note,
+		}); err != nil {
+			return fmt.Errorf("merchants: open destructive run: %w", err)
+		}
+
 		for _, tbl := range tables {
 			if err := purgeMerchantRows(ctx, txq, tbl, id.UUID()); err != nil {
 				return fmt.Errorf("merchants: purge %s: %w", tbl, err)
@@ -224,25 +490,56 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		`, id.String()); err != nil {
 			return fmt.Errorf("merchants: tombstone merchant: %w", err)
 		}
+
+		affected, _ := json.Marshal(counts)
+		if _, err := txq.FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{
+			MerchantID: id.UUID(), ID: runID, Status: "completed",
+			Now: time.Now().UTC(), Affected: affected,
+		}); err != nil {
+			return fmt.Errorf("merchants: close destructive run %s: %w", runID, err)
+		}
 		return nil
 	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23001") {
+			return &ErrPurgeBlockedByRetainedHistory{Slug: m.Slug, Constraint: pgErr.ConstraintName, Detail: pgErr.Detail}
+		}
 		return err
 	}
 
 	// Best-effort purge of any non-DB secret backend (e.g. Vault). Done outside
-	// the tx since it is not transactional; failures here are logged by callers.
+	// the tx since it is not transactional; the count is folded back onto the run
+	// so the record of damage covers the secret store too.
+	secretsDeleted := 0
 	if s.secrets != nil {
 		if names, lerr := s.secrets.List(ctx, id); lerr == nil {
 			for _, n := range names {
-				_ = s.secrets.Delete(ctx, id, n)
+				if derr := s.secrets.Delete(ctx, id, n); derr == nil {
+					secretsDeleted++
+				}
 			}
 		}
+	}
+	if secretsDeleted > 0 {
+		full := make(map[string]int, len(counts)+1)
+		for k, v := range counts {
+			full[k] = v
+		}
+		full["merchant_secrets"] = secretsDeleted
+		affected, _ := json.Marshal(full)
+		_ = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			_, err := gen.New(tx).FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{
+				MerchantID: id.UUID(), ID: runID, Status: "completed",
+				Now: time.Now().UTC(), Affected: affected,
+			})
+			return err
+		})
 	}
 	return nil
 }
 
 // existingMerchantTables returns the subset of merchantOwnedTables that actually
-// exist in the billing schema, so export/delete tolerate a partial schema
+// exist in the billing schema, so inventory/purge tolerate a partial schema
 // without aborting a transaction on a missing table. The names are intersected
 // against a fixed allow-list, never user input.
 func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) {

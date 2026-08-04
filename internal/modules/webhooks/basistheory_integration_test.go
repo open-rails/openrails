@@ -71,12 +71,12 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		ID:                   fx.methodID,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           fx.customerID,
-		Rail:                 string(models.RailVaultedCard),
+		Rail:                 string(models.RailNMI),
 		RailMethodRef:        fx.tokenID,
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
-		VaultProvider:        "basis_theory",
-		VaultFingerprint:     "fp_" + uuid.NewString()[:10],
+		Custodian:            models.CustodianBasisTheory,
+		Fingerprint:          "fp_" + uuid.NewString()[:10],
 		NetworkTokenID:       fx.ntID,
 		NetworkTokenStatus:   "active",
 		NetworkTokenPar:      "par_x",
@@ -90,17 +90,22 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", fx.methodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'vaulted_card'")
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'basis_theory'")
 	})
 
 	fx.dispatcher = &WebhookDispatcher{
 		DB:                   dbi,
 		DeduplicationService: NewDeduplicationService(idempotency.NewIdempotencyService(nil), dbi),
+		// or#879: the custodian's client is armed off the NMI PSP its proxy
+		// charges land on — the webhook routes to that PSP by tenant id.
 		RailConfigs: railresolve.FixedSet{
-			"bt": {
-				Rail:      models.RailVaultedCard,
-				AccountID: "tnt_test",
-				VaultedCard: &config.VaultedCardRailConfig{
+			"mobius-bt": {
+				Rail:      models.RailNMI,
+				AccountID: "579145",
+				NMI:       &config.NMIRailConfig{SecurityKey: "sk_gateway_test"},
+				Custody: &config.CustodyConfig{
+					Custodian:  models.CustodianBasisTheory,
+					AccountID:  "tnt_test",
 					APIKey:     "key_private_test",
 					APIBaseURL: fx.btAPI.URL,
 				},
@@ -123,7 +128,7 @@ func (fx *btWebhookFixture) deliver(t *testing.T, eventID, eventType string, dat
 	require.NoError(t, err)
 	verified := true
 	return fx.dispatcher.Process(fx.ctx, &WebhookMessage{
-		Rail:           string(models.RailVaultedCard),
+		Rail:           string(models.EventSourceBasisTheory),
 		EventID:        eventID,
 		EventType:      eventType,
 		Payload:        payload,
@@ -205,7 +210,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		row := fx.methodRow(t)
 		require.Equal(t, newToken, row.RailMethodRef, "rail_method_ref rotates to new_token")
-		require.Equal(t, "fp_rotated", row.VaultFingerprint)
+		require.Equal(t, "fp_rotated", row.Fingerprint)
 		require.Equal(t, "4444", *row.LastFour)
 		require.Equal(t, "mastercard", *row.CardType)
 		require.Equal(t, "07/33", *row.ExpiryDate)
@@ -219,7 +224,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		after := fx.methodRow(t)
 		require.Equal(t, before.RailMethodRef, after.RailMethodRef)
-		require.Equal(t, before.VaultFingerprint, after.VaultFingerprint)
+		require.Equal(t, before.Fingerprint, after.Fingerprint)
 	})
 
 	t.Run("WRN_CLOSED_ACCOUNT parks", func(t *testing.T) {
@@ -235,7 +240,7 @@ func TestBasisTheoryWebhook_UnverifiedIsRejectedNonRetryable(t *testing.T) {
 	fx := newBTWebhookFixture(t)
 	payload, _ := json.Marshal(map[string]any{"id": "evt_x", "type": basistheory.EventTokenDeleted})
 	err := fx.dispatcher.Process(fx.ctx, &WebhookMessage{
-		Rail:      string(models.RailVaultedCard),
+		Rail:      string(models.EventSourceBasisTheory),
 		EventID:   "evt_x",
 		EventType: basistheory.EventTokenDeleted,
 		Payload:   payload,

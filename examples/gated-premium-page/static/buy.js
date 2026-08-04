@@ -1,7 +1,7 @@
 // NMI tokenized-vault checkout, per docs/frontend-integration.md:
 // delegated token from our backend -> Collect.js tokenizes the card ->
 // POST /v1/me/checkout with the one-time payment_token -> /premium.
-let cfg, priceID, cached;
+let cfg, psp, priceID, cached;
 
 // Fetch-and-cache delegated-token helper (docs/frontend-integration.md).
 async function delegatedToken() {
@@ -18,6 +18,17 @@ function setStatus(msg) { document.getElementById("status").textContent = msg; }
 async function main() {
   cfg = await (await fetch("/api/config")).json();
 
+  // Payment discovery, public + unauthenticated: GET /v1/checkout-config
+  // returns this merchant's ARMED PSPs (resolved from the request Host) with
+  // the public values each needs in the browser. Nothing about rails,
+  // PSP keys or tokenization is configured in this app.
+  const cc = await (await fetch(cfg.openrails_base_url + "/v1/checkout-config")).json();
+  psp = (cc.psps ?? []).find(p => p.flow === "tokenize" && p.rail === "nmi");
+  if (!psp) {
+    setStatus("This merchant has no armed card PSP — nothing to buy.");
+    return;
+  }
+
   // Public catalog, no auth: GET /v1/products (active prices embedded).
   const res = await fetch(cfg.openrails_base_url + "/v1/products");
   const products = (await res.json()).data ?? [];
@@ -25,7 +36,7 @@ async function main() {
   box.textContent = "";
   for (const p of products) {
     for (const price of p.prices ?? []) {
-      if (price.providers?.length && !price.providers.includes(cfg.psp)) continue;
+      if (price.providers?.length && !price.providers.includes(psp.key)) continue;
       const b = document.createElement("button");
       b.className = "price";
       b.textContent = `${p.name} — $${(price.unit_amount / 1_000_000).toFixed(2)} ` +
@@ -39,12 +50,13 @@ async function main() {
       box.appendChild(b);
     }
   }
-  if (!box.childElementCount) box.textContent = "No purchasable prices for PSP " + cfg.psp;
+  if (!box.childElementCount) box.textContent = "No purchasable prices for PSP " + psp.key;
 
-  // Collect.js needs its public tokenization key as a data- attribute.
+  // Collect.js needs its public tokenization key as a data- attribute. Both
+  // values come from the discovery document above.
   const s = document.createElement("script");
-  s.src = cfg.tokenization_url;
-  s.dataset.tokenizationKey = cfg.tokenization_key;
+  s.src = psp.config.tokenization_url;
+  s.dataset.tokenizationKey = psp.config.tokenization_key;
   s.onload = () => CollectJS.configure({
     variant: "inline",
     fields: {
@@ -79,9 +91,10 @@ async function checkout(paymentToken, card) {
     },
     body: JSON.stringify({
       price_id: priceID,
-      // cfg.rail (not cfg.psp): the engine's checkout gate currently rejects
-      // PSP-key wire values — see the NMI_RAIL note in main.go.
-      payment: { rail: cfg.rail, payment_token: paymentToken, ...meta },
+      // psp.key IS the wire selector: /v1/checkout-config returns the
+      // merchant's PSP key, falling back to the rail kind for accounts
+      // declared without one — either way checkout resolves it.
+      payment: { rail: psp.key, payment_token: paymentToken, ...meta },
     }),
   });
   const session = await res.json();

@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func TestAddRecurringPlan_RequestShapeAndConversion(t *testing.T) {
 
 	client := newTestClient(t, server.URL)
 
-	err := client.AddRecurringPlan("openrails-abc", "Premium Monthly", 999, 30, 0)
+	err := client.AddRecurringPlan(context.Background(), "openrails-abc", "Premium Monthly", 999, 30, 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPost, method)
@@ -53,9 +54,9 @@ func TestAddRecurringPlan_RequestShapeAndConversion(t *testing.T) {
 func TestAddRecurringPlan_ValidatesInput(t *testing.T) {
 	client := newTestClient(t, "http://unused.example.com")
 
-	require.Error(t, client.AddRecurringPlan("", "name", 100, 30, 0))
-	require.Error(t, client.AddRecurringPlan("id", "", 100, 30, 0))
-	require.Error(t, client.AddRecurringPlan("id", "name", 100, 0, 0))
+	require.Error(t, client.AddRecurringPlan(context.Background(), "", "name", 100, 30, 0))
+	require.Error(t, client.AddRecurringPlan(context.Background(), "id", "", 100, 30, 0))
+	require.Error(t, client.AddRecurringPlan(context.Background(), "id", "name", 100, 0, 0))
 }
 
 func TestAddRecurringPlan_SurfacesDeclineError(t *testing.T) {
@@ -66,7 +67,7 @@ func TestAddRecurringPlan_SurfacesDeclineError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	err := client.AddRecurringPlan("dup", "Dup", 500, 30, 0)
+	err := client.AddRecurringPlan(context.Background(), "dup", "Dup", 500, 30, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Plan already exists")
 }
@@ -83,7 +84,7 @@ func TestEditRecurringPlan_OnlyMutableFields(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	err := client.EditRecurringPlan("openrails-abc", "New Name", 1999)
+	err := client.EditRecurringPlan(context.Background(), "openrails-abc", "New Name", 1999)
 	require.NoError(t, err)
 
 	assert.Equal(t, "edit_plan", seen.Get("recurring"))
@@ -99,7 +100,7 @@ func TestEditRecurringPlan_OnlyMutableFields(t *testing.T) {
 
 func TestEditRecurringPlan_RequiresPlanID(t *testing.T) {
 	client := newTestClient(t, "http://unused.example.com")
-	require.Error(t, client.EditRecurringPlan("", "name", 100))
+	require.Error(t, client.EditRecurringPlan(context.Background(), "", "name", 100))
 }
 
 func TestGetRecurringPlanByID_FoundParsesAmount(t *testing.T) {
@@ -111,7 +112,7 @@ func TestGetRecurringPlanByID_FoundParsesAmount(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	found, name, cents, err := client.GetRecurringPlanByID("openrails-abc")
+	found, name, cents, err := client.GetRecurringPlanByID(context.Background(), "openrails-abc")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "Premium Monthly", name)
@@ -127,7 +128,7 @@ func TestGetRecurringPlanDetailByID_ParsesAmountAndFrequency(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	detail, err := client.GetRecurringPlanDetailByID("premium-usd-999-30")
+	detail, err := client.GetRecurringPlanDetailByID(context.Background(), "premium-usd-999-30")
 	require.NoError(t, err)
 	assert.True(t, detail.Found)
 	assert.Equal(t, "Premium Monthly", detail.Name)
@@ -142,7 +143,7 @@ func TestGetRecurringPlanDetailByID_MonthPlanHasZeroDayFrequency(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	detail, err := client.GetRecurringPlanDetailByID("monthly")
+	detail, err := client.GetRecurringPlanDetailByID(context.Background(), "monthly")
 	require.NoError(t, err)
 	assert.True(t, detail.Found)
 	assert.Equal(t, 0, detail.DayFrequency)
@@ -156,7 +157,7 @@ func TestGetRecurringPlanByID_NotFound(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	found, _, _, err := client.GetRecurringPlanByID("missing")
+	found, _, _, err := client.GetRecurringPlanByID(context.Background(), "missing")
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -175,7 +176,7 @@ func TestListRecurringPlans_FollowsCursor(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	plans, err := client.ListRecurringPlans()
+	plans, err := client.ListRecurringPlans(context.Background())
 	require.NoError(t, err)
 	require.Len(t, plans, 2)
 	assert.Equal(t, "a", plans[0].ID)

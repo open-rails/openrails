@@ -365,6 +365,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Stripe](docs/rails/stripe.md)
 - [CCBill](docs/rails/ccbill.md)
 - [Solana](docs/rails/solana.md) (USDC, self-custody, on-chain recurring subscriptions)
+- [Payment-method custody](docs/payment-method-custody.md) — who *holds* a stored card vs who *charges* it, and the combinations that are real today
 
 **Run your business** — for the merchant defining plans and managing customers:
 

@@ -18,8 +18,8 @@
 -- keep the escape hatch open after the code closed it. Every producer of these
 -- transfer types now hard-requires a non-empty key.
 
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE UNIQUE INDEX idx_ledger_transfers_credit_spend_once
     ON openrails.ledger_transfers (merchant_id, customer_id, currency, source, source_id, grant_id)

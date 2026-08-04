@@ -70,7 +70,53 @@ to boot unless you declare posture explicitly (#745):
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
-| `DB` | yes | Schema defaults to `openrails`. |
+| `DB` | yes | Schema defaults to `openrails`. The **pool you inject must connect as a non-superuser, `NOBYPASSRLS` role** — see below. |
+
+#### The database role you connect as (required)
+
+**The pool you hand OpenRails must connect as a role that is neither a superuser
+nor `BYPASSRLS` — in every environment, local development included** (or#782,
+or#885). There is no config knob, no dev exemption, and no warn-and-continue.
+
+Why it is a hard gate: OpenRails' merchant isolation is `FORCE ROW LEVEL
+SECURITY` keyed on the `app.merchant_id` GUC. A privileged role skips every
+policy, so isolation degrades to whatever `WHERE merchant_id = …` predicate each
+query happens to carry — and, worse, a query that forgets its merchant scope
+returns *rows* instead of the empty result the policy would give it. That is the
+"the worker ran and did nothing" class: scheduled work that silently matches
+nothing in production while looking healthy on a privileged connection.
+
+Where it is checked: `embedded.New` (and `embed.New`), plus every entry point
+that takes a pool or opens one from `Config.DB` — `PushMerchantCatalog`,
+`DumpMerchantCatalog`, `ConvergeMerchant`, `PruneRollback`/`PruneList`,
+`ImportAdminGrants`, `ImportBilling`, `PullProvider`/`PullProviderReport`. Each
+refuses with the role name in the error.
+
+What to do:
+
+1. Run migrations as your owner/admin role (DDL, `GRANT`s and role creation need
+   it). `openrails migrate` is the only job that runs privileged.
+2. The baseline migration creates `openrails_app` `NOLOGIN NOBYPASSRLS` and
+   grants it exactly what the runtime needs: the `openrails` schema, AuthKit's
+   `profiles` schema, River's `public.river_*` tables, and `SELECT` on
+   `public.migrations`. Attach a login credential out of band
+   (`ALTER ROLE openrails_app WITH LOGIN PASSWORD '…'`) — that grants no
+   privilege and the role stays `NOBYPASSRLS`.
+3. Give OpenRails a pool on that role. Your own application tables are **not**
+   granted to `openrails_app`, so either open a **second pool** for OpenRails
+   (simplest, and the pools cost nothing at rest) or run your whole app on one
+   unprivileged role and grant it on your own schema too.
+
+Any role of your own works as long as it holds the same grants and has neither
+`rolsuper` nor `rolbypassrls`. Verify with:
+
+```sql
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
+```
+
+If a query starts failing under the unprivileged role, it is missing its
+merchant scope (or a grant) — that is the gate working, not a reason to hand
+back the owner role.
 
 Under `TestMode = sandbox` every rail routes to its test environment and live
 credentials refuse to boot — no real money can move. NMI accounts get an arm-time

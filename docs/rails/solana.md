@@ -40,11 +40,12 @@ psps:
         recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
         rpc_provider: helius     # helius | public; empty defaults to helius
         rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-        tokens:                  # accepted tokens: SYMBOL -> { name, mint, decimals }
-                                 # decimals is REQUIRED (the mint's base-unit precision);
-                                 # it scales every charge, so omitting it is rejected.
-          SOL:  { name: Solana,   mint: So11111111111111111111111111111111111111112, decimals: 9 }
-          USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
+        tokens:                  # accepted tokens: SYMBOL -> { name, mint }
+                                 # decimals are NOT configurable: they are read from the
+                                 # SPL mint on-chain, which is the source of truth.
+                                 # A `decimals:` key here is rejected.
+          SOL:  { name: Solana,   mint: So11111111111111111111111111111111111111112 }
+          USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v }
       secrets:
         private_key: replace-with-base58-private-key   # local_keypair mode only
 

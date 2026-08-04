@@ -60,6 +60,7 @@ func recordDeclinedAttempt(ctx context.Context, paymentService *payments.Payment
 		Currency:      a.Currency,
 		Status:        payments.PaymentStatusFailedValue,
 		AttemptKind:   &kind,
+		MoneyMovement: models.MoneyMovementNone, // or#827: a decline moved nothing.
 	}
 	if code := strings.TrimSpace(a.FailureCode); code != "" {
 		reason := payments.NormalizeFailureReason(string(failed.Rail), code)

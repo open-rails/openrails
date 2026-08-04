@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
@@ -44,10 +45,11 @@ func CanonicalRail(rail string) string {
 	if rail == "mobius" {
 		return "nmi"
 	}
-	// #795: the BT webhook endpoint is /webhooks/basistheory; the rail is
-	// vaulted_card (basis_theory is the vault_provider, not the rail).
+	// #795: the BT webhook endpoint is /webhooks/basistheory. The event source
+	// is the CUSTODIAN itself (or#879) — Basis Theory holds the card, NMI
+	// charges it, and only the custodian emits these events.
 	if rail == "basistheory" || rail == "basis_theory" {
-		return "vaulted_card"
+		return string(models.EventSourceBasisTheory)
 	}
 	return rail
 }

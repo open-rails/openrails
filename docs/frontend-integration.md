@@ -97,6 +97,48 @@ GET  /v1/me/notifications[.../unread-count]   billing notifications
 The public catalog needs no auth: `GET /v1/products` (with embedded active prices) and
 `GET /v1/prices?product=prod_...` drive your pricing page.
 
+### Discovering payment options: `GET /v1/checkout-config`
+
+Public, unauthenticated, cacheable (`Cache-Control: public, max-age=60`). It answers
+"what can this merchant take money with, and what do I need in the browser to do it?"
+so you never hard-code a rail or duplicate a tokenization key in your own config. The
+merchant is resolved from the request `Host` (its `api_host`), exactly like the public
+catalog.
+
+```json
+{
+  "object": "checkout_config",
+  "psps": [
+    { "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
+      "flow": "tokenize",
+      "config": { "tokenization_key": "<public Collect.js key>",
+                  "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js" } },
+    { "key": "mobius-bt", "rail": "nmi", "custodian": "basis_theory", "display_name": "Credit Card",
+      "flow": "tokenize",
+      "config": { "public_api_key": "<public Basis Theory application key>" } },
+    { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
+    { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
+  ]
+}
+```
+
+- Only **armed** PSPs appear — a rail the merchant has no live account on is simply
+  absent. Switch on `flow`, not on a hard-coded list of rails:
+  - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
+    POST the resulting `payment_token`.
+  - `redirect` — nothing needed in the browser; POST checkout and follow the `url`.
+  - `wallet` — the buyer's wallet signs; chain/token detail comes from
+    `GET /v1/solana/config` and `GET /v1/solana/tokens`.
+- `key` is the value to send as checkout's `payment.rail`.
+- `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
+  it). `psp` means the gateway itself; anything else is a third party whose SDK your page
+  tokenizes against — same rail, different script and different public key. Read `flow` and
+  `config` and you never have to care; read `rail` alone and you will get this wrong.
+- Every value here is public by nature. Secrets (an NMI `security_key`, a Stripe
+  `sk_`, a CCBill DataLink password, a Solana signer) are structurally unreachable
+  from this endpoint: it serves a fixed whitelist of per-rail public fields, so a new
+  setting is private unless someone deliberately publishes it.
+
 Rail-specific gotchas the UI must handle:
 
 - **Cancel** is queued (202), not instant — reflect "cancellation pending".
@@ -136,7 +178,7 @@ original response instead of double-charging.
 
 The response's `next_action` tells the frontend what to do next:
 
-**Redirect flow** (hosted payment page — CCBill; Stripe hosted checkout):
+**Redirect flow** (`flow: "redirect"` — hosted payment page: CCBill; Stripe hosted checkout):
 1. POST the session with billing fields. Response: `status: "requires_action"`,
    `next_action.type: "redirect_to_url"`, top-level `url`.
 2. Redirect the browser to `url`. The user pays on the provider's page (cards never
@@ -145,15 +187,16 @@ The response's `next_action` tells the frontend what to do next:
    `GET /v1/me/checkout/:id` until `status: "succeeded"` (then `payment_id` /
    `subscription_id` are set), and refresh `/v1/me/status`.
 
-**Tokenized-vault flow** (NMI-backed rails, e.g. `mobius`):
-1. Load the rail's tokenization script (NMI Collect.js) and render its hosted card
-   fields. The card goes browser → gateway; you receive a one-time `payment_token`.
+**Tokenized-vault flow** (`flow: "tokenize"` — NMI-backed rails, e.g. `mobius`):
+1. Load the rail's tokenization script and render its hosted card fields — script URL
+   and public key come from `GET /v1/checkout-config`. The card goes browser →
+   gateway; you receive a one-time `payment_token`.
 2. POST the session with `payment_token` (or `payment_method_id` of a saved card).
 3. OpenRails vaults the token into a reusable payment method, charges immediately, and
    responds synchronously: `status: "succeeded"`, `payment.transaction_id`. The raw
    token is consumed once and never stored.
 
-**Solana** (one-off only — `mode: "subscription"` is a 400):
+**Solana** (`flow: "wallet"`; one-off only — `mode: "subscription"` is a 400):
 1. POST with `rail: "solana"`, `token_symbol`, optional `flow`.
 2. `flow: "transfer_request"` (default) returns `payment.transaction_url` +
    `payment.reference` — render as a QR code (`next_action.type: "solana_qr"`).

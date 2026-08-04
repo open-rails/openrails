@@ -96,7 +96,7 @@ type CheckoutService struct {
 	PurchaseService          *CheckoutPurchaseService
 	PaymentMethodResolver    *CheckoutPaymentMethodResolver
 	NMISaleService           *CheckoutNMISaleService
-	VaultedCardService       *CheckoutVaultedCardService
+	CustodianSaleService     *CheckoutCustodianSaleService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	IdempotencyService       checkoutIdempotencyStore
@@ -184,7 +184,7 @@ func NewCheckoutService(
 	// The scoped resolver is the ONLY NMI client source (#788); armed for
 	// real once SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
-	service.VaultedCardService = &CheckoutVaultedCardService{
+	service.CustodianSaleService = &CheckoutCustodianSaleService{
 		PurchaseService:      service.PurchaseService,
 		PaymentMethodService: paymentMethodService,
 		IdempotencyStore:     idempotencyService,
@@ -192,7 +192,7 @@ func NewCheckoutService(
 		Config:               cfg,
 	}
 	if railPMService != nil {
-		service.VaultedCardService.DB = railPMService.DB
+		service.CustodianSaleService.DB = railPMService.DB
 	}
 	return service
 }
@@ -434,16 +434,18 @@ func (s *CheckoutService) processSubscription(
 	case target.Rail == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
 	case rails.IsNMI(models.Rail(target.Rail)):
+		if custodianHeld(target) {
+			// #795: a custodian-held card has no provider-side recurring engine
+			// (the NMI vault subscription needs NMI to hold the card) and the
+			// OpenRails-driven renewal worker for seam charges is not built yet
+			// — enrolling would strand renewals. Loud error, never a silent accept.
+			return nil, errors.New("subscriptions are not supported on custodian-held cards yet (renewals are engine-driven; see #795)")
+		}
 		return s.processNMISubscription(ctx, req, user, price, product, coverage, target)
 	case target.Rail == "stripe":
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
 	case target.Rail == "solana":
 		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
-	case rail == string(models.RailVaultedCard):
-		// #795: the vaulted_card rail has no provider-side recurring engine and
-		// the OpenRails-driven renewal worker for seam rails is not built yet —
-		// enrolling would strand renewals. Loud error, never a silent accept.
-		return nil, errors.New("vaulted_card subscriptions are not supported yet (renewals are engine-driven; see #795)")
 	default:
 		return nil, fmt.Errorf("unsupported rail: %s", target.Rail)
 	}
@@ -467,6 +469,16 @@ func (s *CheckoutService) processOneTimePurchase(
 	}
 	switch {
 	case rails.IsNMI(models.Rail(target.Rail)):
+		if custodianHeld(target) {
+			// or#879: same rail, same gateway — the card is held by a custodian,
+			// so the sale goes through its detokenizing proxy. The PSP decides
+			// this, not a separate rail value.
+			if s.CustodianSaleService == nil {
+				return nil, errors.New("custodian-held card checkout is not configured")
+			}
+			idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "custodian_sale")
+			return s.CustodianSaleService.Process(ctx, req, user, price, product, idempotencyKey)
+		}
 		return s.processNMISale(ctx, req, user, price, product, coverage, target)
 	case target.Rail == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
@@ -474,12 +486,6 @@ func (s *CheckoutService) processOneTimePurchase(
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
 	case target.Rail == "stripe":
 		return s.processStripePayment(ctx, req, user, price)
-	case rail == string(models.RailVaultedCard):
-		if s.VaultedCardService == nil {
-			return nil, errors.New("vaulted_card checkout is not configured")
-		}
-		idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "vaulted_card_sale")
-		return s.VaultedCardService.Process(ctx, req, user, price, product, idempotencyKey)
 	default:
 		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", target.Rail)
 	}
@@ -1001,6 +1007,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
+			MoneyMovement:            models.MoneyMovementRail, // or#827: the NMI subscription's first charge settled.
 			PurchasedAt:              now,
 			CreatedAt:                now,
 		}
@@ -1882,7 +1889,7 @@ func (s *CheckoutService) processUpgrade(
 			StoredCredential: nmidirect.StoredCredentialFor(recurringCtx),
 		}
 
-		created, err := client.AddRecurringSubscription(params)
+		created, err := client.AddRecurringSubscription(ctx, params)
 		switch {
 		case err == nil:
 			resp = created
@@ -1936,7 +1943,7 @@ func (s *CheckoutService) processUpgrade(
 		if retryAfterFailure {
 			// A previous attempt failed; its charge may have landed. Verify by
 			// the order id BEFORE sending another sale (#674).
-			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID); verr != nil {
+			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID); verr != nil {
 				rollbackNewSubscription()
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
@@ -1945,7 +1952,7 @@ func (s *CheckoutService) processUpgrade(
 			}
 		}
 		if prorationTransactionID == "" {
-			saleResp, err := client.RunSale(nmi.SaleParams{
+			saleResp, err := client.RunSale(ctx, nmi.SaleParams{
 				CustomerVaultID:  railCustomerRef,
 				BillingID:        railMethodRef,
 				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
@@ -1962,7 +1969,7 @@ func (s *CheckoutService) processUpgrade(
 				// by the order id; unresolved ⇒ surface "processing" so the
 				// retry (same content-derived key) re-verifies — never a blind
 				// re-charge, never an unrecorded charge treated as failed.
-				txnID, found, verr := client.FindSuccessfulSaleByOrderID(prorationOrderID)
+				txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID)
 				if verr == nil && found {
 					prorationTransactionID = txnID
 				} else {
@@ -2193,7 +2200,7 @@ func (s *CheckoutService) compensateFailedUpgrade(
 		client, cerr := s.resolveNMIClient(ctx, provider)
 		if cerr != nil || client == nil {
 			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
-		} else if _, err := client.Refund(nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
+		} else if _, err := client.Refund(ctx, nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
 			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")
 		} else {
 			logEntry.Warn("refunded proration during upgrade compensation")
@@ -2379,7 +2386,7 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
-	if err := client.DeleteRecurringSubscription(sub.RailSubscriptionID); err != nil {
+	if err := client.DeleteRecurringSubscription(ctx, sub.RailSubscriptionID); err != nil {
 		return err
 	}
 	return nil

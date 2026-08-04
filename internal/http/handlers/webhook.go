@@ -148,14 +148,53 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 	}
 }
 
+// pinWebhookMerchantConn pins the resolved merchant's DB connection (the
+// app.merchant_id GUC) on the request for the rest of the dispatch, and returns
+// the release the caller must defer.
+//
+// The webhook surfaces resolve their merchant INSIDE the handler — from the URL
+// slug (MerchantWebhook), the Host header (HostWebhook) or the payload's account
+// identity (processRailMerchantAccountWebhook) — so middleware.MerchantDBConnMW
+// cannot have run: at middleware time there is no merchant to pin. Without this,
+// every RLS-forced read the dispatch performs outside a MerchantTx (the price
+// lookup behind a CCBill NewSaleSuccess, subscription/customer lookups) runs on
+// the base pool and, under the production openrails_app role, matches ZERO ROWS
+// AND RAISES NOTHING — the webhook fails as "price not found" for a price that
+// exists. Writes were never affected (they go through MerchantTx), which is why
+// this only ever showed up as a phantom missing row.
+//
+// Nested calls are a no-op (db.WithMerchantConn returns the existing pin), so
+// the Stripe-by-account path that re-enters processResolvedMerchantWebhook is
+// safe.
+func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (func(), bool) {
+	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
+		return func() {}, true
+	}
+	ctx, release, err := r.State.DB.WithMerchantConn(merchant.WithID(r.Request.Context(), merchantID))
+	if err != nil {
+		log.WithError(err).WithField("merchant_id", merchantID.String()).
+			Error("webhook: merchant db connection setup failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		return func() {}, false
+	}
+	r.Request = r.Request.WithContext(ctx)
+	return release, true
+}
+
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
+	release, ok := pinWebhookMerchantConn(r, merchantID)
+	if !ok {
+		return
+	}
+	defer release()
+
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
 	}
-	if provider == string(models.RailVaultedCard) {
+	if provider == string(models.EventSourceBasisTheory) {
 		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -294,10 +333,11 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "NMI webhook payload is missing merchant account identity")
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailNMI), environment, accountID)
+		account, release, ok := resolveWebhookRailMerchantAccount(r, string(models.RailNMI), environment, accountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailCCBill:
 		if !ccbillWebhookIPAllowed(r, clientIP) {
@@ -312,12 +352,13 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		if !ok {
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailCCBill, environment, accountID)
+		account, release, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailCCBill, environment, accountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
-	case rail == string(models.RailVaultedCard):
+	case rail == string(models.EventSourceBasisTheory):
 		body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 		if !ok {
 			return true, false
@@ -327,16 +368,21 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "Basis Theory webhook payload is missing tenant identity")
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailVaultedCard), environment, tenantID)
+		// or#879: a custodian event routes by the CUSTODIAN's tenant identity,
+		// not by a rail account id — the PSP it lands on is the NMI account
+		// whose gateway the proxy charges.
+		account, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		return true, processMerchantBasisTheoryWebhookBody(r, account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
+		account, release, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		// SEC-24 item 7: handled=true, accepted=FALSE. processResolvedMerchantWebhook
 		// writes its OWN response — 401 on a failed signature, 200 on success.
 		// Returning accepted=true made the caller write {"status":"accepted"}
@@ -374,21 +420,45 @@ var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 	}
 }
 
-func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, bool) {
-	account, ok, err := r.State.Merchants.ResolveRailMerchantAccountByIdentity(r.Request.Context(), rail, environment, accountID)
+// resolveWebhookRailMerchantAccount resolves the merchant + PSP a payload-identified
+// account belongs to, pins BOTH on the request (merchant id, psp id) and pins the
+// merchant's DB connection. The returned release must be deferred by the caller —
+// see pinWebhookMerchantConn for why the pin cannot live in middleware.
+func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	return pinWebhookAccount(r, rail, environment, accountID,
+		r.State.Merchants.ResolveRailMerchantAccountByIdentity)
+}
+
+// resolveWebhookCustodianAccount is the custody sibling: it resolves the PSP a
+// CUSTODIAN's tenant identity belongs to (or#879), then pins it exactly like a
+// rail-routed webhook.
+func resolveWebhookCustodianAccount(r *httprequest.Request, custodian, environment, tenantID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	return pinWebhookAccount(r, custodian, environment, tenantID,
+		r.State.Merchants.ResolvePSPByCustodianIdentity)
+}
+
+func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
+	resolve func(context.Context, string, string, string) (merchants.RailMerchantAccountIdentity, bool, error),
+) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	noop := func() {}
+	account, ok, err := resolve(r.Request.Context(), rail, environment, accountID)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")
-		return merchants.RailMerchantAccountIdentity{}, false
+		return merchants.RailMerchantAccountIdentity{}, noop, false
 	}
 	if !ok {
 		r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
-		return merchants.RailMerchantAccountIdentity{}, false
+		return merchants.RailMerchantAccountIdentity{}, noop, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
 	ctx = db.WithPSPID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
-	return account, true
+	release, ok := pinWebhookMerchantConn(r, account.MerchantID)
+	if !ok {
+		return merchants.RailMerchantAccountIdentity{}, noop, false
+	}
+	return account, release, true
 }
 
 func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) bool {

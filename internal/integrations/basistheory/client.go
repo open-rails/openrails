@@ -212,9 +212,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, idem
 // VerifyWebhook verifies a BT webhook delivery (BT-SIGNATURE /
 // BT-SIGNATURE-VERSION, RSA-PSS SHA-256) against the client's configured key
 // URL (cached after first fetch).
-func (c *Client) VerifyWebhook(body []byte, sigB64, sigVersion string) error {
+func (c *Client) VerifyWebhook(ctx context.Context, body []byte, sigB64, sigVersion string) error {
 	if c == nil || c.verifier == nil {
 		return errors.New("basistheory: webhook verifier not initialized")
 	}
-	return c.verifier.Verify(body, sigB64, sigVersion)
+	return c.verifier.Verify(ctx, body, sigB64, sigVersion)
 }

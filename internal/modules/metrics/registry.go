@@ -126,7 +126,7 @@ var Dimensions = []Dimension{
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
-	{Name: "token_type", Description: "credential form presented at charge time (#796): network_token | pan_via_vault (neutral-vault FPAN via proxy) | provider_vault (provider's own vault) | unknown (legacy/non-card); approval_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_vault", "provider_vault", "unknown"}},
+	{Name: "token_type", Description: "credential form presented at charge time (#796): network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); approval_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "attempt_kind", Description: "payment attempt kind stamped at write time: initial | renewal | unknown (pre-instrumentation or imported rows)", Values: []string{"initial", "renewal", "unknown"}},
 	{Name: "failure_reason", Description: "normalized decline category on failed payments (raw code kept verbatim in failure_code)", Values: []string{"insufficient_funds", "card_declined", "expired_card", "cvv_avs", "card_unsupported", "stop_recurring", "duplicate_transaction", "fraud_suspected", "processor_error", "config_error", "generic_decline", "unknown"}},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},

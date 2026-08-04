@@ -1,7 +1,7 @@
 // Package charge is the narrow, rail-agnostic charge seam (#297 Phase A):
 // "charge instrument, amount, CIT/MIT context". It models card-network
 // stored-credential compliance once, in the engine, so every card rail —
-// the direct NMI rail today, a vaulted_card rail later (#297 Phase B) —
+// the direct NMI transport today, a custodian-proxied one later (#297 Phase B) —
 // implements ONE interface and the vault lands as a rail, not a rewrite.
 //
 // Network model (verified against the NMI integration portal + docs.nmi.com,
@@ -146,12 +146,12 @@ type Request struct {
 // charge (#796): the approval_rate dimension that makes the network-token
 // uplift measurable. Stamped by the rail at charge time; "" = unknown.
 const (
-	// TokenTypeProviderVault: the provider's own vault charged its stored
-	// credential (NMI customer vault).
-	TokenTypeProviderVault = "provider_vault"
-	// TokenTypePANViaVault: a neutral-vault FPAN detokenized through a proxy
-	// (vaulted_card pan_proxy).
-	TokenTypePANViaVault = "pan_via_vault"
+	// TokenTypePSPToken: the PSP holds the card and charged its own stored
+	// credential (NMI customer vault, a Stripe pm_).
+	TokenTypePSPToken = "psp_token"
+	// TokenTypePANViaProxy: a custodian-held FPAN detokenized through its
+	// proxy into the gateway (charge_via=pan_proxy).
+	TokenTypePANViaProxy = "pan_via_proxy"
 	// TokenTypeNetworkToken: a network token (DPAN) was presented.
 	TokenTypeNetworkToken = "network_token"
 )

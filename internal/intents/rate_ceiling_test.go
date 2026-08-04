@@ -21,18 +21,21 @@ func TestRateCeiling_ConstantsAreWirePinned(t *testing.T) {
 	if PerActorHourlyCeiling != 5 {
 		t.Fatalf("PerActorHourlyCeiling = %d, want 5", PerActorHourlyCeiling)
 	}
-	if GlobalHourlyCeiling != 15 {
-		t.Fatalf("GlobalHourlyCeiling = %d, want 15", GlobalHourlyCeiling)
+	// or#866: the anti-theft wall is PER MERCHANT. The number is unchanged; a
+	// shared deployment budget let one merchant's ordinary traffic refuse every
+	// other merchant's destructive ops (cross-tenant DoS).
+	if PerMerchantHourlyCeiling != 15 {
+		t.Fatalf("PerMerchantHourlyCeiling = %d, want 15", PerMerchantHourlyCeiling)
 	}
 	// Early-warning thresholds are ceil(50% of the ceiling).
 	if perActorWarnThreshold != 3 {
 		t.Fatalf("perActorWarnThreshold = %d, want 3", perActorWarnThreshold)
 	}
-	if globalWarnThreshold != 8 {
-		t.Fatalf("globalWarnThreshold = %d, want 8", globalWarnThreshold)
+	if perMerchantWarnThreshold != 8 {
+		t.Fatalf("perMerchantWarnThreshold = %d, want 8", perMerchantWarnThreshold)
 	}
-	// or#842: the automated leg. Per merchant, not deployment-wide — a flat
-	// global wall on system origin does not survive fleet scale.
+	// or#842: the automated leg. Its own window, disjoint from the anti-theft
+	// one — automation must never burn a budget that bounds a stolen credential.
 	if PerMerchantSystemHourlyCeiling != 50 {
 		t.Fatalf("PerMerchantSystemHourlyCeiling = %d, want 50", PerMerchantSystemHourlyCeiling)
 	}
@@ -92,12 +95,18 @@ func TestRateCeiling_GateEvalErrorFailsClosed(t *testing.T) {
 	}, now); err == nil {
 		t.Fatal("broken gate must fail closed for a destructive SYSTEM op")
 	}
-	// A system op with no merchant has no window to count in: fail closed
-	// rather than fall back to a deployment-wide count.
+	// An op with no merchant has no window to count in — on EITHER leg, now
+	// that the anti-theft wall is per-merchant too (or#866). Fail closed rather
+	// than fall back to some deployment-wide count.
 	if err := NewRateCeiling(nil).Check(ctx, CheckParams{
 		MerchantID: uuid.Nil, IntentType: destructive, Origin: OriginSystem,
 	}, now); err == nil {
 		t.Fatal("an unscoped system destructive op must fail closed")
+	}
+	if err := NewRateCeiling(nil).Check(ctx, CheckParams{
+		Actor: "a", MerchantID: uuid.Nil, IntentType: destructive, Origin: OriginUser,
+	}, now); err == nil {
+		t.Fatal("an unscoped user destructive op must fail closed")
 	}
 }
 

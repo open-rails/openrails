@@ -88,13 +88,13 @@ type Runtime struct {
 	RiverClient       *river.Client[pgx.Tx]
 	riverPool         *pgxpool.Pool
 
-	SubscriptionService  *subscriptions.SubscriptionService
-	ProductService       *catalog.ProductService
-	PriceService         *catalog.PriceService
-	NotificationService  *subscriptions.NotificationService
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	PaymentService       *payments.PaymentService
-	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
+	SubscriptionService      *subscriptions.SubscriptionService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
+	NotificationService      *subscriptions.NotificationService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	PaymentService           *payments.PaymentService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	// RepriceService is the #773 reprice primitive (move subscribers to a
 	// different price at their next renewal).
 	RepriceService *subscriptions.RepriceService
@@ -171,7 +171,12 @@ type Runtime struct {
 	// for the process-wide Solana services (poller, crank, intent verify legs,
 	// request-plane chain reads): merchant rail-account settings are the ONLY
 	// credential plane.
-	SolanaRPCResolver   *solanamodule.MerchantRPCBuilder
+	SolanaRPCResolver *solanamodule.MerchantRPCBuilder
+	// SolanaMintDecimals reads SPL mint decimals from the chain and caches them
+	// (#817). The chain is the source of truth for decimals — merchants do not
+	// declare them — so every micros->base-units conversion sources its shift
+	// here. Armed over SolanaRPCResolver's merchant-scoped chain reader.
+	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider          fx.Provider
 	FXRateRefresher     interface {

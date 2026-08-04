@@ -75,14 +75,17 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // Client returns the *http.Client all Stripe API calls must go through. Writes
 // (non-GET/HEAD) are blocked with ErrProviderReadOnly when
-// cfg.IsProviderReadOnly() (mode=readonly); reads always pass. A nil cfg is
-// treated as not read-only (config validation guarantees a config in real
-// boots; nil only occurs in tests of unrelated failure paths, which error on
-// the missing secret key before any request is built).
+// cfg.IsProviderReadOnly() (mode=readonly); reads always pass.
+//
+// A nil cfg FAILS CLOSED — it yields a read-only client (or#865). It used to be
+// treated as "not read-only", which meant the one input that tells us nothing
+// about the operating mode produced the most permissive client. Config
+// validation guarantees a config in real boots, so nil is a wiring bug; a
+// wiring bug must not be the thing that unblocks provider writes.
 //
 // timeout <= 0 selects DefaultTimeout.
 func Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return newClient(cfg != nil && cfg.IsProviderReadOnly(), timeout)
+	return newClient(cfg == nil || cfg.IsProviderReadOnly(), timeout)
 }
 
 // ReadOnlyClient returns a Stripe client that blocks writes UNCONDITIONALLY,

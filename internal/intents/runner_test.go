@@ -220,7 +220,9 @@ func TestRunnerRetryableUsesHandlerBackoff(t *testing.T) {
 	intent := testIntent("t", OriginUser, 3)
 	ledger.due = []gen.OpenrailsRailIntent{intent}
 
-	r := &Runner{Store: ledger, Registry: NewRegistry(h)}
+	// Config is required: a Runner with no mode view now parks every intent
+	// rather than executing (or#865 — the gate no longer fails open).
+	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull()}
 	before := time.Now()
 	_, err := r.RunExecuteOnce(context.Background())
 	require.NoError(t, err)

@@ -72,6 +72,8 @@ func TestAutoTopupWorker_NoMerchantContext_TopsUpSeededMerchant(t *testing.T) {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, nil, nil)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),

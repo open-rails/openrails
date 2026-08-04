@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -72,7 +73,7 @@ func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBilli
 
 // CreateCustomerVault stores a Collect.js / Payment Component token as a new
 // vault customer via POST /v5/customers.
-func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCustomerVaultResponse, error) {
+func (c *NMIClient) CreateCustomerVault(ctx context.Context, data CreateCustomerVaultData) (*CreateCustomerVaultResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -82,7 +83,7 @@ func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCu
 	}
 
 	var customer V5Customer
-	if err := c.sendV5Request(http.MethodPost, "/customers", map[string]any{"billing": billing}, &customer); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPost, "/customers", map[string]any{"billing": billing}, &customer); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(customer.ID) == "" {
@@ -100,7 +101,7 @@ func (c *NMIClient) CreateCustomerVault(data CreateCustomerVaultData) (*CreateCu
 // REQUIRES billing[].id (verified 2026-07-01 — the documented
 // omit-for-priority-1 behavior 400s), so the priority-1 billing id is
 // resolved with a read first.
-func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
+func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 		return err
 	}
 
-	page, err := c.ListCustomersPage("", 1, vaultID)
+	page, err := c.ListCustomersPage(ctx, "", 1, vaultID)
 	if err != nil {
 		return fmt.Errorf("failed to update customer vault: lookup: %w", err)
 	}
@@ -130,7 +131,7 @@ func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 	billing.ID = primary.ID
 
 	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
-	if err := c.sendV5Request(http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {
 		return fmt.Errorf("failed to update customer vault: %w", err)
 	}
 	return nil
@@ -142,7 +143,7 @@ func (c *NMIClient) UpdateCustomerVault(data UpdateCustomerVaultData) error {
 // E_ROUTE_NOT_FOUND). NMI refuses to empty a vault ("Customer Vault must have
 // at least one billing", HTTP 400) — deleting the LAST entry means deleting
 // the whole vault customer instead (DeleteCustomerVault).
-func (c *NMIClient) DeleteCustomerBillingEntry(vaultID, billingID string) error {
+func (c *NMIClient) DeleteCustomerBillingEntry(ctx context.Context, vaultID, billingID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -151,14 +152,14 @@ func (c *NMIClient) DeleteCustomerBillingEntry(vaultID, billingID string) error 
 	if vaultID == "" || billingID == "" {
 		return errors.New("customer vault ID and billing ID are required")
 	}
-	if err := c.sendV5Request(http.MethodDelete, "/customers/"+url.PathEscape(vaultID)+"/billing/"+url.PathEscape(billingID), nil, nil); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodDelete, "/customers/"+url.PathEscape(vaultID)+"/billing/"+url.PathEscape(billingID), nil, nil); err != nil {
 		return fmt.Errorf("failed to delete vault billing entry: %w", err)
 	}
 	return nil
 }
 
 // DeleteCustomerVault removes a vault customer via DELETE /v5/customers/{id}.
-func (c *NMIClient) DeleteCustomerVault(data DeleteCustomerVaultData) error {
+func (c *NMIClient) DeleteCustomerVault(ctx context.Context, data DeleteCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func (c *NMIClient) DeleteCustomerVault(data DeleteCustomerVaultData) error {
 	if vaultID == "" {
 		return errors.New("customer vault ID is required")
 	}
-	if err := c.sendV5Request(http.MethodDelete, "/customers/"+url.PathEscape(vaultID), nil, nil); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodDelete, "/customers/"+url.PathEscape(vaultID), nil, nil); err != nil {
 		return fmt.Errorf("failed to delete customer vault: %w", err)
 	}
 	return nil

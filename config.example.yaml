@@ -21,8 +21,10 @@ db:
   host: localhost
   port: "5434"
   database: openrails_db
-  username: admin
-  password: admin_password
+  # Unprivileged, NOBYPASSRLS. Boot refuses a superuser/BYPASSRLS role in EVERY
+  # environment; the privileged role is for `openrails migrate up` only.
+  username: openrails_app
+  password: openrails_app_password
   sslmode: disable
   schema: openrails # defaults to 'openrails' if not specified
 

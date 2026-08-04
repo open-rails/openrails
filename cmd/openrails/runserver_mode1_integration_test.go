@@ -166,8 +166,19 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	`, mode1TestMerchantSlug).Scan(&merchantID, &permissionGroupID))
 	require.NotEmpty(t, permissionGroupID, "manifest boot must bind the merchant permission group")
 
+	// psps and merchant_secrets are RLS-FORCED and this pool connects as the
+	// unprivileged openrails_app role, so an UNSCOPED read returns zero rows with
+	// no error. Both assertions below must run inside a merchant scope — the
+	// secrets one especially, since "expect zero" is what an unscoped read
+	// returns unconditionally, i.e. it would pass while proving nothing.
+	scoped, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = scoped.Rollback(ctx) }()
+	_, err = scoped.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, merchantID)
+	require.NoError(t, err)
+
 	var pspCount int
-	require.NoError(t, pool.QueryRow(ctx, `
+	require.NoError(t, scoped.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.psps
 		 WHERE merchant_id = $1 AND rail = 'nmi' AND environment = 'test'
 		   AND account_id = '579145' AND NOT archived
@@ -178,10 +189,11 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	// MODE 1 holds credentials in memory only — nothing lands in the
 	// persistent secret store.
 	var secretCount int
-	require.NoError(t, pool.QueryRow(ctx, `
+	require.NoError(t, scoped.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1
 	`, merchantID).Scan(&secretCount))
 	require.Zero(t, secretCount, "MODE-1 secrets must never persist (#723)")
+	require.NoError(t, scoped.Rollback(ctx))
 
 	// Checkout-rail readiness over real HTTP: resolve the merchant per-Host
 	// (#734) and prove the armed rail passes checkoutRailConfigured while an

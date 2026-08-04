@@ -159,7 +159,7 @@ func (w CatalogReconciliationPullWorker) reconcileMerchant(ctx context.Context) 
 		}
 	}
 	if nmiClient != nil {
-		v5Plans, err := nmiClient.ListRecurringPlans()
+		v5Plans, err := nmiClient.ListRecurringPlans(ctx)
 		if err != nil {
 			return fmt.Errorf("catalog reconciliation: list nmi recurring plans: %w", err)
 		}

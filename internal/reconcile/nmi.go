@@ -15,10 +15,10 @@ import (
 // Subscriptions and the vault roster read the v5 JSON API; the transaction
 // search stays on query.php (#663: v5 payments has no list/search).
 type nmiQueryClient interface {
-	ListSubscriptionsPage(cursor string, perPage int) (nmi.SubscriptionPage, error)
-	GetSubscription(subscriptionID string) (nmi.V5Subscription, bool, error)
-	ListCustomersPage(cursor string, perPage int, id string) (nmi.CustomerPage, error)
-	SearchTransactions(filter nmi.QueryFilter) (string, error)
+	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
+	GetSubscription(ctx context.Context, subscriptionID string) (nmi.V5Subscription, bool, error)
+	ListCustomersPage(ctx context.Context, cursor string, perPage int, id string) (nmi.CustomerPage, error)
+	SearchTransactions(ctx context.Context, filter nmi.QueryFilter) (string, error)
 }
 
 // NMIFetcher pulls NMI state:
@@ -127,7 +127,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 	}
 	var subs []nmi.V5Subscription
 	if params.SubscriptionID != "" {
-		sub, found, err := f.Client.GetSubscription(params.SubscriptionID)
+		sub, found, err := f.Client.GetSubscription(ctx, params.SubscriptionID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +140,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		cursor := ""
 		seenCursor := map[string]bool{}
 		for {
-			page, err := f.Client.ListSubscriptionsPage(cursor, nmiV5PageLimit)
+			page, err := f.Client.ListSubscriptionsPage(ctx, cursor, nmiV5PageLimit)
 			if err != nil {
 				return nil, err
 			}
@@ -260,7 +260,7 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	seenFirst := map[string]bool{}
 	for page := 1; ; page++ {
 		filter.PageNumber = page
-		raw, err := f.Client.SearchTransactions(filter)
+		raw, err := f.Client.SearchTransactions(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +369,7 @@ func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams
 	cursor := ""
 	seenCursor := map[string]bool{}
 	for {
-		page, err := f.Client.ListCustomersPage(cursor, nmiV5PageLimit, params.CustomerID)
+		page, err := f.Client.ListCustomersPage(ctx, cursor, nmiV5PageLimit, params.CustomerID)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -537,6 +537,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
+			MoneyMovement:            models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
 			PurchasedAt:              purchasedAt,
 			CreatedAt:                now,
 		}
@@ -758,10 +759,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 				AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
+				MoneyMovement:            models.MoneyMovementRail, // or#827: the rebill settled at the rail.
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
-			if tt := payments.DefaultTokenTypeForRail(string(params.Rail)); tt != "" {
+			if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
 				payment.TokenType = &tt
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
@@ -1753,6 +1755,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		Currency:       price.Currency,
 		Status:         payments.PaymentStatusFailedValue,
 		AttemptKind:    &kind,
+		MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 		PurchasedAt:    now,
 		CreatedAt:      now,
 	}
@@ -1761,7 +1764,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
 	}
-	if tt := payments.DefaultTokenTypeForRail(string(subscription.Rail)); tt != "" {
+	if tt := payments.DefaultTokenType(string(subscription.Rail), models.CustodianPSP); tt != "" {
 		failed.TokenType = &tt
 	}
 	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {

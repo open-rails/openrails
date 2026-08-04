@@ -21,8 +21,8 @@
 -- fail-OPEN failure mode that made this whole class invisible), and returns a
 -- scalar, never rows.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE FUNCTION openrails.count_system_destructive_intents_for_merchant_since(
     p_merchant uuid, p_intent_types text[], p_since timestamptz)

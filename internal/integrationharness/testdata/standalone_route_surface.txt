@@ -17,6 +17,7 @@ GET /readyz
 GET /v1/capabilities
 GET /v1/captcha/client.js
 GET /v1/captcha/status
+GET /v1/checkout-config
 GET /v1/checkout/{id}
 GET /v1/checkout/{id}/solana-pay
 GET /v1/customers/{customer_id}/balance

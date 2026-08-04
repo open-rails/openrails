@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 
@@ -45,9 +46,25 @@ var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 // tried to create a merchant namespace without its authkit permission-group id.
 var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
 
-// ErrExportRequired is returned by Delete when no completed export exists for the
-// merchant (export-before-delete is enforced).
-var ErrExportRequired = errors.New("merchants: export required before delete")
+// DestructivePolicy is the destructive-action gate a merchant purge must clear
+// (#836 kill switch + #835 per-merchant policy). internal/destructive.Gate
+// implements it; the indirection keeps this package free of that import and
+// lets a nil gate mean "deny", not "skip".
+type DestructivePolicy interface {
+	// AllowDestructive reports whether destructive actions may execute for a
+	// merchant, and why not when they may not. Implementations fail closed.
+	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
+}
+
+// deniedPolicy is the zero value: no gate wired means no purge. A merchant purge
+// is unreachable by construction until an operator surface deliberately wires
+// the real gate — which is the point (or#858: Service.Delete has no route and no
+// CLI, and must not gain one while a purge is one-way).
+type deniedPolicy struct{}
+
+func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
+	return false, "destructive gate not wired on the merchants service; refusing to purge (fail closed)"
+}
 
 // Service is the merchant provisioning + lifecycle service (issue #225). It owns
 // the openrails.merchants directory rows (billing buckets) and per-merchant
@@ -69,6 +86,18 @@ type Service struct {
 	// read-only NMI Query API and CCBill DataLink checks.
 	nmiCredentialProbeQueryURL   string
 	ccbillCredentialProbeBaseURL string
+	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
+	// it with deniedPolicy so an unwired service cannot purge.
+	destructive DestructivePolicy
+}
+
+// WithDestructivePolicy wires the destructive-action gate the merchant purge
+// must clear. Without it, Delete refuses.
+func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
+	if s != nil && p != nil {
+		s.destructive = p
+	}
+	return s
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
@@ -83,7 +112,7 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 	if env == "" {
 		return nil, fmt.Errorf("merchants: provider environment must be live or test, got %q", providerEnvironment)
 	}
-	return &Service{pool: pool, secrets: secrets, providerEnvironment: env}, nil
+	return &Service{pool: pool, secrets: secrets, providerEnvironment: env, destructive: deniedPolicy{}}, nil
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
@@ -94,7 +123,7 @@ func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
-	return &Service{pool: pool}, nil
+	return &Service{pool: pool, destructive: deniedPolicy{}}, nil
 }
 
 // NewSecretManagementService builds a secret-management-only Service. It is for

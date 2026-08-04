@@ -10,6 +10,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,12 +121,18 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName[key{"mobius", "live"}].Settings["tokenization_key"])
 	require.Equal(t, "7654321", byName[key{"mobius-sandbox", "test"}].AccountID)
 
-	// #795 vaulted_card: BT tenant identity + linked NMI gateway settings; the
-	// private app key is the only custodial secret.
-	require.Equal(t, "vaulted_card", byRail["bt-vault"])
-	require.Equal(t, "replace-with-bt-tenant-id", byName[key{"bt-vault", "test"}].AccountID)
-	require.Equal(t, "7654321", byName[key{"bt-vault", "test"}].Settings["gateway_account"])
-	require.Equal(t, "replace-with-bt-private-application-key", byName[key{"bt-vault", "test"}].Secrets["api_key"])
+	// or#879 custody: an NMI PSP whose cards are held by Basis Theory. The rail
+	// is nmi (it always was); the custodian identity and its private
+	// application key hang off that same PSP.
+	require.Equal(t, "nmi", byRail["mobius-bt"])
+	require.Equal(t, "7654322", byName[key{"mobius-bt", "test"}].AccountID)
+	btSettings := byName[key{"mobius-bt", "test"}].Settings
+	custody, err := config.ParseCustodySettings(btSettings)
+	require.NoError(t, err)
+	require.True(t, custody.ThirdParty())
+	require.Equal(t, models.CustodianBasisTheory, custody.Custodian)
+	require.Equal(t, "replace-with-bt-tenant-id", custody.AccountID)
+	require.Equal(t, "replace-with-bt-private-application-key", byName[key{"mobius-bt", "test"}].Secrets[config.CustodianSecretAPIKey])
 	// A second NMI gateway (paykings) is archived/drain-only in the example.
 	require.True(t, byName[key{"paykings", "live"}].Archived)
 	// Stripe live + test side by side.
@@ -140,7 +148,12 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	parsed, err := config.ParseSolanaAccountSettings(solanaSettings)
 	require.NoError(t, err)
 	require.Equal(t, "helius", parsed.RPCProvider)
-	require.Equal(t, 6, parsed.Tokens["USDC"].Decimals)
+	// or#881: the example declares NO tokens. The curated registry already
+	// carries USDC (and decimals come from the chain, #817), so re-typing a
+	// canonical mint here would be a money-path paste error, not documentation.
+	require.Empty(t, parsed.Tokens)
+	require.Equal(t, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		solanatokens.DefaultSupportedTokens()["USDC"].Mint)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {

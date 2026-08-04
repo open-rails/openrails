@@ -28,7 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -127,17 +127,17 @@ func (f *fakeBTServer) lastProxyForm(t *testing.T) url.Values {
 	return v
 }
 
-type vaultedCardFixture struct {
+type custodianSaleFixture struct {
 	db      *db.DB
 	runner  *intents.Runner
 	bt      *fakeBTServer
-	svc     *CheckoutVaultedCardService
+	svc     *CheckoutCustodianSaleService
 	userID  string
 	priceID uuid.UUID
 	ctx     context.Context
 }
 
-func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture {
+func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFixture {
 	t.Helper()
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
@@ -149,7 +149,7 @@ func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	productID, priceID := uuid.New(), uuid.New()
 	insertProductAndPrice(ctx, t, pool, &models.Product{
-		ID: productID, Key: "vc-intent-" + uuid.NewString()[:8], DisplayName: "VaultedCard Test",
+		ID: productID, Key: "vc-intent-" + uuid.NewString()[:8], DisplayName: "Custodian Sale Test",
 		Archived: false, CreatedAt: now, UpdatedAt: now,
 	}, &models.Price{
 		ID: priceID, ProductID: productID, Archived: false,
@@ -157,7 +157,7 @@ func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture
 	})
 	bt := newFakeBTServer(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'vaulted_card_sale' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'custodian_sale' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE customer_id = $1", customerID)
@@ -166,20 +166,23 @@ func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture
 	})
 
 	clock := clockwork.NewRealClock()
+	// or#879: one PSP — the NMI gateway that charges — carrying the custody
+	// block that says Basis Theory holds the card.
 	rails := railresolve.FixedSet{
-		"bt": {
-			Rail:      models.RailVaultedCard,
-			AccountID: "tnt_test",
-			VaultedCard: &config.VaultedCardRailConfig{
-				APIKey:             "key_private_test",
-				GatewayAccountID:   "579145",
-				GatewaySecurityKey: "sk_gateway_test",
-				NetworkTokens:      networkTokens,
-				APIBaseURL:         bt.srv.URL,
+		"mobius-bt": {
+			Rail:      models.RailNMI,
+			AccountID: "579145",
+			NMI:       &config.NMIRailConfig{SecurityKey: "sk_gateway_test"},
+			Custody: &config.CustodyConfig{
+				Custodian:     models.CustodianBasisTheory,
+				AccountID:     "tnt_test",
+				APIKey:        "key_private_test",
+				NetworkTokens: networkTokens,
+				APIBaseURL:    bt.srv.URL,
 			},
 		},
 	}
-	svc := &CheckoutVaultedCardService{
+	svc := &CheckoutCustodianSaleService{
 		DB: dbi,
 		PurchaseService: NewCheckoutPurchaseService(
 			catalog.NewPriceService(dbi),
@@ -196,42 +199,44 @@ func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
-		Registry: intents.NewRegistry(NewVaultedCardSaleIntentHandler(svc)),
+		Registry: intents.NewRegistry(NewCustodianSaleIntentHandler(svc)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	svc.Intents = runner
-	return &vaultedCardFixture{db: dbi, runner: runner, bt: bt, svc: svc, userID: userID, priceID: priceID, ctx: ctx}
+	return &custodianSaleFixture{db: dbi, runner: runner, bt: bt, svc: svc, userID: userID, priceID: priceID, ctx: ctx}
 }
 
-func (fx *vaultedCardFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
+func (fx *custodianSaleFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Provider:   string(models.RailVaultedCard),
-		IntentType: TypeVaultedCardSale,
+		Provider:   string(models.RailNMI),
+		IntentType: TypeCustodianSale,
 		PriceID:    &fx.priceID,
-		Payload: VaultedCardSalePayload{
+		Payload: CustodianSalePayload{
 			TokenIntentID: fx.bt.intentID,
 			AmountMicros:  1_990_000,
 			Currency:      "USD",
-			Description:   "Purchase: VaultedCard Test",
+			Description:   "Purchase: Custodian Sale Test",
 			UserID:        fx.userID,
 			PriceID:       fx.priceID,
 		},
-		IdempotencyKey: VaultedCardSaleIdempotencyKey(key),
+		IdempotencyKey: CustodianSaleIdempotencyKey(key),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
-		OriginReason:   "test vaulted_card sale",
+		OriginReason:   "test custodian-held card sale",
 	})
 	require.NoError(t, err)
 	return intent
 }
 
-// TestVaultedCardSale_CollectChargeConvert is spec C5 (fake BT leg): CIT
+// TestCustodianSale_CollectChargeConvert is spec C5 (fake BT leg): CIT
 // charges the INTENT with CVC + indicator=stored, converts in-request, writes
 // the instrument row, anchors the unscheduled sequence, and registers the
-// purchase with token_type=pan_via_vault.
-func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+// purchase with token_type=pan_via_proxy.
+func TestCustodianSale_CollectChargeConvert(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 
@@ -247,34 +252,34 @@ func TestVaultedCardSale_CollectChargeConvert(t *testing.T) {
 	require.Empty(t, form.Get("initial_transaction_id"))
 	require.Equal(t, "sk_gateway_test", form.Get("security_key"))
 
-	// Payments row: completed, token_type pan_via_vault, attempt initial.
+	// Payments row: completed, token_type pan_via_proxy, attempt initial.
 	var tokenType, attemptKind string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='vaulted_card' AND transaction_id=$1 AND status='completed'",
+		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
 		fx.bt.txnID).Scan(&tokenType, &attemptKind))
-	require.Equal(t, charge.TokenTypePANViaVault, tokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
 
-	// Instrument row: BT token id, vault provider, fingerprint, pan_proxy,
+	// Instrument row: BT token id, custodian, fingerprint, pan_proxy,
 	// anchored unscheduled sequence = the NMI transactionid.
-	var vaultProvider, fingerprint, chargeVia, anchor, lastFour string
+	var custodian, fingerprint, chargeVia, anchor, lastFour string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT vault_provider, vault_fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
-		 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
-		fx.bt.tokenID).Scan(&vaultProvider, &fingerprint, &chargeVia, &anchor, &lastFour))
-	require.Equal(t, vaultedcard.VaultProvider, vaultProvider)
+		`SELECT custodian, fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
+		 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
+		fx.bt.tokenID).Scan(&custodian, &fingerprint, &chargeVia, &anchor, &lastFour))
+	require.Equal(t, nmiproxy.Custodian, custodian)
 	require.Equal(t, fx.bt.fingerprint, fingerprint)
-	require.Equal(t, vaultedcard.ViaPANProxy, chargeVia)
+	require.Equal(t, nmiproxy.ViaPANProxy, chargeVia)
 	require.Equal(t, fx.bt.txnID, anchor)
 	require.Equal(t, "1111", lastFour)
 }
 
-// TestVaultedCardSale_MITRenewalRidesAnchor is the spec-C6 shape against the
+// TestCustodianSale_MITRenewalRidesAnchor is the spec-C6 shape against the
 // fake wire: after collection, a merchant-initiated charge on the STORED token
 // replays the anchor as initial_transaction_id with no CVC — stored-credential
 // reuse over the proxy.
-func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianSale_MITRenewalRidesAnchor(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 
@@ -283,8 +288,8 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	charger, err := fx.svc.charger(cfg)
 	require.NoError(t, err)
 
-	res, err := charger.WithSource(vaultedcard.Source{TokenID: fx.bt.tokenID}).Charge(fx.ctx, charge.Request{
-		Instrument:  charge.Instrument{Rail: vaultedcard.Rail, MethodRef: fx.bt.tokenID},
+	res, err := charger.WithSource(nmiproxy.Source{TokenID: fx.bt.tokenID}).Charge(fx.ctx, charge.Request{
+		Instrument:  charge.Instrument{Rail: nmiproxy.Rail, MethodRef: fx.bt.tokenID},
 		AmountMinor: 199,
 		Currency:    "USD",
 		Description: "Renewal",
@@ -293,7 +298,7 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, res.Declined)
-	require.Equal(t, charge.TokenTypePANViaVault, res.TokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, res.TokenType)
 	require.Empty(t, res.CapturedRef, "MIT with a prior ref never re-anchors")
 
 	form := fx.bt.lastProxyForm(t)
@@ -305,11 +310,11 @@ func TestVaultedCardSale_MITRenewalRidesAnchor(t *testing.T) {
 	require.Equal(t, "recurring", form.Get("billing_method"))
 }
 
-// TestVaultedCardSale_DeclineWritesFailedRow is spec C7 + #796: a parsed
+// TestCustodianSale_DeclineWritesFailedRow is spec C7 + #796: a parsed
 // decline is terminal AND lands as a failed payments row with the verbatim
 // code and token_type.
-func TestVaultedCardSale_DeclineWritesFailedRow(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianSale_DeclineWritesFailedRow(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("decline")
 
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
@@ -318,17 +323,17 @@ func TestVaultedCardSale_DeclineWritesFailedRow(t *testing.T) {
 	var failureCode, failureReason, tokenType string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT COALESCE(failure_code,''), COALESCE(failure_reason,''), COALESCE(token_type,'')
-		 FROM openrails.payments WHERE rail='vaulted_card' AND status='failed' AND transaction_id=$1`,
-		"vaulted_card_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
+		 FROM openrails.payments WHERE rail='nmi' AND status='failed' AND transaction_id=$1`,
+		"custodian_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
 	require.Equal(t, "insufficient_funds", failureCode) // NMI 202, verbatim localization id
 	require.Equal(t, payments.FailureInsufficientFunds, failureReason)
-	require.Equal(t, charge.TokenTypePANViaVault, tokenType)
+	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 }
 
-// TestVaultedCardSale_BTFailureIsNotADecline is spec C8: a BT pre-forward
+// TestCustodianSale_BTFailureIsNotADecline is spec C8: a BT pre-forward
 // failure parks the intent — no decline, no failed payments row.
-func TestVaultedCardSale_BTFailureIsNotADecline(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianSale_BTFailureIsNotADecline(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("bt401")
 
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
@@ -336,28 +341,28 @@ func TestVaultedCardSale_BTFailureIsNotADecline(t *testing.T) {
 
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='vaulted_card' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n)
 }
 
-// TestVaultedCardSale_AmbiguousNeverDeclines: a 408 (BT may have forwarded)
+// TestCustodianSale_AmbiguousNeverDeclines: a 408 (BT may have forwarded)
 // parks the intent as unknown_needs_verify.
-func TestVaultedCardSale_AmbiguousNeverDeclines(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianSale_AmbiguousNeverDeclines(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	fx.bt.proxyMode.Store("ambiguous408")
 
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status)
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='vaulted_card' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n, "ambiguity is never recorded as an outcome")
 }
 
-// TestVaultedCardSale_ExpiredIntentIsLoud is spec C9: a >24h-old intent is a
+// TestCustodianSale_ExpiredIntentIsLoud is spec C9: a >24h-old intent is a
 // terminal, fabrication-free error.
-func TestVaultedCardSale_ExpiredIntentIsLoud(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianSale_ExpiredIntentIsLoud(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	fx.bt.intentGone.Store(true)
 
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
@@ -366,47 +371,47 @@ func TestVaultedCardSale_ExpiredIntentIsLoud(t *testing.T) {
 	require.Contains(t, *intent.LastFailureReason, "expire")
 }
 
-// TestVaultedCardSale_NTProvisioning is spec C10 (fake leg): with the flag
+// TestCustodianSale_NTProvisioning is spec C10 (fake leg): with the flag
 // armed, a successful checkout provisions an NT and persists id/status/PAR;
 // an NT failure warns and the instrument stays pan_proxy.
-func TestVaultedCardSale_NTProvisioning(t *testing.T) {
+func TestCustodianSale_NTProvisioning(t *testing.T) {
 	t.Run("provisioned", func(t *testing.T) {
-		fx := newVaultedCardFixture(t, true)
+		fx := newCustodianSaleFixture(t, true)
 		intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 		require.Equal(t, intents.StatusSucceeded, intent.Status)
 
 		var ntID, ntStatus, par, chargeVia string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 			`SELECT network_token_id, network_token_status, network_token_par, charge_via
-			 FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1`,
+			 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 			fx.bt.tokenID).Scan(&ntID, &ntStatus, &par, &chargeVia))
 		require.Equal(t, fx.bt.ntID, ntID)
 		require.Equal(t, "active", ntStatus)
 		require.Equal(t, "Q1J4z0aBc", par)
-		require.Equal(t, vaultedcard.ViaPANProxy, chargeVia, "NT provisioning never flips charge routing on NMI")
+		require.Equal(t, nmiproxy.ViaPANProxy, chargeVia, "NT provisioning never flips charge routing on NMI")
 	})
 	t.Run("failure is never load-bearing", func(t *testing.T) {
-		fx := newVaultedCardFixture(t, true)
+		fx := newCustodianSaleFixture(t, true)
 		fx.bt.ntMode.Store("ineligible")
 		intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 		require.Equal(t, intents.StatusSucceeded, intent.Status, "NT failure must not fail the checkout")
 
 		var ntID string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-			"SELECT network_token_id FROM openrails.payment_methods WHERE rail='vaulted_card' AND rail_method_ref=$1",
+			"SELECT network_token_id FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 			fx.bt.tokenID).Scan(&ntID))
 		require.Empty(t, ntID)
 	})
 }
 
-// TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed: a parked
+// TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed: a parked
 // instrument refuses MIT collection loudly.
-func TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) {
-	fx := newVaultedCardFixture(t, false)
+func TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		"UPDATE openrails.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='vaulted_card' AND rail_method_ref=$1",
+		"UPDATE openrails.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 		fx.bt.tokenID)
 	require.NoError(t, err)
 
@@ -416,11 +421,11 @@ func TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) 
 	require.NoError(t, err)
 
 	method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByRailMethodRef(fx.ctx, gen.GetPaymentMethodByRailMethodRefParams{
-		Rail:          string(models.RailVaultedCard),
+		Rail:          string(models.RailNMI),
 		RailMethodRef: fx.bt.tokenID,
 	})
 	require.NoError(t, err)
-	adapter := money.NewVaultedCardCollectionAdapter(charger)
+	adapter := money.NewCustodianProxyCollectionAdapter(charger)
 	_, err = adapter.ChargeSavedMethod(fx.ctx, method, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: method.ID,

@@ -1693,7 +1693,8 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
+    money_movement
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -1701,7 +1702,9 @@ INSERT INTO openrails.payments (
     $6,
     'completed', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10, $11
+    $10, $11,
+    -- or#827: the row mirrors a charge the rail actually settled.
+    'rail'
 )
 ON CONFLICT DO NOTHING
 `
@@ -2187,7 +2190,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind
+    customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -2196,7 +2199,9 @@ INSERT INTO openrails.payments (
     'completed', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $11, $12, 'refund'
+    -- or#827: a refund is real (negative) money movement at the rail; the
+    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    $11, $12, 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING
 `

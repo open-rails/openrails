@@ -304,17 +304,17 @@ func (deleteVaultNoSubs) GetPaginatedByUserID(context.Context, string, int, int)
 }
 
 type fakeVaultDeleteExecutor struct {
-	out    VaultDeleteOutcome
+	out    PaymentMethodDeleteOutcome
 	err    error
 	called int
 }
 
-func (f *fakeVaultDeleteExecutor) ExecuteVaultDelete(context.Context, *models.PaymentMethod) (VaultDeleteOutcome, error) {
+func (f *fakeVaultDeleteExecutor) ExecutePaymentMethodDelete(context.Context, *models.PaymentMethod) (PaymentMethodDeleteOutcome, error) {
 	f.called++
 	return f.out, f.err
 }
 
-func deleteVaultTestService(exec VaultDeleteExecutor) (*RailPaymentMethodService, *models.PaymentMethod) {
+func deleteVaultTestService(exec PaymentMethodDeleteExecutor) (*RailPaymentMethodService, *models.PaymentMethod) {
 	// #788: the NMI client arms from the scoped merchant secret store.
 	store := merchants.NewMemorySecretStore()
 	name, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
@@ -347,18 +347,18 @@ func deleteVaultTestService(exec VaultDeleteExecutor) (*RailPaymentMethodService
 func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
-	exec := &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Done: true}}
+	exec := &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Done: true}}
 	svc, pm := deleteVaultTestService(exec)
 	require.NoError(t, svc.DeletePaymentMethod(ctx, pm))
 	require.Equal(t, 1, exec.called)
 
-	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Terminal: true, Reason: "shared vault, no billing id"}}
+	exec = &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Terminal: true, Reason: "shared vault, no billing id"}}
 	svc, pm = deleteVaultTestService(exec)
 	err := svc.DeletePaymentMethod(ctx, pm)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shared vault, no billing id")
 
-	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Reason: "vault delete outcome unknown"}}
+	exec = &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Reason: "vault delete outcome unknown"}}
 	svc, pm = deleteVaultTestService(exec)
 	require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodDeleteProcessing)
 }

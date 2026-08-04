@@ -19,6 +19,17 @@ import (
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
+// ledgerOwnerPool is the PRIVILEGED handle. The ledger is append-only BY DESIGN
+// — openrails_app holds SELECT,INSERT and nothing else on ledger_transfers /
+// ledger_accounts (0001_schema) — so a fixture that deletes its rows, rewrites a
+// counter, or disables the counter trigger is doing something no production role
+// can do, and must say so by asking for the owner rather than by widening the
+// grant.
+func ledgerOwnerPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	return dbtest.SharedSuperuserPGXPool(t)
+}
+
 // testLedger provisions a Ledger over the shared test DB on a fresh customer and
 // a unique currency (so each test owns an isolated (merchant, currency) ledger).
 func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, string) {
@@ -36,8 +47,9 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 
 	currency := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		owner := ledgerOwnerPool(t)
+		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
 	})
 	return ledger.New(gen.New(pool), merchantID), pool, ctx, customer, merchantID, currency
 }

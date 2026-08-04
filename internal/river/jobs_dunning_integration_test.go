@@ -201,6 +201,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	worker := &DunningWorker{
 		DB:          dbi,
 		NMIResolver: fakeDunningNMIResolver{client: client},
+		// or#865: the worker's self-assembled intent Runner parks every intent
+		// when no mode is stated — this fixture drives real rebills, so it
+		// says "full".
+		Config: fullModeConfig(),
 	}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -211,16 +215,29 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
+	// Same shape as the production Work loop: a merchant in the Go context is
+	// not enough — the pass must run on a merchant-scoped CONNECTION, or every
+	// read the charge path makes matches merchant_id = NULL under the FORCEd RLS
+	// and the outcome silently comes back as "nothing to do".
 	mctx := dbtest.WithTestMerchant(ctx)
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, false))
+	var outcome dunningOutcome
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		return nil
+	}))
+	require.Equal(t, dunningOutcomeSucceeded, outcome)
 
 	// The successful rebill granted the renewal's 100 USD credit lot exactly once.
 	// Post-#512/#514 a credit grant materializes a SINGLE ledger deposit and the
 	// balance is DERIVED (the old money_transactions 'deposit'/'subscription_renewal'
 	// row is now a ledger_transfers deposit). Balance read through the money service
 	// is schema-rewritten; a double grant would read 200.
-	bal, err := moneySvc.GetBalanceForCustomer(mctx, identity.CustomerID(tenantSubjectID), "USD")
-	require.NoError(t, err)
+	var bal *models.MoneyBalance
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		var e error
+		bal, e = moneySvc.GetBalanceForCustomer(sctx, identity.CustomerID(tenantSubjectID), "USD")
+		return e
+	}))
 	require.Equal(t, int64(100), bal.Balance, "renewal granted the 100 USD credit lot exactly once")
 }
 
@@ -336,7 +353,9 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
+	// or#865: the worker's self-assembled intent Runner parks every intent when
+	// no mode is stated — this fixture drives real rebills, so it says "full".
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -346,15 +365,24 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, false)
+	// Same shape as the production Work loop: read AND repair on a
+	// merchant-scoped connection. On the bare context subscriptions' FORCEd RLS
+	// matched merchant_id = NULL, so GetByID returned "no rows in result set".
+	mctx := dbtest.WithTestMerchant(ctx)
+	var outcome dunningOutcome
+	var refreshed gen.OpenrailsSubscription
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(sctx, subID)
+		if err != nil {
+			return err
+		}
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		refreshed, err = dbi.Gen(sctx).GetSubscriptionByID(sctx, subID)
+		return err
+	}))
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 
-	refreshed, err := dbi.Gen(ctx).GetSubscriptionByID(ctx, subID)
-	require.NoError(t, err)
 	assert.Equal(t, string(models.StatusActive), string(refreshed.Status), "lifecycle repaired from the ledger")
 	require.NotNil(t, refreshed.CurrentPeriodEndsAt)
 	assert.True(t, refreshed.CurrentPeriodEndsAt.After(periodEnd))

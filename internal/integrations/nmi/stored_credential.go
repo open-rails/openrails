@@ -62,7 +62,7 @@ func (sc *StoredCredential) Validate() error {
 
 // ApplyToForm stamps the credential-on-file fields onto a classic Direct Post
 // form. nil = caller sends no stored-credential data (legacy shape). Exported
-// for the vaulted_card rail (#795), which composes the same classic sale form
+// for the custodian-proxied transport (#795), which composes the same classic sale form
 // for BT-proxy delivery.
 func (sc *StoredCredential) ApplyToForm(values url.Values) {
 	if sc == nil {

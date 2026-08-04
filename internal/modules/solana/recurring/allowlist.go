@@ -55,11 +55,12 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 }
 
 // ResolveRecurringMint validates that symbol is recurring-eligible and returns
-// its mint + decimals for the given network (mainnet/devnet). It fails closed:
-// an unknown token, an off-allowlist token (PYUSD/USDG/SOL), or a token
-// without a configured mint for the network all return an error, so a caller can
-// never publish a plan against an ineligible or misconfigured mint.
-func ResolveRecurringMint(symbol, network string) (mint string, decimals int, err error) {
+// its mint for the given network (mainnet/devnet). It fails closed: an unknown
+// token, an off-allowlist token (PYUSD/USDG/SOL), or a token without a
+// configured mint for the network all return an error, so a caller can never
+// publish a plan against an ineligible or misconfigured mint. Decimals are NOT
+// returned — they come from the mint on-chain (#817).
+func ResolveRecurringMint(symbol, network string) (mint string, err error) {
 	return ResolveRecurringMintFromTokens(symbol, solanatokens.ForNetwork(network))
 }
 
@@ -67,19 +68,19 @@ func ResolveRecurringMint(symbol, network string) (mint string, decimals int, er
 // resolves it from the runtime-configured token map. Production callers must use
 // this so deployed token config is the source of truth; hard-coded network
 // defaults are only used by legacy tests/helpers that call ResolveRecurringMint.
-func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.TokenConfig) (mint string, decimals int, err error) {
+func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.TokenConfig) (mint string, err error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {
-		return "", 0, fmt.Errorf("recurring: token symbol is required")
+		return "", fmt.Errorf("recurring: token symbol is required")
 	}
 	if !IsRecurringStablecoinSymbol(sym) {
-		return "", 0, ErrTokenNotRecurringEligible{Symbol: sym}
+		return "", ErrTokenNotRecurringEligible{Symbol: sym}
 	}
 	tok, ok := tokens[sym]
 	if !ok || strings.TrimSpace(tok.Mint) == "" {
-		return "", 0, fmt.Errorf("recurring: token %q has no configured mint", sym)
+		return "", fmt.Errorf("recurring: token %q has no configured mint", sym)
 	}
-	return tok.Mint, tok.Decimals, nil
+	return tok.Mint, nil
 }
 
 func normalizeRecurringTokens(tokens map[string]config.TokenConfig) map[string]config.TokenConfig {

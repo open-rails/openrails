@@ -195,7 +195,7 @@ func (s *AdminSubscriptionService) cancelWithNMI(ctx context.Context, subscripti
 		return nil // Log warning but don't fail the cancellation
 	}
 
-	if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
+	if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {
 		return fmt.Errorf("failed to cancel subscription with NMI provider '%s': %w", provider, err)
 	}
 

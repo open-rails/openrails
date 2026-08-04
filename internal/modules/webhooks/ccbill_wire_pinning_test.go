@@ -22,7 +22,7 @@ func TestParseCCBillAmountCents_WirePin(t *testing.T) {
 
 	cases := []struct {
 		raw  string
-		want    moneyutil.Cents // cents, literal
+		want moneyutil.Cents // cents, literal
 	}{
 		{"19.99", 1999},
 		{"0.01", 1},

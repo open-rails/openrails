@@ -126,14 +126,17 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(dbi).Create(ctx, pm))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2", TypeNMIVaultDelete, NMIVaultDeleteIdempotencyKey(pm.ID))
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2", TypeNMIPaymentMethodDelete, NMIPaymentMethodDeleteIdempotencyKey(pm.ID))
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
 	})
 
 	gateway, client := newFakeNMIVaultGateway(t, vaultID, billingID)
 	runner := &Runner{
 		Store:    NewStore(dbi),
-		Registry: NewRegistry(NewNMIVaultDeleteHandler(dbi, fakeVaultClientResolver{client: client})),
+		Registry: NewRegistry(NewNMIPaymentMethodDeleteHandler(dbi, fakeVaultClientResolver{client: client})),
+		// or#865 made a nil ModeView fail CLOSED: without it every intent parks
+		// rather than executing, so the fixture must state its mode.
+		Config: fullModeConfig(),
 	}
 	return &vaultDeleteFixture{db: dbi, runner: runner, gateway: gateway, pm: pm, ctx: ctx}
 }
@@ -152,7 +155,7 @@ func (fx *vaultDeleteFixture) intentStatus(t *testing.T) string {
 	t.Helper()
 	rows, err := fx.db.Pool().Query(fx.ctx,
 		"SELECT status FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2",
-		TypeNMIVaultDelete, NMIVaultDeleteIdempotencyKey(fx.pm.ID))
+		TypeNMIPaymentMethodDelete, NMIPaymentMethodDeleteIdempotencyKey(fx.pm.ID))
 	require.NoError(t, err)
 	defer rows.Close()
 	var status string
@@ -165,9 +168,9 @@ func (fx *vaultDeleteFixture) advanceClock(d time.Duration) {
 	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(d))
 }
 
-func (fx *vaultDeleteFixture) executeThrough(t *testing.T) paymentmethods.VaultDeleteOutcome {
+func (fx *vaultDeleteFixture) executeThrough(t *testing.T) paymentmethods.PaymentMethodDeleteOutcome {
 	t.Helper()
-	out, err := (&VaultDeleteThrough{Runner: fx.runner}).ExecuteVaultDelete(fx.ctx, fx.pm)
+	out, err := (&PaymentMethodDeleteThrough{Runner: fx.runner}).ExecutePaymentMethodDelete(fx.ctx, fx.pm)
 	require.NoError(t, err)
 	return out
 }
@@ -200,14 +203,14 @@ func TestNMIVaultDeleteIntent_CrashBeforeExecute(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   "mobius",
-		IntentType: TypeNMIVaultDelete,
-		Payload: NMIVaultDeletePayload{
+		IntentType: TypeNMIPaymentMethodDelete,
+		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          fx.pm.CustomerID.String(),
 			PaymentMethodID: fx.pm.ID,
 			RailCustomerRef: fx.pm.RailCustomerRef,
 			RailMethodRef:   fx.pm.RailMethodRef,
 		},
-		IdempotencyKey: NMIVaultDeleteIdempotencyKey(fx.pm.ID),
+		IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(fx.pm.ID),
 		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
 		Origin:         OriginUser,
 		OriginReason:   "crash-before-execute test",
@@ -319,14 +322,14 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   "mobius",
-		IntentType: TypeNMIVaultDelete,
-		Payload: NMIVaultDeletePayload{
+		IntentType: TypeNMIPaymentMethodDelete,
+		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          fx.pm.CustomerID.String(),
 			PaymentMethodID: fx.pm.ID,
 			RailCustomerRef: fx.pm.RailCustomerRef,
 			RailMethodRef:   fx.pm.RailMethodRef,
 		},
-		IdempotencyKey: NMIVaultDeleteIdempotencyKey(fx.pm.ID),
+		IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(fx.pm.ID),
 		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
 		Origin:         OriginUser,
 		OriginReason:   "superseded test",

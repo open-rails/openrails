@@ -35,14 +35,14 @@ type GetSubscriptionsFilters struct {
 }
 
 type SubscriptionService struct {
-	db                   *db.DB
-	subscriptionRepo     *SubscriptionRepo
-	notificationRepo     *NotificationQueueRepo
-	clock                clockwork.Clock
-	PriceService         *catalog.PriceService
-	ProductService       *catalog.ProductService
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	RailPaymentMethodService         *paymentmethods.RailPaymentMethodService
+	db                       *db.DB
+	subscriptionRepo         *SubscriptionRepo
+	notificationRepo         *NotificationQueueRepo
+	clock                    clockwork.Clock
+	PriceService             *catalog.PriceService
+	ProductService           *catalog.ProductService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")

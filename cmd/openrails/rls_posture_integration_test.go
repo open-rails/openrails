@@ -83,18 +83,19 @@ func TestCLICommandsAcceptAppRole(t *testing.T) {
 	}
 }
 
-// TestCLIDevelopmentWarnsOnBypassRLSRole mirrors the server/embedded gate:
-// development only warns, so a local privileged DSN stays usable.
-func TestCLIDevelopmentWarnsOnBypassRLSRole(t *testing.T) {
+// TestCLIDevelopmentIsNotExemptFromBypassRLSGate mirrors the server/embedded
+// gate: or#782 made the posture check unconditional, so development is refused
+// on a privileged DSN too — local dev connects as openrails_app like everyone.
+func TestCLIDevelopmentIsNotExemptFromBypassRLSGate(t *testing.T) {
 	superDSN, _ := dbtest.SharedRLSPostgres(t)
 	cfg := &config.Config{
 		Env:      "development",
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: superDSN},
 	}
-	database, err := openCLIDB(context.Background(), cfg)
-	require.NoError(t, err, "development must only warn, never fail, on a bypass-RLS role")
-	require.NoError(t, database.Close())
+	_, err := openCLIDB(context.Background(), cfg)
+	require.Error(t, err, "development must NOT be exempt from the RLS-posture gate")
+	require.ErrorContains(t, err, "bypasses RLS")
 }
 
 // TestOpenCLIDBRequiresConfig: no config, no door.

@@ -60,7 +60,14 @@ func TestGateExecutionUnknownOriginParks(t *testing.T) {
 	assert.Contains(t, reason, "robot")
 }
 
-func TestGateExecutionNilConfigExecutes(t *testing.T) {
-	blocked, _ := GateExecution(nil, OriginSystem)
-	assert.False(t, blocked, "nil mode view (tests/dev) behaves as full")
+// or#865: this used to assert the opposite — a nil ModeView executed, which
+// disabled readonly, limited AND the origin check in one line, inside a gate
+// whose whole job is to fail closed. An unknown mode is a wiring bug, and
+// parking a durable intent costs nothing.
+func TestGateExecutionNilModeViewParks(t *testing.T) {
+	for _, origin := range []Origin{OriginUser, OriginAdmin, OriginSystem} {
+		blocked, reason := GateExecution(nil, origin)
+		assert.True(t, blocked, "a nil mode view must park %s-origin intents, not execute them", origin)
+		assert.Contains(t, reason, "operating mode is unknown")
+	}
 }

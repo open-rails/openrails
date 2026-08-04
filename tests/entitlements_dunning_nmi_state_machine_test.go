@@ -3,12 +3,14 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -223,7 +225,27 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		AttemptRecorded: true,
 	}))
 
+	// or#836: the terminal outcome this test is about is a DESTRUCTIVE action,
+	// and destructive actions ship OFF — a fresh deployment cancels nothing and
+	// revokes nothing until an operator arms them. This test asserts what a
+	// live, REVIEWED deployment does, so it puts itself in that state; the
+	// safe default has its own tests.
+	dbtest.ArmDestructiveActions(ctx, t, dbtest.TestMerchantID.UUID())
+	t.Cleanup(func() {
+		_, _ = suite.MerchantPool().Exec(context.Background(),
+			`UPDATE openrails.destructive_action_switch SET enabled = false`)
+		_, _ = suite.MerchantPool().Exec(context.Background(),
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
+			dbtest.TestMerchantID.UUID())
+	})
+
+	// or#870: only a NAMED certainty terminates. 261 "Stop All Recurring
+	// Payments" is the issuer withdrawing the recurring mandate — bucket 3, the
+	// one decline class that may end a subscription. A generic 300 is bucket 1
+	// and retries forever, and exhausting the ladder on its own is no longer a
+	// death certificate (or#839/or#840).
 	mock.ShouldFail = true
+	mock.FailCode = "261"
 	worker := &riverjobs.DunningWorker{
 		DB:                 rt.DB,
 		Config:             suite.Config,

@@ -64,8 +64,11 @@ func TestReadOnlyAllowsGet(t *testing.T) {
 
 func TestNonReadOnlyAllowsWrites(t *testing.T) {
 	srv, hits := newCountingServer(t)
+	// or#865: nil is NOT in this list. A nil config carries no information about
+	// the operating mode, and an EMPTY config already fails closed
+	// (TestUnsetModeFailsClosedAtTheWire) — nil being the one permissive input
+	// was the inconsistency. See TestNilConfigYieldsReadOnlyClient.
 	for _, cfg := range []*config.Config{
-		nil, // nil = tests/full (documented Client contract)
 		{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}, // sandbox creds, full behavior
 		{ProviderWriteMode: config.ProviderWriteModeFull},
 		{ProviderWriteMode: config.ProviderWriteModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
@@ -76,7 +79,7 @@ func TestNonReadOnlyAllowsWrites(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.NoError(t, resp.Body.Close())
 	}
-	require.Equal(t, int64(4), hits.Load())
+	require.Equal(t, int64(3), hits.Load())
 }
 
 // provider_write_mode FAIL-CLOSES (2026-07-02): an EMPTY config (mode never
@@ -126,7 +129,9 @@ func TestPinsStripeVersionHeader(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(srv.Close)
-	client := Client(nil, 0)
+	// or#865: Client(nil, …) is read-only now, so the write leg needs a config
+	// that actually declares full mode.
+	client := Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
 
 	// GET pins the version.
 	resp, err := client.Get(srv.URL + "/v1/balance")

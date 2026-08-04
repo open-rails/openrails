@@ -330,6 +330,46 @@ func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedM
 	return items, nil
 }
 
+const resolvePSPOwnerByCustodianIdentity = `-- name: ResolvePSPOwnerByCustodianIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_custodian_identity(
+    lower($1::text),
+    COALESCE($2::text, 'live'),
+    $3::text
+)
+`
+
+type ResolvePSPOwnerByCustodianIdentityParams struct {
+	Custodian   string
+	Environment *string
+	AccountID   string
+}
+
+type ResolvePSPOwnerByCustodianIdentityRow struct {
+	ID          *uuid.UUID
+	MerchantID  *uuid.UUID
+	Rail        *string
+	Environment *string
+	AccountID   *string
+}
+
+// or#879: the custody sibling of ResolvePSPOwnerByRailIdentity. A custodian
+// (Basis Theory) sends its own instrument events carrying ITS tenant id, with
+// no merchant context — same problem, same SECURITY DEFINER answer. The
+// identity lives in the PSP's settings, indexed by uq_psps_custodian_identity.
+func (q *Queries) ResolvePSPOwnerByCustodianIdentity(ctx context.Context, arg ResolvePSPOwnerByCustodianIdentityParams) (ResolvePSPOwnerByCustodianIdentityRow, error) {
+	row := q.db.QueryRow(ctx, resolvePSPOwnerByCustodianIdentity, arg.Custodian, arg.Environment, arg.AccountID)
+	var i ResolvePSPOwnerByCustodianIdentityRow
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+	)
+	return i, err
+}
+
 const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
 FROM openrails.psp_owner_by_identity(

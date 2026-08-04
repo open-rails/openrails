@@ -130,8 +130,14 @@ func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig
 	if s.RPCAPIKey != "" {
 		out.RPCAPIKey = s.RPCAPIKey
 	}
+	// or#881: declared tokens EXTEND/OVERRIDE the base set per symbol; they do
+	// not replace it. Replacement meant adding one custom token forced the
+	// merchant to re-type every canonical mint they still wanted — a paste
+	// hazard manufactured by the config shape, on a money path.
 	if len(s.Tokens) > 0 {
-		out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
+		if out.Tokens == nil {
+			out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
+		}
 		for k, v := range s.Tokens {
 			out.Tokens[k] = v
 		}
@@ -176,18 +182,17 @@ func settingTokens(raw any) (map[string]TokenConfig, error) {
 					return nil, err
 				}
 			case "decimals":
-				if token.Decimals, err = settingInt("tokens."+symbol+".decimals", value); err != nil {
-					return nil, err
-				}
+				// #817: retired. Decimals belong to the mint on-chain and are read
+				// from it; a merchant-declared copy could disagree and misprice by
+				// 10^n. Fail loudly rather than silently ignoring a stale key.
+				return nil, fmt.Errorf("solana settings: tokens.%s.decimals is no longer configurable — "+
+					"decimals are read from the SPL mint on-chain; remove this key", symbol)
 			default:
-				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name, decimals)", symbol, key)
+				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name)", symbol, key)
 			}
 		}
 		if strings.TrimSpace(token.Mint) == "" {
 			return nil, fmt.Errorf("solana settings: tokens.%s requires mint", symbol)
-		}
-		if err := ValidateTokenDecimals(symbol, token.Decimals); err != nil {
-			return nil, fmt.Errorf("solana settings: tokens.%s: %w", symbol, err)
 		}
 		out[symbol] = token
 	}

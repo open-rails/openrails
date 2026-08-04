@@ -13,13 +13,21 @@ const (
 	RailCCBill Rail = "ccbill" // CCBill gateway (self-contained)
 	RailSolana Rail = "solana" // Solana crypto payments (self-contained)
 	RailStripe Rail = "stripe" // Stripe gateway (subscriptions + one-time)
-	// RailVaultedCard (#795): neutral card vault (Basis Theory) detokenizing
-	// through a proxy into an NMI gateway account. account_id = the BT tenant
-	// id (operator-declared); the destination NMI account is referenced from
-	// the account's settings (gateway_account).
-	RailVaultedCard Rail = "vaulted_card"
-	RailPayPal      Rail = "paypal" // PayPal gateway (self-contained)
+	RailPayPal Rail = "paypal" // PayPal gateway (self-contained)
 )
+
+// EventSource is WHO sent an inbound provider event. Almost always a rail — but
+// a CUSTODIAN sends its own events too (Basis Theory token/network-token
+// lifecycle), and a custodian is not a gateway (or#879). Rail and Custodian
+// namespaces are disjoint, so one string identifies either without ambiguity;
+// the type exists so the two axes are never silently interchanged.
+type EventSource string
+
+// EventSource returns the rail as an inbound-event source.
+func (r Rail) EventSource() EventSource { return EventSource(r) }
+
+// EventSourceBasisTheory: the custodian, not the NMI rail it proxies into.
+const EventSourceBasisTheory EventSource = EventSource(CustodianBasisTheory)
 
 // Channel is an off-rail mechanism for RECORDING a payment that never flowed
 // through a gateway integration — admin comps and manually-entered payments

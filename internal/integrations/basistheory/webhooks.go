@@ -1,6 +1,7 @@
 package basistheory
 
 import (
+	"context"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -57,8 +58,12 @@ func (v *WebhookVerifier) client() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
 }
 
-func (v *WebhookVerifier) fetchKey() (*rsa.PublicKey, error) {
-	resp, err := v.client().Get(v.KeyURL)
+func (v *WebhookVerifier) fetchKey(ctx context.Context) (*rsa.PublicKey, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.KeyURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("basistheory: build webhook key request: %w", err)
+	}
+	resp, err := v.client().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("basistheory: fetch webhook key: %w", err)
 	}
@@ -95,7 +100,7 @@ func ParsePublicKey(raw []byte) (*rsa.PublicKey, error) {
 // Verify checks sigB64 (BT-SIGNATURE) over body under sigVersion
 // (BT-SIGNATURE-VERSION). On signature mismatch the key is refetched ONCE
 // (rotation self-heal) before failing.
-func (v *WebhookVerifier) Verify(body []byte, sigB64, sigVersion string) error {
+func (v *WebhookVerifier) Verify(ctx context.Context, body []byte, sigB64, sigVersion string) error {
 	if v == nil || strings.TrimSpace(v.KeyURL) == "" {
 		return errors.New("basistheory: webhook verifier not configured")
 	}
@@ -118,7 +123,7 @@ func (v *WebhookVerifier) Verify(body []byte, sigB64, sigVersion string) error {
 	if key != nil && verifyPSS(key, digest[:], sig) == nil {
 		return nil
 	}
-	fresh, err := v.fetchKey()
+	fresh, err := v.fetchKey(ctx)
 	if err != nil {
 		if key == nil {
 			return err

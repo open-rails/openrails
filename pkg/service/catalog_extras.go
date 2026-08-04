@@ -210,7 +210,7 @@ func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister stri
 	}
 
 	if nmiLister != nil {
-		plans, ferr := fetchNMIPlans(nmiLister)
+		plans, ferr := fetchNMIPlans(ctx, nmiLister)
 		if ferr != nil {
 			return nil, ferr
 		}

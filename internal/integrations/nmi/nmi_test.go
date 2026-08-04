@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -70,7 +71,7 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	client.DirectPostURL = server.URL
 	client.QueryURL = server.URL
 
-	resp, err := client.AttemptManualRebill(ManualRebillParams{
+	resp, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
 		VaultID:        "vault_123",
 		BillingID:      "billing_123",
 		SubscriptionID: "sub_123",
@@ -102,9 +103,9 @@ func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 
 	// A v5 write (delete) and a classic direct-post write (rebill) are the two
 	// representative mutation transports; both must be blocked.
-	err = client.DeleteRecurringSubscription("12345")
+	err = client.DeleteRecurringSubscription(context.Background(), "12345")
 	require.ErrorIs(t, err, ErrProviderReadOnly)
-	_, err = client.AttemptManualRebill(ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s"})
+	_, err = client.AttemptManualRebill(context.Background(), ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s"})
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 }
 
@@ -170,7 +171,7 @@ func TestProbeTestMode(t *testing.T) {
 	t.Run("test card approved -> simulating (only a simulator approves a non-issued PAN)", func(t *testing.T) {
 		server := probeServer(t, "1", nil)
 		defer server.Close()
-		result, err := probeClient(t, server.URL).ProbeTestMode()
+		result, err := probeClient(t, server.URL).ProbeTestMode(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, ProbeSimulated, result)
 	})
@@ -178,7 +179,7 @@ func TestProbeTestMode(t *testing.T) {
 	t.Run("test card declined -> live account", func(t *testing.T) {
 		server := probeServer(t, "2", nil)
 		defer server.Close()
-		result, err := probeClient(t, server.URL).ProbeTestMode()
+		result, err := probeClient(t, server.URL).ProbeTestMode(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, ProbeLive, result)
 	})
@@ -186,7 +187,7 @@ func TestProbeTestMode(t *testing.T) {
 	t.Run("gateway error (bad credentials) -> indeterminate", func(t *testing.T) {
 		server := probeServer(t, "3", nil)
 		defer server.Close()
-		result, err := probeClient(t, server.URL).ProbeTestMode()
+		result, err := probeClient(t, server.URL).ProbeTestMode(context.Background())
 		require.Error(t, err)
 		require.Equal(t, ProbeIndeterminate, result)
 	})
@@ -194,7 +195,7 @@ func TestProbeTestMode(t *testing.T) {
 	t.Run("transport failure -> indeterminate", func(t *testing.T) {
 		server := probeServer(t, "1", nil)
 		server.Close() // refuse connections
-		result, err := probeClient(t, server.URL).ProbeTestMode()
+		result, err := probeClient(t, server.URL).ProbeTestMode(context.Background())
 		require.Error(t, err)
 		require.Equal(t, ProbeIndeterminate, result)
 	})
@@ -205,7 +206,7 @@ func TestProbeTestMode(t *testing.T) {
 		defer server.Close()
 		client := probeClient(t, server.URL)
 		for range 3 {
-			result, err := client.ProbeTestMode()
+			result, err := client.ProbeTestMode(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, ProbeSimulated, result)
 		}
@@ -242,7 +243,7 @@ func TestUpdateCustomerVault_ResolvesBillingID(t *testing.T) {
 	require.NoError(t, err)
 	client.V5BaseURL = server.URL
 
-	err = client.UpdateCustomerVault(UpdateCustomerVaultData{
+	err = client.UpdateCustomerVault(context.Background(), UpdateCustomerVaultData{
 		CustomerVaultID:         "vault-9",
 		CreateCustomerVaultData: CreateCustomerVaultData{PaymentToken: "tok_new", FirstName: "Ada"},
 	})
@@ -272,7 +273,7 @@ func TestRunSale_BillingTargetedUsesClassic(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	resp, err := client.RunSale(SaleParams{
+	resp, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  "vault-9",
 		BillingID:        "bill-2",
 		Amount:           1234,
@@ -302,7 +303,7 @@ func TestDeleteCustomerBillingEntry(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	require.NoError(t, client.DeleteCustomerBillingEntry("vault-9", "bill-2"))
+	require.NoError(t, client.DeleteCustomerBillingEntry(context.Background(), "vault-9", "bill-2"))
 	require.Equal(t, http.MethodDelete, method)
 	require.Equal(t, "/customers/vault-9/billing/bill-2", path)
 
@@ -314,7 +315,7 @@ func TestDeleteCustomerBillingEntry(t *testing.T) {
 	}))
 	t.Cleanup(refusing.Close)
 	client2 := newTestClient(t, refusing.URL)
-	err := client2.DeleteCustomerBillingEntry("vault-9", "bill-last")
+	err := client2.DeleteCustomerBillingEntry(context.Background(), "vault-9", "bill-last")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "at least one billing")
 }
@@ -331,7 +332,7 @@ func TestAddRecurringSubscription_BillingTargeted(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	_, err := client.AddRecurringSubscription(RecurringPaymentData{
+	_, err := client.AddRecurringSubscription(context.Background(), RecurringPaymentData{
 		PlanID:          "plan-1",
 		CustomerVaultID: "vault-9",
 		BillingID:       "bill-2",

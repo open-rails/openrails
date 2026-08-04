@@ -13,6 +13,8 @@
 PERMANENT internal/db/db_pgx.go            # MerchantTx GUC + tx plumbing
 PERMANENT internal/db/rls.go               # RLS role/GUC probes
 PERMANENT internal/db/schema_rewrite.go    # execution-time schema rewriting wrapper
+PERMANENT internal/db/merchant_scope.go    # reads the app.merchant_id GUC (current_setting)
+PERMANENT internal/integrationharness/harness.go  # sets the app.merchant_id GUC (set_config)
 PERMANENT internal/http/handlers/admin_payments.go  # pg_advisory_xact_lock only
 
 # --- PERMANENT: dynamic SQL built from user/operator definitions ------------
@@ -49,6 +51,7 @@ DEBT internal/modules/money/metered_rating.go
 DEBT internal/modules/money/money_service.go
 DEBT internal/modules/productaccess/grant_repo.go
 DEBT internal/modules/solana/solanasubs/subscription_repo.go
+DEBT internal/river/jobs_ledger_integrity.go
 DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
 DEBT pkg/service/catalog_sidecars.go

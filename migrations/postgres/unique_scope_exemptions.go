@@ -41,10 +41,12 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	"uq_subscription_reprices_one_scheduled":      "subscription_id FKs a merchant-owned subscription",
 	"uq_subscriptions_customer_tier_group_active": "customer_id FKs a merchant-owned customer (ID-3's one-live-per-tier-group rule)",
 	"unique_prices_product_amount_window":         "product_id FKs a merchant-owned product (ID-5 price financial substance)",
+	"uq_destructive_run_before_images_identity":   "destructive_run_id FKs a merchant-owned destructive_runs row (or#859 undo evidence)",
 
 	// Genuinely global identifiers, unique across the install by construction.
 	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",
 	"uq_psps_identity":                          "one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide",
+	"uq_psps_custodian_identity":                "the custody sibling (or#879): one (custodian, environment, custodian_account_id) tenant belongs to exactly one merchant, for the same reason and by the same operator declaration — and inbound custodian webhooks route by it before any merchant context exists",
 }
 
 // UniqueScopeExempt reports whether a unique index that lacks merchant_id is a

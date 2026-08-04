@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,7 +27,7 @@ func TestRunSale_WirePinsCentsAmount(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	_, err := client.RunSale(SaleParams{
+	_, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID: "v1",
 		Amount:          moneyutil.Cents(1999), // $19.99 — never 19_990_000
 		Currency:        "USD",
@@ -48,7 +49,7 @@ func TestRefund_WirePinsCentsAmount(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	_, err := client.Refund(RefundParams{TransactionID: "t1", Amount: moneyutil.Cents(500)})
+	_, err := client.Refund(context.Background(), RefundParams{TransactionID: "t1", Amount: moneyutil.Cents(500)})
 	require.NoError(t, err)
 
 	var req map[string]json.RawMessage
@@ -56,7 +57,7 @@ func TestRefund_WirePinsCentsAmount(t *testing.T) {
 	assert.Equal(t, "5.00", string(req["amount"]), "refund wire amount must be the exact two-decimal cents rendering")
 
 	// Amount 0 = full refund: no amount key on the wire.
-	_, err = client.Refund(RefundParams{TransactionID: "t1"})
+	_, err = client.Refund(context.Background(), RefundParams{TransactionID: "t1"})
 	require.NoError(t, err)
 	fullBody := map[string]json.RawMessage{}
 	require.NoError(t, json.Unmarshal(body, &fullBody))
@@ -94,7 +95,7 @@ func TestAddRecurringSubscription_WirePinsCentsAmount(t *testing.T) {
 			defer server.Close()
 
 			client := newTestClient(t, server.URL)
-			_, err := client.AddRecurringSubscription(RecurringPaymentData{
+			_, err := client.AddRecurringSubscription(context.Background(), RecurringPaymentData{
 				PlanID:          "plan1",
 				CustomerVaultID: "v1",
 				Currency:        "USD",

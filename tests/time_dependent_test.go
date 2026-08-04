@@ -838,6 +838,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
+			MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt:   mockClock.Now(),
 		}
 
@@ -863,6 +864,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 			TransactionID: "test-tx-" + uuid.New().String()[:8],
 			Amount:        999,
 			Currency:      "usd",
+			MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt:   mockClock.Now(),
 		}
 

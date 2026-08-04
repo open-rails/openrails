@@ -325,7 +325,7 @@ type OpenrailsDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. Rows a run destroyed carry its id (destructive_run_id); `openrails prune rollback --run <id>` reverses one. kind=prune is the first user; converge_enforce / declared_import / plan_migration / catalog_push / merchant_delete follow.
+// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails prune rollback --run <id>`, which dispatches on kind. declared_import / plan_migration / catalog_push / merchant_delete are declared and not yet converted.
 type OpenrailsDestructiveRun struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -345,6 +345,20 @@ type OpenrailsDestructiveRun struct {
 	// running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.
 	Status string
 	Note   *string
+}
+
+// or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858's soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.
+type OpenrailsDestructiveRunBeforeImage struct {
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	DestructiveRunID uuid.UUID
+	TableName        string
+	RowID            uuid.UUID
+	// to_jsonb(row) verbatim, captured server-side inside the run. Complete evidence; the restore reads an explicit typed column projection out of it rather than rewriting the whole row.
+	Before     []byte
+	CapturedAt time.Time
+	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored (or#859 §3.3 / Class D). Restoring one directly could make it disagree with its grant, which recomputation cannot.
+	RestoredAt *time.Time
 }
 
 type OpenrailsEntitlement struct {
@@ -621,16 +635,6 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// Merchant logical-export bookkeeping (issue #225). Merchant deletion is gated on a completed export row (export-before-delete). Merchant-owned and RLS protected.
-type OpenrailsMerchantExport struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Status      string
-	RowCounts   []byte
-	CreatedAt   time.Time
-	CompletedAt *time.Time
-}
-
 // #736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).
 type OpenrailsMerchantNotification struct {
 	ID         uuid.UUID
@@ -643,6 +647,17 @@ type OpenrailsMerchantNotification struct {
 	Data       []byte
 	CreatedAt  time.Time
 	ReadAt     *time.Time
+}
+
+// or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
+type OpenrailsMerchantPurgeInventory struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Status     string
+	// The inventory manifest: row_counts, total_rows, secret_names (never values), not_captured, is_backup=false. total_rows must still match at purge time — a stale inventory does not authorise a purge.
+	Manifest    []byte
+	CreatedAt   time.Time
+	CompletedAt *time.Time
 }
 
 // DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
@@ -782,11 +797,13 @@ type OpenrailsPayment struct {
 	FailureReason *string
 	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
 	ReversalKind *string
-	// #796 credential form presented to the network: network_token | pan_via_vault | provider_vault. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
+	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
+	// or#827 rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
+	MoneyMovement string
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -814,10 +831,10 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
-	// #795 neutral card vault holding this instrument ('basis_theory' on vaulted_card rows; '' elsewhere).
-	VaultProvider string
-	// #795 vault card fingerprint (BT default expression over the PAN) for dedup/lookup.
-	VaultFingerprint string
+	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
+	Custodian string
+	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
+	Fingerprint string
 	// #795 BT network-token uuid; '' = not provisioned.
 	NetworkTokenID string
 	// #795 NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
@@ -998,7 +1015,7 @@ type OpenrailsRailIntent struct {
 	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
 	Origin       string
 	OriginReason *string
-	// Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the #732 anti-credential-compromise rate ceiling (per-actor + global rolling-hour count of destructive ops).
+	// Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the #732 anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).
 	Actor *string
 	// Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.
 	LastFailureReason *string
@@ -1011,6 +1028,8 @@ type OpenrailsRailIntent struct {
 	UpdatedAt      time.Time
 	// PSP row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
 	PspID *uuid.UUID
+	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
+	DestructiveRunID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533).

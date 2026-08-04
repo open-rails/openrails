@@ -227,51 +227,59 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 			return nil, err
 		}
 		out.Solana = SolanaRailConfigFromSettings(settings, s.testMode())
-	case models.RailVaultedCard:
-		apiKey, err := s.requireSecret(ctx, mid, scope, "api_key")
-		if err != nil {
-			return nil, err
-		}
-		settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
-		if err != nil {
-			return nil, err
-		}
-		// Destination creds come from the LINKED NMI account (one source of
-		// truth): resolve it through this same seam by its account_id.
-		gateway, err := s.RailConfig(ctx, string(models.RailNMI), settings.GatewayAccount)
-		if err != nil {
-			return nil, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
-		}
-		if gateway.NMI == nil || strings.TrimSpace(gateway.NMI.SecurityKey) == "" {
-			return nil, fmt.Errorf("vaulted_card account %s: gateway account %q has no NMI security key: %w", scope.AccountID, settings.GatewayAccount, ErrRailNotArmed)
-		}
-		out.VaultedCard = &config.VaultedCardRailConfig{
-			APIKey:             apiKey,
-			GatewayAccountID:   settings.GatewayAccount,
-			GatewaySecurityKey: gateway.NMI.SecurityKey,
-			NetworkTokens:      settings.NetworkTokens,
-			PublicAPIKey:       settings.PublicAPIKey,
-		}
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
 	}
+	// Custody rides on TOP of the rail block (or#879): the gateway credentials
+	// above charge the card, these say who holds it and how to detokenize it.
+	custody, err := s.resolveCustody(ctx, mid, scope)
+	if err != nil {
+		return nil, err
+	}
+	out.Custody = custody
 	return out, nil
+}
+
+// resolveCustody arms a PSP's third-party custody arrangement. nil = the PSP
+// holds its own instruments (the overwhelmingly common case). A DECLARED
+// custodian with no private key is a fail-closed error, never a silent
+// downgrade to "no custody".
+func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*config.CustodyConfig, error) {
+	settings, err := config.ParseCustodySettings(scope.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
+	}
+	if !settings.ThirdParty() {
+		return nil, nil
+	}
+	apiKey, err := s.requireSecret(ctx, mid, scope, config.CustodianSecretAPIKey)
+	if err != nil {
+		return nil, fmt.Errorf("psp %s/%s custodian %s: %w", scope.Rail, scope.AccountID, settings.Custodian, err)
+	}
+	return &config.CustodyConfig{
+		Custodian:     settings.Custodian,
+		AccountID:     settings.AccountID,
+		APIKey:        apiKey,
+		PublicAPIKey:  settings.PublicAPIKey,
+		NetworkTokens: settings.NetworkTokens,
+	}, nil
 }
 
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
 // rail account's declared settings: network derives from test_mode alone
-// (#349), the token set defaults to the network's curated list when the
-// account declares none, and the #360 token pricing policy drops tokens that
-// cannot function (degrade-not-die).
+// (#349), the token set starts as the network's curated list and a declared
+// token extends/overrides it per symbol (or#881 — declaring one custom token
+// must never make the merchant re-type the canonical mints), and the #360
+// token pricing policy drops tokens that cannot function (degrade-not-die).
 func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) *config.SolanaRailConfig {
 	network := "mainnet"
 	if testMode {
 		network = "devnet"
 	}
-	out := settings.ApplyTo(&config.SolanaRailConfig{Network: network})
-	if len(out.Tokens) == 0 {
-		out.Tokens = solanatokens.ForNetwork(network)
-	}
+	out := settings.ApplyTo(&config.SolanaRailConfig{
+		Network: network,
+		Tokens:  solanatokens.ForNetwork(network),
+	})
 	out.Tokens = solanatokens.NormalizeForNetwork(network, out.Tokens)
 	return out
 }

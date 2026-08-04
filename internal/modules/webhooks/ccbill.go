@@ -421,7 +421,7 @@ func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
 			ctx,
 			s.stableDedupeEventKey(),
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			s.Data,
 			s.handleCCBillWebhookDispatch,
 		)
@@ -512,7 +512,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			data,
 			process,
 		)
@@ -760,6 +760,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				Currency:      price.Currency,
 				Status:        payments.PaymentStatusFailedValue,
 				AttemptKind:   &kind,
+				MoneyMovement: models.MoneyMovementNone, // or#827: a decline moved nothing.
 				PurchasedAt:   s.now(),
 				CreatedAt:     s.now(),
 			}
@@ -953,6 +954,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
 			AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
+			MoneyMovement:  models.MoneyMovementRail, // or#827: CCBill billed the upgrade.
 			PurchasedAt:    purchasedAt,
 			CreatedAt:      now,
 		}
@@ -1907,7 +1909,7 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 			ctx,
 			data.TransactionID,
 			string(s.Data.EventType),
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			data,
 			process,
 		)
@@ -2143,6 +2145,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 				Currency:       price.Currency,
 				Status:         payments.PaymentStatusFailedValue,
 				AttemptKind:    &kind,
+				MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 				PurchasedAt:    s.now(),
 				CreatedAt:      s.now(),
 			}

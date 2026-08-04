@@ -14,11 +14,13 @@ import (
 
 func TestPaymentProviderDefinitions(t *testing.T) {
 	expected := []PaymentProviderDefinition{
-		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret"}},
+		// or#879/or#880: vaulted_card is NOT a rail — it is NMI with the card
+		// held by a third-party custodian, so the custodian's key is an NMI
+		// credential and the rail is gone (0031_retire_vaulted_card_rail).
+		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret", "custodian_api_key"}},
 		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
-		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin"}},
+		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}},
 		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}},
-		{Rail: "vaulted_card", DisplayName: "Credit Card", CredentialKeys: []string{"api_key"}},
 	}
 
 	if got := PaymentProviderDefinitions(); !reflect.DeepEqual(got, expected) {

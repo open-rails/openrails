@@ -107,6 +107,27 @@ grant log by convergence, not restored directly — which is why the grant log m
 Do not skip step 3. A restored database plus an immediate enforcing convergence pass is how a
 recovery becomes a second incident.
 
+## What is not a backup
+
+**The merchant purge inventory.** `TakePurgeInventory` (was `Export`) writes row
+counts and secret *names* to `openrails.merchant_purge_inventories`. It copies no
+data — no customer, subscription, payment, entitlement or catalog row, and no
+secret value. It exists so an operator sees the blast radius before confirming a
+purge, and it can restore nothing. Its own recorded manifest says so
+(`"is_backup": false`), and lists what it omits.
+
+If you purge a merchant, PITR above is your only way back.
+
+**A provider pull.** Reconciling against NMI/Stripe/CCBill/Solana repairs local
+state from provider truth, but providers hold only what they were told: no
+entitlements, no grant history, no ledger. A pull is recovery of the mirror, not
+of the system.
+
+**A `--prune` rollback.** `openrails prune rollback --run <id>` reverses one
+prune run's soft deletes. That is scoped undo of one operation, not a restore
+point — and per `operations.md` the complete recovery is `rollback → pull →
+converge`.
+
 ## Verify your backups
 
 An untested backup is a hypothesis. Periodically restore into a scratch instance and check that

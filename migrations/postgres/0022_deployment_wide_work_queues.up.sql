@@ -30,8 +30,8 @@
 --     product, it exists for the platform operator, and it still never vends a
 --     merchant-owned row.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 -- --------------------------------------------------------------------------
 -- or#862: provider-intent executor / verifier work queues

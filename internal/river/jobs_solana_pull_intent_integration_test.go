@@ -78,8 +78,11 @@ type solanaPullFixture struct {
 
 func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	// The fixture stands in for the River worker: it seeds solana_subscriptions
+	// and drives the handler directly, so it must supply the app.merchant_id the
+	// worker supplies in production. An unpinned handle trips the FORCEd RLS
+	// WITH CHECK on solana_subscriptions.
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := dbtest.WithTestMerchant(context.Background())
@@ -141,7 +144,8 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	}
 	chain := &fakeChain{}
 	handler := NewSolanaPullIntentHandler(core, intents.NewStore(dbi), chain)
-	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler)}
+	// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler), Config: fullModeConfig()}
 	return &solanaPullFixture{db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain, row: row, ctx: ctx}
 }
 

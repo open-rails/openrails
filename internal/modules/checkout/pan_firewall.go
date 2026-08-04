@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// PAN firewall (#795 B5, SAQ A): the vaulted_card checkout accepts ONLY the BT
+// PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
 // token-intent handle. A raw card number reaching OpenRails — pasted into any
 // request field — would silently escalate the PCI posture (SAQ A -> SAQ D), so
 // card-number-shaped values are rejected LOUDLY, never stored or forwarded.
