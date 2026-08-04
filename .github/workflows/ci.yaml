@@ -131,10 +131,23 @@ jobs:
 
   # Unit tests, split out of `build` so the two run in parallel. Still -race,
   # still the whole tree: nothing here is scoped, skipped or downgraded.
-  unit:
+  #
+  # SHARDED (or#855). Once the suite went green it measured 181s — on its own
+  # over the 180s bar. Coverage-neutral the same way gosec's split is: the
+  # shards partition `go list ./...` itself, so their union is exactly what
+  # `./...` expands to, with the same flags. Unit tests share no fixture or
+  # stack, so unlike the integration suite there is nothing for a subset to
+  # depend on. The `race` build cache is shared across the shards, so the
+  # duplicated compilation is cache hits rather than work.
+  unit-shard:
+    name: unit shard ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
@@ -154,10 +167,31 @@ jobs:
       # check means.
       - name: Test (race)
         if: needs.changes.outputs.go == 'true'
-        run: go test -count=1 -race ./...
+        env:
+          SHARDS: "3"
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mapfile -t pkgs < <(go list ./... | sort |
+                              awk -v n="$SHARDS" -v p="$SHARD" 'NR % n == p % n')
+          echo "shard ${SHARD}/${SHARDS}: ${#pkgs[@]} packages"
+          [ "${#pkgs[@]}" -gt 0 ] || exit 0
+          go test -count=1 -race "${pkgs[@]}"
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
+
+  # One stable name for branch protection, as with `integration` and `gosec`.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: unit-shard
+    if: always()
+    steps:
+      - name: All unit shards succeeded
+        run: |
+          result="${{ needs.unit-shard.result }}"
+          echo "unit-shard matrix result: $result"
+          [ "$result" = "success" ] || exit 1
 
   # or#869: .golangci.yml existed for a year with nothing running it — and could
   # not have run (v1 schema, which current golangci-lint refuses to load). The
@@ -373,7 +407,10 @@ jobs:
             exit 0
           fi
           echo "shard ${SHARD}/${SHARDS}: ${pkgs[*]}"
-          OPENRAILS_INTEGRATION_TIMEOUT=15m bash scripts/test_integration.sh "${pkgs[@]}"
+          # 6m, not the 15m a single unsharded job needed: a shard is ~2min of
+          # work, so anything past 6m is a hang, and the old budget made one
+          # hung package cost the pipeline 16 minutes before it gave up.
+          OPENRAILS_INTEGRATION_TIMEOUT=6m bash scripts/test_integration.sh "${pkgs[@]}"
 
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''

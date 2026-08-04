@@ -1,60 +1,68 @@
-# or#855: recorded per-package `go test` seconds for the integration-tagged
-# suite, used ONLY to balance the CI shards (scripts/ci-integration-select.sh).
 #
-# Source: the `Integration test` step of a full serial run, which prints
-#   ok  github.com/open-rails/openrails/<pkg>  <seconds>
-# Regenerate after a big shift in suite shape, from a ci-full `integration-full`
-# job log:
+# Byte size was tried first and is a BAD proxy: `tests` is the largest package
+# (customer_integration_test.go, RLS denial then a pool-close deadlock, 15m
+# gets a default weight, so the only thing a stale table can cost is balance.
 #   gh api repos/open-rails/openrails/actions/jobs/<id>/logs |
+# HARVESTED FROM A GREEN RUN, WHICH MATTERS. The first version of this table was
+# internal/db carries its last known-good time. It currently HANGS on dev
+# job log (or the six PR shards):
+#   ok  github.com/open-rails/openrails/<pkg>  <seconds>
+# on disk (552KB) and one of the fastest (6s).
+# or#855: recorded per-package `go test` seconds for the integration-tagged
+# Regenerate after a big shift in suite shape, from a ci-full `integration-full`
 #     sed -nE 's#.*ok[[:space:]]+github\.com/open-rails/openrails/?([^[:space:]]*)[[:space:]]+([0-9.]+)s.*#\1\t\2#p' |
 #     sort
-#
+# Source: the `Integration test` step of a CI run, which prints
 # STALENESS IS HARMLESS TO COVERAGE. A package missing here still runs — it just
-# gets a default weight, so the only thing a stale table can cost is balance.
-# Byte size was tried first and is a BAD proxy: `tests` is the largest package
-# on disk (552KB) and one of the fastest (4.9s), while internal/db/querytest is
-# 36s.
-embed	6.111
-internal/app	14.999
-internal/bootstrap	8.385
-internal/controlplane	7.267
-internal/crypto	0.542
+# suite, used ONLY to balance the CI shards (scripts/ci-integration-select.sh).
+# table built from a red run silently balances for the wrong suite.
+# taken from a run where many packages failed early, so it recorded how long they
+# timeout), so its live number would be the timeout, not its cost.
+# took to FAIL, not to pass — pkg/service showed 8.5s and actually takes 81s. A
+cmd/openrails	1.698
+embed	7.127
+internal/app	14.507
+internal/bootstrap	10.339
+internal/controlplane	7.511
+internal/crypto	0.664
 internal/db	15.821
-internal/db/querytest	35.659
-internal/http	0.140
-internal/http/handlers	1.643
-internal/http/middleware	0.035
-internal/integrationharness	7.981
-internal/integrations/nmi	0.133
-internal/integrations/stripeapi	0.007
-internal/integrations/vault	17.838
-internal/intents	3.293
-internal/merchants	1.886
-internal/merchantsecrets	14.619
-internal/modules/abuse	0.035
+internal/db/querytest	32.508
+internal/http	0.844
+internal/http/handlers	1.655
+internal/http/middleware	0.037
+internal/integrationharness	9.076
+internal/integrations/nmi	0.841
+internal/integrations/stripeapi	0.072
+internal/integrations/vault	25.489
+internal/intents	4.493
+internal/invariantaudit	0.784
+internal/merchants	2.557
+internal/merchantsecrets	27.038
+internal/modules/abuse	0.025
 internal/modules/admission	0.018
-internal/modules/admission/spendgate	1.844
-internal/modules/alerting	1.144
-internal/modules/catalog	0.597
-internal/modules/checkout	1.570
-internal/modules/entitlements	0.567
-internal/modules/grants	1.236
-internal/modules/idempotency	0.053
-internal/modules/metrics	1.781
-internal/modules/money	4.901
-internal/modules/money/ledger	0.602
-internal/modules/paymentmethods	0.554
-internal/modules/payments	0.676
-internal/modules/productaccess	0.691
-internal/modules/ratelimit	0.021
-internal/modules/solana	0.642
-internal/modules/solana/recurring	11.762
+internal/modules/admission/spendgate	1.846
+internal/modules/alerting	1.356
+internal/modules/catalog	0.686
+internal/modules/checkout	1.642
+internal/modules/entitlements	0.685
+internal/modules/grants	1.468
+internal/modules/idempotency	0.054
+internal/modules/metrics	2.081
+internal/modules/money	6.161
+internal/modules/money/ledger	0.851
+internal/modules/paymentmethods	0.587
+internal/modules/payments	0.498
+internal/modules/productaccess	0.841
+internal/modules/ratelimit	0.022
+internal/modules/reconcile	0.609
+internal/modules/solana	0.769
+internal/modules/solana/recurring	56.701
 internal/modules/subscriptions	3.164
-internal/modules/webhooks	1.682
-internal/reconcile	1.169
-internal/reconcile/converge	3.518
-internal/river	20.003
-pkg/embedded	0.895
-pkg/embedded/controlplane	1.325
-pkg/service	8.551
-tests	4.862
+internal/modules/webhooks	2.043
+internal/reconcile	2.666
+internal/reconcile/converge	4.122
+internal/river	23.959
+pkg/embedded	0.827
+pkg/embedded/controlplane	1.374
+pkg/service	80.826
+tests	6.001
