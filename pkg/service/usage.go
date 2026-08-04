@@ -11,8 +11,18 @@ import (
 )
 
 // RecordUsageInput is one host-reported metered usage event (#797).
-// Source+SourceID form the idempotency key within (payer, event_type):
-// replays return success without double-recording or double-charging.
+//
+// Source+SourceID are REQUIRED and form the idempotency key within
+// (merchant, payer, currency, event_type) — structurally, via
+// uq_usage_events_idem, not by convention. Both halves must be REPRODUCIBLE by
+// the caller across retries of the same logical event: a value minted per
+// attempt passes every check here and guarantees nothing.
+//
+// A replay under the same key with the SAME Amount returns success and neither
+// re-records nor re-charges. A replay with a DIFFERENT Amount is refused with
+// money.ErrIdempotencyKeyReused (or#891) rather than answered with the first
+// event, so a corrected charge cannot silently keep the original number.
+//
 // Amount is the host-priced cost in the currency's internal precision;
 // 0 records a free/metered-only event whose Dimensions still aggregate
 // through rate-card rating (gauge meters report unit-second quantities).
@@ -33,7 +43,8 @@ type RecordUsageInput struct {
 
 // RecordUsage durably records a metered usage event (and debits the ledger for
 // a non-zero Amount) via money.RecordUsage (#289/#797). Idempotent on
-// (merchant, payer, event_type, source, source_id).
+// (merchant, payer, currency, event_type, source, source_id); a replay carrying
+// a different Amount returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")

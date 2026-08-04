@@ -40,9 +40,10 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbte
 		Currency: unit, Amount: 500, Source: "grant",
 	})
 	require.NoError(t, err)
+	withdrawKey := uuid.New() // or#891: the idempotency key is required, not optional
 	_, err = svc.Withdraw(ctx, money.WithdrawParams{
 		CustomerID: &payer, Invoker: payer.UUID().String(),
-		Currency: unit, Amount: 150, Source: "usage",
+		Currency: unit, Amount: 150, Source: "usage", SourceID: &withdrawKey,
 	})
 	require.NoError(t, err)
 

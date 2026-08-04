@@ -129,9 +129,51 @@ squashed baseline (creates the schema from nothing, so lock-safety rules are
 vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
 excluded and must pass clean.
 
-`0011_query_audit_indexes.up.sql` has one file-specific exception:
-`require-concurrent-index-creation`. PostgreSQL forbids `CREATE INDEX
-CONCURRENTLY` inside the transaction migratekit always opens, so these two
-narrow partial indexes use regular creation bounded by a five-second lock
-timeout and five-minute statement timeout. The lint script still applies every
-other Squawk rule to that file.
+### `require-concurrent-index-creation` / `require-concurrent-index-deletion` — PERMANENT, repo-wide
+
+**Not a relaxed standard: an unreachable one.** migratekit's only Postgres apply
+path (`postgres.go` `applyOne`) opens `BeginTx` and executes the whole file
+inside it. There is no per-file opt-out, no `-- no-transaction` directive, and
+no second path — verified by reading migratekit v1.4.0, not inferred from the
+`assume_in_transaction` setting. PostgreSQL then refuses both operations
+outright. Measured on `postgres:18-alpine` rather than quoted from the docs:
+
+```
+BEGIN; CREATE INDEX CONCURRENTLY idx_t1_x ON t1 (x);
+  ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+BEGIN; DROP INDEX CONCURRENTLY idx_t1_x2;
+  ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
+```
+
+So **no migration in this repo can ever satisfy these two rules**, and a rule
+nobody can satisfy is not a gate — it is noise that blocks every future index
+and trains readers to reach for a path exclusion. They are therefore excluded in
+`.squawk.toml` via `excluded_rules`, repo-wide, in preference to a growing list
+of per-file carve-outs.
+
+Two pieces of evidence that this was already the de-facto state, just
+undocumented and unevenly applied:
+
+- `0011_query_audit_indexes.up.sql` carried a bespoke exclusion implemented as a
+  second squawk invocation inside `scripts/migration-lint.sh`. That carve-out is
+  now deleted; 0011 is linted by the same rule set as every other file.
+- `0016_cross_merchant_directory.up.sql` (on the unmerged `chaos` branch, not on
+  `master`) states the identical constraint in a code comment written
+  independently: *"Not CONCURRENTLY: the migrator applies each file inside ONE
+  transaction, where CREATE INDEX CONCURRENTLY is illegal (same constraint as
+  the five indexes in 0011)."* A second author reached the same conclusion
+  unprompted, and that migration will trip this gate the moment it merges unless
+  the rules are excluded here.
+
+**What is still enforced.** Only these two rules are excluded. `require-lock-timeout`,
+`require-statement-timeout`, `ban-drop-column`, `ban-drop-table` and the rest
+remain enforcing on every non-baseline migration — verified by running squawk
+with this config against a deliberately unsafe statement, which still reports
+all three of its issues. Because CONCURRENTLY is unavailable, a migration that
+builds an index must instead bound its blocking window explicitly: `SET
+lock_timeout` and `SET statement_timeout` at the top of the file, which
+`require-lock-timeout` / `require-statement-timeout` continue to force.
+
+**How to reverse this.** Give migratekit a non-transactional apply mode and mark
+such files with a directive; then delete the two entries from `excluded_rules`.
+It is a migratekit change, not a `.squawk.toml` change.

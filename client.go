@@ -209,8 +209,17 @@ type DepositCreditsRequest struct {
 	Amount int64
 	// Source identifies the system of record for this deposit (e.g. "stripe", "manual").
 	Source string
-	// SourceID is the idempotency key for the deposit within the Source namespace.
-	// Duplicate (Source, SourceID) pairs are rejected, preventing double-deposits.
+	// SourceID is the idempotency key for the deposit. REQUIRED, and it must be
+	// REPRODUCIBLE by the caller across retries of the same logical deposit —
+	// deriving it (uuidv5 over the operation's own identity) is the only way it
+	// survives this process. A value minted per request (uuid.New() in a handler)
+	// passes validation and guarantees nothing: it is a new deposit every time,
+	// which is exactly how a retried admin deposit double-credited an org.
+	//
+	// The deposit key is (merchant, payer, SourceID). Source is NOT part of it —
+	// the same SourceID under a different Source is still the same deposit. A
+	// duplicate is not rejected: it is answered with the EXISTING grant, so a
+	// replay is a success with the ORIGINAL amount.
 	SourceID    *uuid.UUID
 	ExpiresAt   *time.Time
 	Description string
@@ -436,8 +445,14 @@ type PayerSpendLimitInput struct {
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
-// Source and SourceID are required and together form the idempotency key —
-// duplicate (Source, SourceID) reports are accepted but recorded as Duplicate=true.
+// Source and SourceID are required and together form the idempotency key.
+//
+// Duplicate=true is served from a Redis claim, which is a cache: it expires with
+// the widest configured wasted-spend window and does not survive a flush, so a
+// replay after one is re-graded against grace and comes back Duplicate=false.
+// The MONEY does not move twice either way — the direct-payer overage charge is
+// keyed structurally in the usage ledger — and a replay with a changed Amount is
+// refused rather than answered with the first result (or#891).
 type WastedSpendReport struct {
 	CustomerID  string `json:"customer_id"`
 	Invoker     string `json:"invoker"`
@@ -453,9 +468,12 @@ type WastedSpendReport struct {
 }
 
 // UsageReport is one host-reported metered usage event (#797). CustomerID is
-// the billed payer; Source+SourceID form the idempotency key within
-// (payer, event_type) — replays are accepted and never double-record or
-// double-charge. Amount is the host-priced cost in the currency's internal
+// the billed payer; Source+SourceID are REQUIRED and form the idempotency key
+// within (merchant, payer, currency, event_type), enforced structurally by
+// uq_usage_events_idem. Both halves must be REPRODUCIBLE across retries of the
+// same event. A replay with the same Amount is accepted and neither re-records
+// nor re-charges; a replay with a DIFFERENT Amount is refused (or#891) rather
+// than answered with the first event. Amount is the host-priced cost in the currency's internal
 // precision; 0 records a free/metered-only event (dimensions still aggregate
 // through rate-card rating). OccurredAtUnix (seconds; 0 = now) places the
 // event in its rating window — gauge segment reporters set it to segment end.

@@ -524,7 +524,22 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 }
 
 // WastedSpendInput is one host-reported failed attempt that cost the platform
-// money. Source+SourceID are required for retry idempotency.
+// money.
+//
+// Source+SourceID are required (enforced below) and must be REPRODUCIBLE across
+// retries of the same failed attempt. Read the guarantee precisely, because the
+// two layers differ:
+//
+//   - The DUPLICATE VERDICT (Duplicate=true, no grace re-accounting) is a Redis
+//     SetNX in abuse.WastedSpendGuard.ClaimReport. It is a cache, not a durable
+//     claim: it expires with the widest configured window and does not survive a
+//     flush. After a flush a replay is re-graded and re-counted against grace.
+//   - The MONEY is durable regardless: the direct-payer overage charge posts
+//     through money.RecordUsage at (source, source_id, event_type=wasted_spend),
+//     whose key is structural, so a replay cannot double-charge and a replay
+//     with a changed amount is refused (money.ErrIdempotencyKeyReused).
+//
+// Reported measurements: or#891, and DESIGN-RULINGS §4.23.
 type WastedSpendInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string

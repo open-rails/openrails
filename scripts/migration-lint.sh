@@ -23,25 +23,20 @@ if [ ! -x "$BIN" ]; then
     chmod +x "$BIN"
 fi
 
-# migratekit wraps every migration in a transaction, so PostgreSQL cannot build
-# 0011's two indexes CONCURRENTLY. Lint that file separately with only that
-# incompatible rule disabled; every other rule remains enforcing.
-TRANSACTIONAL_INDEX_MIGRATION="migrations/postgres/0011_query_audit_indexes.up.sql"
-migration_files=()
-for file in migrations/postgres/*.up.sql; do
-    if [ "$file" != "$TRANSACTIONAL_INDEX_MIGRATION" ]; then
-        migration_files+=("$file")
-    fi
-done
+# Every file is linted with one rule set. The CONCURRENTLY rules used to be
+# excluded here for 0011 alone, via a bespoke second squawk invocation — but
+# migratekit applies EVERY migration inside one transaction, where PostgreSQL
+# rejects both CONCURRENTLY forms outright, so no file can ever satisfy them.
+# They are excluded repo-wide in .squawk.toml (rationale + the measured errors
+# are in internal/db/queries/EXEMPTIONS.md), which makes the per-file carve-out
+# dead code. Removing it also means 0011 is finally linted by the SAME rules as
+# everything else instead of its own private set.
+migration_files=(migrations/postgres/*.up.sql)
 
 # squawk exits 0 even when it reports issues; count them instead.
-count="$({
-    "$BIN" --reporter json "${migration_files[@]}"
-    "$BIN" --reporter json --exclude require-concurrent-index-creation "$TRANSACTIONAL_INDEX_MIGRATION"
-} 2>/dev/null | tr ',' '\n' | grep -c '"rule_name"' || true)"
+count="$("$BIN" --reporter json "${migration_files[@]}" 2>/dev/null | tr ',' '\n' | grep -c '"rule_name"' || true)"
 if [ "$count" -gt 0 ]; then
     "$BIN" "${migration_files[@]}" 1>&2
-    "$BIN" --exclude require-concurrent-index-creation "$TRANSACTIONAL_INDEX_MIGRATION" 1>&2
     echo "" 1>&2
     echo "migration-lint: $count issue(s) in new migrations. Fix them, or — if the" 1>&2
     echo "operation is genuinely safe here — record why in" 1>&2
