@@ -306,8 +306,7 @@ func TestDelinquencyLifecycle(t *testing.T) {
 	for _, ev := range events {
 		require.Equal(t, "customer", ev.SubjectType)
 		require.Equal(t, e.payer.UUID(), ev.SubjectID)
-		require.NotNil(t, ev.Currency)
-		require.Equal(t, e.currency, *ev.Currency)
+		require.Equal(t, e.currency, ev.Currency)
 	}
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(events[1].Data, &payload))

@@ -284,7 +284,6 @@ func (s *Service) apply(ctx context.Context, tid merchant.ID, policy Policy, cus
 		if err != nil {
 			return fmt.Errorf("encode delinquency event: %w", err)
 		}
-		cur := currency
 		// transition_seq is the idempotency coordinate: two evaluators racing
 		// the same transition compute the same sequence, so the unique index
 		// collapses them into one instruction to the host.
@@ -294,7 +293,7 @@ func (s *Service) apply(ctx context.Context, tid merchant.ID, policy Policy, cus
 			EventType:   eventTypeFor(ParseState(row.State)),
 			SubjectType: subjectCustomer,
 			SubjectID:   customerID,
-			Currency:    &cur,
+			Currency:    currency,
 			OccurredAt:  now,
 			Data:        data,
 			DedupeKey:   dedupe,
