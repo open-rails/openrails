@@ -158,7 +158,7 @@ func ledgerAuditTargets(ctx context.Context, database *db.DB, merchantSlug strin
 		}
 		return []ledgerAuditTarget{{id: id, slug: strings.TrimSpace(merchantSlug)}}, nil
 	}
-	rows, err := database.GenGlobal().ListLedgerAuditMerchants(ctx)
+	rows, err := database.GenDirectory().ListLedgerAuditMerchants(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list merchants: %w", err)
 	}

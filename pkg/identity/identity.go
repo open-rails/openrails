@@ -14,10 +14,6 @@ import (
 // rejects passing the wrong one.
 type CustomerID uuid.UUID
 
-// Invoker is the user / API key / delegated principal that invoked
-// usage. It is attribution + budgeting, never ownership.
-type Invoker string
-
 // InvokerType classifies whether an invoker is the payer acting directly or a
 // delegated principal using the payer's billing authority.
 type InvokerType string
@@ -39,12 +35,6 @@ func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
 
 // IsZero reports whether the customer id is unset.
 func (id CustomerID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
-
-// String returns the invoker id as a plain string.
-func (i Invoker) String() string { return string(i) }
-
-// IsZero reports whether the invoker id is empty.
-func (i Invoker) IsZero() bool { return strings.TrimSpace(string(i)) == "" }
 
 // NormalizeInvokerType treats empty/unknown values as delegated. That fails
 // closed into the stricter abuse cutoff unless the host explicitly marks the

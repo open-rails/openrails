@@ -505,7 +505,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			return fmt.Errorf("price lookup failed: %w", err)
 		}
 	}
-	amountMicros := moneyutil.CentsToMicros(sess.AmountTotal)
+	amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sess.AmountTotal)))
 	if amountMicros != price.Amount {
 		return fmt.Errorf("stripe checkout amount mismatch: got %d cents (%d micros), want %d micros", sess.AmountTotal, amountMicros, price.Amount)
 	}
@@ -629,11 +629,11 @@ func stripeEntitlementSet(spec map[string]*int) map[string]bool {
 // amount_due (what was attempted) — #671 1f. Wire-pinned in
 // stripe_wire_pinning_test.go.
 func stripeInvoicePaidAmountMicros(inv stripeInvoice) int64 {
-	return moneyutil.CentsToMicros(inv.AmountPaid)
+	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountPaid)))
 }
 
 func stripeInvoiceFailedAmountMicros(inv stripeInvoice) int64 {
-	return moneyutil.CentsToMicros(inv.AmountDue)
+	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountDue)))
 }
 
 func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
@@ -705,7 +705,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, moneyutil.CentsToMicros(refund.Amount), payments.ReversalRefund); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refund.Amount))), payments.ReversalRefund); err != nil {
 			return fmt.Errorf("record stripe refund: %w", err)
 		}
 	}
@@ -782,7 +782,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, moneyutil.CentsToMicros(dispute.Amount), payments.ReversalChargeback); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, int64(moneyutil.CentsToMicros(moneyutil.Cents(dispute.Amount))), payments.ReversalChargeback); err != nil {
 			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
 			log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
 				"dispute_id":          disputeID,

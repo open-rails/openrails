@@ -93,12 +93,13 @@ func (f *fakeNMIPusher) CanPush(_ context.Context, sub *models.Subscription) boo
 	return f != nil && f.canPush && strings.TrimSpace(sub.RailSubscriptionID) != ""
 }
 
-func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, amountMicros int64) error {
+func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, currency string, amountNative int64) error {
 	if f.pushErr != nil {
 		return f.pushErr
 	}
 	f.pushes = append(f.pushes, map[string]any{
-		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID, "amount_micros": amountMicros,
+		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID,
+		"amount_micros": amountNative, "currency": currency,
 	})
 	return nil
 }
@@ -138,7 +139,7 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 	insertPrice := func(id, productID uuid.UUID, amount int64, key string, psp string) {
 		_, e := base.pool.Exec(ctx, `
 			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, psp_links, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'usd',720,true,false,$5,$6::jsonb,$7,$7)`,
+			VALUES ($1,$2,$3,$4,'USD',720,true,false,$5,$6::jsonb,$7,$7)`,
 			id, productID, base.merchantID, amount, key, psp, now)
 		require.NoError(t, e)
 	}
@@ -503,7 +504,7 @@ func TestPlanMigration_Validation(t *testing.T) {
 	eurTargetID := uuid.New()
 	_, e := f.pool.Exec(ctx, `
 		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
-		VALUES ($1,$2,$3,9000000,'eur',720,true,false,$4,$5,$5)`,
+		VALUES ($1,$2,$3,9000000,'EUR',720,true,false,$4,$5,$5)`,
 		eurTargetID, f.targetProductID, f.merchantID, "planmig-eur-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, e)
 	_, err = f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: eurTargetID})

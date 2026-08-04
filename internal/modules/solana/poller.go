@@ -520,11 +520,9 @@ func solanaStateUint64(state map[string]any, key string) uint64 {
 		if v > 0 {
 			return uint64(v)
 		}
-	case float64:
-		if v > 0 {
-			return uint64(v)
-		}
 	case string:
+		// MONEY-3: base-unit amounts round-trip through JSONB as decimal
+		// strings; a JSON number would come back as a lossy float64.
 		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
 			return parsed
 		}

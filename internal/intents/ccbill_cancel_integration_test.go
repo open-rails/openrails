@@ -85,8 +85,7 @@ type ccbillFixture struct {
 func seedCCBillSubscription(t *testing.T) ccbillFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	fx := ccbillFixture{db: dbi, store: NewStore(dbi)}
@@ -107,7 +106,7 @@ func seedCCBillSubscription(t *testing.T) ccbillFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
@@ -363,14 +362,13 @@ func TestCCBillCancelSupersededByReactivation(t *testing.T) {
 // exactly the budget executes, the rest park behind ONE held_bulk finding.
 func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	const over = 2
+	mid := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, mid)
 	pool := dbi.Pool()
 	store := NewStore(dbi)
 	sfx := uuid.NewString()[:8]
 
-	const over = 2
-	mid := uuid.New()
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)
@@ -381,7 +379,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbreaker-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, mid)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, mid)
 	now := time.Now().UTC()
 	for i := 0; i < DestructiveBudgetFloor+over; i++ {
 		subID := uuid.New()

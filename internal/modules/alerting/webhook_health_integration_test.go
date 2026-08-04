@@ -25,7 +25,7 @@ func seedArmedRailWithBillableSub(t *testing.T, pool *pgxpool.Pool, mid uuid.UUI
 	cust, prod, price := uuid.New(), uuid.New(), uuid.New()
 	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	exec(t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,'P',$3)`, prod, "k-"+uuid.NewString()[:8], mid)
-	exec(t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew, access_duration_hours) VALUES ($1,$2,10000000,'usd',$3,true,720)`, price, prod, mid)
+	exec(t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew, access_duration_hours) VALUES ($1,$2,10000000,'USD',$3,true,720)`, price, prod, mid)
 	exec(t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1,$2,'nmi',$3)`, uuid.New(), mid, "579145")
 	exec(t, pool, `INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, rail, rail_subscription_id, status, started_at)
 		VALUES ($1,$2,$3,$4,$5,'nmi',$6,'active',now() - interval '30 days')`, uuid.New(), mid, cust, prod, price, "sub-"+uuid.NewString()[:8])

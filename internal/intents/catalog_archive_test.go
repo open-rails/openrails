@@ -241,7 +241,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		}
 		// A local price links price_x by id.
 		linked := &models.Price{
-			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true,
+			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true,
 			PSPLinks: map[string]map[string]string{
 				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"},
 			},
@@ -258,7 +258,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		intent := archiveIntent(t, TypeStripeArchivePrice, "price_x", "retired.usd.900.30")
 
 		prod := &models.Product{ID: productID, Key: "retired"}
-		price := &models.Price{ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "usd", AccessDurationHours: &cycle, AutoRenew: true}
+		price := &models.Price{ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true}
 		h.LoadCatalog = stubCatalog([]*models.Product{prod}, []*models.Price{price})
 		rel, err := h.CheckRelevance(context.Background(), intent)
 		if err != nil || rel.Applicable {

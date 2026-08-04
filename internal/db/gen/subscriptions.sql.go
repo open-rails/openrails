@@ -20,6 +20,7 @@ SET next_retry_at = $2::timestamptz,
 WHERE id = $1
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= $3::timestamptz
+  AND deleted_at IS NULL
 `
 
 type ClaimDunningAttemptParams struct {
@@ -41,6 +42,7 @@ func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttem
 const countSubscriptionsByCustomer = `-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
+  AND sub.deleted_at IS NULL
 `
 
 func (q *Queries) CountSubscriptionsByCustomer(ctx context.Context, customerID uuid.UUID) (int64, error) {
@@ -61,6 +63,7 @@ WHERE ($1::uuid IS NULL OR sub.customer_id = $1::uuid)
   AND ($7::timestamptz IS NULL OR sub.cancelled_at >= $7::timestamptz)
   AND ($8::timestamptz IS NULL OR sub.cancelled_at <= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.current_period_ends_at <= $9::timestamptz)
+  AND sub.deleted_at IS NULL
 `
 
 type CountSubscriptionsFilteredParams struct {
@@ -193,6 +196,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 
 const deleteSubscription = `-- name: DeleteSubscription :execrows
 DELETE FROM openrails.subscriptions WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) DeleteSubscription(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -204,10 +208,11 @@ func (q *Queries) DeleteSubscription(ctx context.Context, id uuid.UUID) (int64, 
 }
 
 const getActiveSubscriptionByCustomerAt = `-- name: GetActiveSubscriptionByCustomerAt :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.status = 'active'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > $2::timestamptz)
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT 1
 `
@@ -251,15 +256,18 @@ func (q *Queries) GetActiveSubscriptionByCustomerAt(ctx context.Context, arg Get
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getLatestResumableCancelledSubscription = `-- name: GetLatestResumableCancelledSubscription :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.status = 'cancelled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > $2::timestamptz)
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT 1
 `
@@ -303,13 +311,16 @@ func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, a
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getLatestSubscriptionByCustomer = `-- name: GetLatestSubscriptionByCustomer :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT 1
 `
@@ -348,15 +359,18 @@ func (q *Queries) GetLatestSubscriptionByCustomer(ctx context.Context, customerI
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getLifecycleSubscriptionByCustomerAndProduct = `-- name: GetLifecycleSubscriptionByCustomerAndProduct :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status IN ('active', 'pending', 'past_due')
+  AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
 `
@@ -401,16 +415,19 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndProduct(ctx context.Conte
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getLifecycleSubscriptionByCustomerAndTierGroup = `-- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.credits_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id FROM openrails.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.credits_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.customer_id = $1
   AND sub.status IN ('active', 'pending', 'past_due')
   AND prod.tier_group = $2
+  AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
 `
@@ -454,13 +471,16 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndTierGroup(ctx context.Con
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getSubscriptionByCustomerAndPrice = `-- name: GetSubscriptionByCustomerAndPrice :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.price_id = $2
+  AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -503,12 +523,15 @@ func (q *Queries) GetSubscriptionByCustomerAndPrice(ctx context.Context, arg Get
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions WHERE id = $1
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscription, error) {
@@ -545,14 +568,17 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (Openra
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getSubscriptionByRailMetadataValue = `-- name: GetSubscriptionByRailMetadataValue :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1
   AND sub.gateway_response ->> $2::text = $3::text
+  AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -596,13 +622,16 @@ func (q *Queries) GetSubscriptionByRailMetadataValue(ctx context.Context, arg Ge
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getSubscriptionByRailSubID = `-- name: GetSubscriptionByRailSubID :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+  AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -645,13 +674,16 @@ func (q *Queries) GetSubscriptionByRailSubID(ctx context.Context, arg GetSubscri
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getSubscriptionByRailSubIDForUpdate = `-- name: GetSubscriptionByRailSubIDForUpdate :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+  AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE
 `
@@ -697,15 +729,18 @@ func (q *Queries) GetSubscriptionByRailSubIDForUpdate(ctx context.Context, arg G
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getUnknownSubscriptionByCustomerAndProduct = `-- name: GetUnknownSubscriptionByCustomerAndProduct :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status = 'unknown'
+  AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
 `
@@ -752,16 +787,19 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndProduct(ctx context.Context
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const getUnknownSubscriptionByCustomerAndTierGroup = `-- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.credits_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id FROM openrails.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.credits_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.customer_id = $1
   AND sub.status = 'unknown'
   AND prod.tier_group = $2
+  AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
 `
@@ -805,13 +843,16 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Conte
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
 	)
 	return i, err
 }
 
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.status = 'active'
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 `
 
@@ -855,6 +896,8 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, custome
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -867,8 +910,9 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, custome
 }
 
 const listActiveSubscriptionsByPriceIDs = `-- name: ListActiveSubscriptionsByPriceIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.price_id = ANY($1::uuid[]) AND sub.status = 'active'
+  AND sub.deleted_at IS NULL
 `
 
 // #773: every active subscription pinned to one of a set of price rows — the
@@ -914,6 +958,8 @@ func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceId
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -926,8 +972,9 @@ func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceId
 }
 
 const listActiveSubscriptionsByRail = `-- name: ListActiveSubscriptionsByRail :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.status = 'active'
+  AND sub.deleted_at IS NULL
 `
 
 func (q *Queries) ListActiveSubscriptionsByRail(ctx context.Context, rail string) ([]OpenrailsSubscription, error) {
@@ -970,6 +1017,8 @@ func (q *Queries) ListActiveSubscriptionsByRail(ctx context.Context, rail string
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -981,11 +1030,51 @@ func (q *Queries) ListActiveSubscriptionsByRail(ctx context.Context, rail string
 	return items, nil
 }
 
+const listDueDunningMerchants = `-- name: ListDueDunningMerchants :many
+SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
+    $1::text[],
+    $2::timestamptz,
+    $3::int)
+`
+
+type ListDueDunningMerchantsParams struct {
+	Rails         []string
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: merchants holding a due past_due subscription on the named
+// rails, through migration 0023's SECURITY DEFINER work queue (or#877 B5). The
+// dunning worker used to run ListDueDunningSubscriptions on the bare job
+// context; subscriptions FORCEs RLS, so the scan returned an empty slice and
+// scheduled dunning has never retried, parked or terminated anything. Ids only
+// — the due rows and every charge run per-merchant under RunInMerchantScope.
+func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueDunningMerchants, arg.Rails, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = ANY($1::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $2::timestamptz
+  AND sub.deleted_at IS NULL
 `
 
 type ListDueDunningSubscriptionsParams struct {
@@ -993,7 +1082,8 @@ type ListDueDunningSubscriptionsParams struct {
 	Now   time.Time
 }
 
-// Dunning: past_due NMI-backed subscriptions whose next retry is due.
+// Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
+// inside one merchant's scope (see ListDueDunningMerchants above).
 func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Rails, arg.Now)
 	if err != nil {
@@ -1034,6 +1124,8 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1046,9 +1138,10 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 }
 
 const listMigratableSubscriptionsByPriceID = `-- name: ListMigratableSubscriptionsByPriceID :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.price_id = $1::uuid
   AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at
 `
 
@@ -1096,6 +1189,8 @@ func (q *Queries) ListMigratableSubscriptionsByPriceID(ctx context.Context, pric
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1108,8 +1203,9 @@ func (q *Queries) ListMigratableSubscriptionsByPriceID(ctx context.Context, pric
 }
 
 const listSubscriptionsByCustomerPaged = `-- name: ListSubscriptionsByCustomerPaged :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT $3::int OFFSET $2::int
 `
@@ -1160,6 +1256,8 @@ func (q *Queries) ListSubscriptionsByCustomerPaged(ctx context.Context, arg List
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1172,8 +1270,9 @@ func (q *Queries) ListSubscriptionsByCustomerPaged(ctx context.Context, arg List
 }
 
 const listSubscriptionsByCustomerRail = `-- name: ListSubscriptionsByCustomerRail :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.rail = $2
+  AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 `
 
@@ -1222,6 +1321,8 @@ func (q *Queries) ListSubscriptionsByCustomerRail(ctx context.Context, arg ListS
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1234,7 +1335,8 @@ func (q *Queries) ListSubscriptionsByCustomerRail(ctx context.Context, arg ListS
 }
 
 const listSubscriptionsByIDs = `-- name: ListSubscriptionsByIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions WHERE id = ANY($1::uuid[])
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions WHERE id = ANY($1::uuid[])
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsSubscription, error) {
@@ -1277,6 +1379,8 @@ func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) (
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1289,8 +1393,9 @@ func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) (
 }
 
 const listSubscriptionsByPaymentMethodIDs = `-- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.payment_method_id = ANY($1::uuid[])
+  AND sub.deleted_at IS NULL
 `
 
 func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, paymentMethodIds []uuid.UUID) ([]OpenrailsSubscription, error) {
@@ -1333,6 +1438,8 @@ func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, payme
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1345,7 +1452,7 @@ func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, payme
 }
 
 const listSubscriptionsFiltered = `-- name: ListSubscriptionsFiltered :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE ($1::uuid IS NULL OR sub.customer_id = $1::uuid)
   AND ($2::text IS NULL OR sub.status::text = $2::text)
   AND ($3::uuid IS NULL OR sub.price_id = $3::uuid)
@@ -1355,6 +1462,7 @@ WHERE ($1::uuid IS NULL OR sub.customer_id = $1::uuid)
   AND ($7::timestamptz IS NULL OR sub.cancelled_at >= $7::timestamptz)
   AND ($8::timestamptz IS NULL OR sub.cancelled_at <= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.current_period_ends_at <= $9::timestamptz)
+  AND sub.deleted_at IS NULL
 ORDER BY
     CASE WHEN $10::text = 'expires_at'   AND NOT $11::boolean THEN sub.current_period_ends_at END ASC,
     CASE WHEN $10::text = 'expires_at'   AND $11::boolean     THEN sub.current_period_ends_at END DESC,
@@ -1435,6 +1543,8 @@ func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscri
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1457,6 +1567,7 @@ WHERE customer_id = $1
   AND product_id = $2
   AND status = 'cancelled'
   AND ($4::uuid IS NULL OR id != $4::uuid)
+  AND deleted_at IS NULL
 `
 
 type MarkCancelledSubscriptionsSupersededParams struct {
@@ -1487,6 +1598,7 @@ SELECT EXISTS (
     JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
     WHERE s.merchant_id = $1::uuid
       AND s.id = $2::uuid
+      AND s.deleted_at IS NULL
       AND p.auto_renew
       AND s.status IN ('pending', 'active', 'past_due', 'unknown')
 ) AS standing
@@ -1535,6 +1647,7 @@ UPDATE openrails.subscriptions SET
     scheduled_price_id = $24,
     updated_at = $25
 WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 type UpdateSubscriptionAtParams struct {

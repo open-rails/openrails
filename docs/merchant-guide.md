@@ -92,6 +92,11 @@ Credits reference a top-level balance declaration
 `cadence` is `once` (initial activation) or `per_renewal` (granted on each confirmed
 renewal — webhook-replay safe).
 
+**Credits expire only if you say so.** A grant takes its lifetime from its own
+`expires`, else the balance's `expires_default`. Declare neither and the balance
+never expires — OpenRails will not put a clock on customer money you did not ask
+for.
+
 **A variable credit top-up** — buy *any* amount within bounds; graduated tiers give
 volume discounts and stay monotonic, so the quote inverts cleanly (enter $ → credits,
 or credits → $):

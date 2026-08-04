@@ -70,9 +70,6 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		FetchedAt:    time.Now().UTC(),
 		Capabilities: f.Capabilities(),
 	}
-	if params.SubscriptionID == "" {
-		snap.Coverage.SubscriptionsExhaustive = true
-	}
 	snap.Coverage.TransactionsExhaustive = true
 	snap.Coverage.TransactionsPaginatedComplete = true
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
@@ -86,8 +83,20 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		sub, vault := normalizeStripeSubscription(env)
 		snap.Subscriptions = append(snap.Subscriptions, sub)
 		if vault != nil {
-			snap.VaultEntries = append(snap.VaultEntries, *vault)
+			snap.PaymentMethods = append(snap.PaymentMethods, *vault)
 		}
+	}
+	// #842 (same rule as nmi.go): "exhaustive" is an ABSENCE PROOF — it flips
+	// the §3.2 confirmed-absence gate and authorizes cancelling every local
+	// subscription missing from this list. It is therefore decided AFTER the
+	// fetch, from what actually came back. A 200 with an empty `data` and
+	// has_more=false is indistinguishable from a complete roster of an account
+	// that is not ours: a key rotated onto a sibling Stripe account, a restricted
+	// key, or an incident returning an empty first page all look exactly like
+	// "this merchant has no subscribers". A customer-filtered roster proves
+	// nothing about the merchant's book either.
+	if params.SubscriptionID == "" && params.CustomerID == "" && len(snap.Subscriptions) > 0 {
+		snap.Coverage.SubscriptionsExhaustive = true
 	}
 
 	charges, err := f.listRaw(ctx, "/v1/charges", params, nil)
@@ -306,7 +315,7 @@ func normalizeStripeStatus(s string) SubscriptionStatus {
 	}
 }
 
-func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *RemoteVaultEntry) {
+func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *RemotePaymentMethod) {
 	var s stripeSubscriptionJSON
 	_ = json.Unmarshal(obj, &s)
 
@@ -342,12 +351,12 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 		sub.NextBillingAt = &t
 	}
 
-	var vault *RemoteVaultEntry
+	var vault *RemotePaymentMethod
 	if len(s.DefaultPaymentMethod) > 0 && string(s.DefaultPaymentMethod) != "null" {
 		var pm stripePaymentMethodJSON
 		if err := json.Unmarshal(s.DefaultPaymentMethod, &pm); err == nil && pm.ID != "" {
-			entry := RemoteVaultEntry{
-				CustomerVaultID: s.Customer,
+			entry := RemotePaymentMethod{
+				RailCustomerRef: s.Customer,
 				CardLast4:       pm.Card.Last4,
 				Raw:             s.DefaultPaymentMethod,
 			}

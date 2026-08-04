@@ -94,7 +94,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		router:     router,
 		creditType: creditTypeName,
 		ms:         money.NewMoneyService(suite.App.Runtime.DB),
-		ctx:        dbtest.WithTestMerchant(context.Background()),
+		ctx:        suite.MerchantCtx(),
 	}
 }
 

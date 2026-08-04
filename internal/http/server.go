@@ -112,8 +112,7 @@ func (s *Server) recordBrowserRoute(pattern string) {
 	s.browserTierRoutes.Add(pattern)
 }
 
-// RouteTable returns every route pattern the standalone surface registered
-// ("GET /v1/me/balance", ServeMux syntax). Used by the route-surface test.
+// RouteTable returns the registered route surface (guard tests).
 func (s *Server) RouteTable() []string {
 	out := make([]string, len(s.routeTable))
 	copy(out, s.routeTable)
@@ -175,8 +174,8 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.PaymentMethodService == nil {
 		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
-	if deps.Runtime.VaultService == nil {
-		return nil, fmt.Errorf("server runtime vault service is required")
+	if deps.Runtime.RailPaymentMethodService == nil {
+		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
 	if deps.Runtime.RailCustomerService == nil {
 		return nil, fmt.Errorf("server runtime rail customer service is required")
@@ -260,9 +259,9 @@ func New(deps Dependencies) (*Server, error) {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
 				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
-			if deps.Runtime.VaultService != nil {
-				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.VaultService.SetRailMerchantAccountSecretResolver(tsvc)
+			if deps.Runtime.RailPaymentMethodService != nil {
+				deps.Runtime.RailPaymentMethodService.SetMerchantSecretStore(secretStore)
+				deps.Runtime.RailPaymentMethodService.SetRailMerchantAccountSecretResolver(tsvc)
 			}
 		}
 
@@ -402,13 +401,3 @@ func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchan
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }
-
-// Close currently does not own underlying resources; callers should close the App.
-func (s *Server) Close(_ context.Context) error {
-	log.Info("Billing HTTP server shut down")
-	return nil
-}
-
-func (s *Server) Cfg() *config.Config {
-	return s.cfg
-}

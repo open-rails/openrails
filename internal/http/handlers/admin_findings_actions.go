@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,36 @@ func compactJSON(v any) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return string(b)
+}
+
+// paramAmountMicros parses a recommendation/override `amount` param into
+// MICROS as an exact int64. or#863: this used to be `int64(raw.(float64))` —
+// a float64 truncation on a value that feeds a real provider refund and an
+// intents-ledger write. A float64 is now REJECTED rather than truncated
+// (params are decoded with UseNumber, so an integer literal arrives as an
+// exact json.Number); a decimal string is accepted for clients that prefer to
+// keep money out of JSON numbers entirely.
+func paramAmountMicros(raw any) (int64, error) {
+	var text string
+	switch v := raw.(type) {
+	case json.Number:
+		text = v.String()
+	case string:
+		text = strings.TrimSpace(v)
+	case float64, float32:
+		return 0, paramErrorf("recommendation param \"amount\" arrived as a floating-point value; " +
+			"an amount in micros must be an exact integer (MONEY-3)")
+	default:
+		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros")
+	}
+	micros, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros (got %q)", text)
+	}
+	if micros <= 0 {
+		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros")
+	}
+	return micros, nil
 }
 
 func paramString(params map[string]any, key string) string {
@@ -354,11 +385,11 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	// the CCBill refund wire is unverified until the first real refund confirms it.
 	amount := payment.Amount // full refund by default (micros)
 	if raw, ok := params["amount"]; ok && raw != nil {
-		f, isNum := raw.(float64)
-		if !isNum || f <= 0 {
-			return paramErrorf("recommendation param \"amount\" must be a positive number of micros")
+		parsed, perr := paramAmountMicros(raw)
+		if perr != nil {
+			return perr
 		}
-		amount = int64(f)
+		amount = parsed
 	}
 	idempotencyKey := "finding:" + finding.ID.String() + ":refund:" + paymentID.String()
 	refund, status, err := executeAdminRefund(ctx, r, paymentID, refundRequest{

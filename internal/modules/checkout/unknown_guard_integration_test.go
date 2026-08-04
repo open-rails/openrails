@@ -25,9 +25,8 @@ import (
 // A different product is allowed; once the sub resolves terminal (cancelled),
 // checkout is allowed again.
 func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -48,7 +47,7 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
 		      VALUES ($1,$2,$2,$3,$4,'{}'::jsonb,$5)`, prod, "ug-"+key+"-"+sfx, group, rank, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
-		      VALUES ($1,$2,5000000,'usd',720,true,$3)`, price, prod, merchantID)
+		      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
 		return prod, price
 	}
 

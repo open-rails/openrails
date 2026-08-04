@@ -91,7 +91,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
 	}
-	if in.UnitAmount > 0 && moneyutil.CentsToMicros(remote.UnitAmount) != in.UnitAmount {
+	if in.UnitAmount > 0 && int64(moneyutil.CentsToMicros(moneyutil.Cents(remote.UnitAmount))) != in.UnitAmount {
 		return nil, fmt.Errorf("stripe price %q unit_amount (%d cents) does not match catalog price (%d micros)", priceID, remote.UnitAmount, in.UnitAmount)
 	}
 	if in.Currency != "" && !strings.EqualFold(strings.TrimSpace(remote.Currency), strings.TrimSpace(in.Currency)) {
@@ -257,13 +257,13 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		}
 	}
 	if stripePriceID == "" {
-		unitAmountCents, err := moneyutil.MicrosToCentsExact(in.UnitAmount)
+		unitAmountCents, err := moneyutil.NativeToRailMinorExact(in.Currency, in.UnitAmount)
 		if err != nil {
 			return nil, err
 		}
 		id, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
 			StripeProductID:  stripeProductID,
-			UnitAmount:       unitAmountCents,
+			UnitAmount:       int64(unitAmountCents),
 			Currency:         in.Currency,
 			BillingCycleDays: in.BillingCycleDays,
 			LookupKey:        in.LookupKey,
@@ -324,7 +324,7 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 				RemoteValue:    strconv.FormatBool(remote.Active),
 			})
 		}
-		remoteUnitAmountMicros := moneyutil.CentsToMicros(remote.UnitAmount)
+		remoteUnitAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(remote.UnitAmount)))
 		if local.UnitAmount != remoteUnitAmountMicros {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",

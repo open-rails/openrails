@@ -112,15 +112,6 @@ func (b MerchantFetcherBuilder) environment() string {
 	return config.ExpectedProviderEnvironment(b.testMode())
 }
 
-// resolveScope resolves the merchant's declared account row for a rail from
-// the store plane: the pinned account when AccountIDs names one, else the pull
-// scope (active for new work, else newest archived for drain — #655). ok=false
-// means the merchant declares NO account on the rail → nothing is armed for
-// this pass (no boot-config plane exists to fall back to, #788).
-func (b MerchantFetcherBuilder) resolveScope(ctx context.Context, mid merchant.ID, provider Provider) (merchants.PSPScope, bool) {
-	return b.resolveScopeCoverage(ctx, mid, provider, nil)
-}
-
 // resolveScopeCoverage is resolveScope plus the #841 coverage record: how many
 // PSPs the merchant declares active on the rail versus the one this pass arms
 // from.

@@ -37,8 +37,8 @@ const TypeNMIPaymentSourceUpdate = "nmi_payment_source_update"
 // count ⇒ same key ⇒ maps onto the same intent, while a NEW wish after any
 // completed swap advances the count — so a later A→B→A cycle can never be
 // falsely answered from an old succeeded tombstone.
-func NMIPaymentSourceUpdateIdempotencyKey(subscriptionID uuid.UUID, newVaultID string, priorSwaps int64) string {
-	return fmt.Sprintf("%s:%s:%s:swap%d", TypeNMIPaymentSourceUpdate, subscriptionID, newVaultID, priorSwaps)
+func NMIPaymentSourceUpdateIdempotencyKey(subscriptionID uuid.UUID, newRailCustomerRef string, priorSwaps int64) string {
+	return fmt.Sprintf("%s:%s:%s:swap%d", TypeNMIPaymentSourceUpdate, subscriptionID, newRailCustomerRef, priorSwaps)
 }
 
 // NMIPaymentSourceUpdatePayload is the stored payload. The subscription and
@@ -48,9 +48,9 @@ type NMIPaymentSourceUpdatePayload struct {
 	UserID             string     `json:"user_id"`
 	RailSubscriptionID string     `json:"rail_subscription_id,omitempty"`
 	NewPaymentMethodID uuid.UUID  `json:"new_payment_method_id"`
-	NewVaultID         string     `json:"new_vault_id"`
+	NewRailCustomerRef string     `json:"new_vault_id"`
 	OldPaymentMethodID *uuid.UUID `json:"old_payment_method_id,omitempty"`
-	OldVaultID         string     `json:"old_vault_id,omitempty"`
+	OldRailCustomerRef string     `json:"old_vault_id,omitempty"`
 }
 
 // NMIPaymentSourceUpdateHandler implements the effectively-once swap:
@@ -105,7 +105,7 @@ func decodeNMIPaymentSourceUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPay
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode nmi payment source update payload: %w", err)
 	}
-	if p.NewPaymentMethodID == uuid.Nil || strings.TrimSpace(p.NewVaultID) == "" {
+	if p.NewPaymentMethodID == uuid.Nil || strings.TrimSpace(p.NewRailCustomerRef) == "" {
 		return p, errors.New("nmi payment source update payload is incomplete")
 	}
 	return p, nil
@@ -162,7 +162,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
 	}
-	newVault, outcome, ok := h.targetVault(ctx, p)
+	newRailCustomerRef, outcome, ok := h.targetRailCustomerRef(ctx, p)
 	if !ok {
 		return outcome
 	}
@@ -176,14 +176,14 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	if !found {
 		return Terminal(fmt.Sprintf("recurring record %s gone at provider (cancelled/tombstoned); payment-source update cannot apply — repair: subscription lifecycle owns this, no local change made", psid))
 	}
-	if strings.TrimSpace(remote.CustomerVaultID) == newVault {
+	if strings.TrimSpace(remote.CustomerVaultID) == newRailCustomerRef {
 		if err := h.finalize(ctx, intent, p); err != nil {
 			return Ambiguous("provider already bills the new vault, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"verified_already_pointing": true, "rail_subscription_id": psid, "new_vault_id": newVault})
+		return Succeeded(map[string]any{"verified_already_pointing": true, "rail_subscription_id": psid, "new_vault_id": newRailCustomerRef})
 	}
 
-	if err := client.UpdateSubscriptionPaymentSource(psid, newVault); err != nil {
+	if err := client.UpdateSubscriptionPaymentSource(psid, newRailCustomerRef); err != nil {
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -208,8 +208,8 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	return Succeeded(map[string]any{
 		"updated":              true,
 		"rail_subscription_id": psid,
-		"new_vault_id":         newVault,
-		"old_vault_id":         p.OldVaultID,
+		"new_vault_id":         newRailCustomerRef,
+		"old_vault_id":         p.OldRailCustomerRef,
 	})
 }
 
@@ -234,7 +234,7 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	if !ok {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
-	newVault, outcome, ok := h.targetVault(ctx, p)
+	newRailCustomerRef, outcome, ok := h.targetRailCustomerRef(ctx, p)
 	if !ok {
 		return outcome
 	}
@@ -247,21 +247,21 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	}
 	cur := strings.TrimSpace(remote.CustomerVaultID)
 	switch {
-	case cur == newVault:
+	case cur == newRailCustomerRef:
 		if err := h.finalize(ctx, intent, p); err != nil {
 			return Ambiguous("verified new vault at provider, but local finalize failed: " + err.Error())
 		}
-		return Succeeded(map[string]any{"verified_new_vault": true, "rail_subscription_id": psid, "new_vault_id": newVault})
-	case strings.TrimSpace(p.OldVaultID) != "" && cur == strings.TrimSpace(p.OldVaultID):
+		return Succeeded(map[string]any{"verified_new_vault": true, "rail_subscription_id": psid, "new_vault_id": newRailCustomerRef})
+	case strings.TrimSpace(p.OldRailCustomerRef) != "" && cur == strings.TrimSpace(p.OldRailCustomerRef):
 		return Retryable("provider still bills the old vault; update verified not executed")
-	case strings.TrimSpace(p.OldVaultID) == "":
+	case strings.TrimSpace(p.OldRailCustomerRef) == "":
 		// Old side unknown locally (legacy row without a payment-method link):
 		// any non-new vault means the update did not land — re-execute.
 		return Retryable(fmt.Sprintf("provider bills vault %s, not the requested one; update verified not executed", cur))
 	default:
 		return TerminalWithEvidence(
-			fmt.Sprintf("provider bills vault %s — neither this swap's old (%s) nor new (%s); out-of-band change, not overwriting — repair: re-issue the swap if still wanted", cur, p.OldVaultID, newVault),
-			map[string]any{"provider_vault_id": cur, "old_vault_id": p.OldVaultID, "new_vault_id": newVault, "rail_subscription_id": psid},
+			fmt.Sprintf("provider bills vault %s — neither this swap's old (%s) nor new (%s); out-of-band change, not overwriting — repair: re-issue the swap if still wanted", cur, p.OldRailCustomerRef, newRailCustomerRef),
+			map[string]any{"provider_vault_id": cur, "old_vault_id": p.OldRailCustomerRef, "new_vault_id": newRailCustomerRef, "rail_subscription_id": psid},
 		)
 	}
 }
@@ -287,15 +287,15 @@ func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, inten
 	return client, Outcome{}, true
 }
 
-// targetVault re-reads the target payment method for a fresh vault ref; the
+// targetRailCustomerRef re-reads the target payment method for a fresh vault ref; the
 // payload copy backstops a row deleted out-of-band AFTER the provider write
 // may already have landed (the swap must still converge). ok=false carries the
 // outcome to return.
-func (h *NMIPaymentSourceUpdateHandler) targetVault(ctx context.Context, p NMIPaymentSourceUpdatePayload) (string, Outcome, bool) {
+func (h *NMIPaymentSourceUpdateHandler) targetRailCustomerRef(ctx context.Context, p NMIPaymentSourceUpdatePayload) (string, Outcome, bool) {
 	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, p.NewPaymentMethodID)
 	if err != nil {
 		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-			return strings.TrimSpace(p.NewVaultID), Outcome{}, true
+			return strings.TrimSpace(p.NewRailCustomerRef), Outcome{}, true
 		}
 		return "", Retryable("load target payment method: " + err.Error()), false
 	}
@@ -363,8 +363,8 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	if err != nil {
 		return PaymentSourceUpdateOutcome{}, err
 	}
-	newVault := strings.TrimSpace(newPM.RailCustomerRef)
-	if newVault == "" {
+	newRailCustomerRef := strings.TrimSpace(newPM.RailCustomerRef)
+	if newRailCustomerRef == "" {
 		return PaymentSourceUpdateOutcome{}, errors.New("target payment method has no rail customer ref")
 	}
 
@@ -372,14 +372,14 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	// missing/unlinked old method degrades to "old unknown" (verify re-executes
 	// on any non-new vault).
 	var oldPMID *uuid.UUID
-	var oldVault string
+	var oldRailCustomerRef string
 	if sub.PaymentMethodID != nil {
 		id := *sub.PaymentMethodID
 		oldPMID = &id
 		old, err := paymentmethods.NewPaymentMethodRepo(t.DB).GetByID(ctx, id)
 		switch {
 		case err == nil:
-			oldVault = strings.TrimSpace(old.RailCustomerRef)
+			oldRailCustomerRef = strings.TrimSpace(old.RailCustomerRef)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			// linked row gone; old vault stays unknown
 		default:
@@ -407,11 +407,11 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 			UserID:             sub.CustomerID.String(),
 			RailSubscriptionID: sub.RailSubscriptionID,
 			NewPaymentMethodID: newPM.ID,
-			NewVaultID:         newVault,
+			NewRailCustomerRef: newRailCustomerRef,
 			OldPaymentMethodID: oldPMID,
-			OldVaultID:         oldVault,
+			OldRailCustomerRef: oldRailCustomerRef,
 		},
-		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(sub.ID, newVault, priorSwaps),
+		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(sub.ID, newRailCustomerRef, priorSwaps),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         origin,
 		OriginReason:   originReason,

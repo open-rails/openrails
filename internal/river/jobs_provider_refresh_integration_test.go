@@ -21,7 +21,7 @@ import (
 func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	merchantID := dbtest.TestMerchantID.UUID()
 	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -69,7 +69,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	merchantID := dbtest.TestMerchantID.UUID()
 	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -88,7 +88,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "refresh-prod-"+uuid.NewString(), "refresh-tier-"+uuid.NewString(), merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, merchantID)
+		      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
@@ -97,7 +97,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID)
 		exec(`INSERT INTO openrails.payments
 		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id)
-		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'usd', 'completed', $3, $4, $5, $6)`,
+		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'USD', 'completed', $3, $4, $5, $6)`,
 			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID)
 		return nil
 	}))
@@ -111,8 +111,8 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 			RawStatus:          "canceled",
 		}},
 		Transactions: []reconcile.RemoteTransaction{
-			{TransactionID: "ch_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 999, Currency: "usd", OccurredAt: now.Add(-48 * time.Hour)},
-			{TransactionID: "re_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeRefund, Success: true, AmountCents: 999, Currency: "usd", OccurredAt: now.Add(-24 * time.Hour), Raw: rawProviderRefreshJSON(map[string]any{"charge": "ch_original"})},
+			{TransactionID: "ch_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: now.Add(-48 * time.Hour)},
+			{TransactionID: "re_missing", SubscriptionID: psid, Type: reconcile.TransactionTypeRefund, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: now.Add(-24 * time.Hour), Raw: rawProviderRefreshJSON(map[string]any{"charge": "ch_original"})},
 		},
 		Capabilities: reconcile.Capabilities{Subscriptions: true, Transactions: true, Refunds: true, Chargebacks: true},
 		Coverage: reconcile.SnapshotCoverage{

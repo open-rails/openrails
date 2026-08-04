@@ -31,6 +31,14 @@ func TestRateCeiling_ConstantsAreWirePinned(t *testing.T) {
 	if globalWarnThreshold != 8 {
 		t.Fatalf("globalWarnThreshold = %d, want 8", globalWarnThreshold)
 	}
+	// or#842: the automated leg. Per merchant, not deployment-wide — a flat
+	// global wall on system origin does not survive fleet scale.
+	if PerMerchantSystemHourlyCeiling != 50 {
+		t.Fatalf("PerMerchantSystemHourlyCeiling = %d, want 50", PerMerchantSystemHourlyCeiling)
+	}
+	if systemMerchantWarnThreshold != 25 {
+		t.Fatalf("systemMerchantWarnThreshold = %d, want 25", systemMerchantWarnThreshold)
+	}
 }
 
 // The finding types must satisfy reconciliation_findings' type CHECK regex, or
@@ -75,21 +83,31 @@ func TestRateCeiling_GateEvalErrorFailsClosed(t *testing.T) {
 	if errors.As(err, &rce) {
 		t.Fatal("a gate-eval error must not be a *RateCeilingError")
 	}
+
+	// or#842: system origin is gated too, and fails closed the same way. It
+	// used to return nil here — the gate was absent for exactly the paths that
+	// queue the most irreversible work with no human in the loop.
+	if err := broken.Check(ctx, CheckParams{
+		Actor: "", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginSystem,
+	}, now); err == nil {
+		t.Fatal("broken gate must fail closed for a destructive SYSTEM op")
+	}
+	// A system op with no merchant has no window to count in: fail closed
+	// rather than fall back to a deployment-wide count.
+	if err := NewRateCeiling(nil).Check(ctx, CheckParams{
+		MerchantID: uuid.Nil, IntentType: destructive, Origin: OriginSystem,
+	}, now); err == nil {
+		t.Fatal("an unscoped system destructive op must fail closed")
+	}
 }
 
 // The gate is inert for non-gated ops even when its DB is unusable: a broken
-// gate must not fail-close ordinary traffic (only destructive user/admin ops).
+// gate must not fail-close ordinary traffic (only destructive ops).
 func TestRateCeiling_InertForNonGatedOps(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	broken := NewRateCeiling(db.NewWithPgxTx(nil))
 
-	// system-origin destructive op is #679's job, not the anti-theft budget.
-	if err := broken.Check(ctx, CheckParams{
-		Actor: "", MerchantID: uuid.New(), IntentType: DestructiveIntentTypes()[0], Origin: OriginSystem,
-	}, now); err != nil {
-		t.Fatalf("system-origin op must pass even a broken gate: %v", err)
-	}
 	// non-destructive user op (e.g. a payment-source update) is not gated.
 	if err := broken.Check(ctx, CheckParams{
 		Actor: "a", MerchantID: uuid.New(), IntentType: "nmi_payment_source_update", Origin: OriginUser,

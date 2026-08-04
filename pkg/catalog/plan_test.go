@@ -250,12 +250,12 @@ func TestPlan_UnchangedAndUpdate(t *testing.T) {
 	// initiate is fully converged -> unchanged.
 	initiate := f.seedProduct("initiate", "cozy", 1, false)
 	initiate.DisplayName = "Novice"
-	f.seedPrice(initiate.ID, 1200, "usd", 30*24, false, "stripe")
+	f.seedPrice(initiate.ID, 1200, "USD", 30*24, false, "stripe")
 
 	// craftsman has a different display name + active matching price -> product update, price unchanged.
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "OLD NAME"
-	f.seedPrice(craftsman.ID, 1300, "usd", 30*24, false, "stripe")
+	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, false, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	f := newFakeApplier()
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false) // undeclared old price
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -328,7 +328,7 @@ products:
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)
 	premium.DisplayName = "Premium"
-	f.seedPrice(premium.ID, 23_000_000, "usd", 30*24, false, "mobius", "ccbill")
+	f.seedPrice(premium.ID, 23_000_000, "USD", 30*24, false, "mobius", "ccbill", "solana")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -412,7 +412,7 @@ products:
 	premium := f.seedProduct("premium", "default", 0, false)
 	premium.DisplayName = "Premium"
 	// Existing price has the same recurring substance but NO trial.
-	f.seedPrice(premium.ID, 23_000_000, "usd", 30*24, false, "mobius")
+	f.seedPrice(premium.ID, 23_000_000, "USD", 30*24, false, "mobius")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -435,7 +435,7 @@ func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testin
 	f := newFakeApplier()
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false) // undeclared old price
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
 	f.seedProduct("expert", "cozy", 3, false)            // undeclared product
 
 	plan, err := PlanWithOptions(context.Background(), f, m, PlanOptions{})
@@ -463,7 +463,7 @@ func TestPlan_ReactivateArchivedDeclaredPrice(t *testing.T) {
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	// The declared $13 price exists but is archived -> activate.
-	f.seedPrice(craftsman.ID, 1300, "usd", 30*24, true, "stripe")
+	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, true, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -503,7 +503,7 @@ func TestApply_DrivesFacade(t *testing.T) {
 	// craftsman exists with old $12 active; initiate is new.
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false)
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false)
 	// stray product to archive.
 	f.seedProduct("expert", "cozy", 3, false)
 
@@ -539,10 +539,10 @@ func TestApply_Idempotent(t *testing.T) {
 	// Seed a fully-converged catalog.
 	ini := f.seedProduct("initiate", "cozy", 1, false)
 	ini.DisplayName = "Novice"
-	f.seedPrice(ini.ID, 1200, "usd", 30*24, false, "stripe")
+	f.seedPrice(ini.ID, 1200, "USD", 30*24, false, "stripe")
 	cra := f.seedProduct("craftsman", "cozy", 2, false)
 	cra.DisplayName = "Craftsman"
-	f.seedPrice(cra.ID, 1300, "usd", 30*24, false, "stripe")
+	f.seedPrice(cra.ID, 1300, "USD", 30*24, false, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {

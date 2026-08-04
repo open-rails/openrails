@@ -951,9 +951,9 @@ func TestDiffSolanaDiscoveredSubscriptionNeverMaterializes(t *testing.T) {
 	customerID, priceID := uuid.New(), uuid.New()
 
 	local := &LocalState{
-		PaymentMethods: []LocalPaymentMethod{{ID: uuid.New(), CustomerID: customerID, Rail: "solana", VaultID: wallet}},
+		PaymentMethods: []LocalPaymentMethod{{ID: uuid.New(), CustomerID: customerID, Rail: "solana", RailCustomerRef: wallet}},
 		Prices: []LocalPrice{{
-			ID: priceID, ProductID: uuid.New(), Amount: 9_990_000, Currency: "usd",
+			ID: priceID, ProductID: uuid.New(), Amount: 9_990_000, Currency: "USD",
 			PSPLinks: map[string]map[string]string{"solana": {"rail": "solana", "plan_pda": planPDA, "provider": "solana"}},
 		}},
 	}

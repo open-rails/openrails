@@ -15,14 +15,15 @@
 package admission
 
 import (
-	"time"
-
 	"context"
+	"math"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -108,6 +109,9 @@ type AdmitDecision struct {
 	// total in-flight reservation after this admit. StartCapacity = Available − Held.
 	AvailableAmount int64
 	HeldAmount      int64
+	// RetryAfterSeconds is when the blocking budget window next resets (0 unless
+	// a window was the binding gate). Hosts stamp it as the 429 Retry-After.
+	RetryAfterSeconds int64
 }
 
 // Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
@@ -210,7 +214,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: code, AvailableAmount: available}, nil
 	default: // window blocked
 		a.recordDenial(ctx, merchantID, req.CustomerID, DenyBudgetExceeded)
-		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available}, nil
+		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available,
+			RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
 	}
 }
 
@@ -241,7 +246,7 @@ func holdTTL(expiresAt time.Time) time.Duration {
 // currency (cross-currency wasted policies are unsupported in one policy).
 func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
 	cur := money.NormalizeCurrency(requestCurrency)
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
 	explicit := false
@@ -250,7 +255,7 @@ func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindo
 			continue
 		}
 		wc := money.NormalizeCurrency(w.Currency)
-		if err := money.ValidateCurrency(wc); err != nil {
+		if err := moneyutil.ValidateCurrency(wc); err != nil {
 			return "", err
 		}
 		if !explicit {

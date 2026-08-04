@@ -539,25 +539,6 @@ func resolveMerchantForGroupGateError(err error) billingauth.GateError {
 	return billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 }
 
-func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserContext, bool) {
-	a := opts.Authenticator
-	if a == nil {
-		r.AbortJSON(http.StatusInternalServerError, "authentication disabled")
-		return billingauth.UserContext{}, false
-	}
-	uc, err := a.Authenticate(r.Request.Context(), r.Request)
-	if err != nil {
-		r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
-		return billingauth.UserContext{}, false
-	}
-	if verr := uc.ValidateSubject(); verr != nil {
-		r.AbortJSON(http.StatusUnauthorized, verr.Error())
-		return billingauth.UserContext{}, false
-	}
-	r.SetUserContext(uc)
-	return uc, true
-}
-
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {
 	resolver := g.ServiceCredentialResolver
 	if resolver == nil || r == nil {

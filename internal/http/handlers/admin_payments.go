@@ -197,11 +197,13 @@ type adminRefundPrepared struct {
 	ccbillTransactionID  string
 }
 
-// refundAmountCents converts an admin refund request amount (micros) to the
-// provider cents amount. Refunds must be exact: a sub-cent remainder is an
-// error, never rounded.
-func refundAmountCents(amountMicros int64) (int64, error) {
-	cents, err := moneyutil.MicrosToCentsExact(amountMicros)
+// refundAmountCents converts an admin refund request amount (internal units at
+// the PAYMENT's currency scale) to the provider minor amount. Refunds must be
+// exact: a sub-minor remainder is an error, never rounded. Registry-driven
+// (or#863) — a payment whose currency is blank or unregistered cannot be
+// refunded at a guessed scale.
+func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, error) {
+	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
 		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
 	}
@@ -231,7 +233,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
-	amountCents, err := refundAmountCents(req.Amount)
+	amountCents, err := refundAmountCents(payment.Currency, req.Amount)
 	if err != nil {
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}

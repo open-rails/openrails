@@ -185,7 +185,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		CurrentPeriodStartsAt: zeroTimePtr(rec.CurrentPeriodStart),
 		CurrentPeriodEndsAt:   zeroTimePtr(rec.CurrentPeriodEnd),
 		TransactionID:         transactionID,
-		Amount:                moneyutil.CentsToMicros(rec.LatestInvoiceAmountPaid),
+		Amount:                int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid))),
 		AmountProvided:        true,
 		Currency:              rec.LatestInvoiceCurrency,
 		PurchasedAt:           purchasedAt,
@@ -253,7 +253,7 @@ func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, p
 		}
 		return nil
 	}
-	amountPaidMicros := moneyutil.CentsToMicros(rec.LatestInvoiceAmountPaid)
+	amountPaidMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid)))
 	if amountPaidMicros != price.Amount {
 		if rec.LatestInvoiceAmountPaid == 0 {
 			return nil // settled zero-amount invoice (trial / no_payment_required)

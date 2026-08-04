@@ -107,7 +107,7 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 	switch f.Type {
 	case FindingRemoteSubMissingLocal, FindingChargeMissingLocal, FindingRefundUnrecorded:
 		return p.Insert
-	case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingVaultMismatch:
+	case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingPaymentMethodMismatch:
 		return p.Overwrite
 	default:
 		return false
@@ -125,26 +125,26 @@ type RailMerchantAccountBinding struct {
 
 // ProviderReport is one provider's section of the run summary.
 type ProviderReport struct {
-	Provider            Provider          `json:"provider"`
-	PspID               string            `json:"psp_id,omitempty"`
-	Aborted             bool              `json:"aborted,omitempty"`
-	Error               string            `json:"error,omitempty"`
-	Coverage            SnapshotCoverage  `json:"coverage"`
-	RemoteSubscriptions int               `json:"remote_subscriptions"`
-	RemoteTransactions  int               `json:"remote_transactions"`
-	RemoteVaultEntries  int               `json:"remote_vault_entries"`
-	LocalSubscriptions  int               `json:"local_subscriptions"`
-	FindingsByType      map[string]int    `json:"findings_by_type,omitempty"`
-	FindingsBySeverity  map[string]int    `json:"findings_by_severity,omitempty"`
-	NewFindings         int               `json:"new_findings"`
-	UpdatedFindings     int               `json:"updated_findings"`
-	RequiresReview      int               `json:"requires_review"`
-	AdminRequired       int               `json:"-"`
-	AutoResolved        int64             `json:"auto_resolved"`
-	AutoFixed           int               `json:"auto_fixed"`
-	ApplySkipped        int               `json:"apply_skipped,omitempty"`
-	ApplyErrors         []string          `json:"apply_errors,omitempty"`
-	Dunning             *DunningForensics `json:"dunning_forensics,omitempty"`
+	Provider             Provider          `json:"provider"`
+	PspID                string            `json:"psp_id,omitempty"`
+	Aborted              bool              `json:"aborted,omitempty"`
+	Error                string            `json:"error,omitempty"`
+	Coverage             SnapshotCoverage  `json:"coverage"`
+	RemoteSubscriptions  int               `json:"remote_subscriptions"`
+	RemoteTransactions   int               `json:"remote_transactions"`
+	RemotePaymentMethods int               `json:"remote_vault_entries"`
+	LocalSubscriptions   int               `json:"local_subscriptions"`
+	FindingsByType       map[string]int    `json:"findings_by_type,omitempty"`
+	FindingsBySeverity   map[string]int    `json:"findings_by_severity,omitempty"`
+	NewFindings          int               `json:"new_findings"`
+	UpdatedFindings      int               `json:"updated_findings"`
+	RequiresReview       int               `json:"requires_review"`
+	AdminRequired        int               `json:"-"`
+	AutoResolved         int64             `json:"auto_resolved"`
+	AutoFixed            int               `json:"auto_fixed"`
+	ApplySkipped         int               `json:"apply_skipped,omitempty"`
+	ApplyErrors          []string          `json:"apply_errors,omitempty"`
+	Dunning              *DunningForensics `json:"dunning_forensics,omitempty"`
 }
 
 // RunSummary is the persisted summary jsonb of a run.
@@ -210,15 +210,15 @@ type providerTraits struct {
 	// is dead at the rail (NMI recurring report). Guarded by the circuit
 	// breaker.
 	absenceMeansCancelled bool
-	// vaultExhaustive: the vault listing is the complete roster, so a local
+	// paymentMethodsExhaustive: the vault listing is the complete roster, so a local
 	// payment method missing from it no longer exists at the rail.
-	vaultExhaustive bool
+	paymentMethodsExhaustive bool
 }
 
 func traitsFor(p Provider) providerTraits {
 	switch p {
 	case ProviderNMI:
-		return providerTraits{absenceMeansCancelled: true, vaultExhaustive: true}
+		return providerTraits{absenceMeansCancelled: true, paymentMethodsExhaustive: true}
 	default:
 		// CCBill: absence from ACTIVEMEMBERS is inactive-or-out-of-window, NOT
 		// proof of termination — only CANCELLATION/EXPIRE rows assert death.
@@ -350,7 +350,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
-	rep.RemoteVaultEntries = len(snap.VaultEntries)
+	rep.RemotePaymentMethods = len(snap.PaymentMethods)
 
 	local, err := e.Local.Load(ctx, provider, nullableRailMerchantAccountID(binding))
 	if err != nil {
@@ -656,8 +656,8 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		evidence["refund_recorded"] = changed
 		return evidence, changed, nil
 
-	case a.AdoptVault != nil:
-		changed, err := e.Writer.AdoptPaymentMethod(ctx, *a.AdoptVault)
+	case a.AdoptPaymentMethod != nil:
+		changed, err := e.Writer.AdoptPaymentMethod(ctx, *a.AdoptPaymentMethod)
 		if err != nil {
 			return nil, false, err
 		}

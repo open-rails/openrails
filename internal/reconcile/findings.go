@@ -35,9 +35,9 @@ const (
 	// matched subscription is still active locally. CRITICAL; requires_review
 	// (terminating a paying-ish user over a dispute is a human decision).
 	FindingChargebackActiveSub FindingType = "pull.dispute.chargeback"
-	// FindingVaultMismatch (PS-7): stored payment-method metadata disagrees
+	// FindingPaymentMethodMismatch (PS-7): stored payment-method metadata disagrees
 	// with the rail vault. Enforce: adopt the rail record.
-	FindingVaultMismatch FindingType = "pull.payment_method.mismatch"
+	FindingPaymentMethodMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
 	// live REMOTE subscriptions. Only the provider snapshot can see this
 	// (local duplicates are schema-blocked), so it is a PULL-plane finding
@@ -120,11 +120,11 @@ type Finding struct {
 // materialization) are direct appliers; subscription STATE transitions are a
 // Decide action — the #665 decider is the only thing that moves lifecycle state.
 type ApplyAction struct {
-	Decide          *DecideAction
-	BackfillPayment *BackfillPaymentAction
-	RecordRefund    *RecordRefundAction
-	AdoptVault      *AdoptVaultAction
-	Materialize     *MaterializeSubscriptionAction
+	Decide             *DecideAction
+	BackfillPayment    *BackfillPaymentAction
+	RecordRefund       *RecordRefundAction
+	AdoptPaymentMethod *AdoptPaymentMethodAction
+	Materialize        *MaterializeSubscriptionAction
 }
 
 // DecideAction carries a decider transition computed at diff time from the
@@ -223,9 +223,9 @@ type RecordRefundAction struct {
 	MarkRefundedOnly bool
 }
 
-// AdoptVaultAction adopts rail vault metadata onto a local payment
+// AdoptPaymentMethodAction adopts rail vault metadata onto a local payment
 // method (PS-7).
-type AdoptVaultAction struct {
+type AdoptPaymentMethodAction struct {
 	PaymentMethodID uuid.UUID
 	LastFour        string
 	ExpiryDate      string
@@ -250,7 +250,7 @@ var stateRosterFindingTypes = []FindingType{
 	FindingRemoteSubMissingLocal,
 	FindingLocalActiveRemoteDead,
 	FindingStatusMismatch,
-	FindingVaultMismatch,
+	FindingPaymentMethodMismatch,
 	FindingDuplicateSubscriptions,
 }
 

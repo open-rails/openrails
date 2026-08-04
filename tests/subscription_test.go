@@ -67,7 +67,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 		assert.True(t, premiumProduct.Active)
 		require.GreaterOrEqual(t, len(premiumProduct.Prices), 2, "Should have monthly and yearly USD prices")
 		// Intervals are hours since the hours-internally cut (c712299a): 720h = 30d.
-		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "usd", "720h")
+		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 9_990_000, "USD", "720h")
 		require.NotNil(t, monthlyPrice, "Should find Premium 9990000 micros/720h USD price")
 		assert.Equal(t, "price", monthlyPrice.Object)
 	})
@@ -94,7 +94,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 		}
 
 		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
-		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 79_990_000, "usd", "8760h")
+		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 79_990_000, "USD", "8760h")
 		require.NotNil(t, yearlyPrice, "Should find Premium 79990000 micros/8760h USD price")
 	})
 }
@@ -315,7 +315,7 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 			paymentIDs[p["id"].(string)] = true
 			// JSON unmarshals numbers as float64, but we compare against int64 value
 			assert.Equal(t, float64(9_990_000), p["amount"], "Amount should be 9990000 micros")
-			assert.Equal(t, "usd", p["currency"])
+			assert.Equal(t, "USD", p["currency"])
 		}
 		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")
 		assert.True(t, paymentIDs[api.FormatPaymentID(payment2.ID)], "Should include payment 2")

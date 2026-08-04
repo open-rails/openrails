@@ -52,7 +52,7 @@ func TestApplyUpdatedCardMetadataReplacesStoredCardDetails(t *testing.T) {
 	expiryDate := "12/30"
 	pm := &models.PaymentMethod{}
 
-	applyUpdatedCardMetadata(pm, &UpdateVaultRequest{
+	applyUpdatedCardMetadata(pm, &UpdatePaymentMethodRequest{
 		LastFour:   &lastFour,
 		CardType:   &cardType,
 		ExpiryDate: &expiryDate,
@@ -76,7 +76,7 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 		ExpiryDate: &oldExpiryDate,
 	}
 
-	applyUpdatedCardMetadata(pm, &UpdateVaultRequest{})
+	applyUpdatedCardMetadata(pm, &UpdatePaymentMethodRequest{})
 
 	require.Nil(t, pm.LastFour)
 	require.Nil(t, pm.CardType)
@@ -107,7 +107,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	defer server.Close()
 
 	pms := &fakePaymentMethodStore{}
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		PaymentMethodService: pms,
 		MerchantSecrets:      store,
 		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
@@ -123,7 +123,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		},
 	}
 
-	pm, err := svc.CreateVault(ctx, "11111111-1111-1111-1111-111111111111", &CreateVaultRequest{
+	pm, err := svc.CreatePaymentMethod(ctx, "11111111-1111-1111-1111-111111111111", &CreatePaymentMethodRequest{
 		Provider:     "nmi",
 		PaymentToken: "provider-token",
 		NameOnCard:   "Ada Lovelace",
@@ -160,7 +160,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 // account fails closed instead of falling back to a static client.
 func TestVaultWithoutArmedRailAccountFailsClosed(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		Config: vaultTestConfig(true),
 	}
 
@@ -171,7 +171,7 @@ func TestVaultWithoutArmedRailAccountFailsClosed(t *testing.T) {
 
 func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 		ProviderSecrets: vaultMissingProviderSecretResolver{},
 		Config:          vaultTestConfig(true),
@@ -184,7 +184,7 @@ func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClie
 
 func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		MerchantSecrets: merchants.NewMemorySecretStore(),
 	}
 
@@ -195,7 +195,7 @@ func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *test
 
 func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		MerchantSecrets: vaultUnavailableSecretStore{},
 		ProviderSecrets: vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:          vaultTestConfig(true),
@@ -219,7 +219,7 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 	_, err = store.Put(context.Background(), merchantB, nameB, "merchant-b-key")
 	require.NoError(t, err)
 
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		MerchantSecrets: store,
 		ProviderSecrets: vaultPerMerchantProviderSecretResolver{
 			merchantA: "mobius-a",
@@ -295,7 +295,7 @@ func vaultTestConfig(testMode bool) *config.Config {
 	}
 }
 
-// --- DeleteVault durable-intent producer branching (#674 tail) ---
+// --- DeletePaymentMethod durable-intent producer branching (#674 tail) ---
 
 type deleteVaultNoSubs struct{}
 
@@ -314,7 +314,7 @@ func (f *fakeVaultDeleteExecutor) ExecuteVaultDelete(context.Context, *models.Pa
 	return f.out, f.err
 }
 
-func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.PaymentMethod) {
+func deleteVaultTestService(exec VaultDeleteExecutor) (*RailPaymentMethodService, *models.PaymentMethod) {
 	// #788: the NMI client arms from the scoped merchant secret store.
 	store := merchants.NewMemorySecretStore()
 	name, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
@@ -324,7 +324,7 @@ func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.Pa
 	if _, err := store.Put(context.Background(), dbtest.TestMerchantID, name, "k"); err != nil {
 		panic(err)
 	}
-	svc := &VaultService{
+	svc := &RailPaymentMethodService{
 		SubscriptionService: deleteVaultNoSubs{},
 		Config:              vaultTestConfig(true),
 		DeleteIntents:       exec,
@@ -343,29 +343,29 @@ func deleteVaultTestService(exec VaultDeleteExecutor) (*VaultService, *models.Pa
 
 // The producer maps the durable intent's post-execution state onto the caller
 // contract: Done ⇒ nil, Terminal ⇒ error with the reason, anything still
-// resolving ⇒ ErrVaultDeleteProcessing (the ledger finishes out-of-band).
+// resolving ⇒ ErrPaymentMethodDeleteProcessing (the ledger finishes out-of-band).
 func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
 	exec := &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Done: true}}
 	svc, pm := deleteVaultTestService(exec)
-	require.NoError(t, svc.DeleteVault(ctx, pm))
+	require.NoError(t, svc.DeletePaymentMethod(ctx, pm))
 	require.Equal(t, 1, exec.called)
 
 	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Terminal: true, Reason: "shared vault, no billing id"}}
 	svc, pm = deleteVaultTestService(exec)
-	err := svc.DeleteVault(ctx, pm)
+	err := svc.DeletePaymentMethod(ctx, pm)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shared vault, no billing id")
 
 	exec = &fakeVaultDeleteExecutor{out: VaultDeleteOutcome{Reason: "vault delete outcome unknown"}}
 	svc, pm = deleteVaultTestService(exec)
-	require.ErrorIs(t, svc.DeleteVault(ctx, pm), ErrVaultDeleteProcessing)
+	require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodDeleteProcessing)
 }
 
 func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {
 	svc, pm := deleteVaultTestService(nil)
-	err := svc.DeleteVault(merchant.WithID(context.Background(), dbtest.TestMerchantID), pm)
+	err := svc.DeletePaymentMethod(merchant.WithID(context.Background(), dbtest.TestMerchantID), pm)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not wired")
 }

@@ -18,10 +18,9 @@ import (
 // row, so its attempt anchor is completed "in place" (metadata + status); it
 // must not linger as a forever-pending payment.
 func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 	svc := NewPaymentService(dbi)

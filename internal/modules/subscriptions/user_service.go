@@ -251,7 +251,6 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 		Recurring:  recurring,
 		Product:    api.FormatProductID(p.ProductID),
 		Active:     p.IsPurchasable(),
-		Livemode:   false,
 		Metadata:   map[string]string{},
 		Created:    api.ToUnix(p.CreatedAt),
 	}
@@ -269,7 +268,6 @@ func productToAPIObject(p *models.Product) api.ProductObject {
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
-		Livemode:         false,
 		Metadata:         map[string]string{},
 		Created:          api.ToUnix(p.CreatedAt),
 		Updated:          api.ToUnix(p.UpdatedAt),

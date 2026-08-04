@@ -12,25 +12,25 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-type CheckoutVaultService struct {
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	VaultService         *paymentmethods.VaultService
+type CheckoutPaymentMethodResolver struct {
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 }
 
-func NewCheckoutVaultService(paymentMethodService *paymentmethods.PaymentMethodService, vaultService *paymentmethods.VaultService) *CheckoutVaultService {
-	return &CheckoutVaultService{
-		PaymentMethodService: paymentMethodService,
-		VaultService:         vaultService,
+func NewCheckoutPaymentMethodResolver(paymentMethodService *paymentmethods.PaymentMethodService, railPMService *paymentmethods.RailPaymentMethodService) *CheckoutPaymentMethodResolver {
+	return &CheckoutPaymentMethodResolver{
+		PaymentMethodService:     paymentMethodService,
+		RailPaymentMethodService: railPMService,
 	}
 }
 
-// ResolveVault returns the vault handle pair (customer-scope vault id +
+// ResolvePaymentMethod returns the vault handle pair (customer-scope vault id +
 // instrument-scope billing id, #682), the resolved payment method row (#297:
 // carries the stored-credential replay references), and whether it was freshly
 // vaulted from a token in THIS request (created=true — the caller may
 // best-effort clean it up on a verified-clean decline). The billing id is ""
 // for pre-#682 rows that never recorded one.
-func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (vaultID, billingID string, pm *models.PaymentMethod, created bool, err error) {
+func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (railCustomerRef, billingID string, pm *models.PaymentMethod, created bool, err error) {
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
 		if err != nil {
@@ -57,11 +57,11 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 	if req.PaymentToken == "" {
 		return "", "", nil, false, errors.New("payment_method_id or payment_token is required")
 	}
-	if s.VaultService == nil {
-		return "", "", nil, false, errors.New("vault service unavailable")
+	if s.RailPaymentMethodService == nil {
+		return "", "", nil, false, errors.New("payment method service unavailable")
 	}
 
-	pmNew, err := s.VaultService.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
+	pmNew, err := s.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		Provider:     target.PSP,
 		FirstName:    ResolveCheckoutFirstName(req, user),

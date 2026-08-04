@@ -134,14 +134,14 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	require.NoError(t, err)
 	_, err = h.Pool().Exec(ctx, `
 		INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency)
-		VALUES ($1, $2, $3, 1000000, 'usd')`, priceID, a.MerchantID.UUID(), productID)
+		VALUES ($1, $2, $3, 1000000, 'USD')`, priceID, a.MerchantID.UUID(), productID)
 	require.NoError(t, err)
 	_, err = h.Pool().Exec(ctx, `
 		INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, customerID, a.MerchantID.UUID())
 	require.NoError(t, err)
 	_, err = h.Pool().Exec(ctx, `
 		INSERT INTO openrails.payments (merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, created_at)
-		VALUES ($1, $2, $3, 'nmi', $4, 1000000, 1000000, 'usd', $5)`,
+		VALUES ($1, $2, $3, 'nmi', $4, 1000000, 1000000, 'USD', $5)`,
 		a.MerchantID.UUID(), customerID, priceID, "txn-"+suffix, paidAt)
 	require.NoError(t, err)
 

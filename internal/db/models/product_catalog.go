@@ -56,17 +56,15 @@ const (
 	CreditGrantCadencePerRenewal CreditGrantCadence = "per_renewal"
 )
 
-// DefaultCreditGrantExpiryHours is the grant expiry when expiry_hours is omitted
-// (#472): 365 days expressed in hours.
-const DefaultCreditGrantExpiryHours = 365 * 24
-
 type CreditGrantSpec struct {
 	// Unit is the currency code of the granted balance (#472). Required.
 	// Unqualified = built-in currency; a future merchant/name = custom credit (#473).
 	Unit   string `json:"unit,omitempty"`
 	Amount int64  `json:"amount"`
-	// ExpiryHours: balance expires now+N hours. null/omitted => default; explicit
-	// 0 => never expires (#472).
+	// ExpiryHours: balance expires now+N hours. null/omitted => NEVER expires
+	// (#857); explicit 0 says the same thing out loud. Expiry destroys customer
+	// money, so it only ever happens because a merchant asked for it — there is
+	// no implicit clock. Negative is rejected at validation.
 	ExpiryHours *int               `json:"expiry_hours,omitempty"`
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
 }
@@ -76,14 +74,14 @@ func (g CreditGrantSpec) UnitCode() string {
 	return g.Unit
 }
 
-// EffectiveExpiryHours resolves grant expiry in hours (#472): the explicit
-// expiry_hours, else the default. The returned value is 0 only when explicitly
-// set to 0 — meaning NEVER expires. null/omitted yields the default.
+// EffectiveExpiryHours resolves grant expiry in hours. 0 means NEVER expires,
+// and an omitted expiry_hours resolves to exactly that (#857) — an unstated
+// default must never be the reason a paid balance is destroyed.
 func (g CreditGrantSpec) EffectiveExpiryHours() int {
 	if g.ExpiryHours != nil {
 		return *g.ExpiryHours
 	}
-	return DefaultCreditGrantExpiryHours
+	return 0
 }
 
 func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {

@@ -45,10 +45,10 @@ type intentExecutor interface {
 var ErrCheckoutProcessing = errors.New("payment is processing; retry with the same idempotency key to check the result")
 
 type CheckoutNMISaleService struct {
-	PurchaseService  *CheckoutPurchaseService
-	VaultResolver    *CheckoutVaultService
-	VaultService     *paymentmethods.VaultService
-	IdempotencyStore checkoutIdempotencyStore
+	PurchaseService          *CheckoutPurchaseService
+	PaymentMethodResolver    *CheckoutPaymentMethodResolver
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	IdempotencyStore         checkoutIdempotencyStore
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state (#788) — the ONLY client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
@@ -59,15 +59,15 @@ type CheckoutNMISaleService struct {
 
 func NewCheckoutNMISaleService(
 	purchaseService *CheckoutPurchaseService,
-	vaultResolver *CheckoutVaultService,
-	vaultService *paymentmethods.VaultService,
+	pmResolver *CheckoutPaymentMethodResolver,
+	railPMService *paymentmethods.RailPaymentMethodService,
 	idempotencyStore checkoutIdempotencyStore,
 ) *CheckoutNMISaleService {
 	return &CheckoutNMISaleService{
-		PurchaseService:  purchaseService,
-		VaultResolver:    vaultResolver,
-		VaultService:     vaultService,
-		IdempotencyStore: idempotencyStore,
+		PurchaseService:          purchaseService,
+		PaymentMethodResolver:    pmResolver,
+		RailPaymentMethodService: railPMService,
+		IdempotencyStore:         idempotencyStore,
 	}
 }
 
@@ -118,7 +118,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 	}
 
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -144,8 +144,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		Payload: NMISalePayload{
 			Provider:            provider,
 			PSP:                 target.PSP,
-			CustomerVaultID:     customerVaultID,
-			BillingID:           vaultBillingID,
+			CustomerVaultID:     railCustomerRef,
+			BillingID:           railMethodRef,
 			AmountMicros:        price.Amount,
 			Currency:            price.Currency,
 			Description:         fmt.Sprintf("Purchase: %s", product.DisplayName),
@@ -177,8 +177,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		// Verified-clean decline/rejection: no money moved. Direct best-effort
 		// cleanup, NOT an intent (#674 tail): the vault was created for THIS
 		// declined attempt and is referenced nowhere — harmless if lost.
-		if createdVault && resolvedMethod != nil && s.VaultService != nil {
-			_ = s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod)
+		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+			_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 		}
 		reason := "payment failed"
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {

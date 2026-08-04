@@ -39,16 +39,6 @@ SELECT EXISTS (
       AND ent.deleted_at IS NULL
 );
 
--- name: GetLatestActiveEntitlement :one
-SELECT * FROM openrails.entitlements ent
-WHERE ent.merchant_id = $1
-  AND ent.customer_id = $2
-  AND ent.entitlement = $3
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-ORDER BY ent.start_at DESC
-LIMIT 1;
-
 -- name: GetLatestFiniteActiveEntitlement :one
 SELECT * FROM openrails.entitlements ent
 WHERE ent.merchant_id = $1
@@ -121,15 +111,6 @@ WHERE ent.source_type = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
--- name: CountInvalidEndBySubscription :one
-SELECT count(*) FROM openrails.entitlements ent
-WHERE ent.source_type = 'subscription'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(end_at)::timestamptz)
-  AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
-
 -- name: EndActiveEntitlementsBySubscription :exec
 -- #691 closure write: bound a subscription's live windows to a PROVEN end
 -- (user cancel at period end, terminal resolution). Advance-written on disk —
@@ -187,7 +168,8 @@ WHERE ent.id = $1
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id IN (
+WHERE ent.deleted_at IS NULL
+  AND ent.id IN (
     SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
     FROM openrails.entitlements e
     WHERE e.source_type = 'subscription'
@@ -263,47 +245,6 @@ WHERE ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
--- name: RevokeEntitlementBySubscriptionAndName :execrows
-UPDATE openrails.entitlements ent SET
-    revoked_at = sqlc.arg(revoke_at)::timestamptz,
-    revoke_reason = sqlc.arg(revoke_reason)::text,
-    end_at = sqlc.arg(revoke_at)::timestamptz,
-    updated_at = sqlc.arg(revoke_at)::timestamptz
-WHERE ent.source_type = 'subscription'
-  AND ent.source_id = $1
-  AND ent.entitlement = $2
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
-
--- name: SoftDeleteGraceBySubscription :exec
-UPDATE openrails.entitlements ent SET
-    deleted_at = sqlc.arg(now)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'grace'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
-
--- name: ListActiveGraceWindowsForUpdate :many
-SELECT * FROM openrails.entitlements ent
-WHERE ent.source_type = 'grace'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.start_at < sqlc.arg(now)::timestamptz
-  AND ent.end_at IS NOT NULL AND ent.end_at > sqlc.arg(now)::timestamptz
-FOR UPDATE;
-
--- name: SoftDeleteFutureGraceBySubscription :exec
-UPDATE openrails.entitlements ent SET
-    deleted_at = sqlc.arg(now)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'grace'
-  AND ent.source_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(now)::timestamptz;
-
 -- name: AcquireEntitlementTimelineLock :exec
 -- Transaction-scoped advisory lock serializing timeline updates per
 -- (subject, entitlement); the key is hashed in Go.
@@ -321,40 +262,6 @@ WHERE ent.customer_id = $1
   AND ent.deleted_at IS NULL
   AND ent.start_at >= sqlc.arg(from_at)::timestamptz
   AND NOT (ent.id = ANY(sqlc.arg(exclude_ids)::uuid[]));
-
--- name: SetEntitlementEndAt :exec
-UPDATE openrails.entitlements ent SET
-    end_at = sqlc.narg(end_at),
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
-
--- name: SoftDeleteLaterEntitlementWindows :exec
-UPDATE openrails.entitlements ent SET
-    deleted_at = sqlc.arg(now)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.customer_id = $1
-  AND ent.entitlement = $2
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(from_at)::timestamptz
-  AND ent.id <> sqlc.arg(exclude_id)::uuid;
-
--- name: RevokeEntitlementWindowNow :exec
-UPDATE openrails.entitlements ent SET
-    end_at = sqlc.arg(end_at)::timestamptz,
-    revoked_at = sqlc.arg(now)::timestamptz,
-    revoke_reason = sqlc.narg(revoke_reason),
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
-
--- Timeline-service queries (#334: modules/entitlements PushNewEntitlement /
--- RevokeExistingEntitlement). Tenant scoping comes from RLS via TenantTx; the
--- timeline key is (customer_id, entitlement), matching the bun-era
--- service which never added an explicit tenant predicate here.
 
 -- name: TimelineHasIndefinite :one
 SELECT EXISTS (
@@ -405,7 +312,8 @@ UPDATE openrails.entitlements ent SET
     customer_id = $2,
     updated_at = $3
 WHERE ent.id = $1
-  AND ent.customer_id IS NULL;
+  AND ent.customer_id IS NULL
+  AND ent.deleted_at IS NULL;
 
 -- name: SoftDeleteEntitlementByID :exec
 UPDATE openrails.entitlements ent SET

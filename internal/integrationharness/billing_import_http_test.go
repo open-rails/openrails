@@ -40,7 +40,7 @@ func TestBillingImportHTTP(t *testing.T) {
 		prod, "imphttp-"+sfx, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'usd',720,true,$3)`,
+		`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 		price, prod, merchantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -76,7 +76,7 @@ func TestBillingImportHTTP(t *testing.T) {
 		},
 		Transactions: []billingimport.DeclaredTransaction{
 			// cents → micros pin at the wire: 2300 amount_cents → 23_000_000.
-			{RailSubscriptionID: subActive, TransactionID: "tx-" + sfx, Success: true, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-10 * day)},
+			{RailSubscriptionID: subActive, TransactionID: "tx-" + sfx, Success: true, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-10 * day)},
 		},
 	}
 	sourceIDs := []string{"runway-" + sfx, "usercancel-" + sfx}

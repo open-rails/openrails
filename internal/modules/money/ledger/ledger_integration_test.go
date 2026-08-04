@@ -24,7 +24,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, string) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -34,7 +34,7 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 		customer, merchantID)
 	require.NoError(t, err)
 
-	currency := "TC" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	currency := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
@@ -112,7 +112,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 // A transfer may never cross ledgers (the currency-guard trigger).
 func TestLedger_CurrencyGuard(t *testing.T) {
 	l, pool, ctx, customer, merchantID, curA := testLedger(t)
-	curB := "TC" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	curB := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, curB)
 	})

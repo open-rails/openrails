@@ -47,7 +47,6 @@ import (
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
 type TierChangeResponse struct {
 	Object         string                         `json:"object"`                    // "tier_change"
-	ID             string                         `json:"id,omitempty"`              // Operation ID for tracking
 	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
@@ -89,20 +88,20 @@ type TierChangePreviewResponse struct {
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
-	SubscriptionService  *subscriptions.SubscriptionService
-	ProductService       *catalog.ProductService
-	PriceService         *catalog.PriceService
-	PaymentService       *payments.PaymentService
-	EntitlementService   *entitlements.EntitlementService
-	PurchaseService      *CheckoutPurchaseService
-	VaultResolver        *CheckoutVaultService
-	NMISaleService       *CheckoutNMISaleService
-	VaultedCardService   *CheckoutVaultedCardService
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	VaultService         *paymentmethods.VaultService
-	IdempotencyService   checkoutIdempotencyStore
-	MerchantSecrets      merchants.MerchantSecretReader
-	ProviderSecrets      merchants.PSPSecretResolver
+	SubscriptionService      *subscriptions.SubscriptionService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
+	PaymentService           *payments.PaymentService
+	EntitlementService       *entitlements.EntitlementService
+	PurchaseService          *CheckoutPurchaseService
+	PaymentMethodResolver    *CheckoutPaymentMethodResolver
+	NMISaleService           *CheckoutNMISaleService
+	VaultedCardService       *CheckoutVaultedCardService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	IdempotencyService       checkoutIdempotencyStore
+	MerchantSecrets          merchants.MerchantSecretReader
+	ProviderSecrets          merchants.PSPSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
@@ -151,7 +150,7 @@ func NewCheckoutService(
 	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
-	vaultService *paymentmethods.VaultService,
+	railPMService *paymentmethods.RailPaymentMethodService,
 	idempotencyService checkoutIdempotencyStore,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
@@ -160,26 +159,26 @@ func NewCheckoutService(
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
 	service := &CheckoutService{
-		SubscriptionService:  subscriptionService,
-		ProductService:       productService,
-		PriceService:         priceService,
-		PaymentService:       paymentService,
-		EntitlementService:   entitlementService,
-		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		VaultResolver:        NewCheckoutVaultService(paymentMethodService, vaultService),
-		PaymentMethodService: paymentMethodService,
-		VaultService:         vaultService,
-		IdempotencyService:   idempotencyService,
-		RailCustomerService:  railCustomerService,
-		StripeService:        &subscriptions.StripeService{Config: cfg, Rails: railSet},
-		clock:                clock,
-		Config:               cfg,
-		Rails:                railSet,
+		SubscriptionService:      subscriptionService,
+		ProductService:           productService,
+		PriceService:             priceService,
+		PaymentService:           paymentService,
+		EntitlementService:       entitlementService,
+		PurchaseService:          NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		PaymentMethodResolver:    NewCheckoutPaymentMethodResolver(paymentMethodService, railPMService),
+		PaymentMethodService:     paymentMethodService,
+		RailPaymentMethodService: railPMService,
+		IdempotencyService:       idempotencyService,
+		RailCustomerService:      railCustomerService,
+		StripeService:            &subscriptions.StripeService{Config: cfg, Rails: railSet},
+		clock:                    clock,
+		Config:                   cfg,
+		Rails:                    railSet,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
-		service.VaultResolver,
-		vaultService,
+		service.PaymentMethodResolver,
+		railPMService,
 		idempotencyService,
 	)
 	// The scoped resolver is the ONLY NMI client source (#788); armed for
@@ -192,8 +191,8 @@ func NewCheckoutService(
 		Rails:                railSet,
 		Config:               cfg,
 	}
-	if vaultService != nil {
-		service.VaultedCardService.DB = vaultService.DB
+	if railPMService != nil {
+		service.VaultedCardService.DB = railPMService.DB
 	}
 	return service
 }
@@ -528,6 +527,9 @@ func (s *CheckoutService) processCCBillSubscription(
 		FlexID:        flexID,
 		FormName:      formName,
 		ReservationID: req.CheckoutSessionID,
+		// #819: bill the PRICE's currency. An unbillable/absent currency errors
+		// below — before a form exists, therefore before any charge.
+		Currency: price.Currency,
 	}
 
 	response, err := ccbillClient.GenerateFlexFormURL(flexFormParams)
@@ -590,6 +592,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 		Email:                  *user.Email,
 		FormName:               formName,
 		FlexID:                 flexID,
+		Currency:               newPrice.Currency, // #819
 		OriginalSubscriptionID: existingSub.RailSubscriptionID,
 	}
 
@@ -693,14 +696,14 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
-	// Get or create vault (payment method)
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
+	// Get or create the payment method
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 	// #297: the instrument's recurring-sequence stored-credential anchor. ""
-	// (fresh vault or legacy instrument) makes this enrollment the sequence's
+	// (fresh payment method or legacy instrument) makes this enrollment the sequence's
 	// initial CIT; the intent's finalize captures the first-charge txn id.
 	storedCredentialRef := ""
 	if resolvedMethod != nil {
@@ -746,8 +749,8 @@ func (s *CheckoutService) processNMISubscription(
 			Provider:               provider,
 			PSP:                    target.PSP,
 			PlanID:                 nmiPlanID,
-			CustomerVaultID:        customerVaultID,
-			BillingID:              vaultBillingID,
+			CustomerVaultID:        railCustomerRef,
+			BillingID:              railMethodRef,
 			AmountMicros:           price.Amount,
 			Currency:               price.Currency,
 			Email:                  req.Email,
@@ -784,11 +787,11 @@ func (s *CheckoutService) processNMISubscription(
 		return nmiSubscriptionResponseFromIntent(intent)
 	case intents.StatusFailedTerminal:
 		// Verified-clean decline/rejection. Direct best-effort cleanup of the
-		// vault created for THIS attempt, NOT an intent (#674 tail): it is
+		// payment method created for THIS attempt, NOT an intent (#674 tail): it is
 		// referenced nowhere — harmless if lost.
-		if createdVault && resolvedMethod != nil && s.VaultService != nil {
-			if cleanupErr := s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod); cleanupErr != nil {
-				log.WithError(cleanupErr).WithField("vault_id", customerVaultID).Warn("failed to cleanup payment method after subscription error")
+		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+			if cleanupErr := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod); cleanupErr != nil {
+				log.WithError(cleanupErr).WithField("vault_id", railCustomerRef).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
 		reason := "failed to create subscription"
@@ -797,7 +800,7 @@ func (s *CheckoutService) processNMISubscription(
 		}
 		var failErr error = errors.New(reason)
 		if locID := terminalEvidenceLocalization(intent); locID != "" {
-			failErr = &paymentmethods.VaultError{Err: failErr, LocalizationID: locID, Message: reason}
+			failErr = &paymentmethods.PaymentMethodError{Err: failErr, LocalizationID: locID, Message: reason}
 		}
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
@@ -1095,17 +1098,6 @@ func (s *CheckoutService) nmiSubscriptionSuccessResponse(ctx context.Context, su
 	}, nil
 }
 
-func nmiSubscriptionOrderID(idempotencyKey string, metadata map[string]string) string {
-	orderID := nmiIdempotentOrderID("sub", idempotencyKey)
-	if orderID == "" {
-		orderID = uuid.New().String()
-	}
-	if runID := strings.TrimSpace(metadata["e2e_run_id"]); runID != "" {
-		orderID = fmt.Sprintf("%s_e2e_%s", orderID, nmiOrderIDSuffix(runID))
-	}
-	return orderID
-}
-
 func nmiSubscriptionAttemptTransactionID(orderID string) string {
 	return "nmi_sub_attempt:" + strings.TrimSpace(orderID)
 }
@@ -1116,43 +1108,6 @@ func nmiSubscriptionStartDate(coverage *CoverageInfo, now time.Time) (string, *t
 	}
 	startDate, startAt := buildNMIFutureStartDate(*coverage.EndDate, now)
 	return startDate, &startAt
-}
-
-func nmiSubscriptionAttemptMetadata(idempotencyKey string, orderID string, status string, providerSubscriptionID string, transactionID string, subscriptionID uuid.UUID, paymentMethodID *uuid.UUID, delayedStart *time.Time, requestMetadata map[string]string) map[string]any {
-	metadata := map[string]any{
-		"checkout_idempotency_key":  strings.TrimSpace(idempotencyKey),
-		"nmi_subscription_order_id": strings.TrimSpace(orderID),
-		"nmi_attempt_status":        status,
-		"local_subscription_id":     subscriptionID.String(),
-	}
-	if paymentMethodID != nil && *paymentMethodID != uuid.Nil {
-		metadata["payment_method_id"] = paymentMethodID.String()
-	}
-	if delayedStart != nil {
-		metadata["delayed_start"] = delayedStart.Format(time.RFC3339)
-	}
-	if providerSubscriptionID != "" {
-		metadata["provider_subscription_id"] = providerSubscriptionID
-	}
-	if transactionID != "" {
-		metadata["provider_transaction_id"] = transactionID
-	}
-	if runID := strings.TrimSpace(requestMetadata["e2e_run_id"]); runID != "" {
-		metadata["e2e_run_id"] = runID
-	}
-	return metadata
-}
-
-func nmiSubscriptionDelayedStartFromMetadata(metadata map[string]any) *time.Time {
-	raw := metadataString(metadata, "delayed_start")
-	if raw == "" {
-		return nil
-	}
-	parsed, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return nil
-	}
-	return &parsed
 }
 
 func metadataString(metadata map[string]any, key string) string {
@@ -1662,7 +1617,7 @@ func parseStripeError(body []byte) string {
 	return strings.TrimSpace(out.Error.Message)
 }
 
-// resolveVault gets an existing vault or creates one from payment token
+// ResolvePaymentMethod gets an existing payment method or creates one from a payment token
 // grantProductEntitlements grants entitlements from product spec after a one-time or subscription purchase
 
 func timePtr(t time.Time) *time.Time {
@@ -1791,13 +1746,17 @@ func (s *CheckoutService) processUpgrade(
 	if billingCycleHours == nil || *billingCycleHours <= 0 {
 		billingCycleHours = oldPrice.RecurringCycleHours()
 	}
-	prorationAmount, cycleHours := CalculateModelBUpgradeCharge(
-		oldPrice.Amount,
-		newPrice.Amount,
+	prorationAmount, cycleHours, err := CalculateModelBUpgradeCharge(
+		PriceAmountOf(oldPrice),
+		PriceAmountOf(newPrice),
 		existingSub.CurrentPeriodEndsAt,
 		billingCycleHours,
 		now,
 	)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 
 	log.WithFields(log.Fields{
 		"user_id":          user.ID,
@@ -1810,7 +1769,7 @@ func (s *CheckoutService) processUpgrade(
 
 	// NMI charges in whole cents; prorationAmount is micros. Error (never round)
 	// on a sub-cent remainder — same policy as the one-time sale path.
-	prorationCents, err := moneyutil.MicrosToCentsExact(prorationAmount)
+	prorationCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, prorationAmount)
 	if err != nil {
 		err := fmt.Errorf("upgrade proration amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -1818,7 +1777,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 	// Same rule for the successor's recurring enrollment charge, converted here
 	// so BOTH money conversions fail before any provider write happens.
-	recurringCents, err := moneyutil.MicrosToCentsExact(newPrice.Amount)
+	recurringCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount)
 	if err != nil {
 		err := fmt.Errorf("upgrade recurring amount must be representable in whole cents: %w", err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -1853,8 +1812,8 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
-	// Get or create vault
-	customerVaultID, vaultBillingID, resolvedMethod, createdVault, err := s.VaultResolver.ResolveVault(ctx, req, user, target)
+	// Get or create the payment method
+	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1888,7 +1847,7 @@ func (s *CheckoutService) processUpgrade(
 	// the response. Adopt it instead of creating a duplicate.
 	var resp *nmi.AddSubscriptionResponse
 	if retryAfterFailure {
-		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
 		if aerr != nil {
 			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 			return nil, ErrCheckoutProcessing
@@ -1910,8 +1869,8 @@ func (s *CheckoutService) processUpgrade(
 				Country:   DefaultIfEmpty(req.Country, "US"),
 			},
 			PlanID:          nmiPlanID,
-			CustomerVaultID: customerVaultID,
-			BillingID:       vaultBillingID,
+			CustomerVaultID: railCustomerRef,
+			BillingID:       railMethodRef,
 			Amount:          moneyutil.Cents(recurringCents),
 			Currency:        newPrice.Currency,
 			Email:           req.Email,
@@ -1933,7 +1892,7 @@ func (s *CheckoutService) processUpgrade(
 			// "processing" so the retry (same content-derived key) re-runs the
 			// adopt scan. Never a second blind create, never a live remote
 			// subscription abandoned as failed (#674 tail).
-			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, customerVaultID, nmiPlanID, successorOrderID)
+			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
 			if aerr != nil || !ok {
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
@@ -1944,7 +1903,7 @@ func (s *CheckoutService) processUpgrade(
 			subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
 			var nmiErr *nmi.CustomerVaultError
 			if errors.As(err, &nmiErr) {
-				subErr = &paymentmethods.VaultError{
+				subErr = &paymentmethods.PaymentMethodError{
 					Err:            subErr,
 					LocalizationID: nmiErr.LocalizationID,
 					Message:        subErr.Error(),
@@ -1987,8 +1946,8 @@ func (s *CheckoutService) processUpgrade(
 		}
 		if prorationTransactionID == "" {
 			saleResp, err := client.RunSale(nmi.SaleParams{
-				CustomerVaultID:  customerVaultID,
-				BillingID:        vaultBillingID,
+				CustomerVaultID:  railCustomerRef,
+				BillingID:        railMethodRef,
 				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
 				Currency:         newPrice.Currency,
 				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
@@ -2013,11 +1972,11 @@ func (s *CheckoutService) processUpgrade(
 				}
 			default:
 				// Verified-clean decline/rejection: no money moved. Direct
-				// best-effort cleanup of the vault created for THIS attempt,
+				// best-effort cleanup of the payment method created for THIS attempt,
 				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
 				rollbackNewSubscription()
-				if createdVault && resolvedMethod != nil && s.VaultService != nil {
-					_ = s.VaultService.CleanupVaultBestEffort(ctx, resolvedMethod)
+				if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
+					_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 				}
 				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
@@ -2149,7 +2108,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Mark idempotency request as complete
-	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(prorationAmount))
+	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(moneyutil.Micros(prorationAmount)))
 	cachedResult, _ := json.Marshal(upgradeIdempotencyResult{
 		SubscriptionID:         newSubscriptionID.String(),
 		ProrationTransactionID: prorationTransactionID,
@@ -2175,12 +2134,12 @@ func shortHash(s string) string {
 
 // findAdoptableUpgradeSuccessor re-finds a successor subscription a previous
 // (transport-ambiguous) upgrade attempt created at NMI: a live roster entry on
-// (vault, plan) unknown locally. Exactly one match is adopted; zero means the
+// (payment method, plan) unknown locally. Exactly one match is adopted; zero means the
 // create verifiably did not land (safe to create); more than one is refused
 // (never guess which orphan to adopt — operator attention via the returned
 // error, surfaced as ErrCheckoutProcessing).
-func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, vaultID, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
-	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, vaultID, planID, orderID)
+func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
+	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, railCustomerRef, planID, orderID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2196,7 +2155,7 @@ func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, cli
 		}).Info("adopted successor NMI subscription from a previous ambiguous upgrade attempt")
 		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
 	default:
-		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required", len(candidates), vaultID, planID)
+		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match payment method %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
 	}
 }
 
@@ -2327,7 +2286,13 @@ func (s *CheckoutService) processDowngrade(
 // billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
 // full period, and then rebilled `newFull` at `now + cycle`.
 //
-// UNITS: oldFull/newFull and the returned first charge are MICROS. The unused
+// CURRENCY (#820): `newFull - oldUnused` is only meaningful inside ONE
+// currency — across an FX boundary the subtraction silently invents a rate of
+// 1.0. Both operands therefore arrive as PriceAmount (amount + currency) and a
+// mismatched or absent currency returns ErrTierChangeCrossCurrency with NO
+// amount, matching how reprice and plan migration refuse an FX crossing.
+//
+// UNITS: the amounts and the returned first charge are MICROS. The unused
 // credit is rounded UP to a whole cent (customer-favored), so for whole-cent
 // prices the first charge is a whole number of cents — chargeable on every
 // rail (NMI cents, Stripe cents, Solana base units) with preview == charge.
@@ -2351,12 +2316,17 @@ func (s *CheckoutService) processDowngrade(
 // (e.g. the Solana path in #267) can reuse the exact same math. cycleHours is
 // returned so callers can advance the period end (now + cycleHours).
 func CalculateModelBUpgradeCharge(
-	oldFull int64,
-	newFull int64,
+	old PriceAmount,
+	new PriceAmount,
 	periodEndsAt *time.Time,
 	billingCycleHours *int,
 	now time.Time,
-) (firstChargeMicros int64, cycleHours int) {
+) (firstChargeMicros int64, cycleHours int, err error) {
+	if err := RequireSameCurrency(old, new); err != nil {
+		return 0, 0, err
+	}
+	oldFull, newFull := old.Micros, new.Micros
+
 	// Default to a 30-day (720h) cycle if not specified.
 	cycleHours = 30 * 24
 	if billingCycleHours != nil && *billingCycleHours > 0 {
@@ -2380,7 +2350,18 @@ func CalculateModelBUpgradeCharge(
 	// floating-point drift), rounded UP to a whole cent (customer-favored) so
 	// the resulting charge is whole-cent for whole-cent prices.
 	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
-	oldUnused = moneyutil.MicrosToCentsCeil(oldUnused) * moneyutil.MicrosPerCent
+	// or#863: ceil to a whole RAIL MINOR unit at this price's own currency
+	// scale, then back to internal units — not an inline /10_000 that assumes
+	// every currency is 2-decimal. RequireSameCurrency above already proved the
+	// currency is registered and shared by both operands.
+	oldUnusedMinor, err := moneyutil.NativeToRailMinor(old.Currency, oldUnused)
+	if err != nil {
+		return 0, 0, err
+	}
+	oldUnused, err = moneyutil.RailMinorToNative(old.Currency, oldUnusedMinor)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	firstChargeMicros = newFull - oldUnused
 	if firstChargeMicros < 0 {
@@ -2388,7 +2369,7 @@ func CalculateModelBUpgradeCharge(
 		// only reachable with bad inputs (e.g. a "downgrade" routed here).
 		firstChargeMicros = 0
 	}
-	return firstChargeMicros, cycleHours
+	return firstChargeMicros, cycleHours, nil
 }
 
 // cancelNMISubscription cancels a subscription at NMI
@@ -2464,6 +2445,13 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		if strings.TrimSpace(*currentProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 			return nil, ErrTierChangeDifferentGroup
 		}
+	}
+	// A tier group may mix currencies (the catalog allows a per-currency price
+	// per plan), but a SUBSCRIPTION cannot move across one: proration would
+	// subtract across an FX boundary on the way up, and the schedule would
+	// silently change currency on the way down (#820).
+	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, err
 	}
 
 	// 5. Determine action (upgrade vs downgrade)
@@ -2553,6 +2541,11 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 			return nil, ErrTierChangeDifferentGroup
 		}
 	}
+	// Same FX refusal as TierChange (#820) — the preview must never quote a
+	// number the charge would refuse to honour.
+	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, err
+	}
 
 	rail := string(existingSub.Rail)
 	now := s.now()
@@ -2584,7 +2577,10 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	firstCharge, cycleHours := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	firstCharge, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	if err != nil {
+		return nil, err
+	}
 	nextDate := now.Add(time.Duration(cycleHours) * time.Hour)
 	resp.Action = "upgrade"
 	resp.AmountDueNow = firstCharge
@@ -2605,7 +2601,7 @@ func formatMinorAmount(micros int64, currency string) string {
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
 	}
-	amount := moneyutil.FormatMicrosDecimal(micros)
+	amount := moneyutil.FormatMicrosDecimal(moneyutil.Micros(micros))
 	if strings.HasPrefix(amount, "-") {
 		return "-" + symbol + strings.TrimPrefix(amount, "-")
 	}
@@ -2734,6 +2730,22 @@ func (s *CheckoutService) processTierChangeStripe(
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
+
+	// The success-toast estimate is computed BEFORE the provider write, and from
+	// the OLD price + period (the local reset below overwrites them), so it
+	// matches the preview's now-amount and so any money error — an FX crossing
+	// (#820) above all — fails before Stripe is touched.
+	stripeNow := s.now()
+	oldAmount := PriceAmountOf(existingSub.Price)
+	if existingSub.Price == nil {
+		// No old price loaded => no credit is known. Zero credit carries no
+		// currency risk; the estimate is simply the full new price.
+		oldAmount = PriceAmount{Micros: 0, Currency: newPrice.Currency}
+	}
+	estimatedNow, _, err := CalculateModelBUpgradeCharge(oldAmount, PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), stripeNow)
+	if err != nil {
+		return nil, err
+	}
 	// Pass newPrice.ID so the subscription's metadata[internal_price_id] is
 	// rewritten to the new tier; otherwise the proration invoice and every future
 	// renewal would resolve the stale old price in the invoice.paid webhook (#268).
@@ -2745,22 +2757,11 @@ func (s *CheckoutService) processTierChangeStripe(
 	// #268: Model B reset the billing cycle at Stripe (anchor "now"), so reflect
 	// the fresh period [now, now+cycle] locally. Stripe webhooks remain the
 	// source of truth and will reconcile the exact period boundaries.
-	stripeNow := s.now()
 	stripeCycleHours := 30 * 24
 	if ch := newPrice.RecurringCycleHours(); ch != nil {
 		stripeCycleHours = *ch
 	}
 	stripePeriodEnd := stripeNow.Add(time.Duration(stripeCycleHours) * time.Hour)
-
-	// Capture the OLD price + period BEFORE the local reset below overwrites them,
-	// so the success-toast estimate matches the preview's now-amount. Stripe
-	// finalizes the exact prorated total on its side, so this is an estimate.
-	var oldFull int64
-	if existingSub.Price != nil {
-		oldFull = existingSub.Price.Amount
-	}
-	oldPeriodEnd := existingSub.CurrentPeriodEndsAt
-	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.RecurringCycleHours(), stripeNow)
 
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID
@@ -3054,7 +3055,7 @@ func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *mo
 	if pm == nil || ref == "" {
 		return
 	}
-	if s.VaultService == nil || s.VaultService.DB == nil {
+	if s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
 		log.WithContext(ctx).Warn("checkout: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
@@ -3063,7 +3064,7 @@ func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *mo
 		log.WithContext(ctx).WithError(err).Warn("checkout: no merchant context to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := s.VaultService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+	if _, err := s.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
 		MerchantID: tid.UUID(),
 		ID:         pm.ID,
 		Agreement:  string(agreement),

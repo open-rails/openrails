@@ -36,7 +36,7 @@ func TestWebhookDedupPosture(t *testing.T) {
 	t.Run("dev and embedded get the per-process warning", func(t *testing.T) {
 		for _, msg := range []string{
 			webhookDedupPostureWarning(dev, false),
-			webhookDedupPostureWarning(&config.Config{}, false), // empty env = dev
+			webhookDedupPostureWarning(&config.Config{Env: "development"}, false),
 			webhookDedupPostureWarning(prod, true),
 			webhookDedupPostureWarning(nil, false),
 		} {

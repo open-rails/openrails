@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -176,7 +176,7 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	if err := money.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -428,7 +428,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		if !ok {
 			return
 		}
-		if err := money.ValidateCurrency(currency); err != nil {
+		if err := moneyutil.ValidateCurrency(currency); err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}

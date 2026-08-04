@@ -47,7 +47,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-			 VALUES ($1, $2, 999, 'usd', 720, true, $3)`,
+			 VALUES ($1, $2, 999, 'USD', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
@@ -60,7 +60,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			TransactionID: "txn-stamp-" + suffix,
 			Amount:        999,
 			ListAmount:    999,
-			Currency:      "usd",
+			Currency:      "USD",
 			Status:        "completed",
 			PurchasedAt:   now,
 			CreatedAt:     now,
@@ -76,7 +76,7 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 		pinnedCtx := db.WithPSPID(ctx, account.ID)
 		pmt2 := &models.Payment{
 			ID: uuid.New(), CustomerID: customerID, PriceID: priceID, Rail: models.RailNMI,
-			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "usd",
+			TransactionID: "txn-pin-" + suffix, Amount: 999, ListAmount: 999, Currency: "USD",
 			Status: "completed", PurchasedAt: now, CreatedAt: now,
 		}
 		require.NoError(t, payments.NewPaymentRepo(appDB).Create(pinnedCtx, pmt2))

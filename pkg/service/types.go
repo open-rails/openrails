@@ -245,18 +245,6 @@ type ResumeSubscriptionResult struct {
 	Message string
 }
 
-// ChangeTierRequest specifies tier change parameters.
-type ChangeTierRequest struct {
-	NewPriceID string
-}
-
-// ChangeTierResult is the result of a tier change request.
-type ChangeTierResult struct {
-	Success        bool
-	Message        string
-	SubscriptionID string
-}
-
 // UpdateSubscriptionPaymentMethodRequest specifies payment method update parameters.
 type UpdateSubscriptionPaymentMethodRequest struct {
 	SubscriptionID  string

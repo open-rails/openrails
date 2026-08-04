@@ -132,8 +132,7 @@ type saleIntentFixture struct {
 
 func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -170,9 +169,9 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		),
 		// #788: the scoped resolver is the ONLY NMI client source.
 		ResolveNMIClient: func(context.Context, string) (*nmi.NMIClient, error) { return client, nil },
-		// VaultService carries the DB handle finalize persists the #297
+		// RailPaymentMethodService carries the DB handle finalize persists the #297
 		// stored-credential anchor through.
-		VaultService: &paymentmethods.VaultService{DB: dbi},
+		RailPaymentMethodService: &paymentmethods.RailPaymentMethodService{DB: dbi},
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),

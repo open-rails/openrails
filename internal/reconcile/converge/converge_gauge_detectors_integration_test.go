@@ -45,7 +45,7 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rw-prod-"+suffix, "rw-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// User cancelled mid-period: cancelled now, ended_at = period end (the runway).
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
@@ -154,7 +154,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "orph-prod-"+suffix, "orph-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 
 		seedSub := func(id uuid.UUID, status string, periodEnd, endedAt *time.Time, nextRetry *time.Time) {
 			exec(`INSERT INTO openrails.subscriptions
@@ -175,10 +175,10 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		seedSub(subPastDue, "past_due", &futurePeriod, nil, &futureRetry)
 
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'usd','refunded',$6)`,
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','refunded',$6)`,
 			payRefunded, merchantID, customer, priceID, "orph-txn-r-"+suffix, now.Add(-5*24*time.Hour))
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'usd','completed',$6)`,
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6)`,
 			payCompleted, merchantID, customer, priceID, "orph-txn-c-"+suffix, now.Add(-4*24*time.Hour))
 
 		seedEnt := func(id uuid.UUID, feature, sourceType string, sourceID uuid.UUID, endAt *time.Time) {
@@ -341,10 +341,10 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 			      VALUES ($1,$2,$2,'{}'::jsonb,$3)`, pid, "dupown-"+suffix+"-"+string(rune('a'+i)), merchantID)
 		}
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',$3)`, priceID, prodDup, merchantID)
+		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, prodDup, merchantID)
 		seedPay := func(id uuid.UUID, txn string, at time.Time) {
 			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'usd','completed',$6)`,
+			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6)`,
 				id, merchantID, customer, priceID, txn, at)
 		}
 		// Every payment lands in a DIFFERENT month (all share one price →

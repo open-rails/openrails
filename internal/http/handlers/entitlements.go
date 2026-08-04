@@ -345,29 +345,6 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 	r.SuccessJSONMessage("entitlement revoked")
 }
 
-func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []ServiceEntitlementRecord {
-	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
-	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
-		if e.EndAt != nil {
-			rec.EndAt = e.EndAt
-		}
-		if e.SourceID != nil {
-			sourceStr := e.SourceID.String()
-			rec.SourceID = &sourceStr
-		}
-		if e.RevokedAt != nil {
-			rec.RevokedAt = e.RevokedAt
-		}
-		if e.RevokeReason != nil {
-			reasonStr := string(*e.RevokeReason)
-			rec.RevokeReason = &reasonStr
-		}
-		result = append(result, rec)
-	}
-	return result
-}
-
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {

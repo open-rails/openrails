@@ -37,10 +37,6 @@ type Prepared struct {
 	SignatureVerified bool
 }
 
-func (p Prepared) UniqueKey() string {
-	return ComputeUniqueKey(p.Rail, p.EventID, p.EventType, p.Body)
-}
-
 // CanonicalRail normalizes a webhook URL's rail segment. The legacy "mobius"
 // path resolves to the NMI rail; everything else passes through lower-cased.
 func CanonicalRail(rail string) string {

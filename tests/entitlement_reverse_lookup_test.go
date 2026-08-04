@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"sort"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 // TestListCustomersWithEntitlement_Reverse validates the #535 reverse lookup
@@ -22,7 +20,7 @@ import (
 // filter-by-entitlement (#91).
 func TestListCustomersWithEntitlement_Reverse(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	svc := suite.App.Runtime.EntitlementService
 	now := time.Now().UTC()
 

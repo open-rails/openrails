@@ -59,7 +59,7 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "il-"+key+"-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, f.sub, merchantID, f.cust, prod, price, railSub, start, periodEnd)
 		if withEnt {
@@ -106,8 +106,8 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 			{RailSubscriptionID: goneB.railSub, Status: reconcile.SubscriptionStatusCancelled},
 		},
 		Transactions: []reconcile.RemoteTransaction{
-			{TransactionID: "il-tx-a-" + sfx, SubscriptionID: renewA.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
-			{TransactionID: "il-tx-b-" + sfx, SubscriptionID: renewB.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "il-tx-a-" + sfx, SubscriptionID: renewA.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "il-tx-b-" + sfx, SubscriptionID: renewB.railSub, Type: reconcile.TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
 	fetchers := map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: &cannedFetcher{snap: snap}}

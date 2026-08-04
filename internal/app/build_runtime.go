@@ -52,6 +52,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
@@ -299,7 +300,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
-		VaultService:             serviceInstances.VaultService,
+		RailPaymentMethodService:             serviceInstances.RailPaymentMethodService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
@@ -372,13 +373,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	// #732: user/admin destructive cancels pass the anti-credential-compromise
-	// rate ceiling before their write-ahead intent is created. System-origin
-	// deletes (dunning) skip it (the gate is inert for system origin).
+	// #732: every destructive cancel passes the rate ceiling before its
+	// write-ahead intent is created — user/admin on the deployment-wide
+	// anti-credential-compromise ceilings, system on the per-merchant automation
+	// ceiling (or#842: the system scheduler used to pass nil, so the paths that
+	// queue the most irreversible work were the only ungated ones).
 	rateCeiling := runtime.RateCeiling()
 	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginUser,
 		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, nil, intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
@@ -413,8 +416,8 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
-	if runtime.VaultService != nil {
-		runtime.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
+	if runtime.RailPaymentMethodService != nil {
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
@@ -561,7 +564,7 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
-	VaultService             *paymentmethods.VaultService
+	RailPaymentMethodService             *paymentmethods.RailPaymentMethodService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -673,7 +676,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	}
 	if redisClient != nil {
 		redisFX := fx.NewRedisCachedProvider(redisClient, liveFX, 3*time.Hour)
-		redisFX.Start(context.Background(), money.CurrencyCodes(), 2*time.Hour)
+		redisFX.Start(context.Background(), moneyutil.CurrencyCodes(), 2*time.Hour)
 		fxProvider = redisFX
 		fxRateRefresher = redisFX
 	}
@@ -733,8 +736,8 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		Clock:    clock,
 	})
 
-	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, database, cfg, clock)
-	subscriptionService.VaultService = vaultService
+	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
+	subscriptionService.RailPaymentMethodService = railPMService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
 	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
@@ -803,7 +806,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		purchaseService,
 		entitlementService,
 		paymentMethodService,
-		vaultService,
+		railPMService,
 		idempotencyService,
 		railCustomerService,
 		cfg,
@@ -858,7 +861,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
-		VaultService:                 vaultService,
+		RailPaymentMethodService:                 railPMService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,

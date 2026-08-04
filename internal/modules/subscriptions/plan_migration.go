@@ -294,7 +294,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			out.Disposition = "blocked"
 			out.Reason = migrationBlockedNMIIntervalMismatch
 			rail(sub).RequiresAction++
-		case capability == capabilityAutoNMI && !centRepresentable(target.Amount):
+		case capability == capabilityAutoNMI && !railMinorRepresentable(target.Currency, target.Amount):
 			out.Disposition = "blocked"
 			out.Reason = migrationBlockedNMISubCentAmount
 			rail(sub).RequiresAction++
@@ -506,10 +506,13 @@ func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMi
 	}
 }
 
-// centRepresentable reports whether a micro-dollar amount lands on a whole
-// cent — NMI's amount granularity.
-func centRepresentable(amountMicros int64) bool {
-	_, err := moneyutil.MicrosToCentsExact(amountMicros)
+// railMinorRepresentable reports whether an internal amount lands exactly on a
+// whole rail minor unit at the price's own currency scale — NMI's amount
+// granularity. Registry-driven (or#863): an unregistered currency is NOT
+// representable, so a price whose currency nobody established blocks the
+// migration instead of being pushed at a guessed scale.
+func railMinorRepresentable(currency string, amountNative int64) bool {
+	_, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	return err == nil
 }
 
@@ -546,7 +549,7 @@ func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRe
 	if deferredPushRequired(req.EffectiveAt, sub) {
 		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s — re-run the migration once the subscription enters its final period before the effective date", req.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
-	if err := s.nmi.PushPlanAmount(ctx, sub, target.Amount); err != nil {
+	if err := s.nmi.PushPlanAmount(ctx, sub, target.Currency, target.Amount); err != nil {
 		return err
 	}
 	return s.applyImmediately(ctx, sub, target, targetProduct, row)

@@ -128,7 +128,7 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 
 	// Saved payment method on file — the send_invoice skip below must be the
 	// collection_method, not a missing method.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -279,9 +279,13 @@ func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *tes
 }
 
 func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *testing.T) {
-	svc, pool, _, _, ctx := moneyInEnv(t)
+	svc, _, _, _, ctx := moneyInEnv(t)
 	foreignMerchantID := uuid.New()
 	foreignPayer := identity.CustomerIDFromString(uuid.NewString())
+	// The fixture is deliberately ANOTHER merchant's — the whole point is that the
+	// service refuses it — so seeding it is one of the few genuinely privileged
+	// cases. No merchant-pinned connection can write another merchant's rows.
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", foreignPayer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", foreignMerchantID)

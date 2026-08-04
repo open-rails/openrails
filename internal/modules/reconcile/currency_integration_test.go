@@ -21,7 +21,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 // The old code defaulted to a lowercase, unregistered "usd" and persisted it.
 func TestEnsureChargePayment_NoCurrencyWritesNoRow(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()

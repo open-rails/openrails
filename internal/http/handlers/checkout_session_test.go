@@ -58,7 +58,7 @@ func TestWriteCheckoutSessionErrorSanitizesVaultFailures(t *testing.T) {
 			httpReq.Header.Set("X-Request-ID", "req-checkout-149")
 			req := httprequest.NewHTTP(rec, httpReq, &app.Runtime{})
 
-			writeCheckoutSessionError(req, &paymentmethods.VaultError{
+			writeCheckoutSessionError(req, &paymentmethods.PaymentMethodError{
 				LocalizationID: tt.localizationID,
 				Message:        "raw processor detail that must stay server-side",
 			}, checkoutSessionErrorContext{})

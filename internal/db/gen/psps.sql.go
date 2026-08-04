@@ -195,6 +195,58 @@ func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIden
 	return i, err
 }
 
+const listLivePSPsForRail = `-- name: ListLivePSPsForRail :many
+SELECT id, merchant_id, rail, environment, account_id, key
+FROM openrails.psps
+WHERE merchant_id = $1::uuid
+  AND rail = $2::text
+  AND archived = false
+ORDER BY account_id
+`
+
+type ListLivePSPsForRailParams struct {
+	MerchantID uuid.UUID
+	Rail       string
+}
+
+type ListLivePSPsForRailRow struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+	AccountID   string
+	Key         *string
+}
+
+// One merchant's live PSPs on a rail, read inside that merchant's scope (the
+// second leg of the ListRailArmedMerchants fan-out).
+func (q *Queries) ListLivePSPsForRail(ctx context.Context, arg ListLivePSPsForRailParams) ([]ListLivePSPsForRailRow, error) {
+	rows, err := q.db.Query(ctx, listLivePSPsForRail, arg.MerchantID, arg.Rail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLivePSPsForRailRow
+	for rows.Next() {
+		var i ListLivePSPsForRailRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.Key,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
 WHERE merchant_id = $1::uuid
@@ -239,6 +291,86 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 		return nil, err
 	}
 	return items, nil
+}
+
+const listRailArmedMerchants = `-- name: ListRailArmedMerchants :many
+SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
+    $1::text[],
+    $2::int)
+`
+
+type ListRailArmedMerchantsParams struct {
+	Rails         []string
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: merchants armed on one of the named rails, through migration
+// 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
+// used to JOIN merchants to psps on the base pool; psps FORCEs RLS, so the join
+// yielded nothing and the managed endpoint was never registered or
+// version-bumped. Ids only — each merchant's PSP rows are read inside its own
+// scope.
+func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_identity(
+    lower($1::text),
+    COALESCE($2::text, 'live'),
+    $3::text
+)
+`
+
+type ResolvePSPOwnerByRailIdentityParams struct {
+	Rail        string
+	Environment *string
+	AccountID   string
+}
+
+type ResolvePSPOwnerByRailIdentityRow struct {
+	ID          *uuid.UUID
+	MerchantID  *uuid.UUID
+	Rail        *string
+	Environment *string
+	AccountID   *string
+}
+
+// #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
+// account_id) natural key, for webhook routing and the uniqueness preflight —
+// both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
+// above carries no merchant predicate, so under the RLS-enforcing app role it
+// can only ever return no rows; the SECURITY DEFINER directory function
+// (migration 0016) is the sanctioned way to make that read, and it RAISES
+// rather than returning empty if its definer cannot bypass RLS.
+func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg ResolvePSPOwnerByRailIdentityParams) (ResolvePSPOwnerByRailIdentityRow, error) {
+	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
+	var i ResolvePSPOwnerByRailIdentityRow
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+	)
+	return i, err
 }
 
 const upsertPSP = `-- name: UpsertPSP :one

@@ -80,33 +80,6 @@ func (g *WastedSpendGuard) ClaimReport(ctx context.Context, merchant, payer, cur
 	return g.lim.ClaimOnce(ctx, fmt.Sprintf("wasted:%s:%s:%s:%s:%s", merchant, payer, currency, source, sourceID), ttl)
 }
 
-// Record adds an amount of wasted spend to BOTH the payer's and the invoker's windows
-// (whichever window lists are supplied). The unit is the window Key, so multiple
-// windows of one subject are distinct Redis counters. A no-op for amount <= 0
-// (cheap rejects are not reported).
-func (g *WastedSpendGuard) Record(ctx context.Context, merchant, payer, invoker, currency string, amount int64, payerWindows, invokerWindows []WastedWindow) error {
-	if !g.Enabled() || amount <= 0 {
-		return nil
-	}
-	if payer != "" {
-		base := payerBase(merchant, payer, currency)
-		for _, w := range payerWindows {
-			if _, err := g.lim.AddWindowValue(ctx, base, w.Key, w.Window, amount); err != nil {
-				return err
-			}
-		}
-	}
-	if invoker != "" {
-		base := invokerBase(merchant, payer, invoker, currency)
-		for _, w := range invokerWindows {
-			if _, err := g.lim.AddWindowValue(ctx, base, w.Key, w.Window, amount); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // RecordPayerGrace records direct-payer wasted spend against payer grace windows
 // and returns the amount that exceeds the strictest remaining grace window. No
 // windows means no configured grace policy and no chargeable overage.
@@ -189,33 +162,4 @@ func (g *WastedSpendGuard) overBudget(ctx context.Context, base string, windows 
 		}
 	}
 	return false, "", nil
-}
-
-// Usage returns the running wasted-$ totals for a subject's windows (introspection
-// for /abuse-usage). subject "payer" or "invoker" selects the keyspace.
-func (g *WastedSpendGuard) Usage(ctx context.Context, base, currency string, windows []WastedWindow) ([]WindowUsage, error) {
-	out := make([]WindowUsage, 0, len(windows))
-	if !g.Enabled() {
-		return out, nil
-	}
-	for _, w := range windows {
-		used, err := g.lim.WindowValue(ctx, base, w.Key, w.Window)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, WindowUsage{
-			Key: w.Key, Currency: currency, Window: w.Window.String(), Used: used,
-			Limit: w.Limit, OverBudget: w.Limit > 0 && used >= w.Limit,
-		})
-	}
-	return out, nil
-}
-
-// PayerBase / InvokerBase expose the keyspace prefixes so a caller (the service
-// facade /abuse-usage) can read Usage for either subject.
-func (g *WastedSpendGuard) PayerBase(merchant, payer, currency string) string {
-	return payerBase(merchant, payer, currency)
-}
-func (g *WastedSpendGuard) InvokerBase(merchant, payer, invoker, currency string) string {
-	return invokerBase(merchant, payer, invoker, currency)
 }

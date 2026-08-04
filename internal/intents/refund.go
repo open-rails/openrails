@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/railresolve"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -253,12 +253,12 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// The gateway answered with a decline: the refund definitively did
 			// not happen and re-sending the identical request cannot succeed.
-			return h.terminally(ctx, p, "nmi refund declined: "+vaultErr.Message, map[string]any{
-				"response_code": vaultErr.ResponseCode,
+			return h.terminally(ctx, p, "nmi refund declined: "+pmErr.Message, map[string]any{
+				"response_code": pmErr.ResponseCode,
 			})
 		}
 		// Transport-level failure: the refund MAY have been processed.
@@ -322,23 +322,6 @@ func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (r
 		return action.TransactionID, true, nil
 	}
 	return "", false, nil
-}
-
-// nmiAmountToCents converts the Query API dollar amount ("5.00", "-5.00" on
-// refund actions) into absolute cents.
-func nmiAmountToCents(amount string) (int64, error) {
-	trimmed := strings.TrimSpace(amount)
-	if trimmed == "" {
-		return 0, errors.New("empty amount")
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0, err
-	}
-	if f < 0 {
-		f = -f
-	}
-	return int64(f*100 + 0.5), nil
 }
 
 // ============================================================================

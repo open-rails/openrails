@@ -52,12 +52,6 @@ type ChargeResult struct {
 	CapturedStoredCredentialRef string
 }
 
-// Alerter delivers a low-balance notification. Implemented by the notification
-// layer; faked in tests (#240).
-type Alerter interface {
-	LowBalanceAlert(ctx context.Context, payer identity.CustomerID, available, threshold int64) error
-}
-
 // moneyInAccount is a scanned (settings ⨝ balance) row for the money-in workers.
 type moneyInAccount struct {
 	MerchantID      uuid.UUID
@@ -100,38 +94,6 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 		})
 	}
 	return out, nil
-}
-
-// RunLowBalanceAlerts finds accounts below their low-balance threshold and emits
-// one alert per account, deduped by last_alert_at within `cooldown`. Returns the
-// number of alerts sent. (#240)
-func (s *MoneyService) RunLowBalanceAlerts(ctx context.Context, alerter Alerter, cooldown time.Duration) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if alerter == nil {
-		return 0, fmt.Errorf("alerter required")
-	}
-	rows, err := s.belowThresholdAccounts(ctx)
-	if err != nil {
-		return 0, err
-	}
-	now := s.now()
-	sent := 0
-	for _, r := range rows {
-		if r.LastAlertAt != nil && now.Sub(*r.LastAlertAt) < cooldown {
-			continue
-		}
-		payer := identity.CustomerID(r.CustomerID)
-		if err := alerter.LowBalanceAlert(ctx, payer, r.Available, r.Threshold); err != nil {
-			continue // best-effort; try again next tick
-		}
-		if err := s.stampMoneyInTimestamp(ctx, r, "last_alert_at", now); err != nil {
-			return sent, err
-		}
-		sent++
-	}
-	return sent, nil
 }
 
 // AutoTopupCandidate is one account due an auto-top-up episode (#674): below

@@ -303,20 +303,25 @@ func (q *Queries) ListAlertRules(ctx context.Context) ([]OpenrailsAlertRule, err
 }
 
 const listArmedAlertMerchants = `-- name: ListArmedAlertMerchants :many
-SELECT DISTINCT merchant_id FROM openrails.alert_rules WHERE enabled
+SELECT merchant_id FROM openrails.armed_alert_merchant_ids()
 `
 
-// CROSS-MERCHANT (base pool / GenGlobal): the evaluator scheduler's armed-merchant
-// selection. Same base-pool posture as the #358 intent executor sweeps.
-func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]uuid.UUID, error) {
+// CROSS-MERCHANT: the evaluator scheduler's armed-merchant selection, through
+// migration 0021's SECURITY DEFINER reader (or#861). It used to be a base-pool
+// `SELECT DISTINCT merchant_id FROM alert_rules` — but the base pool is not
+// privileged, it is the same openrails_app role with no app.merchant_id, so
+// alert_rules' FORCEd RLS matched `merchant_id = NULL` and this returned NO
+// MERCHANTS: the alert evaluator had never run in production. Ids only; the
+// rules themselves are still read per-merchant under MerchantTx.
+func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedAlertMerchants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

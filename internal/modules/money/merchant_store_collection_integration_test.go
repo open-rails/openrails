@@ -71,7 +71,7 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 	storeKey := "sk_test_store_only_" + sfx
 	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), "acct_store"+sfx, map[string]string{"secret_key": storeKey})
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_store_only_"+sfx)
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_store_only_"+sfx)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_store_only_"+sfx)
 	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
@@ -180,7 +180,7 @@ func TestChargeOutstanding_BootPlaneFallback_WhenMerchantDeclaresNoAccount(t *te
 	// the resolver must decline (ok=false) and the boot adapter must charge.
 	msvc := merchantsServiceForTest(t, dbi)
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_boot_fallback")
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_boot_fallback")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_boot_fallback")
 	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
@@ -212,7 +212,7 @@ func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T
 	// Declared account row, NO secrets: never boot fallback, the charge errors.
 	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), "acct_secretless"+sfx, map[string]string{})
 
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_fail_closed_"+sfx)
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_fail_closed_"+sfx)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_fail_closed_"+sfx)
 	seedArrearsInvoice(t, svc, ctx, payer, pm)
 

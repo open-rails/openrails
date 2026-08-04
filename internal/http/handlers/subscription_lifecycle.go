@@ -94,6 +94,7 @@ func CancelSubscription(r *httprequest.Request) {
 	// #696: CCBill cancels queue like every other rail — the worker's user
 	// cancel path records the local runway cancel + durable remote-cancel intent.
 	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{
+		MerchantID:     sub.MerchantID,
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
 		Feedback:       feedback,
@@ -162,6 +163,7 @@ func ResumeSubscription(r *httprequest.Request) {
 	}
 
 	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     sub.MerchantID,
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
 	}, &river.InsertOpts{

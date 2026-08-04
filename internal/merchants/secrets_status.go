@@ -150,6 +150,8 @@ func validateSecretValueLocal(name, value string) error {
 			name = SecretStripeWebhookSigning
 		case rail == "stripe" && key == "webhook_signing_secret_thin":
 			name = SecretStripeWebhookSigningThin
+		case rail == "stripe" && key == "webhook_signing_secret_previous":
+			name = SecretStripeWebhookSigningPrevious
 		case rail == "nmi" && key == "tokenization_url":
 			name = SecretNMITokenizationURL
 		}
@@ -159,7 +161,7 @@ func validateSecretValueLocal(name, value string) error {
 		if !strings.HasPrefix(value, "sk_") {
 			return errors.New("invalid_format")
 		}
-	case SecretStripeWebhookSigning, SecretStripeWebhookSigningThin:
+	case SecretStripeWebhookSigning, SecretStripeWebhookSigningThin, SecretStripeWebhookSigningPrevious:
 		if !strings.HasPrefix(value, "whsec_") {
 			return errors.New("invalid_format")
 		}

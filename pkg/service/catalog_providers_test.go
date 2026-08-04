@@ -164,7 +164,7 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 	req := CreatePriceRequest{
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		PSPs:       []string{"stripe", "ccbill", "nmi"},
 		PSPLinks: map[string]map[string]string{
 			"stripe": {models.RailKeyStripePriceID: "price_xxx"},
@@ -196,7 +196,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	req := CreatePriceRequest{
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		PSPs:       []string{"ccbill", "nmi"},
 		PSPLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
@@ -259,7 +259,7 @@ func TestResolveProviders_AllPending(t *testing.T) {
 	req := CreatePriceRequest{
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		PSPs:       []string{"ccbill", "nmi"},
 	}
 	_, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
@@ -282,7 +282,7 @@ func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
 	req := CreatePriceRequest{
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		PSPs:       []string{"paypal"}, // not in dispatch table
 	}
 	_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
@@ -299,7 +299,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 	req := CreatePriceRequest{
 		ProductID:  productID,
 		UnitAmount: 9_990_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		PSPLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
 		},
@@ -325,7 +325,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
 		PSPs:       []string{"stripe", "nmi"},
 		UnitAmount: 23_000_000,
-		Currency:   "usd",
+		Currency:   "USD",
 	}, priceID)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -367,7 +367,7 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 	a := newMobiusAdapterWithServer(t, server.URL)
 	cycle := 30
 	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-23000000-30"}, autoCreateContext{
-		ProductKey: "premium", UnitAmount: 23_000_000, Currency: "usd", BillingCycleDays: &cycle,
+		ProductKey: "premium", UnitAmount: 23_000_000, Currency: "USD", BillingCycleDays: &cycle,
 		RemoteWritesDisabled: true,
 	})
 	if !errors.Is(err, errRemoteWritesDisabled) {

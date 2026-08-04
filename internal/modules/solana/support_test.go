@@ -35,7 +35,7 @@ func TestCalculateTokenQuote_USDPrice(t *testing.T) {
 	require.Equal(t, uint64(10_000_000), quote.Units)
 	require.Equal(t, "10.000000", quote.Amount)
 	require.Equal(t, 1.0, quote.FXRate)
-	require.Equal(t, "usd", quote.FXCurrency)
+	require.Equal(t, "USD", quote.FXCurrency)
 }
 
 // TestCalculateTokenQuote_MicrosWirePin pins the #671 units contract on the
@@ -124,7 +124,7 @@ func TestCalculateTokenQuote_WithMockFXProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, moneyutil.Micros(10_800_000), quote.AmountUSDMicros)
 	require.Equal(t, 1.08, quote.FXRate)
-	require.Equal(t, "eur", quote.FXCurrency)
+	require.Equal(t, "EUR", quote.FXCurrency)
 }
 
 func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T) {
@@ -134,7 +134,7 @@ func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T
 		PriceID:   priceID.String(),
 		SessionID: "session_123",
 		Amount:    1000,
-		Currency:  "usd",
+		Currency:  "USD",
 	}
 	payment := &models.Payment{
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),

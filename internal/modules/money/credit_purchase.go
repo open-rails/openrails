@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
@@ -210,7 +211,7 @@ func (s *MoneyService) qualifyCatalogCreditUnit(ctx context.Context, unit string
 		return "", fmt.Errorf("credit purchase unit required")
 	}
 	if !IsQualifiedUnit(unit) {
-		if _, ok := CurrencyScale(unit); ok {
+		if _, ok := moneyutil.CurrencyScale(unit); ok {
 			return normalizeUnit(unit), nil
 		}
 		tid, err := merchant.Require(ctx)

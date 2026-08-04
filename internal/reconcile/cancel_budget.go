@@ -22,6 +22,13 @@ const (
 	// DefaultMaxCancelFraction is the share of a merchant's live book one pass
 	// may cancel.
 	DefaultMaxCancelFraction = 0.05
+	// DefaultMinCancelAllowance keeps the percentage cap from livelocking small
+	// books. 5% of a nine-subscriber merchant rounds to zero, so a pure
+	// percentage cap would hold even two genuinely provider-cancelled
+	// subscriptions FOREVER and the mirror could never converge — entitlements
+	// granted in perpetuity off subscriptions that no longer exist. A handful
+	// still makes mass cancellation structurally impossible.
+	DefaultMinCancelAllowance = 3
 	// DefaultBreakerRatio: a roster reporting less than this share of the local
 	// live book is more likely truncated/broken than true.
 	DefaultBreakerRatio = 0.10
@@ -40,17 +47,19 @@ type CancelBudget struct {
 	Max int
 	// Fraction is the share of the live book (<=0 → DefaultMaxCancelFraction).
 	Fraction float64
+	// MinAllowance is the small-book floor (<=0 → DefaultMinCancelAllowance).
+	MinAllowance int
 }
 
 // Limit is how many cancellations this pass may apply against a book of
-// localLive live subscriptions: the tighter of the absolute and percentage
-// caps, floored at 1.
+// localLive live subscriptions:
 //
-// The floor of 1 is deliberate. Without it, P% of a nine-subscriber book
-// rounds to zero and the merchant's mirror could never converge even ONE
-// genuinely provider-cancelled subscription — entitlements would be granted
-// forever off a subscription that no longer exists. One at a time still makes
-// a mass cancellation structurally impossible.
+//	min(Max, max(MinAllowance, floor(localLive * Fraction)))
+//
+// The percentage is the real guard on a big book (5% of 1 000 = 50, capped to
+// 25); MinAllowance keeps a small book from livelocking on a cap that rounds to
+// zero. A nine-subscriber merchant losing all nine still trips it; a
+// two-subscriber merchant with two genuine cancellations still converges.
 func (b CancelBudget) Limit(localLive int) int {
 	maxAbs := b.Max
 	if maxAbs <= 0 {
@@ -60,12 +69,16 @@ func (b CancelBudget) Limit(localLive int) int {
 	if frac <= 0 {
 		frac = DefaultMaxCancelFraction
 	}
+	minAllow := b.MinAllowance
+	if minAllow <= 0 {
+		minAllow = DefaultMinCancelAllowance
+	}
 	limit := int(math.Floor(float64(localLive) * frac))
+	if limit < minAllow {
+		limit = minAllow
+	}
 	if limit > maxAbs {
 		limit = maxAbs
-	}
-	if limit < 1 {
-		limit = 1
 	}
 	return limit
 }
@@ -79,7 +92,7 @@ func (b CancelBudget) Exceeded(planned, localLive int) (bool, string) {
 		return false, ""
 	}
 	return true, fmt.Sprintf(
-		"cancellation cap: this pass planned %d cancellations against %d locally-live subscriptions, over the %d-row limit (max %d rows or %.0f%% of the book, whichever is smaller). NONE were applied and the merchant's pass halted — converging %d cancellations at once is a broken roster, not %d customers all leaving. Review the findings, then re-run once the provider data is trusted",
+		"cancellation cap: this pass planned %d cancellations against %d locally-live subscriptions, over the %d-row limit (at most %d rows or %.0f%% of the book, whichever is smaller). NONE were applied and the merchant's pass halted — converging %d cancellations at once is a broken roster, not %d customers all leaving. Review the findings, then re-run once the provider data is trusted",
 		planned, localLive, limit, b.maxAbs(), b.fraction()*100, planned, planned)
 }
 

@@ -94,8 +94,7 @@ type rebillFixture struct {
 func seedPastDueSubscription(t *testing.T) rebillFixture {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	fx := rebillFixture{db: dbi, store: NewStore(dbi)}
@@ -119,7 +118,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, merchant_id)
 	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6)`,
 		paymentMethodID, userID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix, tenantID)

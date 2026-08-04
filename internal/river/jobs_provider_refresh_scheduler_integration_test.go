@@ -24,7 +24,7 @@ import (
 func TestProviderRefreshScheduler_UniquePerMerchantAcrossTicks(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 

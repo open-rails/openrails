@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // MockProvider is a test double for FX rate provider.
@@ -26,13 +28,14 @@ type MockProvider struct {
 
 // NewMockProvider creates a MockProvider with the given rates.
 func NewMockProvider(rates map[string]float64) *MockProvider {
-	if rates == nil {
-		rates = make(map[string]float64)
+	normalized := make(map[string]float64, len(rates)+1)
+	for code, rate := range rates {
+		normalized[normalizeCurrency(code)] = rate
 	}
 	// Always include USD
-	rates["usd"] = 1.0
+	normalized[money.DefaultCurrency] = 1.0
 	return &MockProvider{
-		Rates: rates,
+		Rates: normalized,
 	}
 }
 
@@ -71,12 +74,12 @@ func (p *MockProvider) Quote(ctx context.Context, fromCurrency, toCurrency strin
 
 // QuoteToUSD returns a mock quote to USD.
 func (p *MockProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return p.Quote(ctx, currency, "usd")
+	return p.Quote(ctx, currency, money.DefaultCurrency)
 }
 
 // SetRate sets the rate for a specific currency.
 func (p *MockProvider) SetRate(currency string, rate float64) {
-	p.Rates[currency] = rate
+	p.Rates[normalizeCurrency(currency)] = rate
 }
 
 // Reset clears call tracking.

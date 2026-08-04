@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
@@ -158,10 +159,41 @@ func testDBIsStale(name string) bool {
 	return time.Since(time.Unix(0, nano)) > testDBStaleAfter
 }
 
-// SharedPostgresDSN returns a DSN to a migrated Postgres shared across all
-// integration tests in the calling package process. It fails the test if the
-// database cannot be provisioned.
+// SharedPostgresDSN returns the DEFAULT DSN to a migrated Postgres shared across
+// all integration tests in the calling package process.
+//
+// It connects as the unprivileged `openrails_app` role (NOBYPASSRLS) — the SAME
+// role production connects as — so every per-merchant RLS policy actually
+// constrains the code under test. A query that forgets to set the
+// `app.merchant_id` GUC returns zero rows here, exactly as it would in
+// production, instead of silently succeeding against a superuser connection.
+//
+// Tests that legitimately need privilege (seeding cross-merchant fixtures,
+// asserting on another merchant's rows, driving migrations) must say so:
+// SharedSuperuserDSN(t).
+//
+// It fails the test if the database cannot be provisioned, or if the DSN it is
+// about to hand back turns out to be privileged (see requireRLSEnforcing).
 func SharedPostgresDSN(t *testing.T) string {
+	t.Helper()
+	dsn := sharedAppDSN(t)
+	requireRLSEnforcing(t, dsn)
+	return dsn
+}
+
+// SharedSuperuserDSN returns the PRIVILEGED (RLS-bypassing) DSN on the same
+// shared database as SharedPostgresDSN — for the cases that genuinely need it:
+// cross-merchant fixture seeding, asserting on rows the merchant under test
+// cannot see, driving the migrator. Never for "the test fails otherwise": that
+// is the harness reporting a production bug.
+func SharedSuperuserDSN(t *testing.T) string {
+	t.Helper()
+	return sharedPrivilegedDSN(t)
+}
+
+// sharedPrivilegedDSN provisions (once) the shared database and returns the
+// admin/superuser DSN.
+func sharedPrivilegedDSN(t *testing.T) string {
 	t.Helper()
 	sharedOnce.Do(func() {
 		sharedDSN, sharedErr = provision(context.Background())
@@ -349,12 +381,64 @@ func waitForDB(ctx context.Context, sqlDB *sql.DB) error {
 	}
 }
 
-// SharedPGXPool returns a pgx/v5 pool on the shared integration postgres —
-// the handle for exercising sqlc-converted code paths (#334).
+// SharedPGXPool returns a pgx/v5 pool on the shared integration postgres, as the
+// RLS-ENFORCING openrails_app role (see SharedPostgresDSN) — the handle for
+// exercising sqlc-converted code paths (#334) the way production runs them.
 func SharedPGXPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool, err := pgxpool.New(context.Background(), SharedPostgresDSN(t))
 	require.NoError(t, err, "open pgx pool on shared integration postgres")
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// SharedSuperuserPGXPool returns a pgx/v5 pool as the privileged role.
+func SharedSuperuserPGXPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), SharedSuperuserDSN(t))
+	require.NoError(t, err, "open privileged pgx pool on shared integration postgres")
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// MerchantPinnedDSN is the default (RLS-enforcing) DSN with app.merchant_id
+// pinned at connection startup — what MerchantTx/RunInMerchantConn establish in
+// production, in DSN form.
+//
+// CAVEAT: the startup pin is a SESSION value, and db.lazyMerchantPgxConn.release
+// resets app.merchant_id to ” at session level when a merchant connection goes
+// back to the pool. A handle built from this DSN therefore loses its pin on any
+// connection that has served a RunInMerchantConn block. Use it for pure fixture
+// pools; use SharedMerchantPool / OpenMerchantDB (BeforeAcquire re-pin) for a
+// handle that also drives code.
+func MerchantPinnedDSN(t *testing.T, merchantID uuid.UUID) string {
+	t.Helper()
+	u, err := url.Parse(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	q := u.Query()
+	q.Set("options", "-c app.merchant_id="+merchantID.String())
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// SharedMerchantPool returns an RLS-ENFORCING pool pinned to merchantID. This,
+// not a superuser pool, is what a test wants when it seeds or asserts on ONE
+// merchant's own rows: the policies stay live and the fixture proves the
+// merchant can see its own data. Superuser is for fixtures spanning merchants.
+//
+// The pin is re-applied on every acquire, so it survives the session-level GUC
+// reset db.lazyMerchantPgxConn.release performs when a merchant connection is
+// returned to the pool.
+func SharedMerchantPool(t *testing.T, merchantID uuid.UUID) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	cfg.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+		_, err := conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
+		return err == nil
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err, "open merchant-pinned pgx pool")
 	t.Cleanup(pool.Close)
 	return pool
 }

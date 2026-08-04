@@ -15,13 +15,13 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -462,6 +462,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 	}
 
 	if _, err := rt.RiverProducer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     target.MerchantID,
 		UserID:         userID,
 		SubscriptionID: target.ID,
 	}, &river.InsertOpts{
@@ -666,7 +667,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
+	pm, err := vaults.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -716,7 +717,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &paymentmethods.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -735,7 +736,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 		ExpiryDate:   req.ExpiryDate,
 	}
 
-	pm, err = vaults.UpdateVault(ctx, pm, updateReq)
+	pm, err = vaults.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +767,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
-	return vaults.DeleteVault(ctx, pm)
+	return vaults.DeletePaymentMethod(ctx, pm)
 }
 
 // -------------------------------- Notifications --------------------------------
@@ -883,7 +884,7 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
-	decimals, _ := money.CurrencyScale(bal.Currency)
+	decimals, _ := moneyutil.CurrencyScale(bal.Currency)
 
 	return &CreditBalance{
 		Currency:      bal.Currency,

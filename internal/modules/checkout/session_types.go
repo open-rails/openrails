@@ -71,8 +71,7 @@ type CheckoutSessionConfirmRequest struct {
 }
 
 type CheckoutSessionRedirectToURL struct {
-	URL       string `json:"url,omitempty"`
-	ReturnURL string `json:"return_url,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
 type CheckoutSessionNextAction struct {

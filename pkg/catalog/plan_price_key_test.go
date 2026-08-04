@@ -98,7 +98,7 @@ products:
 `)
 	f := newFakeApplier()
 	product := f.seedProduct("renamed", "", 0, false)
-	f.seedPrice(product.ID, 1200, "usd", 30*24, false)
+	f.seedPrice(product.ID, 1200, "USD", 30*24, false)
 	// fakeApplier.seedPrice does not set a key; simulate the pre-existing row's
 	// old key directly.
 	f.prices[product.ID][0].Key = "renamed-monthly"

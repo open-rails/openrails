@@ -79,6 +79,15 @@ func (p *CredentialPosture) UnmarshalText(text []byte) error {
 }
 
 type Config struct {
+	// Env is the deployment environment and it is REQUIRED (SEC-18). It is the
+	// switch behind RequiresRLS and RequiresSecretEncryption, so an unset value
+	// must never read as "development": a container shipped without ENV would
+	// otherwise boot with PLAINTEXT merchant secrets (NMI security_key, Stripe
+	// sk_, CCBill DataLink passwords, webhook signing secrets) after a single
+	// warning, and stop requiring the DB role to enforce RLS — silently, and in
+	// exactly the deployment least likely to be watching. Load() refuses an
+	// empty ENV, and IsDev() reads empty as NOT development so any path that
+	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
@@ -1142,7 +1151,7 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
-	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
+	isDev := cfg.IsDev()
 	if !isDev {
 		// #762: posture (TestMode: sandbox|live) and environment strictness
 		// (isDev vs non-dev hard gates) are INDEPENDENT axes — sandbox is
@@ -1619,20 +1628,6 @@ func validateVaultedCardRail(name string, proc *PSPConfig, isDev bool) error {
 	return nil
 }
 
-// ByRail returns all provider accounts on the given rail, keyed by account name.
-func (set PSPSet) ByRail(rail models.Rail) map[string]*PSPConfig {
-	result := make(map[string]*PSPConfig)
-	if set == nil {
-		return result
-	}
-	for name, proc := range set {
-		if proc != nil && proc.EffectiveRail(name) == rail {
-			result[strings.ToLower(name)] = proc
-		}
-	}
-	return result
-}
-
 // RailKeysByType returns configured account names on the given rail,
 // sorted for deterministic diagnostics and selection.
 func (set PSPSet) RailKeysByType(rail models.Rail) []string {
@@ -1695,12 +1690,6 @@ func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfi
 	return nil, false
 }
 
-// GetCCBillRail returns the configured active CCBill rail.
-func (set PSPSet) GetCCBillRail() *PSPConfig {
-	_, proc, _ := set.ActiveRailByType(models.RailCCBill)
-	return proc
-}
-
 // GetStripeRail returns the configured active Stripe rail.
 func (set PSPSet) GetStripeRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailStripe)
@@ -1711,27 +1700,6 @@ func (set PSPSet) GetStripeRail() *PSPConfig {
 func (set PSPSet) GetSolanaRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
-}
-
-// GetRail returns a rail config by name.
-func (set PSPSet) GetRail(name string) *PSPConfig {
-	if set == nil {
-		return nil
-	}
-	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if proc, ok := set[normalizedName]; ok && proc != nil {
-		return proc
-	}
-	return nil
-}
-
-// RailOf returns the rail of the named provider account, or "" if not found.
-func (set PSPSet) RailOf(name string) models.Rail {
-	proc := set.GetRail(name)
-	if proc == nil {
-		return ""
-	}
-	return proc.EffectiveRail(name)
 }
 
 func (cfg *Config) normalizedProviderWriteMode() string {
@@ -1785,8 +1753,13 @@ func (cfg *Config) IsProviderReadOnly() bool {
 }
 
 // IsDev returns true if the environment is development.
+//
+// SEC-18: an EMPTY Env is NOT development. It used to be, which made every
+// dev-only relaxation (plaintext merchant secrets, an RLS-bypassing DB role)
+// the default for any deployment that simply forgot to set ENV. Unset is now
+// the strict posture; Load() refuses it outright.
 func (cfg *Config) IsDev() bool {
-	return cfg.Env == "" || cfg.Env == "dev" || cfg.Env == "development"
+	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
 
 // RequiresRLS reports whether startup must fail if the connected Postgres role
@@ -1842,7 +1815,12 @@ func validateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
-// GetDefaultBillingConfig returns a billing configuration with sensible defaults
+// GetDefaultBillingConfig returns the DEVELOPMENT default configuration — a
+// local, zero-config working set. Load() uses it as its base but CLEARS Env
+// first (SEC-18): the deployment environment is the one knob whose default
+// cannot be safe, because "development" is the permissive posture (plaintext
+// merchant secrets, an RLS-bypassing DB role is tolerated). A deployment
+// declares ENV or does not boot.
 func GetDefaultBillingConfig() *Config {
 	return &Config{
 		Env:    "development",
@@ -1997,8 +1975,12 @@ func envKeyToConfigKey(s string) string {
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
 
-	// Start from sensible defaults so zero-config works in containers/compose.
+	// Start from sensible defaults so zero-config works in containers/compose —
+	// except the environment. GetDefaultBillingConfig is the DEVELOPMENT default
+	// set; Load must not inherit that posture, so ENV is cleared here and
+	// required below once every source has been overlaid (SEC-18).
 	cfg := GetDefaultBillingConfig()
+	cfg.Env = ""
 
 	if err := godotenv.Load(); err != nil {
 		var pathErr *os.PathError
@@ -2158,6 +2140,16 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
+	// closed on its own; this one decides WHICH way the others fail, so it must
+	// be declared, not inferred. Silently reading unset as "development" meant a
+	// container deployed without ENV kept merchant secrets in PLAINTEXT and
+	// stopped requiring the DB role to enforce RLS.
+	cfg.Env = strings.TrimSpace(cfg.Env)
+	if cfg.Env == "" {
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one")
+	}
+
 	// These sections are intentionally tolerated for operator visibility during
 	// migration, but they no longer participate in runtime configuration. Keep
 	// Load permissive while ensuring the returned struct reflects the supported
@@ -2189,7 +2181,7 @@ func Load(configPath string) (*Config, error) {
 		cfg.Auth = &AuthConfig{}
 	}
 	if strings.TrimSpace(cfg.Auth.Issuer) == "" {
-		if isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""; isDev {
+		if cfg.IsDev() {
 			issuer := strings.TrimSpace(cfg.APIURL)
 			if issuer == "" {
 				port := int(cfg.Port)

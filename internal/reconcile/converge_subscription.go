@@ -32,7 +32,7 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 	return SubscriptionState{
 		Status:             string(sub.Status),
 		Rail:               string(sub.Rail),
-		Vaulted:            sub.PaymentMethodID != nil,
+		HasPaymentMethod:   sub.PaymentMethodID != nil,
 		RailSubscriptionID: sub.RailSubscriptionID,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		GraceEndsAt:        sub.GraceEndsAt,

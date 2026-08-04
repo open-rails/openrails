@@ -17,7 +17,7 @@ import (
 
 func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)

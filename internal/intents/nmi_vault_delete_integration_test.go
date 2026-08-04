@@ -103,8 +103,7 @@ type vaultDeleteFixture struct {
 
 func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -345,7 +344,7 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "vdel-prod-"+sfx, dbtest.TestMerchantID.UUID())
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,

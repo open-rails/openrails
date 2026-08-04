@@ -108,7 +108,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		// repeated failures escalate to captcha/block (and feed site-wide
 		// attack-mode detection). Best-effort + nil-safe; never affects the
 		// response.
-		var vErr *paymentmethods.VaultError
+		var vErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &vErr) {
 			r.State.CardAbuseGuard.RecordChargeFailure(
 				r.Request.Context(),
@@ -216,9 +216,9 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
-	var vaultErr *paymentmethods.VaultError
-	if errors.As(err, &vaultErr) {
-		writeVaultError(r, vaultErr)
+	var pmErr *paymentmethods.PaymentMethodError
+	if errors.As(err, &pmErr) {
+		writePaymentMethodError(r, pmErr)
 		return
 	}
 	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an

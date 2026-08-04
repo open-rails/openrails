@@ -27,7 +27,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, "b6b6b6b6-0000-4000-8000-000000000042")
+	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "b6b6b6b6-0000-4000-8000-000000000042")
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})

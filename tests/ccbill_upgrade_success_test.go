@@ -3,13 +3,11 @@
 package tests
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,7 +66,7 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, models.StatusActive, updated.Status)
 	require.Equal(t, newPrice.ID, updated.PriceID)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payment := suite.GetPaymentByTransaction(ctx, models.RailCCBill, transactionID)
 	require.NotNil(t, payment.SubscriptionID)
 	require.Equal(t, updated.ID, *payment.SubscriptionID)

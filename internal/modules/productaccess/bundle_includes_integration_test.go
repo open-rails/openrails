@@ -32,7 +32,7 @@ func newBundleEnv(t *testing.T) *bundleEnv {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	return &bundleEnv{

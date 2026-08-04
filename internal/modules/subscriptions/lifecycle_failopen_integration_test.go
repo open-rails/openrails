@@ -45,9 +45,8 @@ type failopenFixture struct {
 // autoRenew=false models a bounded (rental/one-off duration) price.
 func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failopenFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -65,7 +64,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 9990000, Currency: "usd",
+		MerchantID: dbtest.TestMerchantID.UUID(), ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD",
 		Archived: false, AccessDurationHours: &billingHours, AutoRenew: autoRenew, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
@@ -352,6 +351,9 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 		require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
 			Rail:           models.RailNMI,
 			SubscriptionID: &sub.ID,
+			// A real declined charge attempt underlies this failure (#840): that is
+			// what lets the schedule's exhaustion count as a certainty leg.
+			AttemptRecorded: true,
 		}))
 		mid := f.loadSub(t, sub.ID)
 		require.Equal(t, models.StatusPastDue, mid.Status, "attempt %d keeps dunning alive", i)
@@ -363,6 +365,9 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 	terminal := f.loadSub(t, sub.ID)
 	require.Equal(t, models.StatusCancelled, terminal.Status)
@@ -390,6 +395,9 @@ func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	terminal := f.loadSub(t, sub.ID)

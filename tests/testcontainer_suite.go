@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
@@ -154,10 +155,10 @@ func (suite *TestContainerSuite) boot() {
 		// delegated_sub.
 		integrationharness.WithAuthenticator(&suiteDelegatedUserAuthenticator{suite: suite}),
 	}
-	// Super DSN: the legacy tests/ fixtures and direct service calls predate
-	// merchant-pinned contexts; RLS enforcement is covered by the harness's
-	// StartStandalone consumers (cross-merchant isolation + rls suites).
-	suite.surface = suite.harness.StartStandaloneSuper("usd", opts...)
+	// The server connects as openrails_app: RLS enforces on every route this
+	// suite drives, exactly as in production (or#867). Fixtures that write
+	// merchant-owned rows go through suite.MerchantPool (pinned), not suite.Pool.
+	suite.surface = suite.harness.StartStandalone("usd", opts...)
 	suite.App = suite.surface.App()
 	suite.Server = suite.surface.Server()
 	suite.Pool = suite.harness.Pool()
@@ -372,8 +373,8 @@ func (suite *TestContainerSuite) SetNMIGateway(url string) {
 	if rt.CheckoutService != nil {
 		rt.CheckoutService.NMIEndpointOverride = url
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.NMIEndpointOverride = url
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.NMIEndpointOverride = url
 	}
 	suite.RearmIntentPlumbing()
 }
@@ -422,8 +423,8 @@ func (suite *TestContainerSuite) RearmIntentPlumbing() {
 			rt.CheckoutService.NMISaleService.Intents = runner
 		}
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
 	}
 }
 
@@ -498,10 +499,59 @@ func (suite *TestContainerSuite) ClearJobQueue() {
 	}
 }
 
+// FixtureDB is the handle this suite's fixture helpers write and read through:
+// the RLS-ENFORCING app role with app.merchant_id pinned to the suite's one
+// merchant. Those helpers drive MODULE SERVICES and REPOS directly — below the
+// layer that opens the merchant connection in production (MerchantDBConnMW on
+// the HTTP path, the River worker's own wrap) — so the fixture has to supply
+// what that layer supplies. suite.App.Runtime.DB is the SERVER's unpinned pool:
+// code under test must pin it itself, which is exactly what these tests prove.
+func (suite *TestContainerSuite) FixtureDB() *db.DB {
+	suite.t.Helper()
+	return suite.harness.MerchantDB(dbtest.TestMerchantID.UUID())
+}
+
+// MerchantCtx returns a context carrying the suite's merchant AND a pinned
+// merchant DB connection on the app runtime's pool — literally what
+// MerchantDBConnMW does for every request and what a River job does via
+// RunInMerchantConn. The connection is released at test end.
+//
+// A test that calls an App.Runtime service DIRECTLY has stepped below the layer
+// that pins in production, so it must stand in for that layer; this is how. A
+// test driving a full ENTRY POINT (an HTTP route, a worker) must NOT use the
+// result to reach past the entry point — proving the code pins itself is that
+// test's whole point, and the server pins its own request context regardless of
+// what the test holds.
+func (suite *TestContainerSuite) MerchantCtx() context.Context {
+	suite.t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx, release, err := suite.App.Runtime.DB.WithMerchantConn(ctx)
+	require.NoError(suite.t, err, "pin merchant db connection")
+	suite.t.Cleanup(release)
+	return ctx
+}
+
+// MerchantPool is the raw-SQL counterpart of FixtureDB: the RLS-ENFORCING app
+// role pinned to the suite's merchant. Assertions about the suite merchant's own
+// rows belong here, not on suite.App.Runtime.DB.Pool() — that is the server's
+// BASE pool, which carries no GUC and therefore returns nothing.
+func (suite *TestContainerSuite) MerchantPool() *pgxpool.Pool {
+	suite.t.Helper()
+	return suite.harness.MerchantPool(dbtest.TestMerchantID.UUID())
+}
+
+// WorkerCtx is the context a River worker actually receives in production: no
+// merchant, no pinned connection. A test that drives a worker's Work() directly
+// MUST hand it this and not MerchantCtx() — the worker pinning its own merchant
+// connection (RunInMerchantConn) is precisely what such a test exists to prove,
+// and a pre-pinned context does the worker's job for it, turning an inert sweep
+// into a green test. That is the failure mode or#867 exists to remove.
+func (suite *TestContainerSuite) WorkerCtx() context.Context { return context.Background() }
+
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price, err := catalog.NewPriceService(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
+	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

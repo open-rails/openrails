@@ -13,6 +13,47 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
+// SEC-18 made ENV required with no default, so every Load() in this package
+// needs a declared environment. The suite declares the development posture once
+// here; TestLoad_RequiresEnv is the one case that takes it away again.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("ENV", "development")
+	os.Exit(m.Run())
+}
+
+// SEC-18: a deployment that never declared its environment must not boot. It
+// used to silently read as development, which is the posture that keeps
+// merchant secrets in PLAINTEXT and stops requiring an RLS-enforcing DB role.
+func TestLoad_RequiresEnv(t *testing.T) {
+	t.Run("empty ENV is refused", func(t *testing.T) {
+		t.Setenv("ENV", "")
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "ENV is required")
+	})
+
+	t.Run("whitespace-only ENV is refused", func(t *testing.T) {
+		t.Setenv("ENV", "   ")
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "ENV is required")
+	})
+
+	t.Run("an unset Env is NOT development", func(t *testing.T) {
+		// The predicate itself fails closed, so any path that constructs a
+		// Config without going through Load still gets the strict posture.
+		cfg := &Config{}
+		require.False(t, cfg.IsDev())
+		require.True(t, cfg.RequiresRLS())
+		require.True(t, cfg.RequiresSecretEncryption())
+	})
+
+	t.Run("declared environments still classify", func(t *testing.T) {
+		require.True(t, (&Config{Env: "development"}).IsDev())
+		require.True(t, (&Config{Env: "dev"}).IsDev())
+		require.False(t, (&Config{Env: "production"}).IsDev())
+		require.True(t, (&Config{Env: "production"}).RequiresRLS())
+	})
+}
+
 func TestLoad_EnvMapping(t *testing.T) {
 	// Issue #222 removed the SERVICE_MTLS_* env surface entirely (no private/mTLS
 	// service listener). These cases assert the remaining env-mapping behaviour.
@@ -311,9 +352,10 @@ func TestIsTestMode(t *testing.T) {
 }
 
 func TestIsDev(t *testing.T) {
-	t.Run("returns true for empty env", func(t *testing.T) {
+	// SEC-18: unset is NOT development. The permissive posture must be declared.
+	t.Run("returns false for empty env", func(t *testing.T) {
 		cfg := &Config{Env: ""}
-		assert.True(t, cfg.IsDev())
+		assert.False(t, cfg.IsDev())
 	})
 
 	t.Run("returns true for dev", func(t *testing.T) {
@@ -349,7 +391,7 @@ func TestRequiresRLS(t *testing.T) {
 		env  string
 		want bool
 	}{
-		{"empty env is development", "", false},
+		{"empty env is NOT development and requires RLS (SEC-18)", "", true},
 		{"dev allows local privileged DB role", "dev", false},
 		{"development allows local privileged DB role", "development", false},
 		{"prod requires RLS-enforcing DB role", "prod", true},
@@ -501,6 +543,7 @@ func stripeTestModeConfig(secretKey string, testMode bool) (*Config, PSPSet) {
 		posture = CredentialPostureSandbox
 	}
 	return &Config{
+			Env:               "development", // SEC-18: dev posture is declared, never inferred from an empty Env
 			ProviderWriteMode: ProviderWriteModeFull,
 			TestMode:          posture,
 		}, PSPSet{
@@ -574,7 +617,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 	})
 
 	t.Run("validates every stripe rail", func(t *testing.T) {
-		cfg := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
+		cfg := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
 		rails := PSPSet{
 			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
 			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
@@ -602,14 +645,14 @@ func TestActiveRailByType(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
-	require.NoError(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
+	require.NoError(t, ValidateRailSet(&Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
 		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}))
 
 	// Two accounts on a rail without account_id is rejected: the made-up map name
 	// can't be the provider identity (#641).
-	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
+	require.ErrorContains(t, ValidateRailSet(&Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
 		"stripe_a": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
 		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
 	}), "must declare account_id")
@@ -651,7 +694,7 @@ func TestRailEnvironmentMustMatchTestMode(t *testing.T) {
 	require.ErrorContains(t, err, "requires environment=test")
 
 	// test_mode=live (production) rejects a test-declared account.
-	cfgLive := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
+	cfgLive := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
 	require.ErrorContains(t, ValidateRailSet(cfgLive, PSPSet{
 		"stripe": {Rail: models.RailStripe, Environment: "test", Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
 	}), "requires environment=live")
@@ -698,7 +741,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 }
 
 func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{Env: "development"}
 	rails := PSPSet{
 		"mobius": {
 			Rail: models.RailNMI,

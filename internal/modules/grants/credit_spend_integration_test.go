@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 // derived; over-spend is rejected atomically.
 func TestGrants_CreditSpendFIFO(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -52,7 +53,7 @@ func TestGrants_CreditSpendFIFO(t *testing.T) {
 // A lapsed credit lot's unspent remainder is clawed to expired_credits; idempotent.
 func TestGrants_CreditExpire(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -93,7 +94,7 @@ func TestGrants_CreditExpire(t *testing.T) {
 // ExpireLapsed must block on the lock and claw only the committed remainder.
 func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})

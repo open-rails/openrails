@@ -48,7 +48,7 @@ func insertCeilingIntent(t *testing.T, dbi *db.DB, merchantID uuid.UUID, actor s
 	if actor != "" {
 		actorArg = actor
 	}
-	_, err := dbi.Pool().Exec(context.Background(),
+	_, err := dbtest.SharedMerchantPool(t, merchantID).Exec(context.Background(),
 		`INSERT INTO openrails.rail_intents
 		   (merchant_id, rail, intent_type, idempotency_key, status, origin, actor, next_attempt_at, created_at)
 		 VALUES ($1, 'mobius', $2, $3, 'pending', $4, $5, $6, $6)`,
@@ -74,8 +74,8 @@ func trippedFindingCount(t *testing.T, dbi *db.DB, merchantID uuid.UUID, finding
 // on the actor id with no role bypass, so a "root" principal trips identically.
 func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 
 	// Future window so the count sees ONLY the rows we seed.
@@ -109,14 +109,19 @@ func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	assert.Equal(t, "requires_review", status)
 }
 
+// Each test in this file takes its OWN non-overlapping hour window: the global
+// ceiling deliberately counts across merchants, so tests sharing one bucket see
+// each other's intents. (They did not before or#860 fixed the count, which
+// returned 0 forever.)
+//
 // Global ceiling trips at the 16th op across ALL actors/merchants in the hour —
 // distinct actors so the per-actor ceiling never fires; the global wall does.
 func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(5 * time.Hour)
 
 	// 14 prior ops (distinct actors): the 15th is still under the global wall.
 	for i := 0; i < 14; i++ {
@@ -143,15 +148,14 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	assert.Equal(t, "critical", severity)
 }
 
-// System-origin destructive ops (automated dunning / decline cleanup) are
-// #679's job and must NOT burn the anti-theft budget: 20 system ops in the
-// window leave both ceilings untouched.
-func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
+// System-origin destructive ops do NOT burn the anti-theft budget — that budget
+// is about a stolen credential, and no principal produced these.
+func TestRateCeiling_SystemOriginDoesNotBurnTheAntiTheftBudget(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(8 * time.Hour)
 
 	for i := 0; i < 20; i++ {
 		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
@@ -159,12 +163,85 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 	// A user op sees a clean budget (system ops excluded).
 	require.NoError(t, gate.Check(ctx, CheckParams{
 		Actor: "u-" + uuid.NewString(), MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginUser,
-	}, base), "system-origin ops must not count against the ceilings")
+	}, base), "system-origin ops must not count against the anti-theft ceilings")
+}
 
-	// And a system op itself is never gated (inert for system origin).
+// or#842: but they are NOT ungated. Check returned nil for origin='system', so
+// the ceiling was absent for exactly the paths that queue the most irreversible
+// work with no human in the loop. The system wall is PER MERCHANT: one
+// merchant's runaway convergence hits it; a large fleet of merchants each
+// converging their own book does not.
+func TestRateCeiling_SystemOriginWalledPerMerchant(t *testing.T) {
+	ctx := context.Background()
+	root := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	merchant := seedCeilingMerchant(t, root)
+	neighbour := seedCeilingMerchant(t, root)
+	dbi := dbtest.OpenMerchantDB(t, merchant)
+	gate := NewRateCeiling(dbi)
+	base := time.Now().UTC().Add(14 * time.Hour)
+
+	// 49 automated destructive ops this hour: the 50th is still admitted.
+	for i := 0; i < 49; i++ {
+		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	}
 	require.NoError(t, gate.Check(ctx, CheckParams{
-		Actor: "", MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "50th automated op (49 prior) must be admitted")
+
+	// 50 prior: the 51st is refused, and nothing is queued.
+	insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	err := gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base)
+	require.Error(t, err, "the 51st automated destructive op must be refused")
+	require.True(t, errors.Is(err, ErrRateCeilingTripped))
+	var rce *RateCeilingError
+	require.ErrorAs(t, err, &rce)
+	assert.Equal(t, ceilingSystemMerchant, rce.Ceiling)
+	assert.EqualValues(t, 50, rce.SystemMerchantCount)
+
+	// The refusal reaches the operator queue, keyed on the merchant.
+	n, severity, status := trippedFindingCount(t, dbi, merchant, RateCeilingTrippedFindingType, "system:"+merchant.String())
+	assert.Equal(t, 1, n, "an automated trip must raise exactly one standing finding")
+	assert.Equal(t, "critical", severity)
+	assert.Equal(t, "requires_review", status)
+
+	// Fleet scale: the neighbour merchant's automation is untouched by it. A
+	// deployment-wide wall on system origin would have stopped this one too.
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: neighbour, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "one merchant hitting its wall must not stop every other merchant's dunning")
+}
+
+// Early warning on the automated leg: crossing 50% of the per-merchant ceiling
+// raises the finding before the wall, so a runaway is visible while it builds.
+func TestRateCeiling_SystemEarlyWarningFires(t *testing.T) {
+	ctx := context.Background()
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
+	gate := NewRateCeiling(dbi)
+	base := time.Now().UTC().Add(17 * time.Hour)
+	subject := "system:" + merchant.String()
+
+	for i := 0; i < 23; i++ {
+		insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	}
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
 	}, base))
+	if n, _, _ := trippedFindingCount(t, dbi, merchant, RateCeilingWarningFindingType, subject); n != 0 {
+		t.Fatalf("no warning expected below 50%%, got %d", n)
+	}
+
+	insertCeilingIntent(t, dbi, merchant, "", OriginSystem, base)
+	require.NoError(t, gate.Check(ctx, CheckParams{
+		MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginSystem,
+	}, base), "an op crossing 50%% is warned, not refused")
+
+	n, severity, status := trippedFindingCount(t, dbi, merchant, RateCeilingWarningFindingType, subject)
+	assert.Equal(t, 1, n, "the 50% crossing raises an early-warning finding")
+	assert.Equal(t, "high", severity)
+	assert.Equal(t, "requires_review", status)
 }
 
 // Early warning: an op that crosses 50% of a ceiling (but stays below the wall)
@@ -172,10 +249,10 @@ func TestRateCeiling_SystemOriginDoesNotCount(t *testing.T) {
 // notice-and-rotate.
 func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	merchant := seedCeilingMerchant(t, dbi)
+	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
-	base := time.Now().UTC().Add(2 * time.Hour)
+	base := time.Now().UTC().Add(11 * time.Hour)
 	actor := "w-" + uuid.NewString()
 
 	// 1 prior op: the 2nd op (running total 2) is below 50% of 5 — no warning.
@@ -205,7 +282,7 @@ func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 // intent never exists, so the destructive op cannot happen).
 func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	merchant := seedCeilingMerchant(t, dbi)
 

@@ -294,7 +294,7 @@ func TestPlanMigration_NMINativeIntervalMismatchBlocks(t *testing.T) {
 	annualTargetID := uuid.New()
 	_, err := f.pool.Exec(ctx, `
 		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
-		VALUES ($1,$2,$3,90000000,'usd',8760,true,false,$4,$5,$5)`,
+		VALUES ($1,$2,$3,90000000,'USD',8760,true,false,$4,$5,$5)`,
 		annualTargetID, f.targetProductID, f.merchantID, "planmig-annual-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, err)
 
@@ -319,7 +319,7 @@ func TestPlanMigration_NMINativeSubCentAmountBlocks(t *testing.T) {
 	subCentID := uuid.New()
 	_, err := f.pool.Exec(ctx, `
 		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
-		VALUES ($1,$2,$3,9000001,'usd',720,true,false,$4,$5,$5)`,
+		VALUES ($1,$2,$3,9000001,'USD',720,true,false,$4,$5,$5)`,
 		subCentID, f.targetProductID, f.merchantID, "planmig-subcent-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, err)
 

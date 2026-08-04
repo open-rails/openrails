@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -66,7 +67,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
 	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -212,7 +213,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 		return nil, fmt.Errorf("payer required")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)

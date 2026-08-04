@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"testing"
 	"time"
 )
@@ -30,7 +31,7 @@ func TestDecide_StaleRosterDateNeverCancels(t *testing.T) {
 
 		for _, status := range []string{"active", "past_due", "unknown"} {
 			d := Decide(SubscriptionState{
-				Status: status, Rail: "nmi", Vaulted: true,
+				Status: status, Rail: "nmi", HasPaymentMethod: true,
 				RailSubscriptionID: railSub, PeriodEnd: &periodEnd,
 			}, EvidenceBundle{Snapshot: snap}, now, 0)
 
@@ -55,14 +56,14 @@ func TestDecide_StaleRosterDateCancelsOnCertainty(t *testing.T) {
 		Provider:      ProviderNMI,
 		Subscriptions: []RemoteSubscription{{RailSubscriptionID: railSub, Status: SubscriptionStatusPastDue, NextBillingAt: &periodEnd}},
 	}
-	state := SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, RailSubscriptionID: railSub, PeriodEnd: &periodEnd}
+	state := SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: railSub, PeriodEnd: &periodEnd}
 
 	cases := map[string]struct {
 		charge    ChargeEvidence
 		certainty string
 	}{
-		"non-retryable decline": {ChargeEvidence{NonRetryableDecline: true}, CertaintyNonRetryableDecline},
-		"dunning exhausted":     {ChargeEvidence{RetryAttempts: 5, DunningMaxAttempts: 5}, CertaintyDunningExhausted},
+		"non-retryable decline": {ChargeEvidence{NonRetryableDecline: true}, collection.CertaintyNonRetryableDecline},
+		"dunning exhausted":     {ChargeEvidence{RetryAttempts: 5, DunningMaxAttempts: 5}, collection.CertaintyDunningExhausted},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -90,17 +91,20 @@ func TestGateCancelCertainty_NoCancelWithoutALeg(t *testing.T) {
 
 	gone := base
 	gone.RemoteGone = true
-	if got := gateCancelCertainty(gone, EvidenceBundle{}); got.Kind != TransitionCancel || got.Certainty != CertaintyProviderConfirmedDead {
+	if got := gateCancelCertainty(gone, EvidenceBundle{}); got.Kind != TransitionCancel || got.Certainty != collection.CertaintyProviderConfirmedDead {
 		t.Fatalf("provider-confirmed cancel = %v/%q", got.Kind, got.Certainty)
 	}
 
 	withLeg := gateCancelCertainty(base, EvidenceBundle{Charge: ChargeEvidence{NonRetryableDecline: true}})
-	if withLeg.Kind != TransitionCancel || withLeg.Certainty != CertaintyNonRetryableDecline {
+	if withLeg.Kind != TransitionCancel || withLeg.Certainty != collection.CertaintyNonRetryableDecline {
 		t.Fatalf("first-party certainty cancel = %v/%q", withLeg.Kind, withLeg.Certainty)
 	}
 }
 
-func TestIsNonRetryableDecline(t *testing.T) {
+func TestDeciderCancelCertaintyUsesTheOr870Classifier(t *testing.T) {
+	// The decider's terminal leg fires for bucket 3 and NOTHING else: a bucket-2
+	// card problem beyond the dunning window is a customer who can still fix it,
+	// and an unreadable code is missing evidence.
 	cases := []struct {
 		rail, code string
 		want       bool
@@ -109,10 +113,10 @@ func TestIsNonRetryableDecline(t *testing.T) {
 		{"nmi", "262", true},  // stop this recurring program
 		{"nmi", "252", true},  // stolen card
 		{"nmi", "202", false}, // insufficient funds — dun, never cancel
-		{"nmi", "201", false}, // do not honor
-		{"nmi", "223", false}, // expired card — the customer can update it
+		{"nmi", "201", false}, // do not honor — bucket 2, they can fix it
+		{"nmi", "223", false}, // expired card — bucket 2
 		{"nmi", "264", false}, // "retry in a few days" is literally retryable
-		{"nmi", "420", false}, // communication error
+		{"nmi", "420", false}, // communication error — ours
 		{"nmi", "declined_stop_all_recurring_payments", true},
 		{"nmi", "nmi_declined_stop_all_recurring_payments", true},
 		{"nmi", "", false},
@@ -123,8 +127,9 @@ func TestIsNonRetryableDecline(t *testing.T) {
 		{"solana", "anything", false},
 	}
 	for _, c := range cases {
-		if got := IsNonRetryableDecline(c.rail, c.code); got != c.want {
-			t.Errorf("IsNonRetryableDecline(%q, %q) = %v, want %v", c.rail, c.code, got, c.want)
+		got := collection.ClassifyDecline(c.rail, c.code) == collection.DeclineNonRecoverable
+		if got != c.want {
+			t.Errorf("ClassifyDecline(%q, %q)==NonRecoverable = %v, want %v", c.rail, c.code, got, c.want)
 		}
 	}
 }

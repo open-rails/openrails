@@ -30,11 +30,11 @@ type breakerMerchant struct {
 func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbi.Pool()
 	store := NewStore(dbi)
 	sfx := uuid.NewString()[:8]
 
 	m := breakerMerchant{id: uuid.New()}
+	pool := dbtest.SharedMerchantPool(t, m.id)
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)
@@ -45,7 +45,7 @@ func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "breaker-prod-"+sfx, m.id)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, m.id)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, m.id)
 
 	now := time.Now().UTC()
 	for i := 0; i < n; i++ {
@@ -125,8 +125,7 @@ func breakerRunner(dbi *db.DB, client *nmi.NMIClient) *Runner {
 // merchant is unaffected; operator ack resumes.
 func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	const over = 2 // intents beyond the budget floor

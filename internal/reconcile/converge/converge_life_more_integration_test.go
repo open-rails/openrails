@@ -37,7 +37,7 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ps-prod-"+suffix, "ps-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'pending','nmi',$4,$5,$5,'{}'::jsonb,$6,$7)`,
 			subID, priceID, productID, "ps-sub-"+suffix, old, customer, merchantID)
@@ -54,6 +54,31 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		})
 	})
 
+	// #842: pending_stale cancels because a confirmation did NOT arrive — an
+	// absence — so it is now behind the §3.2 confirmed-absence gate. Until the
+	// merchant's `subscriptions` domain is proven fully reconciled, a delayed or
+	// dropped webhook must not be read as "the customer never paid".
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Findings)
+		require.Equal(t, 0, res.AutoFixed, "ungated retraction: the gate must hold it")
+		require.Equal(t, 1, res.ReconcileRequired)
+		var status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.Equal(t, "pending", status, "the subscription must survive an unproven absence")
+		return nil
+	}))
+
+	// Prove the domain (what a completed exhaustive pull does) and the same
+	// repair proceeds.
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := appDB.Qx(ctx).Exec(ctx,
+			`INSERT INTO openrails.reconciliation_state (merchant_id, source_domain, fully_reconciled, last_full_pull_at)
+			 VALUES ($1,'subscriptions',true,now())
+			 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET fully_reconciled = true`, merchantID)
+		return err
+	}))
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
@@ -112,7 +137,7 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "pi-prod-"+suffix, "pi-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID)
 		// a provider action that failed terminally and won't auto-retry
@@ -173,7 +198,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "po-prod-"+suffix, "po-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// #664: period_overdue needs vault + ownership evidence — seed a payment
 		// method and a completed payment that opened the current period.
 		pmID := uuid.New()
@@ -182,7 +207,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'usd','completed',$7)`,
+		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'USD','completed',$7)`,
 			uuid.New(), merchantID, customer, priceID, subID, "po-pay-"+suffix, periodEnd.Add(-30*24*time.Hour))
 		return nil
 	}))
@@ -255,7 +280,7 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "do-prod-"+suffix, "do-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// past_due, grace still open, but next_retry_at NULL: schedule stalled.
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9)`,

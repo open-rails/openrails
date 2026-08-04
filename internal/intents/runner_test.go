@@ -524,3 +524,77 @@ func TestMutationLogScrubsSensitiveFields(t *testing.T) {
 	assert.NotContains(t, text, "/tmp/key.pem")
 	assert.Contains(t, text, "sub_123")
 }
+
+// fakeDestructiveGate is a canned #836 kill switch.
+type fakeDestructiveGate struct {
+	allow  bool
+	reason string
+	calls  int
+}
+
+func (g *fakeDestructiveGate) AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string) {
+	g.calls++
+	return g.allow, g.reason
+}
+
+// #836: an operator flipping the DB-backed kill switch must stop destructive
+// provider writes on every node, without a deploy — and the intent must PARK,
+// not fail, so flipping it back resumes exactly where it stopped.
+func TestRunnerDestructiveKillSwitch(t *testing.T) {
+	cases := []struct {
+		name     string
+		typ      string
+		allow    bool
+		executes bool
+		consults bool
+	}{
+		{"destructive type blocked by the switch", TypeNMIDeleteSubscription, false, false, true},
+		{"destructive type allowed when armed", TypeNMIDeleteSubscription, true, true, true},
+		// Non-destructive work (refunds, captures) is not what the switch is
+		// for; halting money movement would be its own incident.
+		{"non-destructive type is not gated", "not_destructive", false, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := newFakeLedger()
+			h := &fakeHandler{typ: tc.typ, relevance: StillRelevant(), execute: Succeeded(nil)}
+			intent := testIntent(tc.typ, OriginSystem, 1)
+			ledger.due = []gen.OpenrailsRailIntent{intent}
+
+			gate := &fakeDestructiveGate{allow: tc.allow, reason: "instance kill switch is OFF"}
+			r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull(), Destructive: gate}
+			_, err := r.RunExecuteOnce(context.Background())
+			require.NoError(t, err)
+
+			if tc.executes {
+				assert.Equal(t, 1, h.executed)
+			} else {
+				assert.Zero(t, h.executed, "the kill switch must stop the provider write, not just record it")
+				assert.Equal(t, StatusPending, ledger.transition[intent.ID], "parked, never failed: flipping the switch back must resume it")
+				assert.Contains(t, ledger.reasons[intent.ID], "kill switch")
+			}
+			if tc.consults {
+				assert.Equal(t, 1, gate.calls)
+			} else {
+				assert.Zero(t, gate.calls)
+			}
+		})
+	}
+}
+
+// A gate that cannot read its policy must DENY, never default to allowing an
+// irreversible provider delete.
+func TestRunnerDestructiveGateFailsClosed(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: TypeNMIDeleteSubscription, relevance: StillRelevant(), execute: Succeeded(nil)}
+	intent := testIntent(TypeNMIDeleteSubscription, OriginSystem, 1)
+	ledger.due = []gen.OpenrailsRailIntent{intent}
+
+	gate := &fakeDestructiveGate{allow: false, reason: "destructive policy unreadable (boom); refusing destructive actions (fail closed)"}
+	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull(), Destructive: gate}
+	_, err := r.RunExecuteOnce(context.Background())
+	require.NoError(t, err)
+
+	assert.Zero(t, h.executed)
+	assert.Contains(t, ledger.reasons[intent.ID], "fail closed")
+}

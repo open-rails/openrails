@@ -591,6 +591,43 @@ func (q *Queries) ListIncludedProductIDs(ctx context.Context, arg ListIncludedPr
 	return items, nil
 }
 
+const listLapsedCreditLotMerchants = `-- name: ListLapsedCreditLotMerchants :many
+SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListLapsedCreditLotMerchantsParams struct {
+	AsOf          time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: merchants holding a lapsed credit lot, through migration
+// 0022's SECURITY DEFINER reader (or#868 B1). The credit-expiry worker used to
+// run ListCustomersWithLapsedCreditLots inside a bare RunInTx on the base pool;
+// grants FORCEs RLS, so it enumerated nothing and NO credit lot has ever been
+// clawed back. Ids only — the per-customer work list and the ledger transfers
+// run per-merchant under RunInMerchantConn.
+func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLapsedCreditLotMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listLapsedCreditLotMerchants, arg.AsOf, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLapsedCreditLots = `-- name: ListLapsedCreditLots :many
 SELECT g.id,
     (g.amount - COALESCE((
@@ -818,7 +855,7 @@ WHERE g.merchant_id = $1::uuid
   )
   AND EXISTS (
       SELECT 1 FROM openrails.payments p
-      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.status = 'refunded'
+      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
   )
 ORDER BY g.id
 `
@@ -1095,6 +1132,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND p.deleted_at IS NULL
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
@@ -1162,6 +1200,7 @@ FROM openrails.subscriptions s
 JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
   AND s.status IN ('active', 'cancelled', 'unknown')
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
@@ -1247,6 +1286,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND p.deleted_at IS NULL
   AND p.rail = 'solana'
   AND p.status = 'completed'
   AND p.amount > 0

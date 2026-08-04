@@ -6,15 +6,8 @@ import (
 	"strings"
 )
 
-func nmiIdempotentOrderID(prefix, key string) string {
-	trimmed := strings.TrimSpace(key)
-	if trimmed == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(trimmed))
-	return prefix + "_" + hex.EncodeToString(sum[:16])
-}
-
+// nmiOrderIDSuffix derives a short deterministic suffix from a value, so an NMI
+// order id stays stable across retries of the same logical charge.
 func nmiOrderIDSuffix(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {

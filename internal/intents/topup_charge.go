@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -143,7 +144,7 @@ func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRa
 		}
 	}
 
-	chargeMinor, err := money.NativeToRailMinor(p.Currency, p.AmountNative)
+	chargeMinor, err := moneyutil.NativeToRailMinor(p.Currency, p.AmountNative)
 	if err != nil {
 		return Terminal("top-up amount not representable in rail minor units: " + err.Error())
 	}

@@ -61,9 +61,9 @@ type Runner struct {
 	// deletes with one UPDATE instead of a deploy. Same convention as Breaker:
 	// nil = ungated (unit tests); production wiring always sets it.
 	Destructive DestructiveGate
-	Clock   clockwork.Clock
-	Lease   time.Duration
-	Batch   int64
+	Clock       clockwork.Clock
+	Lease       time.Duration
+	Batch       int64
 }
 
 func (r *Runner) now() time.Time {
@@ -97,6 +97,19 @@ type Stats struct {
 	Parked     int
 	Superseded int
 	Expired    int64
+}
+
+// Add folds one merchant's pass into the deployment-wide totals the executor
+// and verifier workers log (or#862: a pass is now per-merchant).
+func (s *Stats) Add(o Stats) {
+	s.Claimed += o.Claimed
+	s.Succeeded += o.Succeeded
+	s.Retryable += o.Retryable
+	s.Unknown += o.Unknown
+	s.Terminal += o.Terminal
+	s.Parked += o.Parked
+	s.Superseded += o.Superseded
+	s.Expired += o.Expired
 }
 
 // RunExecuteOnce expires overdue intents, claims due ones and executes them

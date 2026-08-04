@@ -21,10 +21,9 @@ import (
 )
 
 func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -76,7 +75,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,

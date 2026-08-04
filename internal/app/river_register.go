@@ -95,6 +95,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
+	// or#833: the ledger integrity checks existed but nothing ran them.
+	if err := addTrackedWorker(r, workers, &riverjobs.LedgerIntegrityWorker{
+		DB:    r.DB,
+		Clock: clock,
+	}); err != nil {
+		return fmt.Errorf("add ledger integrity worker: %w", err)
+	}
 	// #733: flush the Redis admission-denial counters to PG hourly aggregates.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
 	if err := addTrackedWorker(r, workers, &riverjobs.AdmissionDenialFlushWorker{
@@ -340,10 +347,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
 	}
-	// #674 tail: durable user-initiated vault deletes (an unwired VaultService
+	// #674 tail: durable user-initiated vault deletes (an unwired RailPaymentMethodService
 	// resolves no client, so the handler parks — never fails).
-	if r.VaultService != nil {
-		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.VaultService))
+	if r.RailPaymentMethodService != nil {
+		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.RailPaymentMethodService))
 	}
 	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.CollectionResolver, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine
@@ -749,6 +756,23 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Daily: ledger integrity audit (or#833). The account counters are a
+	// trigger-maintained projection, so the only thing that can break them is a
+	// write that bypassed the trigger (restore, COPY, a migration with triggers
+	// off) — no event, no watermark, no error. Nothing can be pushed, so a slow
+	// periodic look is the only detector; daily bounds how long a wrong balance
+	// can compound before an operator hears about it.
+	jobs = append(jobs, r.healthPeriodic(
+		24*time.Hour,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.LedgerIntegrityArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// #895: the worker-health check is NOT scheduled here any more. Scheduling

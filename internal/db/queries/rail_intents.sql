@@ -1,9 +1,11 @@
 -- #358 phase A: provider intent ledger queries — idempotent enqueue, the
 -- executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
 -- and relevance-window expiry. merchant_id is stamped explicitly by the
--- producers (request paths run on a tenant-pinned connection, so RLS
--- double-checks the stamp); the executor/verifier workers sweep cross-tenant
--- on the privileged pool like the other River workers.
+-- producers (request paths run on a merchant-pinned connection, so RLS
+-- double-checks the stamp). The executor/verifier workers do NOT sweep
+-- cross-merchant: there is no privileged pool, so they fan out over the
+-- merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
+-- that merchant's own pinned scope (or#862).
 
 -- ============================================================================
 -- Enqueue (effectively-once per logical intent)
@@ -311,7 +313,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- The breaker's budget baseline: max(floor, pct of active subscriptions).
 -- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
+  AND deleted_at IS NULL;
 
 -- The breaker's per-merchant standing finding (stable identity —
 -- merchant x finding_type x subject_key is UNIQUE).
@@ -330,24 +333,65 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- credential-theft surface; origin='system' (automated dunning / decline
 -- cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
 -- CREATION (created_at), not execution: the ceiling stops the burst at the
--- producer chokepoint, before the write-ahead intent is even created. These
--- run cross-merchant (per-actor AND global), so callers must execute them on a
--- non-merchant-pinned connection (the base pool), like the other cross-tenant
--- worker sweeps.
+-- producer chokepoint, before the write-ahead intent is even created. These run
+-- cross-merchant (per-actor AND global) through migration 0021's SECURITY
+-- DEFINER readers — NOT the base pool. The base pool is not privileged: it is
+-- the same openrails_app role, so a GUC-less count is not cross-merchant, it is
+-- EMPTY (or#824/or#860).
 
 -- Destructive user/admin intents THIS actor created in the rolling window.
 -- name: CountDestructiveIntentsByActorSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE actor = sqlc.arg(actor)::text
-  AND origin IN ('user', 'admin')
-  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
-  AND created_at >= sqlc.arg(since)::timestamptz;
+SELECT openrails.count_destructive_intents_by_actor_since(
+    sqlc.arg(actor)::text,
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
 
 -- Destructive user/admin intents ALL actors + ALL merchants created in the
 -- rolling window — the absolute frying-protection ceiling even if many actor
 -- identities are forged.
+--
+-- or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
+-- a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
+-- openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
+-- structurally never exceeded — a fail-OPEN safety control. The definer RAISES
+-- when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
+-- instead of silently permitting unlimited destructive intents.
 -- name: CountDestructiveIntentsGlobalSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE origin IN ('user', 'admin')
-  AND intent_type = ANY (sqlc.arg(intent_types)::text[])
-  AND created_at >= sqlc.arg(since)::timestamptz;
+SELECT openrails.count_destructive_intents_since(
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
+
+-- or#842: the AUTOMATED leg. The two counts above are deliberately blind to
+-- origin='system', which left the ceiling absent for exactly the paths that
+-- queue the most irreversible work with no human in the loop. System origin is
+-- walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
+-- survive fleet scale, a per-merchant window does, and one merchant's runaway
+-- convergence is the shape this must see.
+-- name: CountSystemDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_system_destructive_intents_for_merchant_since(
+    sqlc.arg(merchant_id)::uuid,
+    sqlc.arg(intent_types)::text[],
+    sqlc.arg(since)::timestamptz);
+
+-- ============================================================================
+-- or#862: deployment-wide executor / verifier fan-out
+-- ============================================================================
+
+-- CROSS-MERCHANT: the merchants the executor pass must visit, through migration
+-- 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
+-- River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
+-- claim matched `merchant_id = NULL` and leased ZERO intents — the whole
+-- outbound provider-mutation plane was inert, and the #836 kill switch and #679
+-- volume breaker (which only run on a claimed intent) never executed. Ids only:
+-- the claim, the gates and the execution run per-merchant under
+-- RunInMerchantConn, where these same predicates re-apply.
+-- name: ListDueRailIntentMerchants :many
+SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
+    sqlc.arg(now)::timestamptz,
+    sqlc.arg(merchant_limit)::int);
+
+-- CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
+-- name: ListDueVerifyRailIntentMerchants :many
+SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
+    sqlc.arg(now)::timestamptz,
+    sqlc.arg(merchant_limit)::int);

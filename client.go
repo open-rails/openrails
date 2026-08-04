@@ -277,22 +277,17 @@ type AdmitRequest struct {
 // AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
-// keyed Redis hold; BudgetReservationID is the budget reservation settled with
-// the request. A deny is returned as (Allowed=false, nil error) on both
+// keyed Redis hold. A deny is returned as (Allowed=false, nil error) on both
 // transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
-	Allowed             bool           `json:"allowed"`
-	BlockedBy           string         `json:"blocked_by,omitempty"`
-	DenyCode            string         `json:"deny_code,omitempty"`
-	Currency            string         `json:"currency,omitempty"`
-	EstimatedAmount     int64          `json:"estimated_amount,omitempty"`
-	PolicyCurrency      string         `json:"policy_currency,omitempty"`
-	PolicyAmount        int64          `json:"policy_amount,omitempty"`
-	StartCapacityAmount int64          `json:"start_capacity_amount,omitempty"`
-	RetryAfterSeconds   int64          `json:"retry_after_seconds,omitempty"`
-	HoldExpiresAt       *time.Time     `json:"hold_expires_at,omitempty"`
-	BudgetReservationID string         `json:"budget_reservation_id,omitempty"`
-	BudgetWindows       []BudgetWindow `json:"budget_windows,omitempty"`
+	Allowed             bool       `json:"allowed"`
+	BlockedBy           string     `json:"blocked_by,omitempty"`
+	DenyCode            string     `json:"deny_code,omitempty"`
+	Currency            string     `json:"currency,omitempty"`
+	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
+	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
+	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
+	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
@@ -356,23 +351,6 @@ type CreditAccount struct {
 	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
 }
 
-// AccountSettingsInput patches an OpenRails credit account policy.
-// All pointer fields are optional — nil means "no change" for that setting.
-// Amounts are in the currency's internal precision (e.g. cents for USD).
-type AccountSettingsInput struct {
-	// BillingMode controls how the account is charged ("prepaid" or "postpaid").
-	BillingMode *string `json:"billing_mode,omitempty"`
-	// LowBalanceThreshold triggers a low-balance alert when prepaid balance falls below this.
-	LowBalanceThreshold *int64 `json:"low_balance_threshold,omitempty"`
-	AutoTopupEnabled    *bool  `json:"auto_topup_enabled,omitempty"`
-	// AutoTopupAmount is the topup deposit size in currency-internal units.
-	AutoTopupAmount        *int64  `json:"auto_topup_amount,omitempty"`
-	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id,omitempty"`
-	// DefaultCreditExpiryHours is the default lifetime in hours for credit deposits that
-	// don't carry an explicit ExpiresAt.
-	DefaultCreditExpiryHours *int `json:"default_credit_expiry_hours,omitempty"`
-}
-
 // UsageRollupRow is one grouped spend bucket from OpenRails.
 type UsageRollupRow struct {
 	Key         string `json:"key"`
@@ -412,22 +390,6 @@ type MerchantSettings struct {
 type MerchantTrustLevelSchedule struct {
 	Currency string                   `json:"currency"`
 	Schedule []TrustLevelScheduleRung `json:"schedule"`
-}
-
-// BudgetWindow is one computed window from admission policy checks and Admit's
-// budget_windows
-// (pkg/service.AdmitBudgetWindowDTO on the wire).
-type BudgetWindow struct {
-	Key               string `json:"key"`
-	Currency          string `json:"currency"`
-	Limit             int64  `json:"limit"`
-	Used              int64  `json:"used"`
-	Reserved          int64  `json:"reserved"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-	// ResetAt is the exact window boundary (#337 fixed windows).
-	ResetAt time.Time `json:"reset_at,omitzero"`
-	Allowed bool      `json:"allowed"`
 }
 
 // PayerSpendLimitInput configures a per-payer trust-level policy via merchant

@@ -21,8 +21,30 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// applyDirectoryFunctionMigration replays the REAL text of migration 0016 onto
+// this package's hand-written schema, so the #824 cross-merchant directory
+// functions cannot drift from what production runs. schemaDDL below is a
+// deliberate minimal subset of the migrated schema; a hand-copied function body
+// here would be exactly the divergence that let #824 hide behind
+// routes_merchant_webhook_integration_test.go's bespoke openrails.psps.
+func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	// 0016 GRANTs to openrails_app, which only 0001 creates.
+	_, err := pool.Exec(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
+		END IF;
+	END $$;`)
+	require.NoError(t, err)
+	sql, err := postgresmigrations.FS.ReadFile("0016_cross_merchant_directory.up.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(sql))
+	require.NoError(t, err)
+}
 
 // schemaDDL stands up the minimal openrails.* schema the merchant service touches:
 // the merchant directory (with #225 columns), one representative merchant-owned table
@@ -50,7 +72,10 @@ CREATE TABLE IF NOT EXISTS openrails.entitlements (
 
 CREATE TABLE IF NOT EXISTS openrails.customers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL
+    merchant_id UUID NOT NULL,
+    -- #824: the subject-first directory lookup and its index live in 0016,
+    -- which this harness replays verbatim.
+    subject     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
@@ -128,6 +153,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 		pool := newExternalTenancyTestPool(t, ctx, dsn)
 		_, err := pool.Exec(ctx, schemaDDL)
 		require.NoError(t, err)
+		applyDirectoryFunctionMigration(t, ctx, pool)
 		return pool
 	}
 
@@ -152,6 +178,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 
 	_, err = pool.Exec(ctx, schemaDDL)
 	require.NoError(t, err)
+	applyDirectoryFunctionMigration(t, ctx, pool)
 	return pool
 }
 

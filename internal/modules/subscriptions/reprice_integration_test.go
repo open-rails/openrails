@@ -48,8 +48,7 @@ type repriceFixture struct {
 func newRepriceFixture(t *testing.T) *repriceFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	merchantID := dbtest.TestMerchantID.UUID()
 
@@ -80,11 +79,11 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 	otherProductPriceID := uuid.New()
 	otherCurrencyPriceID := uuid.New()
 	inactivePriceID := uuid.New()
-	insertPrice(lowPriceID, productID, 10000000, "usd", false, "reprice-low-"+suffix)
-	insertPrice(highPriceID, productID, 12000000, "usd", false, "reprice-high-"+suffix)
-	insertPrice(otherProductPriceID, otherProductID, 10000000, "usd", false, "reprice-other-product-price-"+suffix)
-	insertPrice(otherCurrencyPriceID, productID, 10000000, "eur", false, "reprice-eur-"+suffix)
-	insertPrice(inactivePriceID, productID, 15000000, "usd", true, "reprice-inactive-"+suffix)
+	insertPrice(lowPriceID, productID, 10000000, "USD", false, "reprice-low-"+suffix)
+	insertPrice(highPriceID, productID, 12000000, "USD", false, "reprice-high-"+suffix)
+	insertPrice(otherProductPriceID, otherProductID, 10000000, "USD", false, "reprice-other-product-price-"+suffix)
+	insertPrice(otherCurrencyPriceID, productID, 10000000, "EUR", false, "reprice-eur-"+suffix)
+	insertPrice(inactivePriceID, productID, 15000000, "USD", true, "reprice-inactive-"+suffix)
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -525,79 +524,4 @@ func (c *fakeCharger) Charge(_ context.Context, req charge.Request) (charge.Resu
 		return charge.Result{}, c.err
 	}
 	return c.result, nil
-}
-
-// TestRenewalCharger_ChargesNewAmountWithSameStoredCredentialAnchor:
-// extends the #297 Phase A stored-credential pattern — a scheduled reprice
-// flips the CHARGED amount at the renewal boundary while the recurring
-// stored-credential anchor (PriorRef) rides along UNCHANGED, which is exactly
-// what card-network MIT amount-change compliance requires (disclosed via the
-// schedule-time notification).
-func TestRenewalCharger_ChargesNewAmountWithSameStoredCredentialAnchor(t *testing.T) {
-	f := newRepriceFixture(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	subID, railSubID := f.createSubscription(t, ctx, f.lowPriceID)
-
-	const anchor = "anchor-txn-12345"
-	pm := &models.PaymentMethod{
-		ID: uuid.New(), Rail: models.RailNMI, RailCustomerRef: "vault-abc",
-		StoredCredentialRecurringRef: anchor,
-	}
-	fc := &fakeCharger{result: charge.Result{TransactionID: "charge-1"}}
-	rc := &RenewalCharger{Charger: fc, Reprice: f.repriceSvc, Lifecycle: f.lifecycle, Clock: f.clock}
-
-	sub, err := f.subSvc.GetByID(ctx, subID)
-	require.NoError(t, err)
-	sub.RailSubscriptionID = railSubID
-
-	// Renewal #1: no reprice due yet — charges the ORIGINAL amount, same anchor.
-	res, err := rc.ChargeRenewal(ctx, sub, pm)
-	require.NoError(t, err)
-	require.Equal(t, "charge-1", res.TransactionID)
-	require.EqualValues(t, 1000, fc.lastReq.AmountMinor, "10,000,000 micros == 1,000 cents ($10.00)")
-	require.Equal(t, anchor, fc.lastReq.Context.PriorRef)
-	require.Equal(t, charge.InitiatorMerchant, fc.lastReq.Context.Initiator)
-	require.Equal(t, charge.AgreementRecurring, fc.lastReq.Context.Agreement)
-
-	// Schedule a reprice effective now.
-	_, err = f.repriceSvc.Reprice(ctx, RepriceRequest{SubscriptionID: subID, ToPriceID: f.highPriceID, EffectiveAt: f.clock.Now()})
-	require.NoError(t, err)
-
-	sub, err = f.subSvc.GetByID(ctx, subID)
-	require.NoError(t, err)
-	sub.RailSubscriptionID = railSubID
-
-	// Renewal #2: the due reprice flips the CHARGED amount — the anchor is
-	// UNCHANGED (same stored-credential reference, only the amount differs).
-	fc.result = charge.Result{TransactionID: "charge-2"}
-	res, err = rc.ChargeRenewal(ctx, sub, pm)
-	require.NoError(t, err)
-	require.Equal(t, "charge-2", res.TransactionID)
-	require.EqualValues(t, 1200, fc.lastReq.AmountMinor, "flips to the new $12.00 amount")
-	require.Equal(t, anchor, fc.lastReq.Context.PriorRef, "SAME stored-credential anchor across the reprice")
-}
-
-// TestRenewalCharger_DeclinedChargeDoesNotRecordRenewal: a declined charge
-// must not silently record a renewal at the wrong (or any) amount.
-func TestRenewalCharger_DeclinedChargeDoesNotRecordRenewal(t *testing.T) {
-	f := newRepriceFixture(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	subID, railSubID := f.createSubscription(t, ctx, f.lowPriceID)
-
-	msg := "insufficient funds"
-	fc := &fakeCharger{result: charge.Result{Declined: true, FailureMessage: &msg}}
-	rc := &RenewalCharger{Charger: fc, Reprice: f.repriceSvc, Lifecycle: f.lifecycle, Clock: f.clock}
-	pm := &models.PaymentMethod{ID: uuid.New(), Rail: models.RailNMI, StoredCredentialRecurringRef: "anchor"}
-
-	sub, err := f.subSvc.GetByID(ctx, subID)
-	require.NoError(t, err)
-	sub.RailSubscriptionID = railSubID
-
-	_, err = rc.ChargeRenewal(ctx, sub, pm)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "declined")
-
-	var count int
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT COUNT(*) FROM openrails.payments WHERE subscription_id = $1`, subID).Scan(&count))
-	require.Equal(t, 0, count, "a declined charge must not record a renewal payment")
 }

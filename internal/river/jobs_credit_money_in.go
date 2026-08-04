@@ -28,7 +28,7 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 		logger.Debug("db not configured; skipping")
 		return nil
 	}
-	merchantIDs, err := dbi.Gen(ctx).ListActiveMerchantIDs(ctx)
+	merchantIDs, err := dbi.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list merchants: %w", err)
 	}
@@ -43,49 +43,10 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 	return errors.Join(errs...)
 }
 
-// These workers drive the money-in + reconciliation flows (issues
-// #239/#240/#241/#243). The auto-top-up and arrears workers need a
-// money.Charger (off-session rail charge) and the low-balance worker
-// needs a money.Alerter; when those are not configured the worker logs and
-// no-ops so it is safe to register before the rail/notification wiring
-// lands. The reconcile worker needs no external dependency and runs fully.
-
-// --- Low-balance alerts (#240) ---
-
-const KindLowBalanceAlert = "openrails.low_balance_alert"
-
-type LowBalanceAlertArgs struct{}
-
-func (LowBalanceAlertArgs) Kind() string { return KindLowBalanceAlert }
-
-type LowBalanceAlertWorker struct {
-	river.WorkerDefaults[LowBalanceAlertArgs]
-	Money    *money.MoneyService
-	Alerter  money.Alerter
-	Cooldown time.Duration
-}
-
-func (LowBalanceAlertWorker) Kind() string { return KindLowBalanceAlert }
-
-func (w LowBalanceAlertWorker) Work(ctx context.Context, _ *river.Job[LowBalanceAlertArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", KindLowBalanceAlert)
-	if w.Money == nil || w.Alerter == nil {
-		logger.Debug("low-balance alerter not configured; skipping")
-		return nil
-	}
-	cooldown := w.Cooldown
-	if cooldown <= 0 {
-		cooldown = 24 * time.Hour
-	}
-	n, err := w.Money.RunLowBalanceAlerts(ctx, w.Alerter, cooldown)
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		logger.WithField("alerts_sent", n).Info("low-balance alerts sent")
-	}
-	return nil
-}
+// These workers drive the money-in + reconciliation flows (#239/#241/#243).
+// The auto-top-up and arrears workers need a money.Charger (off-session rail
+// charge); when it is not configured the worker logs and no-ops so it is safe
+// to register before the rail wiring lands.
 
 // --- Prepaid auto-top-up (#239) ---
 

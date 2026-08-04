@@ -23,7 +23,7 @@ import (
 // NOT "no intro".
 func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 
 	dbi, err := db.NewWithPGXPool(pool, "")
@@ -45,7 +45,7 @@ func TestPriceRepo_IntroPricing_RoundTrip(t *testing.T) {
 	mk := func(amount, initialAmount int64, initialHours int, withIntro bool) *models.Price {
 		p := &models.Price{
 			ID: uuid.New(), MerchantID: merchantID, ProductID: productID,
-			Archived: true, Amount: amount, Currency: "usd",
+			Archived: true, Amount: amount, Currency: "USD",
 			AccessDurationHours: &recurringHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		}
 		if withIntro {

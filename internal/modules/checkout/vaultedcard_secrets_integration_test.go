@@ -23,8 +23,7 @@ import (
 // api_key + the LINKED NMI gateway account's security key resolve into one
 // VaultedCardRailConfig through the real merchants.Service + railresolve seam.
 func TestVaultedCardRailResolvesFromStoreBothModes(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)

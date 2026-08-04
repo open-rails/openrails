@@ -4,6 +4,7 @@ package converge
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ func TestConverge_DeriveGrantEffectMissing(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	cur := "TC" + uuid.NewString()[:6]
+	cur := "TC" + strings.ToUpper(uuid.NewString()[:6])
 	e := NewConvergeEngine(appDB)
 
 	var customer, grantID uuid.UUID
@@ -193,10 +194,10 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, productID, "ge-prod-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, productID, merchantID)
 		// A REFUNDED payment backing a still-live ownership grant.
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'mobius',$5,9990000,9990000,'usd','refunded',now())`,
+		      VALUES ($1,$2,$3,$4,'mobius',$5,9990000,9990000,'USD','refunded',now())`,
 			paymentID, merchantID, customer, priceID, "txn_"+suffix)
 		gl := grants.New(appDB.Gen(ctx), merchantID)
 		g, err := gl.Grant(ctx, grants.GrantInput{
@@ -269,11 +270,11 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prodGrant, "gm-g-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prodEmpty, "gm-e-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, priceGrant, prodGrant, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, priceEmpty, prodEmpty, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceGrant, prodGrant, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceEmpty, prodEmpty, merchantID)
 		ins := func(id, price uuid.UUID, txn string) {
 			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-			      VALUES ($1,$2,$3,$4,'mobius',$5,5000000,5000000,'usd','completed',now())`, id, merchantID, customer, price, txn)
+			      VALUES ($1,$2,$3,$4,'mobius',$5,5000000,5000000,'USD','completed',now())`, id, merchantID, customer, price, txn)
 		}
 		ins(payMissing, priceGrant, "txn-m-"+sfx) // grantable product, NO grant → flagged
 		ins(payEmpty, priceEmpty, "txn-e-"+sfx)   // empty-spec product → ignored
@@ -329,7 +330,7 @@ func TestConverge_DeriveSweepRemediatesAllCustomers(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	cur := "TC" + uuid.NewString()[:6]
+	cur := "TC" + strings.ToUpper(uuid.NewString()[:6])
 	e := NewConvergeEngine(appDB)
 
 	var customers, grantIDs []uuid.UUID

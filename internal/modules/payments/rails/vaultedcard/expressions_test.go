@@ -27,7 +27,7 @@ func TestSaleFormWirePins(t *testing.T) {
 		return charge.Request{
 			// 1_990_000 micros = 199 cents (converted upstream of the seam).
 			AmountMinor: moneyutil.Cents(199),
-			Currency:    "usd",
+			Currency:    "USD",
 			Description: "Renewal",
 			OrderRef:    "order-1",
 			Context:     ctx,
@@ -43,7 +43,7 @@ func TestSaleFormWirePins(t *testing.T) {
 			"type":                        {"sale"},
 			"security_key":                {"sk_test_123"},
 			"amount":                      {"1.99"},
-			"currency":                    {"usd"},
+			"currency":                    {"USD"},
 			"order_description":           {"Renewal"},
 			"orderid":                     {"order-1"},
 			"ccnumber":                    {`{{ token: 3fa85f64-5717-4562-b3fc-2c963f66afa6 | json: "$.data.number" }}`},
@@ -148,7 +148,7 @@ func TestSaleFormWirePins(t *testing.T) {
 			1:      "0.01",
 			123456: "1234.56",
 		} {
-			form, err := SaleForm(charge.Request{AmountMinor: cents, Currency: "usd", Context: charge.InitialOneTime()},
+			form, err := SaleForm(charge.Request{AmountMinor: cents, Currency: "USD", Context: charge.InitialOneTime()},
 				Source{TokenID: testTokenID}, testGW, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -163,20 +163,20 @@ func TestSaleFormWirePins(t *testing.T) {
 		if _, err := SaleForm(charge.Request{AmountMinor: 199, Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
 			t.Fatal("missing currency must error")
 		}
-		if _, err := SaleForm(charge.Request{AmountMinor: 0, Currency: "usd", Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
+		if _, err := SaleForm(charge.Request{AmountMinor: 0, Currency: "USD", Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
 			t.Fatal("zero amount must error")
 		}
-		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "usd", Context: charge.InitialOneTime()}, Source{}, testGW, nil); err == nil {
+		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", Context: charge.InitialOneTime()}, Source{}, testGW, nil); err == nil {
 			t.Fatal("missing source must error")
 		}
-		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "usd", Context: charge.RecurringMIT("1")}, Source{TokenIntentID: testIntentID}, testGW, nil); err == nil {
+		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", Context: charge.RecurringMIT("1")}, Source{TokenIntentID: testIntentID}, testGW, nil); err == nil {
 			t.Fatal("MIT from a token intent must error")
 		}
-		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "usd", Context: charge.InitialRecurring()},
+		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", Context: charge.InitialRecurring()},
 			Source{Via: ViaNetworkToken, NetworkTokenID: testNTID}, testGW, nil); err == nil {
 			t.Fatal("NT CIT without cryptogram must error")
 		}
-		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "usd", OrderRef: strings.Repeat("x", 51), Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
+		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", OrderRef: strings.Repeat("x", 51), Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
 			t.Fatal("51-char order id must error, never truncate")
 		}
 	})
@@ -195,7 +195,7 @@ func TestChargerOutcomes(t *testing.T) {
 	}
 	req := charge.Request{
 		Instrument:  charge.Instrument{Rail: Rail, MethodRef: testTokenID},
-		AmountMinor: 199, Currency: "usd", OrderRef: "ord-1",
+		AmountMinor: 199, Currency: "USD", OrderRef: "ord-1",
 		Context: charge.RecurringMIT("9001"),
 	}
 

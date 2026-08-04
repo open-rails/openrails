@@ -252,11 +252,11 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	// both key off it, so an absent code is a caller bug — not a "usd" default.
 	// Validated against the money registry so an unregistered code cannot reach
 	// the FX provider or the persisted quote.
-	currency = strings.ToLower(strings.TrimSpace(currency))
+	currency = money.NormalizeCurrency(currency)
 	if currency == "" {
 		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
 	}
-	if err := money.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		return nil, err
 	}
 	if amountMicros <= 0 {
@@ -266,7 +266,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	quotedAt := time.Now()
 
 	fxRate := 1.0
-	if currency != "usd" {
+	if currency != money.DefaultCurrency {
 		if fxProvider == nil {
 			return nil, fmt.Errorf("FX conversion required for currency %s but no FX provider configured", currency)
 		}
@@ -310,7 +310,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 		tokenUnits uint64
 		err        error
 	)
-	if atPeg && currency == "usd" {
+	if atPeg && currency == money.DefaultCurrency {
 		tokenUnits, err = FiatMicrosToBaseUnitsAtPeg(amountMicros, tokenSymbol, tokenCfg.Decimals)
 	} else {
 		tokenUnits, err = fiatMicrosToBaseUnitsAtRate(amountMicros, tokenSymbol, tokenCfg.Decimals, fxRate, tokenPriceUSD)

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -259,7 +259,7 @@ func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID
 			return fmt.Errorf("credit balance %q unit %q is qualified with slug %q, not this merchant's %q", balanceKey, unit, slug, merchantSlug)
 		}
 		name = qualified
-	} else if _, builtin := money.CurrencyScale(unit); builtin {
+	} else if _, builtin := moneyutil.CurrencyScale(unit); builtin {
 		return nil
 	}
 	if name == "" || strings.ContainsAny(name, "/ ") {

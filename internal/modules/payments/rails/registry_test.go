@@ -64,7 +64,8 @@ func TestRegistryPinnedFacts(t *testing.T) {
 	}{
 		{models.RailNMI, false, true, true, true, 2, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682
 		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
-		{models.RailStripe, true, true, false, true, 3, false, false, false, CancelModeReversible},
+		// 4 keys: secret_key, webhook_signing_secret, _thin, _previous (#856 rollover overlap).
+		{models.RailStripe, true, true, false, true, 4, false, false, false, CancelModeReversible},
 		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
 		{models.RailVaultedCard, false, true, true, true, 1, false, false, false, CancelModeDestructive}, // #795: BT tenant, one custodial secret (api_key)
 		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},

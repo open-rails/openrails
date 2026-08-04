@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -266,7 +267,7 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 		}
 		window.Currency = money.NormalizeCurrency(window.Currency)
 		if window.Currency != "" {
-			if err := money.ValidateCurrency(window.Currency); err != nil {
+			if err := moneyutil.ValidateCurrency(window.Currency); err != nil {
 				return InvokerSpendLimit{}, fmt.Errorf("windows[%d].currency invalid: %w", i, err)
 			}
 		}
@@ -368,21 +369,6 @@ func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	})
-}
-
-// Delete removes one invoker spend limit.
-func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) error {
-	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
-		return txStore.delete(ctx, tenantID, payer, scope, scopeKey)
-	})
-}
-
-func (s *InvokerSpendLimitStore) delete(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID, scope, scopeKey string) error {
-	_, err := s.db.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
-		MerchantID: tenantID, CustomerID: payer.UUID(),
-		Scope: budgets.NormalizeScope(scope), ScopeKey: strings.TrimSpace(scopeKey),
-	})
-	return err
 }
 
 // Replace atomically replaces the complete payer-owned policy document. Any

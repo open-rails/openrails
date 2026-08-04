@@ -270,3 +270,47 @@ func TestNMIResumeWindowLifecycle(t *testing.T) {
 	sub.CurrentPeriodEndsAt = ptrTime(now.Add(-1 * time.Hour))
 	require.False(t, Resumable(sub, now))
 }
+
+// or#842: the AUTOMATED counterpart. A user cancel gets an undo window; the
+// automated terminal cancels (dunning exhaustion, unknown-resolution
+// convergence) queued the irreversible rail delete at `now`.
+func TestSystemDeferredDeleteAt(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+
+	t.Run("lapsed period gets the full cooling-off window", func(t *testing.T) {
+		// The dominant automated shape: dunning exhausted on a period that ended
+		// weeks ago. No known future charge date, so nothing shortens the window.
+		sub := baseSub(models.RailNMI, models.StatusPastDue)
+		sub.CurrentPeriodEndsAt = ptrTime(now.Add(-30 * 24 * time.Hour))
+		require.Equal(t, now.Add(SystemDeleteCoolingOff), SystemDeferredDeleteAt(sub, now))
+	})
+
+	t.Run("unknown period end gets the full cooling-off window", func(t *testing.T) {
+		sub := baseSub(models.RailNMI, models.StatusPastDue)
+		sub.CurrentPeriodEndsAt = nil
+		require.Equal(t, now.Add(SystemDeleteCoolingOff), SystemDeferredDeleteAt(sub, now))
+	})
+
+	t.Run("distant rebill: the window closes long before it", func(t *testing.T) {
+		sub := baseSub(models.RailNMI, models.StatusActive)
+		sub.CurrentPeriodEndsAt = ptrTime(now.Add(10 * 24 * time.Hour))
+		require.Equal(t, now.Add(SystemDeleteCoolingOff), SystemDeferredDeleteAt(sub, now))
+	})
+
+	t.Run("rebill inside the window shortens it to the safety margin", func(t *testing.T) {
+		// period_end - 48h still in the future but sooner than now+24h.
+		periodEnd := now.Add(NMIDeleteSafetyMargin + 6*time.Hour)
+		sub := baseSub(models.RailNMI, models.StatusActive)
+		sub.CurrentPeriodEndsAt = ptrTime(periodEnd)
+		require.Equal(t, periodEnd.Add(-NMIDeleteSafetyMargin), SystemDeferredDeleteAt(sub, now))
+	})
+
+	t.Run("no safe room at all is due immediately", func(t *testing.T) {
+		// The pre-rebill margin has already opened: waiting would let the rail
+		// bill a customer we just cancelled. Same answer as the user path.
+		sub := baseSub(models.RailNMI, models.StatusActive)
+		sub.CurrentPeriodEndsAt = ptrTime(now.Add(12 * time.Hour))
+		require.Equal(t, now, SystemDeferredDeleteAt(sub, now))
+	})
+}

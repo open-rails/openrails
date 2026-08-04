@@ -36,7 +36,7 @@ func TestMerchantSourceDefaultsToManifest(t *testing.T) {
 }
 
 func TestMerchantSourceUnknownValueRefusesLoad(t *testing.T) {
-	cfg := &Config{MerchantSource: "yaml", DB: &DBConfig{URL: "postgres://u:p@localhost:5432/x"}}
+	cfg := &Config{Env: "development", MerchantSource: "yaml", DB: &DBConfig{URL: "postgres://u:p@localhost:5432/x"}}
 	err := Validate(cfg)
 	if err == nil || !strings.Contains(err.Error(), "merchant_source") {
 		t.Fatalf("unknown merchant_source must refuse to load, got %v", err)

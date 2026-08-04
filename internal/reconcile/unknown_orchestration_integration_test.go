@@ -69,7 +69,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ur-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 			      VALUES ($1,$2,$3,$4,$5,'unknown',$6,$7,$8,$8,$9)`, id, merchantID, cust, prod, price, rail, railSub, start, periodEnd)
 			return cust
@@ -111,7 +111,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			{RailSubscriptionID: rsCancel, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 			{TransactionID: "tx-decline-" + sfx, SubscriptionID: rsDecline, Type: TransactionTypeDecline, Success: false, OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}

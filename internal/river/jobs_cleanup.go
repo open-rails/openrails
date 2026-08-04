@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
@@ -81,6 +82,19 @@ type CleanupResult struct {
 	PaymentSettlements      int64
 }
 
+// Work runs every retention sweep once per merchant, inside that merchant's own
+// scope (or#877 B4).
+//
+// It used to run all five on the job's bare context. Three of them
+// (checkout-session expiry and both notification sweeps) carried UNQUALIFIED
+// predicates, which under the production openrails_app role match
+// `merchant_id = NULL`: zero rows, no error, an hourly log line claiming
+// success. Retention had never run — notifications and expired checkout
+// sessions accumulated without bound. The two that were already converted
+// (webhook dedup marks, acked settlements) are the shape all five now share:
+// enumerate ids from the policy-free merchant directory, then delete inside
+// each merchant's scope, with the merchant predicate ALSO written into the SQL
+// so the walk stays honest on a BYPASSRLS connection.
 func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[CleanupExpiredDataArgs]) error {
 	clock := w.Clock
 	if clock == nil {
@@ -99,42 +113,24 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 	logger.Info("Starting cleanup of expired data")
 
-	// 1. Expire checkout sessions that have passed their TTL
-	var err error
-	result.CheckoutSessionsExpired, err = w.expireCheckoutSessions(ctx, now)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
-		logger.WithError(err).Error("Failed to expire checkout sessions")
-		cleanupErr = errors.Join(cleanupErr, err)
+		return fmt.Errorf("cleanup expired data: list merchants: %w", err)
 	}
 
-	// 2. Clean up old notifications (seen ones first with shorter retention)
-	result.NotificationsSeen, err = w.cleanupSeenNotifications(ctx, now, config.NotificationSeenRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup seen notifications")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
-
-	result.NotificationsAll, err = w.cleanupOldNotifications(ctx, now, config.NotificationUnseenRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup old notifications")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
-
-	// 3. Retention for webhook dedup marks (#678)
-	result.WebhookEvents, err = w.cleanupWebhookEvents(ctx, now, config.WebhookEventRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup webhook dedup marks")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
-
-	// 4. Retention for acked payment settlement events (#827)
-	result.PaymentSettlements, err = w.cleanupPaymentSettlements(ctx, now, config.PaymentSettlementAckedRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup acked payment settlements")
-		cleanupErr = errors.Join(cleanupErr, err)
+	for _, mid := range merchantIDs {
+		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(mid), "cleanup expired data", func(mctx context.Context) error {
+			w.sweepMerchant(mctx, mid, now, config, &result, &cleanupErr)
+			return nil
+		}); err != nil {
+			// One merchant's failure must not abort the rest of the sweep.
+			logger.WithError(err).WithField("merchant_id", mid).Error("Cleanup: merchant pass failed; continuing")
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
 	}
 
 	logger.WithFields(log.Fields{
+		"merchants":                 len(merchantIDs),
 		"checkout_sessions_expired": result.CheckoutSessionsExpired,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
@@ -148,87 +144,58 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	return nil
 }
 
-func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
-	rows, err := w.DB.Gen(ctx).ExpireCheckoutSessions(ctx, now)
-	if err != nil {
-		return 0, fmt.Errorf("expire checkout sessions: %w", err)
-	}
-	return rows, nil
-}
-
-// cleanupSeenNotifications deletes seen notifications older than the retention period
-func (w CleanupExpiredDataWorker) cleanupSeenNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
-
-	rows, err := w.DB.Gen(ctx).DeleteSeenNotificationsBefore(ctx, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("delete seen notifications: %w", err)
-	}
-	return rows, nil
-}
-
-// cleanupOldNotifications deletes all notifications (including unseen) older than the retention period
-func (w CleanupExpiredDataWorker) cleanupOldNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
-
-	rows, err := w.DB.Gen(ctx).DeleteNotificationsBefore(ctx, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("delete old notifications: %w", err)
-	}
-	return rows, nil
-}
-
-// cleanupWebhookEvents deletes completed webhook dedup marks older than the
-// retention window (#678). webhook_events is RLS-scoped, so this walks the
-// control-plane merchant directory and deletes per merchant under MerchantTx
-// (same pattern as the converge sweep). One merchant's failure doesn't abort
-// the rest.
-func (w CleanupExpiredDataWorker) cleanupWebhookEvents(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
-
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("cleanup webhook events: list merchants: %w", err)
-	}
-	var total int64
-	var sweepErr error
-	for _, mid := range merchantIDs {
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
-		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
-			n, err := gen.New(tx).DeleteCompletedWebhookEventsBefore(ctx, cutoff)
-			total += n
-			return err
+// sweepMerchant runs the five retention sweeps for ONE merchant, already inside
+// its scope. Each sweep gets its own transaction so a failing one cannot roll
+// back the others' deletes.
+func (w CleanupExpiredDataWorker) sweepMerchant(
+	ctx context.Context, mid uuid.UUID, now time.Time, config CleanupConfig,
+	result *CleanupResult, cleanupErr *error,
+) {
+	logger := log.WithContext(ctx).WithFields(log.Fields{
+		"worker": KindCleanupExpiredData, "merchant_id": mid,
+	})
+	sweep := func(name string, total *int64, fn func(ctx context.Context, q *gen.Queries) (int64, error)) {
+		if err := w.DB.MerchantTx(ctx, func(tctx context.Context, tx pgx.Tx) error {
+			n, err := fn(tctx, gen.New(tx))
+			if err != nil {
+				return err
+			}
+			*total += n
+			return nil
 		}); err != nil {
-			sweepErr = errors.Join(sweepErr, fmt.Errorf("delete webhook events for merchant %s: %w", mid, err))
+			logger.WithError(err).Error("Cleanup: " + name + " failed")
+			*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("%s for merchant %s: %w", name, mid, err))
 		}
 	}
-	return total, sweepErr
-}
 
-// cleanupPaymentSettlements deletes acknowledged (delivered) settlement events
-// older than the retention window (#827). RLS-scoped, so per merchant under
-// MerchantTx like cleanupWebhookEvents. Pending events are never touched.
-func (w CleanupExpiredDataWorker) cleanupPaymentSettlements(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
+	// 1. Expire checkout sessions that have passed their TTL
+	sweep("expire checkout sessions", &result.CheckoutSessionsExpired, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.ExpireCheckoutSessions(ctx, gen.ExpireCheckoutSessionsParams{MerchantID: mid, Now: now})
+	})
 
-	merchantIDs, err := w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("cleanup payment settlements: list merchants: %w", err)
-	}
-	var total int64
-	var sweepErr error
-	for _, mid := range merchantIDs {
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
-		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
-			n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
-				MerchantID: mid,
-				Cutoff:     cutoff,
-			})
-			total += n
-			return err
-		}); err != nil {
-			sweepErr = errors.Join(sweepErr, fmt.Errorf("delete payment settlements for merchant %s: %w", mid, err))
-		}
-	}
-	return total, sweepErr
+	// 2. Old notifications — seen ones first, with the shorter retention
+	sweep("delete seen notifications", &result.NotificationsSeen, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.DeleteSeenNotificationsBefore(ctx, gen.DeleteSeenNotificationsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.NotificationSeenRetention),
+		})
+	})
+	sweep("delete old notifications", &result.NotificationsAll, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.DeleteNotificationsBefore(ctx, gen.DeleteNotificationsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.NotificationUnseenRetention),
+		})
+	})
+
+	// 3. Webhook dedup marks (#678)
+	sweep("delete webhook events", &result.WebhookEvents, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.DeleteCompletedWebhookEventsBefore(ctx, gen.DeleteCompletedWebhookEventsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.WebhookEventRetention),
+		})
+	})
+
+	// 4. Acked payment settlement events (#827). Pending events are never pruned.
+	sweep("delete payment settlements", &result.PaymentSettlements, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.PaymentSettlementAckedRetention),
+		})
+	})
 }

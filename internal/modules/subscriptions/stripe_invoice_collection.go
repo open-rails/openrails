@@ -293,14 +293,19 @@ func rawString(raw json.RawMessage) string {
 	return strings.TrimSpace(s)
 }
 
+// rawInt64 decodes a Stripe integer field. Stripe amounts are minor units and
+// always integral on the wire; a non-integral value is a decode failure, not
+// something to truncate through a float64 (MONEY-3).
 func rawInt64(raw json.RawMessage) int64 {
 	var n int64
 	if err := json.Unmarshal(raw, &n); err == nil {
 		return n
 	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err == nil {
-		return int64(f)
+	var num json.Number
+	if err := json.Unmarshal(raw, &num); err == nil {
+		if parsed, perr := strconv.ParseInt(num.String(), 10, 64); perr == nil {
+			return parsed
+		}
 	}
 	return 0
 }

@@ -68,8 +68,28 @@ Signing-secret handling depends on the merchant source:
 
 The endpoint's `api_version` is pinned to the same single constant that stamps the
 `Stripe-Version` header on every outbound call, so inbound event shapes and outbound
-parsers can never drift apart. A version bump (or a lost secret) triggers a
-delete-and-recreate of the endpoint.
+parsers can never drift apart.
+
+**Version rollover.** Stripe's `api_version` is set at creation and cannot be
+updated, and the signing secret is returned only at creation — so a bump needs a new
+endpoint. It does not need an outage. OpenRails follows Stripe's own dual-endpoint
+migration: the successor is **created first**, the predecessor is stamped
+`metadata[openrails_superseded_at]` and **left enabled**, and the outgoing secret is
+retained as `webhook_signing_secret_previous` so anything already queued on the old
+endpoint still verifies. Both endpoints deliver during the overlap; duplicate events
+are deduplicated by event id. Nothing is deleted by the bump.
+
+Retiring the superseded endpoint is the only destructive step. It happens no sooner
+than 7 days after it was replaced, requires a live enabled endpoint at the current
+version, and is gated on the operator kill switch
+(`openrails.destructive_action_switch`), which is **off by default**. Until it runs,
+an operator finding (`consistency.stripe_webhook_endpoint`) names every superseded
+endpoint and when it becomes retireable; it auto-resolves once the rollover drains.
+
+A signing secret missing locally is treated as **unknown, never lost**: OpenRails
+first tries to repair the local record (a `psps` row whose `environment` or
+`account_id` changed moves the derived secret name), and only if that fails does it
+roll over. It never deletes a remote endpoint because of a local miss.
 
 ### Catalog sync
 

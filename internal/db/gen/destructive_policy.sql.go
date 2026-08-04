@@ -48,6 +48,7 @@ WHERE merchant_id = $1::uuid
   AND rail = $2::text
   AND status IN ('active', 'past_due', 'unknown')
   AND rail_subscription_id <> ''
+  AND deleted_at IS NULL
 `
 
 type CountLiveLinkedSubscriptionsForRailParams struct {

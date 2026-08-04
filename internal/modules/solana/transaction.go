@@ -165,7 +165,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		TokenAmount:       req.TokenAmount,
 		TokenSymbol:       req.TokenSymbol,
 		ExpiresAt:         expiresAt,
-		Instructions:      fmt.Sprintf("Sign this transaction to pay %s %s using %s", moneyutil.FormatMicrosDecimal(req.Amount), req.Currency, req.TokenSymbol),
+		Instructions:      fmt.Sprintf("Sign this transaction to pay %s %s using %s", moneyutil.FormatMicrosDecimal(moneyutil.Micros(req.Amount)), req.Currency, req.TokenSymbol),
 	}, nil
 }
 

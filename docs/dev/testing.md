@@ -20,6 +20,25 @@ resolve in order:
 
 Redis: `OPENRAILS_TEST_REDIS_ADDR` (host:port), else a testcontainer.
 
+### RLS is enforced by default
+
+`dbtest.SharedPostgresDSN(t)` — the default handle — connects as **`openrails_app`**
+(NOBYPASSRLS), the same role production connects as, and asserts the role is
+neither `rolsuper` nor `rolbypassrls` before handing it out. A query that forgets
+to open a merchant connection returns zero rows here exactly as it would in
+production, instead of silently succeeding on a superuser connection.
+
+Pick the handle by what the test is proving:
+
+| helper | role | use for |
+|---|---|---|
+| `SharedPostgresDSN` / `SharedPGXPool` | app, no merchant | code that must pin its own merchant (HTTP routes, River workers) |
+| `SharedMerchantPool` / `OpenMerchantDB` / `MerchantPinnedDSN` | app, merchant pinned | fixtures for one merchant, and module services called below the layer that pins |
+| `SharedSuperuserDSN` / `SharedSuperuserPGXPool` | superuser | fixtures spanning merchants, assertions on another merchant's rows, migrations |
+
+Never reach for the superuser helper to make a failure go away — under the default
+handle, a failure is usually the harness reporting a production bug (see or#867/#868).
+
 Ways to run:
 
 ```bash

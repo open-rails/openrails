@@ -41,7 +41,7 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 		      VALUES ($1,$2,$2,$3, jsonb_build_object($4::text, null), $5)`,
 			productID, "gd-prod-"+suffix, "gd-tier-"+suffix, feature, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// Active sub, RUNNING period [now-5d, now+25d).
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
@@ -142,7 +142,7 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rd-prod-"+suffix, "rd-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		seedSub := func(id uuid.UUID, status, railSubID string) {
 			exec(`INSERT INTO openrails.subscriptions
 			        (id, price_id, product_id, status, rail, rail_subscription_id,

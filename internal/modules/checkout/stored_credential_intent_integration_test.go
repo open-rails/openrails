@@ -108,7 +108,7 @@ func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string)
 func TestNMISubscriptionIntent_InitialRecurringCITAnchorsInstrument(t *testing.T) {
 	fx := newSubIntentFixture(t)
 	// Wire the DB handle finalize persists the anchor through.
-	fx.svc.VaultService = &paymentmethods.VaultService{DB: fx.db}
+	fx.svc.RailPaymentMethodService = &paymentmethods.RailPaymentMethodService{DB: fx.db}
 	pmID := fx.seedSubInstrument(t, "")
 
 	intent := fx.enqueueAndExecute(t)
@@ -129,7 +129,7 @@ func TestNMISubscriptionIntent_InitialRecurringCITAnchorsInstrument(t *testing.T
 
 func TestNMISubscriptionIntent_AnchoredInstrumentSendsUsedWithReference(t *testing.T) {
 	fx := newSubIntentFixture(t)
-	fx.svc.VaultService = &paymentmethods.VaultService{DB: fx.db}
+	fx.svc.RailPaymentMethodService = &paymentmethods.RailPaymentMethodService{DB: fx.db}
 	fx.seedSubInstrument(t, "anchor-297-sub")
 	fx.payload.StoredCredentialRef = "anchor-297-sub"
 

@@ -22,7 +22,7 @@ import (
 // history are absent from the map. No mocks — real Postgres via testcontainers.
 func TestLatestChargeByMethodIDs(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 
 	dbi, err := db.NewWithPGXPool(pool, "")
@@ -100,7 +100,7 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 // vault_id-only uniqueness forbade. Same (customer_ref, method_ref) pair still dedupes.
 func TestMultiInstrumentPerVaultUniqueness(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbi, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
 

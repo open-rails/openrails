@@ -17,7 +17,7 @@ import (
 
 func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 
@@ -356,7 +356,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 
 func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 

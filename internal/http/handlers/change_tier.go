@@ -9,6 +9,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -116,9 +117,9 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		return
 	}
 
-	var vaultErr *paymentmethods.VaultError
-	if errors.As(err, &vaultErr) {
-		writeVaultError(r, vaultErr)
+	var pmErr *paymentmethods.PaymentMethodError
+	if errors.As(err, &pmErr) {
+		writePaymentMethodError(r, pmErr)
 		return
 	}
 
@@ -135,6 +136,8 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		r.ErrorJSON(http.StatusConflict, "already on this plan")
 	case errors.Is(err, checkout.ErrTierChangeDifferentGroup):
 		r.ErrorJSON(http.StatusBadRequest, "cannot change to a different tier group")
+	case errors.Is(err, subscriptions.ErrRepriceCrossCurrency):
+		r.ErrorJSON(http.StatusBadRequest, "cannot change to a plan in a different currency")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "tier change request failed")
 	}

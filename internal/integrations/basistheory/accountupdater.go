@@ -92,6 +92,13 @@ func (c *Client) UploadAccountUpdaterCSV(ctx context.Context, uploadURL string, 
 	if uploadURL == "" {
 		return errors.New("basistheory: upload url is required")
 	}
+	// SEC-24 item 5 (same class): this URL comes from the PROVIDER's job
+	// payload. It is a pre-signed object-store URL, so its host cannot be
+	// pinned — but it must at least be publicly routable, or the job payload
+	// becomes a lever to POST a CSV of card tokens at an internal service.
+	if err := c.outbound.ValidateURL(uploadURL); err != nil {
+		return fmt.Errorf("basistheory: account updater upload url refused: %w", err)
+	}
 	if len(rows) == 0 {
 		return errors.New("basistheory: account updater upload requires at least one row")
 	}
@@ -130,6 +137,9 @@ func (c *Client) DownloadAccountUpdaterResults(ctx context.Context, downloadURL 
 	downloadURL = strings.TrimSpace(downloadURL)
 	if downloadURL == "" {
 		return nil, errors.New("basistheory: download url is required")
+	}
+	if err := c.outbound.ValidateURL(downloadURL); err != nil {
+		return nil, fmt.Errorf("basistheory: account updater download url refused: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {

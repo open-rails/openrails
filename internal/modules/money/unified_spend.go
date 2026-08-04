@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -50,7 +51,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		return err
 	}
 	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -117,7 +118,7 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 		return nil, fmt.Errorf("source and source_id required")
 	}
 	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)

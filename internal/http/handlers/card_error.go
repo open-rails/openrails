@@ -10,11 +10,11 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-// writeVaultError translates NMI's raw decline vocabulary into OpenRails'
+// writePaymentMethodError translates NMI's raw decline vocabulary into OpenRails'
 // stable public categories. Processor text and localization IDs stay in
 // server-side logs; the browser receives only safe actionable copy.
-func writeVaultError(r *httprequest.Request, vaultErr *paymentmethods.VaultError) {
-	reason := payments.NormalizeFailureReason("nmi", strings.TrimSpace(vaultErr.LocalizationID))
+func writePaymentMethodError(r *httprequest.Request, pmErr *paymentmethods.PaymentMethodError) {
+	reason := payments.NormalizeFailureReason("nmi", strings.TrimSpace(pmErr.LocalizationID))
 	code, message := publicCardFailure(reason)
 	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, message).
 		WithMetadata(map[string]any{"decline_reason": reason}))

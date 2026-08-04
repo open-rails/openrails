@@ -18,7 +18,7 @@ import (
 // split one real customer.
 func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
 	q := gen.New(pool)

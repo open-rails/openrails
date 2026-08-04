@@ -44,6 +44,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
@@ -59,6 +60,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -77,12 +79,21 @@ type Harness struct {
 	t   *testing.T
 	ctx context.Context
 
-	// DSN is the shared, fully-migrated Postgres (OpenRails + AuthKit profiles.*).
+	// DSN is the shared, fully-migrated Postgres (OpenRails + AuthKit profiles.*),
+	// as the unprivileged openrails_app role: RLS ENFORCES on it, exactly as in
+	// production. This is what every server this harness boots connects with.
 	DSN string
+	// SuperDSN is the same database over the privileged role. Fixture seeding
+	// only — it bypasses every RLS policy, so no code under test may run on it.
+	SuperDSN string
 	// Redis is a client over shared Redis (admission throughput axis).
 	Redis *redis.Client
 
 	pool *pgxpool.Pool
+	// merchantPools/merchantDBs cache the RLS-enforcing, merchant-pinned fixture
+	// handles MerchantPool/MerchantDB hand out, one per merchant id.
+	merchantPools map[uuid.UUID]*pgxpool.Pool
+	merchantDBs   map[uuid.UUID]*db.DB
 
 	// persistent harnesses collect resource cleanups for an explicit Close()
 	// instead of t.Cleanup — for package-shared suites that outlive the test
@@ -114,12 +125,13 @@ func (h *Harness) Close() {
 	h.cleanups = nil
 }
 
-// sharedPool lazily opens a privileged pgx pool over the shared DSN for fixture
-// writes (merchant directory row, payer subjects, entitlements).
+// sharedPool lazily opens a privileged pgx pool over SuperDSN for fixture
+// writes (merchant directory row, payer subjects, entitlements) that legitimately
+// span merchants. Never hand it to code under test — it bypasses RLS.
 func (h *Harness) sharedPool() *pgxpool.Pool {
 	h.t.Helper()
 	if h.pool == nil {
-		p, err := pgxpool.New(h.ctx, h.DSN)
+		p, err := pgxpool.New(h.ctx, h.SuperDSN)
 		require.NoError(h.t, err, "open shared pgx pool")
 		h.pool = p
 		h.cleanup(p.Close)
@@ -129,6 +141,63 @@ func (h *Harness) sharedPool() *pgxpool.Pool {
 
 // Pool returns the shared privileged pgx pool for test fixtures.
 func (h *Harness) Pool() *pgxpool.Pool { return h.sharedPool() }
+
+// MerchantPool returns an RLS-ENFORCING pool over h.DSN with app.merchant_id
+// pinned to merchantID — the production posture, not a bypass. It is what a
+// fixture wants when it writes or reads ONE merchant's own rows: the policies
+// stay live, so the fixture proves that merchant can actually see its own data.
+// Privilege (h.Pool) is only for fixtures that legitimately span merchants.
+//
+// Pools are cached per merchant id, so a test that mints several merchants gets
+// one handle each from the same harness. Lifetime follows the harness: t.Cleanup
+// for a per-test harness, Close() for a persistent one — which is why this
+// exists rather than dbtest.SharedMerchantPool, whose pool dies with the test
+// that first asked for it.
+//
+// The pin is re-applied on every acquire: db.lazyMerchantPgxConn.release resets
+// app.merchant_id at SESSION level when a merchant connection goes back to the
+// pool, which would otherwise silently wipe a startup-time pin.
+func (h *Harness) MerchantPool(merchantID uuid.UUID) *pgxpool.Pool {
+	h.t.Helper()
+	if p, ok := h.merchantPools[merchantID]; ok {
+		return p
+	}
+	cfg, err := pgxpool.ParseConfig(h.DSN)
+	require.NoError(h.t, err, "parse app dsn for merchant-pinned pool")
+	cfg.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+		_, err := conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
+		return err == nil
+	}
+	p, err := pgxpool.NewWithConfig(h.ctx, cfg)
+	require.NoError(h.t, err, "open merchant-pinned pgx pool")
+	if h.merchantPools == nil {
+		h.merchantPools = map[uuid.UUID]*pgxpool.Pool{}
+	}
+	h.merchantPools[merchantID] = p
+	h.cleanup(p.Close)
+	return p
+}
+
+// MerchantDB is MerchantPool as a *db.DB — the handle for a fixture that drives
+// a MODULE SERVICE directly, i.e. below the layer that opens the merchant
+// connection in production (the HTTP router / River worker). The fixture stands
+// in for that layer, so it must supply what that layer supplies.
+//
+// A test driving a full ENTRY POINT must NOT use this: proving the code pins the
+// merchant itself is that test's whole point.
+func (h *Harness) MerchantDB(merchantID uuid.UUID) *db.DB {
+	h.t.Helper()
+	if d, ok := h.merchantDBs[merchantID]; ok {
+		return d
+	}
+	d, err := db.NewWithPGXPool(h.MerchantPool(merchantID), config.DefaultSchema)
+	require.NoError(h.t, err, "open merchant-pinned db")
+	if h.merchantDBs == nil {
+		h.merchantDBs = map[uuid.UUID]*db.DB{}
+	}
+	h.merchantDBs[merchantID] = d
+	return d
+}
 
 // Surface is a single running server: its base URL, the bearer token a client
 // must present (empty/trusting for the embedded host — any token works), and a
@@ -189,10 +258,11 @@ func New(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
+	superDSN := dbtest.SharedSuperuserDSN(t)
 
 	rdb, _ := dbtest.SharedRedisClient(t)
 
-	return &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb}
+	return &Harness{t: t, ctx: ctx, DSN: dsn, SuperDSN: superDSN, Redis: rdb}
 }
 
 // NewPersistent is New for a package-shared harness: resource lifetimes are NOT
@@ -202,9 +272,10 @@ func NewPersistent(t *testing.T, ctx context.Context) *Harness {
 	t.Helper()
 
 	dsn := dbtest.SharedPostgresDSN(t)
+	superDSN := dbtest.SharedSuperuserDSN(t)
 	rdb := dbtest.NewSharedRedisClient(t)
 
-	h := &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb, persistent: true}
+	h := &Harness{t: t, ctx: ctx, DSN: dsn, SuperDSN: superDSN, Redis: rdb, persistent: true}
 	h.cleanup(func() { _ = rdb.Close() })
 	return h
 }
@@ -358,8 +429,7 @@ func WithDelegatedAuthenticator(a billingauth.DelegatedAuthenticator) Standalone
 // real RLS, never a privileged bypass. Fixtures are still seeded via the super pool
 // (h.sharedPool), which bypasses RLS for cross-merchant setup an admin does out of band.
 func (h *Harness) StartStandalone(currency string, opts ...StandaloneOption) *Surface {
-	_, appDSN := dbtest.SharedRLSPostgres(h.t)
-	return h.startStandalone(currency, appDSN, "standalone", opts...)
+	return h.startStandalone(currency, h.DSN, "standalone", opts...)
 }
 
 // StartStandaloneSuper boots the same real standalone graph over the PRIVILEGED
@@ -368,7 +438,7 @@ func (h *Harness) StartStandalone(currency string, opts ...StandaloneOption) *Su
 // covered by StartStandalone consumers (cross-merchant isolation + rls tests).
 // New tests should prefer StartStandalone.
 func (h *Harness) StartStandaloneSuper(currency string, opts ...StandaloneOption) *Surface {
-	return h.startStandalone(currency, h.DSN, "standalone-super", opts...)
+	return h.startStandalone(currency, h.SuperDSN, "standalone-super", opts...)
 }
 
 func (h *Harness) startStandalone(currency, appDSN, name string, opts ...StandaloneOption) *Surface {

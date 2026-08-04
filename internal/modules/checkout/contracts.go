@@ -95,9 +95,3 @@ type EligibilityResult struct {
 	ExistingSubscription *models.Subscription
 	ExistingProduct      *models.Product
 }
-
-type UpgradeResponse struct {
-	*CheckoutResponse
-	ProratedAmount    int64      `json:"prorated_amount,omitempty"`
-	OldSubscriptionID *uuid.UUID `json:"old_subscription_id,omitempty"`
-}

@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 	railSub := "rsub-1"
 
 	sale := func(success bool, at time.Time) RemoteTransaction {
-		return RemoteTransaction{TransactionID: "tx-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeSale, Success: success, AmountCents: 5000, Currency: "usd", OccurredAt: at}
+		return RemoteTransaction{TransactionID: "tx-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeSale, Success: success, AmountCents: 5000, Currency: "USD", OccurredAt: at}
 	}
 	decline := func(at time.Time) RemoteTransaction {
 		return RemoteTransaction{TransactionID: "txd-" + at.Format("0102150405"), SubscriptionID: railSub, Type: TransactionTypeDecline, Success: false, OccurredAt: at}
@@ -118,7 +119,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			wantKind:       TransitionCancel,
 			wantBackfill:   1,
 			wantRemoteGone: false,
-			wantCertainty:  CertaintyNonRetryableDecline,
+			wantCertainty:  collection.CertaintyNonRetryableDecline,
 		},
 		{
 			name:           "stale decline + roster cancelled → cancel, remote gone",
@@ -196,7 +197,7 @@ func TestDecide_SnapshotLaw(t *testing.T) {
 			// structurally impossible.
 			wantCertainty := c.wantCertainty
 			if wantCertainty == "" && c.wantKind == TransitionCancel {
-				wantCertainty = CertaintyProviderConfirmedDead
+				wantCertainty = collection.CertaintyProviderConfirmedDead
 			}
 			if d.Kind != TransitionCancel {
 				wantCertainty = ""
@@ -236,7 +237,7 @@ func TestDecide_FirstPartyLaw(t *testing.T) {
 	graceGone := now.Add(-2 * time.Hour)
 
 	active := func(rail string, vaulted bool, end time.Time) SubscriptionState {
-		return SubscriptionState{Status: "active", Rail: rail, Vaulted: vaulted, RailSubscriptionID: "rs", PeriodEnd: &end}
+		return SubscriptionState{Status: "active", Rail: rail, HasPaymentMethod: vaulted, RailSubscriptionID: "rs", PeriodEnd: &end}
 	}
 
 	cases := []struct {
@@ -282,27 +283,27 @@ func TestDecide_FirstPartyLaw(t *testing.T) {
 			EvidenceBundle{},
 			TransitionNone},
 		{"past_due, grace elapsed, no retry scheduled → park (dunning stalled)",
-			SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
+			SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
 			EvidenceBundle{},
 			TransitionParkUnknown},
 		{"past_due, grace elapsed, retry scheduled → none (dunning working)",
-			SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone, NextRetryScheduled: true},
+			SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone, NextRetryScheduled: true},
 			EvidenceBundle{},
 			TransitionNone},
 		{"past_due, grace elapsed, non-retryable decline → cancel (certainty leg)",
-			SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
+			SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
 			EvidenceBundle{Charge: ChargeEvidence{NonRetryableDecline: true}},
 			TransitionCancel},
 		{"past_due, grace elapsed, dunning exhausted → cancel (certainty leg)",
-			SubscriptionState{Status: "past_due", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
+			SubscriptionState{Status: "past_due", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed, GraceEndsAt: &graceGone},
 			EvidenceBundle{Charge: ChargeEvidence{RetryAttempts: 4, DunningMaxAttempts: 4}},
 			TransitionCancel},
 		{"pending → none (signup/pending_stale own it)",
-			SubscriptionState{Status: "pending", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed},
+			SubscriptionState{Status: "pending", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed},
 			EvidenceBundle{},
 			TransitionNone},
 		{"cancelled → none (terminal)",
-			SubscriptionState{Status: "cancelled", Rail: "nmi", Vaulted: true, PeriodEnd: &lapsed},
+			SubscriptionState{Status: "cancelled", Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &lapsed},
 			EvidenceBundle{},
 			TransitionNone},
 	}

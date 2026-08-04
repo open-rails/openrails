@@ -59,6 +59,9 @@ func newMerchant(t *testing.T) merchant.ID {
 	return merchant.ID(uuid.New())
 }
 
+// testAAD is the row binding these tests seal against.
+func testAAD(m merchant.ID) AAD { return SecretAAD(m, "stripe/secret_key") }
+
 func TestEncrypt_RoundTripsPerMerchant(t *testing.T) {
 	ctx := context.Background()
 	enc, err := NewEncryptor(testMasterKey(t), newMemDEKStore())
@@ -71,14 +74,14 @@ func TestEncrypt_RoundTripsPerMerchant(t *testing.T) {
 
 	tA := newMerchant(t)
 	plaintext := []byte("sk_live_super_secret")
-	ct, err := enc.Encrypt(ctx, tA, plaintext)
+	ct, err := enc.Encrypt(ctx, tA, testAAD(tA), plaintext)
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
 	if ct == string(plaintext) {
 		t.Fatal("ciphertext must not equal plaintext")
 	}
-	got, err := enc.Decrypt(ctx, tA, ct)
+	got, err := enc.Decrypt(ctx, tA, testAAD(tA), ct)
 	if err != nil {
 		t.Fatalf("Decrypt: %v", err)
 	}
@@ -91,8 +94,8 @@ func TestEncrypt_NonDeterministic(t *testing.T) {
 	ctx := context.Background()
 	enc, _ := NewEncryptor(testMasterKey(t), newMemDEKStore())
 	tA := newMerchant(t)
-	c1, _ := enc.Encrypt(ctx, tA, []byte("same"))
-	c2, _ := enc.Encrypt(ctx, tA, []byte("same"))
+	c1, _ := enc.Encrypt(ctx, tA, testAAD(tA), []byte("same"))
+	c2, _ := enc.Encrypt(ctx, tA, testAAD(tA), []byte("same"))
 	if c1 == c2 {
 		t.Fatal("two encryptions of the same plaintext must differ (random nonce)")
 	}
@@ -104,12 +107,12 @@ func TestDecrypt_CrossMerchantFails(t *testing.T) {
 	tA := newMerchant(t)
 	tB := newMerchant(t)
 
-	ctA, err := enc.Encrypt(ctx, tA, []byte("tenant-A-secret"))
+	ctA, err := enc.Encrypt(ctx, tA, testAAD(tA), []byte("tenant-A-secret"))
 	if err != nil {
 		t.Fatalf("Encrypt A: %v", err)
 	}
 	// Merchant B's DEK must NOT be able to decrypt merchant A's ciphertext.
-	if _, err := enc.Decrypt(ctx, tB, ctA); err == nil {
+	if _, err := enc.Decrypt(ctx, tB, testAAD(tB), ctA); err == nil {
 		t.Fatal("merchant B must not decrypt merchant A's ciphertext")
 	}
 }
@@ -126,7 +129,7 @@ func TestDEK_CreatedLazilyAndReused(t *testing.T) {
 	}
 
 	// First encrypt creates+stores exactly one wrapped DEK.
-	if _, err := enc.Encrypt(ctx, tA, []byte("x")); err != nil {
+	if _, err := enc.Encrypt(ctx, tA, testAAD(tA), []byte("x")); err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
 	if store.puts != 1 {
@@ -138,7 +141,7 @@ func TestDEK_CreatedLazilyAndReused(t *testing.T) {
 
 	// Subsequent ops reuse the cached DEK (no further puts).
 	for i := 0; i < 3; i++ {
-		if _, err := enc.Encrypt(ctx, tA, []byte("y")); err != nil {
+		if _, err := enc.Encrypt(ctx, tA, testAAD(tA), []byte("y")); err != nil {
 			t.Fatalf("Encrypt: %v", err)
 		}
 	}
@@ -154,7 +157,7 @@ func TestDEK_SurvivesNewEncryptorInstance(t *testing.T) {
 	tA := newMerchant(t)
 
 	enc1, _ := NewEncryptor(master, store)
-	ct, err := enc1.Encrypt(ctx, tA, []byte("persisted"))
+	ct, err := enc1.Encrypt(ctx, tA, testAAD(tA), []byte("persisted"))
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
@@ -162,7 +165,7 @@ func TestDEK_SurvivesNewEncryptorInstance(t *testing.T) {
 	// A fresh encryptor (cold cache) over the same store + master key must unwrap
 	// the stored DEK and decrypt successfully.
 	enc2, _ := NewEncryptor(master, store)
-	got, err := enc2.Decrypt(ctx, tA, ct)
+	got, err := enc2.Decrypt(ctx, tA, testAAD(tA), ct)
 	if err != nil {
 		t.Fatalf("Decrypt with fresh encryptor: %v", err)
 	}
@@ -177,11 +180,11 @@ func TestDecrypt_WrongMasterKeyFails(t *testing.T) {
 	tA := newMerchant(t)
 
 	enc1, _ := NewEncryptor(testMasterKey(t), store)
-	ct, _ := enc1.Encrypt(ctx, tA, []byte("secret"))
+	ct, _ := enc1.Encrypt(ctx, tA, testAAD(tA), []byte("secret"))
 
 	// A different master key cannot unwrap the stored DEK.
 	enc2, _ := NewEncryptor(testMasterKey(t), store)
-	if _, err := enc2.Decrypt(ctx, tA, ct); err == nil {
+	if _, err := enc2.Decrypt(ctx, tA, testAAD(tA), ct); err == nil {
 		t.Fatal("decrypt with wrong master key must fail")
 	}
 }
@@ -195,7 +198,7 @@ func TestDisabledEncryptor(t *testing.T) {
 	if enc.Enabled() {
 		t.Fatal("encryptor with no master key must be disabled")
 	}
-	if _, err := enc.Encrypt(ctx, newMerchant(t), []byte("x")); !errors.Is(err, ErrEncryptionDisabled) {
+	if _, err := enc.Encrypt(ctx, newMerchant(t), testAAD(newMerchant(t)), []byte("x")); !errors.Is(err, ErrEncryptionDisabled) {
 		t.Fatalf("expected ErrEncryptionDisabled, got %v", err)
 	}
 }

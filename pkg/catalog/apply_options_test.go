@@ -31,7 +31,7 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 					Action: PriceCreate,
 					CreateReq: billingservice.CreatePriceRequest{
 						UnitAmount: 999,
-						Currency:   "usd",
+						Currency:   "USD",
 						Archived:   false,
 					},
 				}},

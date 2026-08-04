@@ -34,7 +34,7 @@ func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg Acknowle
 
 const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM openrails.payment_settlement_events
- WHERE merchant_id = $1
+ WHERE merchant_id = $1::uuid
    AND delivered_at IS NOT NULL
    AND delivered_at < $2::timestamptz
 `

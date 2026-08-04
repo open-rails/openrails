@@ -29,6 +29,10 @@ type StripeCredentials struct {
 	SecretKey            string
 	WebhookSigningSecret string
 	WebhookSigningThin   string
+	// WebhookSigningPrevious is the outgoing secret during an api_version
+	// rollover (#856). Both endpoints deliver through the overlap, so inbound
+	// verification must accept both secrets.
+	WebhookSigningPrevious string
 }
 
 // NMITokenizationConfig is browser-facing NMI tokenization configuration for a
@@ -50,7 +54,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 		return creds, nil
 	}
 	if s.pool == nil {
-		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin)
+		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin, SecretStripeWebhookSigningPrevious)
 	}
 	scope, ok, err := s.activePSPSecretScope(ctx, id, "stripe", s.providerEnvironment)
 	if err != nil {
@@ -71,7 +75,11 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if err != nil {
 		return creds, err
 	}
-	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	if err != nil {
+		return creds, err
+	}
+	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
 }
 
 func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
@@ -135,7 +143,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	return cfg, nil
 }
 
-func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName string) (StripeCredentials, error) {
+func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName, previousName string) (StripeCredentials, error) {
 	var creds StripeCredentials
 	var err error
 	if creds.SecretKey, err = s.secretValue(ctx, id, secretKeyName); err != nil {
@@ -146,6 +154,11 @@ func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.I
 	}
 	if creds.WebhookSigningThin, err = s.secretValue(ctx, id, thinName); err != nil {
 		return creds, err
+	}
+	if previousName != "" {
+		if creds.WebhookSigningPrevious, err = s.secretValue(ctx, id, previousName); err != nil {
+			return creds, err
+		}
 	}
 	return creds, nil
 }
@@ -524,7 +537,11 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	if err != nil {
 		return creds, false, err
 	}
-	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	if err != nil {
+		return creds, false, err
+	}
+	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
 	return c, true, err
 }
 
@@ -599,8 +616,14 @@ func PspID(rail, environment, accountID string) uuid.UUID {
 // global-uniqueness upsert: it returns ErrRailMerchantAccountOwnedByAnotherMerchant
 // (wrapped with the conflicting identity) when (rail, environment, account_id)
 // already belongs to a merchant other than merchantID, and nil when the account
-// is unclaimed or already this merchant's. q MUST be a privileged (non-RLS)
-// querier so it can see accounts across merchants.
+// is unclaimed or already this merchant's.
+//
+// #824: the ownership question is global by definition, so it goes through the
+// cross-merchant directory function (migration 0016). Reading psps directly on
+// q could only ever see the caller's OWN merchant, which made this assertion
+// pass unconditionally — the only thing still catching a hijack was UpsertPSP's
+// `ON CONFLICT … WHERE psps.merchant_id = EXCLUDED.merchant_id`, and it reports
+// the conflict as an opaque no-rows.
 func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rail, environment, accountID string) error {
 	accountID = strings.TrimSpace(accountID)
 	if q == nil || accountID == "" {
@@ -611,19 +634,12 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 	if environment == "" {
 		return errors.New("merchants: provider account environment must be live or test")
 	}
-	row, err := q.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
-		Rail:        rail,
-		Environment: &environment,
-		AccountID:   accountID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	owner, found, err := resolvePSPOwner(ctx, q, rail, environment, accountID)
+	if err != nil || !found {
 		return err
 	}
-	if row.MerchantID != merchantID {
-		return fmt.Errorf("provider account %s:%s (%s): %w", row.Rail, row.AccountID, row.Environment, ErrRailMerchantAccountOwnedByAnotherMerchant)
+	if uuid.UUID(owner.MerchantID) != merchantID {
+		return fmt.Errorf("provider account %s:%s (%s): %w", owner.Rail, owner.AccountID, owner.Environment, ErrRailMerchantAccountOwnedByAnotherMerchant)
 	}
 	return nil
 }
@@ -632,6 +648,17 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 // its rail-native identity. Use this at webhook/callback boundaries where the
 // provider payload or route carries account_id and the merchant should be derived
 // from the account row.
+//
+// #824: this is a genuinely cross-merchant read — inbound webhooks have no
+// merchant context yet, which is the whole point. It used to run
+// GetPSPByRailIdentity on the base pool under a comment claiming a "privileged,
+// non-RLS role"; no such role exists (one pool, one DSN), so under the
+// production openrails_app role psps' FORCE'd merchant_isolation policy made it
+// return zero rows and no error, and EVERY account-routed CCBill/Basis
+// Theory/Stripe-account webhook answered 404 "Unknown provider account". It now
+// goes through the explicit SECURITY DEFINER directory function (migration
+// 0016), which raises instead of returning empty when it cannot see across
+// merchants.
 func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return RailMerchantAccountIdentity{}, false, nil
@@ -641,10 +668,17 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	if environment == "" {
 		return RailMerchantAccountIdentity{}, false, errors.New("merchants: provider account environment must be live or test")
 	}
-	row, err := gen.New(s.pool).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+	return resolvePSPOwner(ctx, gen.New(s.pool), rail, environment, strings.TrimSpace(accountID))
+}
+
+// resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
+// made. q may be bound to anything (pool, merchant-pinned conn, tx): the
+// definer function is what supplies cross-merchant visibility, not the handle.
+func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
+	row, err := q.ResolvePSPOwnerByRailIdentity(ctx, gen.ResolvePSPOwnerByRailIdentityParams{
 		Rail:        rail,
 		Environment: &environment,
-		AccountID:   strings.TrimSpace(accountID),
+		AccountID:   accountID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RailMerchantAccountIdentity{}, false, nil
@@ -652,13 +686,23 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	if err != nil {
 		return RailMerchantAccountIdentity{}, false, err
 	}
+	if row.ID == nil || row.MerchantID == nil {
+		return RailMerchantAccountIdentity{}, false, nil
+	}
 	return RailMerchantAccountIdentity{
-		ID:          row.ID,
-		MerchantID:  merchant.ID(row.MerchantID),
-		Rail:        row.Rail,
-		Environment: row.Environment,
-		AccountID:   row.AccountID,
+		ID:          *row.ID,
+		MerchantID:  merchant.ID(*row.MerchantID),
+		Rail:        derefString(row.Rail),
+		Environment: derefString(row.Environment),
+		AccountID:   derefString(row.AccountID),
 	}, true, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // LiveRailPresence is the TRI-state answer to "does a live PSP exist on this

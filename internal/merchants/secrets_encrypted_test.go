@@ -106,7 +106,7 @@ func TestEncryptedSecretStore_CrossMerchantIsolation(t *testing.T) {
 	}
 	// Merchant B has its own DEK; merchant A's ciphertext is unreadable as B.
 	rawA, _ := inner.Get(ctx, tA, SecretStripeSecretKey)
-	if _, err := enc.Decrypt(ctx, tB, rawA.Value); err == nil {
+	if _, err := enc.Decrypt(ctx, tB, crypto.SecretAAD(tB, SecretStripeSecretKey), rawA.Value); err == nil {
 		t.Fatal("merchant B must not decrypt merchant A's stored secret")
 	}
 }
@@ -120,5 +120,46 @@ func TestNewEncryptedSecretStore_DisabledPassThrough(t *testing.T) {
 	}
 	if got != inner {
 		t.Fatal("disabled encryptor must return the inner store unchanged")
+	}
+}
+
+// TestEncryptedSecretStore_CiphertextIsBoundToItsRow is the SEC-24 item 1
+// guard. Distinct DEKs already stop CROSS-MERCHANT relocation. This is the
+// within-merchant case the audit named: an actor with DB WRITE access moves one
+// merchant's webhook_signing_secret blob into its security_key row, or an NMI
+// test key into the Stripe live-key slot. Same DEK, so before AAD binding it
+// decrypted cleanly and the process then used the wrong credential.
+func TestEncryptedSecretStore_CiphertextIsBoundToItsRow(t *testing.T) {
+	ctx := context.Background()
+	inner := NewMemorySecretStore()
+	enc := newEnc(t)
+	store, _ := NewEncryptedSecretStore(inner, enc)
+	tA := merchant.ID(uuid.New())
+
+	if _, err := store.Put(ctx, tA, SecretStripeWebhookSigning, "whsec_real"); err != nil {
+		t.Fatalf("Put webhook secret: %v", err)
+	}
+	blob, err := inner.Get(ctx, tA, SecretStripeWebhookSigning)
+	if err != nil {
+		t.Fatalf("read raw ciphertext: %v", err)
+	}
+
+	// Relocate the ciphertext into a DIFFERENT name for the SAME merchant —
+	// exactly what a DB-write actor can do.
+	if _, err := inner.Put(ctx, tA, SecretStripeSecretKey, blob.Value); err != nil {
+		t.Fatalf("relocate blob: %v", err)
+	}
+	if _, err := store.Get(ctx, tA, SecretStripeSecretKey); err == nil {
+		t.Fatal("a ciphertext moved into another (merchant, name) row must NOT decrypt: " +
+			"AAD binds it to the row it was sealed for (SEC-24 item 1)")
+	}
+
+	// The row it belongs to still round-trips.
+	got, err := store.Get(ctx, tA, SecretStripeWebhookSigning)
+	if err != nil {
+		t.Fatalf("original row must still decrypt: %v", err)
+	}
+	if got.Value != "whsec_real" {
+		t.Fatalf("round-trip mismatch: %q", got.Value)
 	}
 }

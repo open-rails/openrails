@@ -24,10 +24,9 @@ import (
 // grace entitlement windows — the auto-renew sub's STANDING window keeps
 // access intact through CCBill's dunning.
 func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -65,7 +64,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -172,10 +171,9 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -212,7 +210,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,

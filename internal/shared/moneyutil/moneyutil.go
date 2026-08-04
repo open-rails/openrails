@@ -21,8 +21,11 @@ type Micros int64
 // most card rails (NMI, Stripe) charge in for 2-decimal currencies.
 type Cents int64
 
-func ParseDecimalToCents(value string) (int64, error) {
-	return parseDecimalScaled(value, CentsPerMajorUnit)
+// ParseDecimalToCents is the provider-decimal-string -> minor-unit boundary
+// (MONEY-6): exact rational, half-away-from-zero, int64-overflow error.
+func ParseDecimalToCents(value string) (Cents, error) {
+	v, err := parseDecimalScaled(value, CentsPerMajorUnit)
+	return Cents(v), err
 }
 
 func parseDecimalScaled(value string, scale int64) (int64, error) {
@@ -40,30 +43,37 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 	return roundHalfAwayFromZero(scaled)
 }
 
-func CentsToMicros(cents int64) int64 {
-	return cents * MicrosPerCent
+// GAP-12 / or#863. Unit changes are typed, so handing cents to a micros
+// parameter (or the reverse) is a compile error rather than a mischarge.
+//
+// The internal->rail direction lives in currency.go and is currency-aware
+// (NativeToRailMinor / NativeToRailMinorExact). The currency-BLIND
+// MicrosToCentsCeil/MicrosToCentsExact that 14 provider boundaries used to
+// call are DELETED, not deprecated: an exported converter that cannot see the
+// currency is a converter that cannot refuse an amount whose currency nobody
+// established, and it is not reintroducible if it does not exist.
+//
+// Deliberately NOT converted (see docs/invariants.md GAP-12): DB columns are
+// still bare bigint, most struct fields are still int64, and
+// NativeToRailMinor still takes int64 because its input is "internal units at
+// the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —
+// typing it Micros would be a lie.
+
+// CentsToMicros widens a rail minor amount into internal micros. Valid for
+// every registered currency only because every registered currency has the
+// same 10^4 native shift — TestRegistryNativeShiftIsUniform pins that, and
+// FAILS the moment a currency is registered that breaks it. Currency-aware
+// callers should prefer RailMinorToNative.
+func CentsToMicros(cents Cents) Micros {
+	return Micros(int64(cents) * MicrosPerCent)
 }
 
-func MicrosToCentsCeil(micros int64) int64 {
-	if micros <= 0 {
-		return 0
-	}
-	return (micros + MicrosPerCent - 1) / MicrosPerCent
+func FormatMicrosDecimal(micros Micros) string {
+	return formatDecimal(int64(micros), MicrosPerMajorUnit, 6)
 }
 
-func MicrosToCentsExact(micros int64) (int64, error) {
-	if micros%MicrosPerCent != 0 {
-		return 0, fmt.Errorf("amount %d micros is not representable in whole cents", micros)
-	}
-	return micros / MicrosPerCent, nil
-}
-
-func FormatMicrosDecimal(micros int64) string {
-	return formatDecimal(micros, MicrosPerMajorUnit, 6)
-}
-
-func FormatCentsDecimal(cents int64) string {
-	return formatDecimal(cents, CentsPerMajorUnit, 2)
+func FormatCentsDecimal(cents Cents) string {
+	return formatDecimal(int64(cents), CentsPerMajorUnit, 2)
 }
 
 func formatDecimal(amount, scale int64, width int) string {
@@ -86,7 +96,7 @@ func formatDecimal(amount, scale int64, width int) string {
 	return fmt.Sprintf("%d.%0*d", major, width, minor)
 }
 
-func FormatDisplay(micros int64, currency string) string {
+func FormatDisplay(micros Micros, currency string) string {
 	code := strings.ToUpper(strings.TrimSpace(currency))
 	amount := FormatMicrosDecimal(micros)
 	if code == "" {
@@ -101,7 +111,7 @@ func FormatDisplay(micros int64, currency string) string {
 	return fmt.Sprintf("%s %s", amount, code)
 }
 
-func FormatUSD(micros int64) string {
+func FormatUSD(micros Micros) string {
 	amount := FormatMicrosDecimal(micros)
 	if strings.HasPrefix(amount, "-") {
 		return "-$" + strings.TrimPrefix(amount, "-")

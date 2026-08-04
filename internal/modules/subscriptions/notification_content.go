@@ -16,7 +16,7 @@ type EmailContent struct {
 
 func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Welcome to %s! Your subscription is confirmed", premiumName),
@@ -57,7 +57,7 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 
 func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s subscription has been renewed", premiumName),
@@ -229,7 +229,7 @@ func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.
 }
 
 func RenderPaymentFailedEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
-	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
+	amountLine := moneyutil.FormatDisplay(moneyutil.Micros(data.Amount), data.Currency)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkHTML := ""
 	linkText := ""
@@ -279,4 +279,104 @@ func subscriptionProductName(storeName, productName string) string {
 		premiumName = storeName + " Premium"
 	}
 	return premiumName
+}
+
+// RenderPaymentMethodUpdateRequiredEmail is the or#870 BUCKET 2 notice: the
+// rail told us this card cannot be charged (expired, bad CVC, call issuer...),
+// so we STOPPED charging it. The subscription and the customer's access are
+// still live — they just need to update the card. The one email in the ladder
+// that is a recovery opportunity rather than an apology or a goodbye.
+func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
+	premiumName := subscriptionProductName(storeName, data.ProductName)
+	linkHTML := ""
+	linkText := ""
+	if customerPortalURL != "" {
+		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Update payment method</a></p>`, customerPortalURL)
+		linkText = fmt.Sprintf("Update your payment method here: %s", customerPortalURL)
+	}
+
+	return EmailContent{
+		Subject: fmt.Sprintf("Please update the payment method for your %s subscription", premiumName),
+		HTML: fmt.Sprintf(`
+			<h2>Your Payment Method Needs Updating</h2>
+			<p>Hi %s,</p>
+			<p>Your bank declined the card saved for your %s subscription, and it won't work on future renewals — so we've paused charging it rather than trying again.</p>
+			<ul>
+				<li><strong>Subscription ID:</strong> %s</li>
+				<li><strong>Payment method:</strong> %s</li>
+			</ul>
+			<p><strong>Your access is still active.</strong> Add or update a card and your subscription carries on as normal. If nothing changes, the subscription will eventually end.</p>
+			%s
+			<p>The %s Team</p>
+		`, data.Username, premiumName, data.SubscriptionID, data.PaymentMethod, linkHTML, storeName),
+		Plain: fmt.Sprintf(`
+			Please update the payment method for your %s subscription
+
+			Hi %s,
+
+			Your bank declined the card saved for your %s subscription, and it won't work on
+			future renewals — so we've paused charging it rather than trying again.
+
+			Subscription ID: %s
+			Payment method: %s
+
+			Your access is still active. Add or update a card and your subscription carries
+			on as normal. If nothing changes, the subscription will eventually end.
+
+			%s
+
+			The %s Team
+		`, premiumName, data.Username, premiumName, data.SubscriptionID, data.PaymentMethod, linkText, storeName),
+	}
+}
+
+// RenderSubscriptionNonRecoverableEmail is the or#870 BUCKET 3 goodbye: the
+// issuer withdrew the recurring mandate (NMI 261/262, Stripe
+// revocation_of_authorization) or the instrument is permanently dead
+// (pick-up/lost/stolen/fraudulent). We cancelled the schedule at the rail. We
+// did NOT touch their stored payment method — only they delete that — and they
+// are welcome to re-subscribe.
+func RenderSubscriptionNonRecoverableEmail(storeName, checkoutURL string, data SubscriptionEmailData) EmailContent {
+	premiumName := subscriptionProductName(storeName, data.ProductName)
+	linkHTML := ""
+	linkText := ""
+	if checkoutURL != "" {
+		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Re-subscribe</a></p>`, checkoutURL)
+		linkText = fmt.Sprintf("Re-subscribe any time: %s", checkoutURL)
+	}
+
+	return EmailContent{
+		Subject: fmt.Sprintf("Your %s subscription has ended", premiumName),
+		HTML: fmt.Sprintf(`
+			<h2>Your Subscription Has Ended</h2>
+			<p>Hi %s,</p>
+			<p>Your bank told us the card on your %s subscription can no longer be used for recurring payments, so we've ended the subscription rather than keep trying.</p>
+			<ul>
+				<li><strong>Subscription ID:</strong> %s</li>
+			</ul>
+			<p>Nothing was changed about the payment methods saved to your account — you can review or remove them yourself at any time.</p>
+			<p>When you're ready, start a new subscription with a different card and you're back in.</p>
+			%s
+			<p>The %s Team</p>
+		`, data.Username, premiumName, data.SubscriptionID, linkHTML, storeName),
+		Plain: fmt.Sprintf(`
+			Your %s subscription has ended
+
+			Hi %s,
+
+			Your bank told us the card on your %s subscription can no longer be used for
+			recurring payments, so we've ended the subscription rather than keep trying.
+
+			Subscription ID: %s
+
+			Nothing was changed about the payment methods saved to your account — you can
+			review or remove them yourself at any time.
+
+			When you're ready, start a new subscription with a different card and you're back in.
+
+			%s
+
+			The %s Team
+		`, premiumName, data.Username, premiumName, data.SubscriptionID, linkText, storeName),
+	}
 }

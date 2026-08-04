@@ -54,7 +54,7 @@ type perfSeed struct {
 // lookups are O(1) and need no gate.
 func TestQueryPerformance(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	scale := queryPerfScale(t)

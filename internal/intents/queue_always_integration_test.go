@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -23,8 +24,7 @@ import (
 // limited), and it drains once the mode allows.
 func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	subID, productID, priceID := uuid.New(), uuid.New(), uuid.New()
@@ -41,7 +41,7 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "qa-prod-"+uuid.NewString()[:8], tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
@@ -67,6 +67,9 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 		SubscriptionID: &subID,
 		FailureReason:  &reason,
 		Terminal:       true,
+		// #839: Terminal is a REQUEST; it needs a named certainty leg or the
+		// row parks. This scenario is dunning genuinely exhausted.
+		TerminalCertainty: collection.CertaintyDunningExhausted,
 	}))
 
 	// The decision is durable: cancelled + marker + PENDING system-origin intent.
@@ -99,7 +102,12 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 			Config:   cfg,
 		}
 	}
-	_, err := runnerFor(limitedModeConfig()).RunExecuteOnce(ctx)
+	// or#842: a system-origin delete is queued with a cooling-off window, so it
+	// is not due yet. This test is about the MODE gate, not the schedule — make
+	// it due so the executor actually claims it.
+	_, err := pool.Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", intentID)
+	require.NoError(t, err)
+	_, err = runnerFor(limitedModeConfig()).RunExecuteOnce(ctx)
 	require.NoError(t, err)
 	got := fx.intent(t, intentID)
 	assert.Equal(t, StatusPending, got.Status, "limited mode parks the queued delete, never executes it")

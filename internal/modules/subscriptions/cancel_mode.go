@@ -57,6 +57,47 @@ func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bo
 	return deleteAt, true
 }
 
+// SystemDeleteCoolingOff is how long an AUTOMATED (system-origin) terminal
+// cancellation waits before its irreversible rail-side delete becomes due
+// (or#842). A user cancel already has an undo window; the automated paths —
+// dunning exhaustion, unknown-resolution convergence — queued the delete at
+// `now`, so a cancellation our own malfunction produced (a stale roster, a
+// misread decline) reached the provider before anything could notice.
+//
+// The window is not a delay for its own sake: NMIDeleteHandler.CheckRelevance
+// re-reads the subscription at execution time and SUPERSEDES the delete if the
+// row is no longer a cancelled-awaiting-delete one. A late renewal charge, a
+// converge pass that resurrects the row, or an operator undo inside the window
+// therefore leaves the rail schedule intact — the delete simply never happens.
+// 24h covers one full worker/reconcile cycle plus an operator's working day.
+const SystemDeleteCoolingOff = 24 * time.Hour
+
+// SystemDeferredDeleteAt is when an automated terminal cancellation's rail-side
+// delete becomes due: now + SystemDeleteCoolingOff, shortened when a KNOWN
+// future rebill would otherwise fire first.
+//
+// The clamp is the same doctrine as NMIDeleteSafetyMargin: the delete must land
+// strictly before the rail's next auto-charge or the customer is billed after
+// being cancelled. When the paid period ends in the future but the 48h pre-rebill
+// margin has already opened, there is no safe room to wait at all and the delete
+// is due immediately, exactly as before. The dominant automated case — a
+// subscription already past its period end — has no known future charge date, so
+// it gets the full window.
+func SystemDeferredDeleteAt(sub *models.Subscription, now time.Time) time.Time {
+	due := now.Add(SystemDeleteCoolingOff)
+	if !periodEndsInFuture(sub, now) {
+		return due
+	}
+	margin := sub.CurrentPeriodEndsAt.Add(-NMIDeleteSafetyMargin)
+	if due.Before(margin) {
+		return due
+	}
+	if margin.Before(now) {
+		return now
+	}
+	return margin
+}
+
 // CancelModeFor returns the cancellation capability for a subscription — each
 // rail's answer lives in its #669 descriptor (rails.Descriptor.CancelMode; NMI
 // is state-conditional: reversible only while its deferred delete is pending,

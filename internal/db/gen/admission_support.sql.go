@@ -33,32 +33,6 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 	return result.RowsAffected(), nil
 }
 
-const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
-DELETE FROM openrails.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2
-  AND scope = $3 AND scope_key = $4
-`
-
-type DeleteInvokerSpendLimitParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Scope      string
-	ScopeKey   string
-}
-
-func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvokerSpendLimitParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteInvokerSpendLimit,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Scope,
-		arg.ScopeKey,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
 SELECT id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1

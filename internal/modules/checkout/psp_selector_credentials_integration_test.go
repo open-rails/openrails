@@ -23,15 +23,13 @@ import (
 // merchants.Service — no fake resolvers), and the bare rail kind must refuse
 // with both keys named instead of silently picking one.
 func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
-
 	// A dedicated merchant: two armed nmi rows on the shared test merchant
 	// would make bare-"nmi" resolution ambiguous for concurrently running
-	// packages.
+	// packages. Every handle below is pinned to it, so RLS enforces throughout.
 	nano := time.Now().UnixNano()
 	mid := merchant.ID(uuid.New())
+	dbi := dbtest.OpenMerchantDB(t, mid.UUID())
+	pool := dbi.Pool()
 	slug := fmt.Sprintf("psp848-%d", nano)
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,

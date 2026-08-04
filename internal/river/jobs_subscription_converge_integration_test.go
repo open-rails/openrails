@@ -69,10 +69,10 @@ func newConvergeFakeStripe(t *testing.T) *convergeFakeStripe {
 func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	// ---- seed one active Stripe subscription mid-renewal --------------------
 	suffix := uuid.NewString()[:8]
@@ -91,7 +91,7 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "burst-prod-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,'{}'::jsonb,$7,$8)`,
@@ -283,7 +283,7 @@ func seedConvergeE2ESubscription(t *testing.T, dbi *db.DB, baseCtx context.Conte
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			f.productID, "e2e-prod-"+suffix, f.merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			f.priceID, f.productID, f.merchantID)
 		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
@@ -346,9 +346,9 @@ func awaitConvergeCompletion(t *testing.T, events <-chan *river.Event) {
 func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "stripe", "sub_e2e_"+uuid.NewString()[:8])
 
@@ -439,9 +439,9 @@ func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "nmi", "nmi_e2e_"+uuid.NewString()[:8])
 

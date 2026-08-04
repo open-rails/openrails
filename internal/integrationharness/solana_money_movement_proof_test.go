@@ -124,16 +124,16 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 
 	manifest := catalog.Manifest{
 		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "usd"}},
+		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "USD"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
-			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "usd", Amount: solanaPtrI64(50_000)}},
+			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "USD", Amount: solanaPtrI64(50_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "30d",
 				AutoRenew:  true,
 				PSPs:       []string{"solana"}, // priced for the Solana rail
@@ -234,7 +234,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID, priceID uuid.UUID, reference, entitlement string) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payer := openrails.CustomerID(uuid.New())
 	payerID := payer.UUID()
@@ -269,7 +269,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
-		Currency:   "usd",
+		Currency:   "USD",
 		Amount:     50_000,
 		Source:     "solana-money-movement",
 		SourceID:   &depositSourceID,
@@ -282,7 +282,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 2_500,
 		RequestID:       requestID,
 		Source:          "solana-money-movement",
@@ -310,7 +310,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	err = pool.QueryRow(ctx, `
 		INSERT INTO openrails.payments
 			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot)
-		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'usd', 'completed', $6::jsonb)
+		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb)
 		RETURNING id, entitlements_spec_snapshot
 	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
 		`{"entitlements":["`+entitlement+`"]}`).Scan(&paymentID, &snapshot)

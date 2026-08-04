@@ -290,17 +290,17 @@ func createNMISandboxVault(t *testing.T, client *nmi.NMIClient, securityKey stri
 		"test_mode":      {"enabled"},
 	})
 	require.Equalf(t, "1", out.Get("response"), "NMI add_customer should succeed: %s", out.Get("responsetext"))
-	vaultID := out.Get("customer_vault_id")
-	require.NotEmpty(t, vaultID, "NMI should return a customer_vault_id")
+	railCustomerRef := out.Get("customer_vault_id")
+	require.NotEmpty(t, railCustomerRef, "NMI should return a customer_vault_id")
 	t.Cleanup(func() {
 		postNMIForm(t, client.DirectPostURL, url.Values{
 			"customer_vault":    {"delete_customer"},
 			"security_key":      {securityKey},
-			"customer_vault_id": {vaultID},
+			"customer_vault_id": {railCustomerRef},
 			"test_mode":         {"enabled"},
 		})
 	})
-	return vaultID
+	return railCustomerRef
 }
 
 func verifyNMITransaction(t *testing.T, client *nmi.NMIClient, securityKey, txnID string, amountMicroUSD int64) {

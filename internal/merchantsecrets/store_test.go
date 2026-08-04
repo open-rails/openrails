@@ -93,7 +93,8 @@ func TestRequiresSecretEncryption_EnvSignal(t *testing.T) {
 		env  string
 		want bool
 	}{
-		{"", false}, {"dev", false}, {"development", false},
+		// SEC-18: an UNDECLARED env is not development — it requires encryption.
+		{"", true}, {"dev", false}, {"development", false},
 		{"production", true}, {"staging", true},
 	}
 	for _, tc := range cases {

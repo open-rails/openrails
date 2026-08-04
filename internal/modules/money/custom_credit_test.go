@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 func TestRequireBillingCurrencyRejectsCustom(t *testing.T) {
@@ -23,11 +25,11 @@ func TestCurrencyRegistryRejectsBlank(t *testing.T) {
 	if got := NormalizeCurrency(""); got != "" {
 		t.Fatalf("NormalizeCurrency(\"\") = %q, want empty", got)
 	}
-	if err := ValidateCurrency(""); err == nil {
-		t.Fatal("ValidateCurrency(\"\") must reject blank")
+	if err := moneyutil.ValidateCurrency(""); err == nil {
+		t.Fatal("moneyutil.ValidateCurrency(\"\") must reject blank")
 	}
-	if _, ok := CurrencyScale(""); ok {
-		t.Fatal("CurrencyScale(\"\") must reject blank")
+	if _, ok := moneyutil.CurrencyScale(""); ok {
+		t.Fatal("moneyutil.CurrencyScale(\"\") must reject blank")
 	}
 }
 

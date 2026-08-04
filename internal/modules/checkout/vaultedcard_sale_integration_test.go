@@ -139,8 +139,7 @@ type vaultedCardFixture struct {
 
 func newVaultedCardFixture(t *testing.T, networkTokens bool) *vaultedCardFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -426,7 +425,7 @@ func TestVaultedCardCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.T) 
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: method.ID,
 		AmountCents:     199,
-		Currency:        "usd",
+		Currency:        "USD",
 		IdempotencyKey:  "invoice:test:attempt:0",
 	})
 	require.Error(t, err)

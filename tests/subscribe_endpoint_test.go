@@ -77,8 +77,8 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if customerVault == "add_customer" {
 		// Create customer vault response
-		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
-		response = fmt.Sprintf("response=1&responsetext=SUCCESS&customer_vault_id=%s", vaultID)
+		railCustomerRef := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
+		response = fmt.Sprintf("response=1&responsetext=SUCCESS&customer_vault_id=%s", railCustomerRef)
 	} else if customerVault == "update_customer" {
 		response = "response=1&responsetext=SUCCESS"
 	} else if customerVault == "delete_customer" {
@@ -132,8 +132,8 @@ func (m *MockNMIServer) handleV5(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `{"type":"validationError","error_code":"E_VALIDATION","message":"%s"}`, m.FailReason)
 			return
 		}
-		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
-		fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}`, vaultID)
+		railCustomerRef := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
+		fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}`, railCustomerRef)
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/customers/"):
 		_, _ = w.Write([]byte(`{"object":"customer","id":"` + strings.TrimPrefix(r.URL.Path, "/customers/") + `"}`))
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/customers/"):

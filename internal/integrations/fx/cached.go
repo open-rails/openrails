@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // CachedProvider wraps another Provider with in-memory caching.
@@ -75,7 +77,7 @@ func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency str
 
 // QuoteToUSD returns a cached quote to USD.
 func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return p.Quote(ctx, currency, "usd")
+	return p.Quote(ctx, currency, money.DefaultCurrency)
 }
 
 // InvalidateAll clears the entire cache.

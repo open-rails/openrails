@@ -93,8 +93,9 @@ SELECT DISTINCT ON (s.payment_method_id)
     p.purchased_at      AS purchased_at,
     p.status            AS status
 FROM openrails.subscriptions s
-JOIN openrails.payments p ON p.subscription_id = s.id
+JOIN openrails.payments p ON p.subscription_id = s.id AND p.deleted_at IS NULL
 WHERE s.payment_method_id = ANY(sqlc.arg(ids)::uuid[])
+  AND s.deleted_at IS NULL
 ORDER BY s.payment_method_id, p.purchased_at DESC;
 
 -- name: CountPaymentMethodsSharingCustomerRef :one

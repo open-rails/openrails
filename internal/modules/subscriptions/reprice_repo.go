@@ -179,14 +179,38 @@ func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, 
 	return out, nil
 }
 
-// ListRedrivableBlockedPlanChanges (#816) is the re-driver's CROSS-MERCHANT
-// enumeration (base pool, same posture as the River workers' other sweeps):
-// plan_change rows blocked by a rail push failure — the deferred-window
+// ListRedrivableMerchants (#816 / or#861) lists the merchants holding a
+// rail-push-blocked plan_change reprice, through migration 0022's SECURITY
+// DEFINER work queue. Ids only: the rows themselves are read per-merchant by
+// ListRedrivableBlockedPlanChanges under a pinned connection.
+func (r *RepriceRepo) ListRedrivableMerchants(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	limit32, _ := safecast.Convert[int32](limit)
+	rows, err := r.db.GenDirectory().ListRedrivablePlanChangeMerchants(ctx, limit32)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, id := range rows {
+		if id != nil {
+			out = append(out, *id)
+		}
+	}
+	return out, nil
+}
+
+// ListRedrivableBlockedPlanChanges (#816) reads ONE merchant's re-drivable
+// rows: plan_change rows blocked by a rail push failure — the deferred-window
 // refusals and the push-verified-then-crash window. Classification blocks
 // stay terminal and are excluded by the reason prefix.
+//
+// or#861: this used to read the rows off the base pool, believing that gave it
+// a cross-merchant view. It did not — subscription_reprices FORCEs RLS, so a
+// GUC-less read matched `merchant_id = NULL` and the #816 re-driver never
+// re-drove anything. The enumeration is now ListRedrivableMerchants and the
+// rows come from the merchant's own scope, where RLS supplies the predicate.
 func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batchSize int) ([]*models.SubscriptionReprice, error) {
 	batch32, _ := safecast.Convert[int32](batchSize)
-	rows, err := r.db.GenGlobal().ListRedrivableBlockedPlanChangeReprices(ctx, batch32)
+	rows, err := r.db.Gen(ctx).ListRedrivableBlockedPlanChangeReprices(ctx, batch32)
 	if err != nil {
 		return nil, err
 	}

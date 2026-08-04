@@ -225,6 +225,7 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'
+  AND deleted_at IS NULL
 `
 
 // The breaker's budget baseline: max(floor, pct of active subscriptions).
@@ -237,11 +238,10 @@ func (q *Queries) CountActiveSubscriptionsByMerchant(ctx context.Context, mercha
 
 const countDestructiveIntentsByActorSince = `-- name: CountDestructiveIntentsByActorSince :one
 
-SELECT count(*) FROM openrails.rail_intents
-WHERE actor = $1::text
-  AND origin IN ('user', 'admin')
-  AND intent_type = ANY ($2::text[])
-  AND created_at >= $3::timestamptz
+SELECT openrails.count_destructive_intents_by_actor_since(
+    $1::text,
+    $2::text[],
+    $3::timestamptz)
 `
 
 type CountDestructiveIntentsByActorSinceParams struct {
@@ -259,23 +259,23 @@ type CountDestructiveIntentsByActorSinceParams struct {
 // credential-theft surface; origin='system' (automated dunning / decline
 // cleanup) is #679's job and must NOT burn the anti-theft budget. Counts by
 // CREATION (created_at), not execution: the ceiling stops the burst at the
-// producer chokepoint, before the write-ahead intent is even created. These
-// run cross-merchant (per-actor AND global), so callers must execute them on a
-// non-merchant-pinned connection (the base pool), like the other cross-tenant
-// worker sweeps.
+// producer chokepoint, before the write-ahead intent is even created. These run
+// cross-merchant (per-actor AND global) through migration 0021's SECURITY
+// DEFINER readers — NOT the base pool. The base pool is not privileged: it is
+// the same openrails_app role, so a GUC-less count is not cross-merchant, it is
+// EMPTY (or#824/or#860).
 // Destructive user/admin intents THIS actor created in the rolling window.
 func (q *Queries) CountDestructiveIntentsByActorSince(ctx context.Context, arg CountDestructiveIntentsByActorSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsByActorSince, arg.Actor, arg.IntentTypes, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var count_destructive_intents_by_actor_since int64
+	err := row.Scan(&count_destructive_intents_by_actor_since)
+	return count_destructive_intents_by_actor_since, err
 }
 
 const countDestructiveIntentsGlobalSince = `-- name: CountDestructiveIntentsGlobalSince :one
-SELECT count(*) FROM openrails.rail_intents
-WHERE origin IN ('user', 'admin')
-  AND intent_type = ANY ($1::text[])
-  AND created_at >= $2::timestamptz
+SELECT openrails.count_destructive_intents_since(
+    $1::text[],
+    $2::timestamptz)
 `
 
 type CountDestructiveIntentsGlobalSinceParams struct {
@@ -286,11 +286,18 @@ type CountDestructiveIntentsGlobalSinceParams struct {
 // Destructive user/admin intents ALL actors + ALL merchants created in the
 // rolling window — the absolute frying-protection ceiling even if many actor
 // identities are forged.
+//
+// or#860: both counts go through migration 0021's SECURITY DEFINER readers, NOT
+// a base-pool SELECT. rail_intents FORCEs RLS; a GUC-less count under
+// openrails_app matched `merchant_id = NULL` and returned 0, so the ceiling was
+// structurally never exceeded — a fail-OPEN safety control. The definer RAISES
+// when its owner cannot bypass RLS, so a mis-owned schema now fails loudly
+// instead of silently permitting unlimited destructive intents.
 func (q *Queries) CountDestructiveIntentsGlobalSince(ctx context.Context, arg CountDestructiveIntentsGlobalSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDestructiveIntentsGlobalSince, arg.IntentTypes, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var count_destructive_intents_since int64
+	err := row.Scan(&count_destructive_intents_since)
+	return count_destructive_intents_since, err
 }
 
 const countDestructiveRailIntentsExecutedSince = `-- name: CountDestructiveRailIntentsExecutedSince :one
@@ -351,6 +358,32 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSystemDestructiveIntentsForMerchantSince = `-- name: CountSystemDestructiveIntentsForMerchantSince :one
+SELECT openrails.count_system_destructive_intents_for_merchant_since(
+    $1::uuid,
+    $2::text[],
+    $3::timestamptz)
+`
+
+type CountSystemDestructiveIntentsForMerchantSinceParams struct {
+	MerchantID  uuid.UUID
+	IntentTypes []string
+	Since       time.Time
+}
+
+// or#842: the AUTOMATED leg. The two counts above are deliberately blind to
+// origin='system', which left the ceiling absent for exactly the paths that
+// queue the most irreversible work with no human in the loop. System origin is
+// walled PER MERCHANT (migration 0024): a flat deployment-wide number does not
+// survive fleet scale, a per-merchant window does, and one merchant's runaway
+// convergence is the shape this must see.
+func (q *Queries) CountSystemDestructiveIntentsForMerchantSince(ctx context.Context, arg CountSystemDestructiveIntentsForMerchantSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSystemDestructiveIntentsForMerchantSince, arg.MerchantID, arg.IntentTypes, arg.Since)
+	var count_system_destructive_intents_for_merchant_since int64
+	err := row.Scan(&count_system_destructive_intents_for_merchant_since)
+	return count_system_destructive_intents_for_merchant_since, err
 }
 
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
@@ -433,9 +466,11 @@ type EnqueueRailIntentParams struct {
 // #358 phase A: provider intent ledger queries — idempotent enqueue, the
 // executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
 // and relevance-window expiry. merchant_id is stamped explicitly by the
-// producers (request paths run on a tenant-pinned connection, so RLS
-// double-checks the stamp); the executor/verifier workers sweep cross-tenant
-// on the privileged pool like the other River workers.
+// producers (request paths run on a merchant-pinned connection, so RLS
+// double-checks the stamp). The executor/verifier workers do NOT sweep
+// cross-merchant: there is no privileged pool, so they fan out over the
+// merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
+// that merchant's own pinned scope (or#862).
 // ============================================================================
 // Enqueue (effectively-once per logical intent)
 // ============================================================================
@@ -612,6 +647,81 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 		&i.NotifiedSeverity,
 	)
 	return i, err
+}
+
+const listDueRailIntentMerchants = `-- name: ListDueRailIntentMerchants :many
+
+SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListDueRailIntentMerchantsParams struct {
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// ============================================================================
+// or#862: deployment-wide executor / verifier fan-out
+// ============================================================================
+// CROSS-MERCHANT: the merchants the executor pass must visit, through migration
+// 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
+// River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
+// claim matched `merchant_id = NULL` and leased ZERO intents — the whole
+// outbound provider-mutation plane was inert, and the #836 kill switch and #679
+// volume breaker (which only run on a claimed intent) never executed. Ids only:
+// the claim, the gates and the execution run per-merchant under
+// RunInMerchantConn, where these same predicates re-apply.
+func (q *Queries) ListDueRailIntentMerchants(ctx context.Context, arg ListDueRailIntentMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueRailIntentMerchants, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueVerifyRailIntentMerchants = `-- name: ListDueVerifyRailIntentMerchants :many
+SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
+    $1::timestamptz,
+    $2::int)
+`
+
+type ListDueVerifyRailIntentMerchantsParams struct {
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
+func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg ListDueVerifyRailIntentMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueVerifyRailIntentMerchants, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRailIntents = `-- name: ListRailIntents :many

@@ -18,8 +18,6 @@ type (
 	DeclaredPaymentMethod = billingimport.DeclaredPaymentMethod
 	PaymentMethodRef      = billingimport.PaymentMethodRef
 	CancelEvidence        = billingimport.CancelEvidence
-	DeclaredPayment       = billingimport.DeclaredPayment
-	DeclaredDunningEvent  = billingimport.DeclaredDunningEvent
 	DunningEvidence       = billingimport.DunningEvidence
 	DeclaredTransaction   = billingimport.DeclaredTransaction
 	DeclaredSubscription  = billingimport.DeclaredSubscription

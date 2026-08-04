@@ -440,25 +440,6 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListSubscriptionsByCustomerRail(ctx, gen.ListSubscriptionsByCustomerRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return nil, err
-	}
-	subs, err := r.manyWithDetails(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	return derefSubs(subs), nil
-}
-
 func (r *SubscriptionRepo) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByRail(ctx, rail)
 	if err != nil {

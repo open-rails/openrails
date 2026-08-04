@@ -51,7 +51,9 @@ func seedSolanaRailAccount(t *testing.T, dbi *db.DB, mid merchant.ID, accountID 
 	}
 	raw, err := json.Marshal(evidence)
 	require.NoError(t, err)
-	_, err = dbi.Pool().Exec(context.Background(), `
+	// psps is merchant-policied: seed it on a connection pinned to the merchant
+	// that owns the row, which is the production posture — not on dbi's base pool.
+	_, err = dbtest.SharedMerchantPool(t, mid.UUID()).Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'solana', 'live', $2, false, $3::jsonb)
 	`, mid.String(), accountID, raw)
@@ -66,8 +68,7 @@ func newSolanaMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 }
 
 func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-store-"+sfx)
@@ -96,8 +97,7 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 // resolves NO client (fail closed); a declared account without RPC knobs
 // arms the public-RPC default.
 func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	// Merchant declares NO solana account at all.
@@ -121,8 +121,7 @@ func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 }
 
 func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-bad-"+sfx)
@@ -183,8 +182,7 @@ func jsonID(id any) string {
 // SKIPPED (fail closed — no boot plane exists, #788). Per merchant, per pass,
 // RLS-scoped.
 func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	rdb := dbtest.NewSharedRedisClient(t)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
@@ -231,7 +229,7 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 			PriceID:     uuid.NewString(),
 			SessionID:   uuid.NewString(),
 			Amount:      1000000,
-			Currency:    "usd",
+			Currency:    "USD",
 			Token:       "USDC",
 			TokenMint:   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 			TokenAmount: 1000000,

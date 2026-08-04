@@ -4,7 +4,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +48,7 @@ import (
 func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	require.NotNil(t, suite.App.Runtime.RedisClient, "admit needs Redis")
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// The customer-treasury surface rebinds the payer to the customer's payable
 	// subject = the customer/merchant uuid (#567), so both the delegation it stores

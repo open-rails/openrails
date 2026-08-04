@@ -96,11 +96,18 @@ type Product struct {
 }
 
 type CreditBalance struct {
-	Key            string `json:"key" yaml:"key"`
-	Unit           string `json:"unit" yaml:"unit"`
+	Key  string `json:"key" yaml:"key"`
+	Unit string `json:"unit" yaml:"unit"`
+	// ExpiresDefault is the DECLARED expiry every grant into this balance
+	// inherits unless it declares its own `expires` (e.g. "365d"). Omitting it
+	// means balances in this bucket never expire — OpenRails supplies no
+	// implicit clock of its own (#857).
 	ExpiresDefault string `json:"expires_default,omitempty" yaml:"expires_default,omitempty"`
 }
 
+// CreditGrant is one product-bundled deposit into a declared credit balance.
+// Expiry comes from `expires` here, else the balance's `expires_default`, else
+// nowhere — and "nowhere" means the granted balance never expires (#857).
 type CreditGrant struct {
 	Key string `json:"key" yaml:"key"`
 	// Unit is resolved from the referenced CreditBalance during validation.

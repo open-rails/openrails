@@ -18,8 +18,7 @@ import (
 func newPriceKeyTestService(t *testing.T) (*Service, context.Context, uuid.UUID) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
 	svc := &Service{rt: &app.Runtime{
 		DB:             dbi,
@@ -48,7 +47,7 @@ func TestCreatePrice_AmountEditSameKey_VersionBumpAndGrandfather(t *testing.T) {
 	key := product.Key + "-monthly"
 
 	original, err := svc.CreatePrice(ctx, CreatePriceRequest{
-		ProductID: product.ID, Key: key, UnitAmount: 1000000, Currency: "usd",
+		ProductID: product.ID, Key: key, UnitAmount: 1000000, Currency: "USD",
 		AccessDurationHours: intPtrPK(720), AutoRenew: true,
 	})
 	require.NoError(t, err)
@@ -65,7 +64,7 @@ func TestCreatePrice_AmountEditSameKey_VersionBumpAndGrandfather(t *testing.T) {
 
 	// Edit the amount under the SAME key: $10 -> $12.
 	bumped, err := svc.CreatePrice(ctx, CreatePriceRequest{
-		ProductID: product.ID, Key: key, UnitAmount: 1200000, Currency: "usd",
+		ProductID: product.ID, Key: key, UnitAmount: 1200000, Currency: "USD",
 		AccessDurationHours: intPtrPK(720), AutoRenew: true,
 	})
 	require.NoError(t, err)
@@ -114,7 +113,7 @@ func TestCreatePrice_FlipFlop_TwoRowsTotal(t *testing.T) {
 
 	priceReq := func(amount int64) CreatePriceRequest {
 		return CreatePriceRequest{
-			ProductID: product.ID, Key: key, UnitAmount: amount, Currency: "usd",
+			ProductID: product.ID, Key: key, UnitAmount: amount, Currency: "USD",
 			AccessDurationHours: intPtrPK(720), AutoRenew: true,
 		}
 	}
@@ -159,7 +158,7 @@ func TestCreatePrice_RelabelInPlace(t *testing.T) {
 	newKey := product.Key + "-premium-monthly"
 
 	price, err := svc.CreatePrice(ctx, CreatePriceRequest{
-		ProductID: product.ID, Key: oldKey, UnitAmount: 500000, Currency: "usd",
+		ProductID: product.ID, Key: oldKey, UnitAmount: 500000, Currency: "USD",
 		AccessDurationHours: intPtrPK(720), AutoRenew: true,
 	})
 	require.NoError(t, err)

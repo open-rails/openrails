@@ -41,6 +41,7 @@ WHERE merchant_id = $1
 SELECT c.id, c.subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
+       AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
 FROM openrails.customers c
@@ -52,6 +53,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'))
 ORDER BY c.last_seen_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
@@ -66,6 +68,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'));
 
 -- name: UpsertCustomerBySubject :one
@@ -78,3 +81,16 @@ ON CONFLICT (id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
 RETURNING id;
+
+-- #824: the hosted portal's "which merchants am I a customer of" directory
+-- (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+-- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+-- name: ListMerchantsForCustomerSubject :many
+SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND m.status = 'active'
+  AND m.id IN (
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject(sqlc.arg(subject)::text)
+  )
+ORDER BY m.slug;

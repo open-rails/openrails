@@ -26,7 +26,7 @@ func short() string { return strings.ReplaceAll(uuid.NewString(), "-", "")[:10] 
 func testGrants(t *testing.T) (*grants.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -191,7 +191,7 @@ func TestGrants_RevokeAsOfOwnershipRevokedAt(t *testing.T) {
 // A credit grant materializes as a #512 ledger deposit; idempotent.
 func TestGrants_CreditDepositSeam(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	amount := int64(5000)
 	g, err := l.Grant(ctx, grants.GrantInput{
 		Customer: customer, Product: &product, Kind: grants.Credit, Source: grants.Purchase, SourceID: "pay_" + short(),

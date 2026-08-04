@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,7 +83,7 @@ func TestRefundAmountCents(t *testing.T) {
 	tests := []struct {
 		name      string
 		micros    int64
-		wantCents int64
+		wantCents moneyutil.Cents
 		wantErr   bool
 	}{
 		{name: "sixty dollars", micros: 60_000_000, wantCents: 6000},
@@ -93,7 +94,7 @@ func TestRefundAmountCents(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cents, err := refundAmountCents(tt.micros)
+			cents, err := refundAmountCents("USD", tt.micros)
 			if tt.wantErr {
 				require.Error(t, err)
 				return

@@ -22,6 +22,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 `
 
@@ -81,6 +82,45 @@ type EnsureCustomerRowParams struct {
 func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) error {
 	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID, arg.Subject)
 	return err
+}
+
+const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
+SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND m.status = 'active'
+  AND m.id IN (
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject($1::text)
+  )
+ORDER BY m.slug
+`
+
+type ListMerchantsForCustomerSubjectRow struct {
+	Slug        string
+	DisplayName string
+}
+
+// #824: the hosted portal's "which merchants am I a customer of" directory
+// (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+// customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject string) ([]ListMerchantsForCustomerSubjectRow, error) {
+	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMerchantsForCustomerSubjectRow
+	for rows.Next() {
+		var i ListMerchantsForCustomerSubjectRow
+		if err := rows.Scan(&i.Slug, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockCustomerForMerchant = `-- name: LockCustomerForMerchant :one
@@ -143,6 +183,7 @@ const searchCustomers = `-- name: SearchCustomers :many
 SELECT c.id, c.subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
+       AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
 FROM openrails.customers c
@@ -154,6 +195,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 ORDER BY c.last_seen_at DESC
 LIMIT $4 OFFSET $3

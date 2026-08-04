@@ -106,7 +106,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 			TierRank:    intPtr(1),
 			Prices: []catalog.Price{{
 				UnitAmount: 1299,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "30d",
 				AutoRenew:  true,
 			}},
@@ -201,7 +201,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 			TierRank:    intPtr(1),
 			Prices: []catalog.Price{{
 				UnitAmount: 1499,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "30d",
 				AutoRenew:  true,
 			}},
@@ -288,7 +288,7 @@ func TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP(t *testing.T) {
 				DisplayName: "Price Key Bump Product",
 				Prices: []catalog.Price{{
 					UnitAmount: amount,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 				}},
@@ -459,7 +459,7 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 				RateCards: []catalog.RateCard{{
 					Meter: meterKey,
 					Price: catalog.RatePrice{
-						Model: "per_unit", Currency: "usd",
+						Model: "per_unit", Currency: "USD",
 						PerUnit: &catalog.PerUnitPrice{
 							DivideBy: 3600,
 							Matrix: &catalog.Matrix{Dimension: "size_slug", Cells: map[string]catalog.MatrixCell{
@@ -474,7 +474,7 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 				DisplayName: "Image Credit Top-up",
 				Credits:     []catalog.CreditGrant{{Key: "image-credit"}},
 				Prices: []catalog.Price{{
-					Currency: "usd",
+					Currency: "USD",
 					Model:    "tiered",
 					Tiered: &catalog.TieredPrice{Mode: "graduated", Tiers: []catalog.RateTier{
 						{UpTo: ptrI64(2000), UnitAmount: 10000},
@@ -534,16 +534,16 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	productKey := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
 		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: "native-lifecycle-usd", Unit: "usd"}},
+		CreditBalances: []catalog.CreditBalance{{Key: "native-lifecycle-usd", Unit: "USD"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  "Native Lifecycle Product",
 			Description:  "published catalog anchor for native lifecycle proof",
 			Entitlements: []string{"native-lifecycle-premium"},
-			Credits:      []catalog.CreditGrant{{Key: "native-lifecycle-usd", Currency: "usd", Amount: ptrI64(10_000)}},
+			Credits:      []catalog.CreditGrant{{Key: "native-lifecycle-usd", Currency: "USD", Amount: ptrI64(10_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: 10_000,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "indefinite",
 				PSPs:       []string{},
 			}},
@@ -597,7 +597,7 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 			DisplayName: "Metered Usage Product",
 			Prices: []catalog.Price{{
 				UnitAmount: 0,
-				Currency:   "usd",
+				Currency:   "USD",
 				PSPs:       []string{},
 				Metered: &catalog.MeteredPrice{
 					Meter:    meterKey,
@@ -640,7 +640,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	// events (100+200+120) plus one without the dimension (counts as 1) —
 	// aggregate 421 -> round_half_up(421 * 250_000 / 100) = 1_052_500.
 	mctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payerID := uuid.New()
 	t.Cleanup(func() {
@@ -654,7 +654,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 		_, err := moneySvc.RecordUsage(mctx, money.RecordUsageParams{
 			Payer:      &payer,
 			Invoker:    "test-invoker",
-			Currency:   "usd",
+			Currency:   "USD",
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: quantity},
 			Amount:     0,
@@ -667,7 +667,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	_, err = moneySvc.RecordUsage(mctx, money.RecordUsageParams{
 		Payer:      &payer,
 		Invoker:    "test-invoker",
-		Currency:   "usd",
+		Currency:   "USD",
 		EventType:  meterKey,
 		Amount:     0,
 		Source:     "metered-usage-http",
@@ -706,7 +706,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 				DisplayName: "Included Movie",
 				Prices: []catalog.Price{{
 					UnitAmount: 4_990_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "indefinite",
 					PSPs:       []string{},
 				}},
@@ -717,7 +717,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 				Includes:    []string{childKey},
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "indefinite",
 					PSPs:       []string{},
 				}},
@@ -740,7 +740,7 @@ func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
 	var child billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &child))
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customer := uuid.New()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
@@ -808,7 +808,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 				UsageLimits: []string{limitKey},
 				Prices: []catalog.Price{{
 					UnitAmount: 20_000_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 					PSPs:       []string{},
@@ -822,7 +822,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 				UsageLimits: []string{limit20Key},
 				Prices: []catalog.Price{{
 					UnitAmount: 80_000_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 					PSPs:       []string{},
@@ -846,7 +846,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	var product20 billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product20))
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customer := openrails.CustomerID(uuid.New())
 	customerID := customer.UUID()
@@ -874,7 +874,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &customer,
 		Invoker:    customerID.String(),
-		Currency:   "usd",
+		Currency:   "USD",
 		Amount:     1_000,
 		Source:     "catalog-usage-limit",
 		SourceID:   &depositSourceID,
@@ -887,7 +887,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Invoker:         customerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        measure,
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 60,
 		RequestID:       firstID,
 		Source:          "catalog-usage-limit",
@@ -902,7 +902,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Invoker:         customerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        measure,
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 50,
 		RequestID:       secondID,
 		Source:          "catalog-usage-limit",
@@ -935,7 +935,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Invoker:         customerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        measure,
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 150,
 		RequestID:       upgradeID,
 		Source:          "catalog-usage-limit",
@@ -983,7 +983,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Entitlements: []string{"premium"},
 				Prices: []catalog.Price{{
 					UnitAmount: 9_990_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 				}},
@@ -995,7 +995,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				TierRank:    intPtr(1),
 				Prices: []catalog.Price{{
 					UnitAmount: 19_990_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 				}},
@@ -1007,7 +1007,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				TierRank:    intPtr(2),
 				Prices: []catalog.Price{{
 					UnitAmount: 49_990_000,
-					Currency:   "usd",
+					Currency:   "USD",
 					Duration:   "30d",
 					AutoRenew:  true,
 					Trial:      &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"},
@@ -1017,18 +1017,18 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 				Key:         aiSlug,
 				DisplayName: "AI Image Credits",
 				Credits:     []catalog.CreditGrant{{Key: "ai-image-gen", Unit: aiUnit, Amount: ptrI64(100)}},
-				Prices:      []catalog.Price{{UnitAmount: 5_000_000, Currency: "usd", Duration: "indefinite"}},
+				Prices:      []catalog.Price{{UnitAmount: 5_000_000, Currency: "USD", Duration: "indefinite"}},
 			},
 			{
 				Key:         apiSlug,
 				DisplayName: "fal.ai API Credits",
 				Credits:     []catalog.CreditGrant{{Key: "fal-api", Unit: apiUnit, Amount: ptrI64(2_000)}},
-				Prices:      []catalog.Price{{UnitAmount: 20_000_000, Currency: "usd", Duration: "indefinite"}},
+				Prices:      []catalog.Price{{UnitAmount: 20_000_000, Currency: "USD", Duration: "indefinite"}},
 			},
 			{
 				Key:         movieKey,
 				DisplayName: "Catalog Movie",
-				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "usd", Duration: "indefinite"}},
+				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "USD", Duration: "indefinite"}},
 			},
 		},
 	}
@@ -1070,7 +1070,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Nil(t, moviePrices[0].AccessDurationHours)
 	require.False(t, moviePrices[0].AutoRenew)
 
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	customerID := uuid.New()
 	customer := identity.CustomerID(customerID)
@@ -1221,7 +1221,7 @@ func serviceCreditsToModel(in billingservice.CreditsSpec) models.CreditsSpec {
 func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, productID uuid.UUID) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payer := openrails.CustomerID(uuid.New())
 	payerID := payer.UUID()
@@ -1258,7 +1258,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
-		Currency:   "usd",
+		Currency:   "USD",
 		Amount:     10_000,
 		Source:     "catalog-native-lifecycle",
 		SourceID:   &depositSourceID,
@@ -1274,7 +1274,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 2_500,
 		RequestID:       requestID,
 		Source:          "native-lifecycle",

@@ -382,7 +382,7 @@ func TestGate_ReleaseAfterBucketExpiryNoNegativeWindow(t *testing.T) {
 
 	require.NoError(t, g.Release(ctx, spendgate.ReleaseInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
 
-	ws, err := g.WindowStatus(ctx, m, c, cur, pol, req)
+	ws, err := g.WindowUsage(ctx, m, c, cur, pol, req)
 	require.NoError(t, err)
 	require.Len(t, ws, 1)
 	require.Equal(t, int64(0), ws[0].Used, "release must not recreate an expired bucket as a negative key")

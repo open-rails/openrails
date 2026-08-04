@@ -54,28 +54,55 @@ type PlanMigrationRedriveResult struct {
 	Failed int `json:"failed"`
 }
 
-// RedriveBlocked enumerates re-drivable blocked plan-change rows across all
-// merchants and re-drives each under its own merchant context. batchSize
-// bounds one pass (default 200).
+// RedriveBlocked re-drives blocked plan-change rows across every merchant that
+// has one. batchSize bounds one pass (default 200).
+//
+// or#861: this used to read the ROWS deployment-wide off the base pool, which
+// is not a cross-merchant read path — subscription_reprices FORCEs RLS, so the
+// list came back empty and the #816 re-driver has never re-driven anything.
+// The enumeration is now a SECURITY DEFINER work queue returning merchant IDS
+// (migration 0022), and every row read, every rail push and every batch-header
+// re-sync happens inside that merchant's own pinned scope. A definer must not
+// vend whole merchant rows, and this way it does not have to.
 func (s *PlanMigrationService) RedriveBlocked(ctx context.Context, batchSize int) (*PlanMigrationRedriveResult, error) {
 	if batchSize <= 0 {
 		batchSize = 200
 	}
-	rows, err := s.reprice.repo.ListRedrivableBlockedPlanChanges(ctx, batchSize)
+	merchantIDs, err := s.reprice.repo.ListRedrivableMerchants(ctx, batchSize)
 	if err != nil {
-		return nil, fmt.Errorf("redrive: list blocked plan changes: %w", err)
+		return nil, fmt.Errorf("redrive: list merchants with blocked plan changes: %w", err)
 	}
 	res := &PlanMigrationRedriveResult{}
-	touchedBatches := map[uuid.UUID]uuid.UUID{} // batch id -> merchant id
+	for _, mid := range merchantIDs {
+		if res.Examined >= batchSize {
+			break
+		}
+		remaining := batchSize - res.Examined
+		if err := s.reprice.repo.db.RunInMerchantScope(ctx, merchant.ID(mid), "plan-migration re-driver",
+			func(ctx context.Context) error { return s.redriveMerchant(ctx, res, remaining) },
+		); err != nil {
+			// Driver errors (DB unavailable mid-pass etc.) end the pass;
+			// everything already re-driven stays done and the next tick
+			// resumes — same partial-failure posture as Migrate itself.
+			return res, err
+		}
+	}
+	return res, nil
+}
+
+// redriveMerchant runs one merchant's re-drive inside its pinned scope: read
+// the blocked rows, re-drive each, then re-sync every touched batch header.
+func (s *PlanMigrationService) redriveMerchant(ctx context.Context, res *PlanMigrationRedriveResult, limit int) error {
+	rows, err := s.reprice.repo.ListRedrivableBlockedPlanChanges(ctx, limit)
+	if err != nil {
+		return fmt.Errorf("redrive: list blocked plan changes: %w", err)
+	}
+	touchedBatches := map[uuid.UUID]struct{}{}
 	for _, row := range rows {
 		res.Examined++
-		mctx := merchant.WithID(ctx, merchant.ID(row.MerchantID))
-		outcome, rerr := s.redriveRow(mctx, row)
+		outcome, rerr := s.redriveRow(ctx, row)
 		if rerr != nil {
-			// Row-level driver errors (DB unavailable mid-pass etc.) end the
-			// pass; everything already re-driven stays done and the next tick
-			// resumes — same partial-failure posture as Migrate itself.
-			return res, fmt.Errorf("redrive row %s: %w", row.ID, rerr)
+			return fmt.Errorf("redrive row %s: %w", row.ID, rerr)
 		}
 		switch outcome {
 		case redriveOutcomePushed:
@@ -91,22 +118,21 @@ func (s *PlanMigrationService) RedriveBlocked(ctx context.Context, batchSize int
 			res.Failed++
 		}
 		if row.RepriceBatchID != nil && outcome != redriveOutcomeDeferred && outcome != redriveOutcomeSkipped {
-			touchedBatches[*row.RepriceBatchID] = row.MerchantID
+			touchedBatches[*row.RepriceBatchID] = struct{}{}
 		}
 	}
 	// Re-sync every touched batch header from its actual rows — the header
 	// must always agree with the per-subscription ledger (#813 invariant).
-	for batchID, merchantID := range touchedBatches {
-		mctx := merchant.WithID(ctx, merchant.ID(merchantID))
-		scheduled, blocked, cerr := s.reprice.repo.CountBatchRows(mctx, batchID)
+	for batchID := range touchedBatches {
+		scheduled, blocked, cerr := s.reprice.repo.CountBatchRows(ctx, batchID)
 		if cerr != nil {
-			return res, fmt.Errorf("redrive: count batch %s rows: %w", batchID, cerr)
+			return fmt.Errorf("redrive: count batch %s rows: %w", batchID, cerr)
 		}
-		if uerr := s.reprice.repo.UpdatePlanMigrationBatchCounts(mctx, batchID, scheduled, blocked); uerr != nil {
-			return res, fmt.Errorf("redrive: sync batch %s counts: %w", batchID, uerr)
+		if uerr := s.reprice.repo.UpdatePlanMigrationBatchCounts(ctx, batchID, scheduled, blocked); uerr != nil {
+			return fmt.Errorf("redrive: sync batch %s counts: %w", batchID, uerr)
 		}
 	}
-	return res, nil
+	return nil
 }
 
 type redriveOutcome int

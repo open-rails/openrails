@@ -20,18 +20,18 @@ import (
 // 3 settled + 1 failed (0.75), one NULL-token_type row folding to 'unknown'.
 func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	m := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, m)
 	pool := dbi.Pool()
 	svc := metrics.NewService(dbi)
 
-	m := uuid.New()
 	mctx := merchant.WithID(ctx, merchant.ID(m))
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	customerID, productID, priceID := uuid.New(), uuid.New(), uuid.New()
 	exec(ctx, t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, m, "tokentype-"+suffix)
 	exec(ctx, t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, customerID, m)
 	exec(ctx, t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'TT', $3)`, productID, "tokentype-p-"+suffix, m)
-	exec(ctx, t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1990000, 'usd', $3)`, priceID, productID, m)
+	exec(ctx, t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1990000, 'USD', $3)`, priceID, productID, m)
 
 	type row struct {
 		status, tokenType string
@@ -48,7 +48,7 @@ func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 		}
 		exec(ctx, t, pool, `INSERT INTO openrails.payments
 			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, token_type, purchased_at)
-			VALUES ($1, $2, $3, $4, 'vaulted_card', $5, 1990000, 1990000, 'usd', $6::openrails.payment_status, $7, '2026-06-10')`,
+			VALUES ($1, $2, $3, $4, 'vaulted_card', $5, 1990000, 1990000, 'USD', $6::openrails.payment_status, $7, '2026-06-10')`,
 			uuid.New(), m, customerID, priceID, "tt-txn-"+suffix+"-"+strings.Repeat("x", i+1), r.status, tt)
 	}
 

@@ -643,7 +643,7 @@ func PriceLabel(productKey string, price Price) string {
 
 // formatMoney renders an internal micros amount as a human currency string.
 func formatMoney(unitAmount int64, currency string) string {
-	amount := moneyutil.FormatMicrosDecimal(unitAmount)
+	amount := moneyutil.FormatMicrosDecimal(moneyutil.Micros(unitAmount))
 	if currency == "" || strings.EqualFold(currency, "usd") {
 		return "$" + amount
 	}

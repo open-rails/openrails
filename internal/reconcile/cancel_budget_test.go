@@ -12,9 +12,9 @@ import (
 func TestCancelBudget_Limit(t *testing.T) {
 	var b CancelBudget
 	cases := map[int]int{
-		0:     1,  // floor: one genuine cancellation must always be able to converge
-		9:     1,  // 5% of 9 rounds to 0 -> floored
-		20:    1,  // 5% of 20 = 1
+		0:     3,  // small-book allowance: a tiny merchant must still converge
+		9:     3,  // 5% of 9 rounds to 0 -> allowance; all nine would still trip
+		20:    3,  // 5% of 20 = 1 -> allowance
 		100:   5,  // 5%
 		500:   25, // 5% would be 25, equal to the absolute cap
 		1000:  25, // absolute cap wins over 5% (=50)

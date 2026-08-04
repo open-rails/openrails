@@ -261,6 +261,13 @@ const getSubscriptionRepriceByID = `-- name: GetSubscriptionRepriceByID :one
 SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices WHERE id = $1
 `
 
+// SEC-18 NOTE: this by-id surface still has NO application-level merchant
+// predicate; RLS is its only control. A GUC-derived predicate (the fix used for
+// the reconciliation findings) is wrong HERE because RepriceRepo is shared with
+// the plan-migration batch/re-driver paths, which do not consistently pin a
+// merchant connection — it would trade a hardening for an availability bug of
+// exactly the #824 shape. The honest fix is threading merchant.ID through the
+// repo, same as the by-customer admin surface. Tracked in SEC-18.
 func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionRepriceByID, id)
 	var i OpenrailsSubscriptionReprice
@@ -325,6 +332,36 @@ func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, b
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRedrivablePlanChangeMerchants = `-- name: ListRedrivablePlanChangeMerchants :many
+SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+    $1::int)
+`
+
+// CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
+// through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
+// used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
+// RLS, so it enumerated nothing and never re-drove. A definer must not vend
+// whole merchant rows, so it vends ids and the rows are read per-merchant.
+func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listRedrivablePlanChangeMerchants, merchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

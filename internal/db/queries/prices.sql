@@ -133,11 +133,6 @@ UPDATE openrails.prices SET
     updated_at = now()
 WHERE id = sqlc.arg(id);
 
--- name: DeletePrice :execrows
-DELETE FROM openrails.prices WHERE id = $1;
-
--- #774: the CURRENT (non-archived) row for a key, if any. At most one exists
--- per (merchant, key) by uq_prices_merchant_key_current.
 -- name: GetCurrentPriceByKey :one
 SELECT * FROM openrails.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND NOT archived;

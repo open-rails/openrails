@@ -34,7 +34,9 @@ func (s *MoneyService) SetCustomerMinimumSpend(ctx context.Context, payer identi
 	}
 	tenantID := tid.UUID()
 	now := s.now()
-	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	// or#868 B2: merchant-pinned, not a bare RunInTx — the ensureCustomer below
+	// is denied 42501 on a GUC-less transaction.
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if amount <= 0 {
 			return q.DeleteCustomerMinimumSpend(ctx, gen.DeleteCustomerMinimumSpendParams{

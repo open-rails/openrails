@@ -83,9 +83,9 @@ func (s *statefulIdemStub) Complete(_ context.Context, op, key string, result js
 // scan), v5 DELETE /subscriptions/{id} (old-sub cancel + rollback), and the
 // classic query search (unused here — proration is zero).
 type fakeNMIUpgradeGateway struct {
-	vaultID string
-	planID  string
-	subID   string
+	railCustomerRef string
+	planID          string
+	subID           string
 
 	createCalls atomic.Int64
 	createMode  atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"
@@ -94,10 +94,10 @@ type fakeNMIUpgradeGateway struct {
 	subDeletes  atomic.Int64
 }
 
-func newFakeNMIUpgradeGateway(t *testing.T, vaultID, planID string) (*fakeNMIUpgradeGateway, *nmi.NMIClient) {
+func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMIUpgradeGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMIUpgradeGateway{
-		vaultID: vaultID, planID: planID,
+		railCustomerRef: railCustomerRef, planID: planID,
 		subID: "rsub-upg-" + uuid.NewString()[:8],
 	}
 	f.createMode.Store("approve")
@@ -108,7 +108,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, vaultID, planID string) (*fakeNMIUpg
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions"):
 			if f.subExists.Load() {
 				fmt.Fprintf(w, `{"subscriptions":[{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}],"next_cursor":null,"has_more":false}`,
-					f.subID, f.vaultID, f.planID)
+					f.subID, f.railCustomerRef, f.planID)
 				return
 			}
 			fmt.Fprint(w, `{"subscriptions":[],"next_cursor":null,"has_more":false}`)
@@ -164,8 +164,7 @@ type upgradeAdoptFixture struct {
 
 func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -197,9 +196,9 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 		CreatedAt: now, UpdatedAt: now,
 	})
 
-	vaultID := "vault-upg-" + sfx
+	railCustomerRef := "vault-upg-" + sfx
 	planID := "plan-upg-" + sfx
-	gateway, client := newFakeNMIUpgradeGateway(t, vaultID, planID)
+	gateway, client := newFakeNMIUpgradeGateway(t, railCustomerRef, planID)
 
 	clock := clockwork.NewRealClock()
 
@@ -208,7 +207,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 		ID:                   uuid.New(),
 		CustomerID:           customerID,
 		Rail:                 models.Rail("nmi"),
-		RailCustomerRef:      vaultID,
+		RailCustomerRef:      railCustomerRef,
 		RailMethodRef:        "bill-upg-" + sfx,
 		RebillDriver:         models.RebillDriverProvider,
 		InitialTransactionID: "txn-" + sfx,
