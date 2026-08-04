@@ -30,6 +30,13 @@ const (
 	// non_recoverable (the issuer withdrew the mandate).
 	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
 
+	// Arrears delinquency (or#878). The TIME axis, not the card axis: the debt
+	// has outlived the merchant's grace window. Nothing is cancelled and no
+	// entitlement is withdrawn — OpenRails refuses new spend and tells the host,
+	// which owns whatever shutoff its product needs.
+	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"
+	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
+
 	// System notifications (1 type)
 	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
 

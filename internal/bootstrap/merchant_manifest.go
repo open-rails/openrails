@@ -388,6 +388,15 @@ type InvoiceConfig struct {
 	// BillingPeriodBoundary: calendar_month | anniversary | fixed_interval.
 	// Default fixed_interval (rolling 30d). calendar_month resets on the 1st.
 	BillingPeriodBoundary string `yaml:"billing_period_boundary,omitempty" koanf:"billing_period_boundary"`
+	// DelinquencyGraceDays (or#878): days past an invoice's due date before the
+	// payer is DELINQUENT — new spend refused and the host signalled to shut off
+	// whatever it runs. Business policy, so it is the merchant's. Default 14;
+	// 0 means delinquent as soon as it is overdue.
+	DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
+	// DelinquencyAmountFloor (micros): the smallest overdue balance that can
+	// escalate. Unset DERIVES from monthly_floor — a debt too small to bother
+	// collecting is too small to cut anyone off for.
+	DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
 }
 
 // BudgetWindowConfig is one delegated-invoker wasted-spend window. Window is a
@@ -841,6 +850,12 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 			}
 			if b := strings.TrimSpace(mt.Invoice.BillingPeriodBoundary); b != "" {
 				conf.InvoiceBillingBoundary = b
+			}
+			if mt.Invoice.DelinquencyGraceDays != nil {
+				conf.ArrearsGraceDays = mt.Invoice.DelinquencyGraceDays
+			}
+			if mt.Invoice.DelinquencyAmountFloor != nil {
+				conf.ArrearsDelinquencyFloor = mt.Invoice.DelinquencyAmountFloor
 			}
 		}
 		if len(mt.DelegatedInvokerWastedSpendWindows) > 0 {

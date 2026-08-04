@@ -38,6 +38,13 @@ type CleanupConfig struct {
 	// payment settlement events (#827) are kept. Default: 30 days. Pending
 	// (unacked) events are never pruned.
 	PaymentSettlementAckedRetention time.Duration
+
+	// HostLifecycleEventAckedRetention is how long acknowledged host-lifecycle
+	// events (or#878 delinquency transitions) are kept. Default: 30 days, the
+	// same as the settlement feed it is modelled on. Pending (unacked) events
+	// are NEVER pruned — an unread shutoff or restore instruction is not
+	// garbage, it is undone work.
+	HostLifecycleEventAckedRetention time.Duration
 }
 
 // DefaultCleanupConfig is the ONE defaults path (#711): worker registration
@@ -49,12 +56,14 @@ func DefaultCleanupConfig() CleanupConfig {
 		NotificationUnseenRetention: 180 * 24 * time.Hour,
 		WebhookEventRetention:       webhooks.WebhookIdempotencyTTL,
 
-		PaymentSettlementAckedRetention: 30 * 24 * time.Hour,
+		PaymentSettlementAckedRetention:  30 * 24 * time.Hour,
+		HostLifecycleEventAckedRetention: 30 * 24 * time.Hour,
 	}
 }
 
 func (c CleanupConfig) validate() error {
-	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 || c.PaymentSettlementAckedRetention <= 0 {
+	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
+		c.PaymentSettlementAckedRetention <= 0 || c.HostLifecycleEventAckedRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
 	return nil
@@ -80,6 +89,7 @@ type CleanupResult struct {
 	NotificationsAll        int64
 	WebhookEvents           int64
 	PaymentSettlements      int64
+	HostLifecycleEvents     int64
 }
 
 // Work runs every retention sweep once per merchant, inside that merchant's own
@@ -136,6 +146,7 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,
 		"payment_settlements":       result.PaymentSettlements,
+		"host_lifecycle_events":     result.HostLifecycleEvents,
 	}).Info("Cleanup completed")
 
 	if cleanupErr != nil {
@@ -196,6 +207,14 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete payment settlements", &result.PaymentSettlements, func(ctx context.Context, q *gen.Queries) (int64, error) {
 		return q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentSettlementAckedRetention),
+		})
+	})
+
+	// 5. Acked host-lifecycle events (or#878). Same discipline as the feed above:
+	// only DELIVERED rows are pruned.
+	sweep("delete host lifecycle events", &result.HostLifecycleEvents, func(ctx context.Context, q *gen.Queries) (int64, error) {
+		return q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.HostLifecycleEventAckedRetention),
 		})
 	})
 }

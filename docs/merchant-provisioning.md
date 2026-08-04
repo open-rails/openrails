@@ -81,6 +81,7 @@ merchants:
       billing_period_boundary: calendar_month
       collection_threshold: 50_000_000
       monthly_floor: 1_000_000
+      delinquency_grace_days: 7    # days past due before delinquent (default 14)
     psps:                          # operator-declared rail accounts
       mobius:
         nmi:
@@ -103,7 +104,10 @@ Per merchant:
   `jwks`, or raw `public_keys`), registered as merchant **owner**: delegated
   tokens signed by that issuer fully administer this one merchant and no other.
 - `profile` — display name, logo, from-email, support/signup URLs.
-- `invoice` — arrears invoicing policy; amounts are micros.
+- `invoice` — arrears invoicing policy; amounts are micros. Includes the
+  delinquency policy (`delinquency_grace_days`, `delinquency_amount_floor`) —
+  see `docs/arrears-delinquency.md` for what OpenRails enforces (new spend) and
+  what the operator must integrate (existing resources).
 - `delegated_invoker_wasted_spend_windows` — per-invoker windowed spend caps.
 - `psps.<key>.<rail>` — one entry per PSP. `key` is the manifest PSP name
   catalog `psp_links` and checkout use ("mobius"); the rail nests inside.

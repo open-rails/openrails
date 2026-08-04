@@ -252,6 +252,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add invoice worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.DelinquencyWorker{
+		DB:    r.DB,
+		Clock: clock,
+	}); err != nil {
+		return fmt.Errorf("add delinquency worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CreditReconcileWorker{
 		Money: r.MoneyService,
 		Clock: clock,
@@ -683,6 +689,21 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.InvoiceArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: arrears delinquency evaluation (or#878). Tighter than
+	// the hourly collection pass on purpose — the exit half of this state
+	// machine is what stops telling a customer who has already paid that they
+	// cannot spend.
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.DelinquencyArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

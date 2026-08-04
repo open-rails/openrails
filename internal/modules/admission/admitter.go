@@ -43,11 +43,22 @@ const DenyDelegatedSpendNotAllowed = "delegated_spend_not_allowed"
 // DenyBudgetExceeded is the deny code when a spend-cap window blocks the request.
 const DenyBudgetExceeded = "budget_exceeded"
 
+// DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
+// outlived the merchant's grace window. Deliberately DISTINCT from
+// insufficient_credit — "you are over your limit" and "you have an unpaid
+// invoice" call for different things from the customer, and a host that cannot
+// tell them apart cannot say anything useful to either.
+const DenyDelinquent = "delinquent_unpaid_invoice"
+
 // Admitter is the service-admit money gate.
 type Admitter struct {
 	money  *money.MoneyService
 	gate   *spendgate.Gate
 	loader *SpendgatePolicyLoader
+
+	// delinquency is the optional or#878 arrears delinquency gate; nil disables
+	// it (the amount cap still applies — the two axes are independent).
+	delinquency DelinquencyGate
 
 	// wasted is the optional $-valued delegated-invoker wasted-spend cutoff (#497);
 	// nil disables it. invokerWastedWindows is the flat per-invoker backstop.
@@ -62,6 +73,19 @@ type Admitter struct {
 // NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
 func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *SpendgatePolicyLoader) *Admitter {
 	return &Admitter{money: moneySvc, gate: gate, loader: loader}
+}
+
+// DelinquencyGate answers whether a payer's arrears debt has outlived the
+// merchant's grace window. An interface so admission depends on the QUESTION,
+// not on the delinquency module's storage.
+type DelinquencyGate interface {
+	IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error)
+}
+
+// WithDelinquency enables the or#878 arrears delinquency admit gate.
+func (a *Admitter) WithDelinquency(g DelinquencyGate) *Admitter {
+	a.delinquency = g
+	return a
 }
 
 // WithWastedSpend enables the delegated-invoker wasted-spend admit gate (#497).
@@ -155,6 +179,30 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		if over {
 			a.recordDenial(ctx, merchantID, req.CustomerID, DenyFailureRateLimited)
 			return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
+		}
+	}
+
+	// or#878, the TIME axis. The amount cap below asks "can this payer afford
+	// one more request"; this asks "has this payer's existing debt outlived the
+	// merchant's grace window". A payer can pass either and fail the other, so
+	// both gates run and each has its own deny code.
+	//
+	// This is the ONE enforcement lever OpenRails is authoritative over, and for
+	// usage billing it is the meaningful cutoff: refusing new spend is what stops
+	// the bill growing. It revokes nothing and cancels nothing — whatever the
+	// host is already running is the host's to shut off, told by the durable
+	// delinquency signal.
+	//
+	// Fails OPEN by construction: the gate below only refuses on a recorded
+	// transition that a live re-read of the invoices still agrees with.
+	if a.delinquency != nil {
+		delinquent, derr := a.delinquency.IsDelinquent(ctx, req.CustomerID, req.Currency)
+		if derr != nil {
+			return AdmitDecision{}, derr
+		}
+		if delinquent {
+			a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelinquent)
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
 		}
 	}
 

@@ -497,7 +497,7 @@ up. "start" = RunOnStart.
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
-| Convergence sweep (+ start) · auto-top-up · alert evaluation · findings digest | 15 min |
+| Convergence sweep (+ start) · auto-top-up · alert evaluation · findings digest · arrears delinquency evaluation | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |

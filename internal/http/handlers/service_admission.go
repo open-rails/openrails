@@ -345,7 +345,12 @@ type serviceMerchantSettingsRequest struct {
 	// RepriceNoticeWindowDays (#781): the minimum advance-notice window (in
 	// days) a subscription price INCREASE's effective_at must give existing
 	// subscribers. Unset ⇒ subscriptions.DefaultRepriceNoticeWindowDays (30).
-	RepriceNoticeWindowDays           *int                                  `json:"reprice_notice_window_days,omitempty"`
+	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
+	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878): the delinquency
+	// policy. Grace unset ⇒ delinquency.DefaultGraceDays (14); the floor unset ⇒
+	// derived from monthly_floor.
+	ArrearsGraceDays        *int   `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
 	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
 	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
@@ -383,6 +388,8 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
 		AlertEmail:                        cfg.AlertEmail,
 		RepriceNoticeWindowDays:           cfg.RepriceNoticeWindowDays,
+		ArrearsGraceDays:                  cfg.ArrearsGraceDays,
+		ArrearsDelinquencyFloor:           cfg.ArrearsDelinquencyFloor,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -417,6 +424,8 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		AlertEmail:                         req.AlertEmail,
 		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
+		ArrearsGraceDays:                   req.ArrearsGraceDays,
+		ArrearsDelinquencyFloor:            req.ArrearsDelinquencyFloor,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")

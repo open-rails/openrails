@@ -11,6 +11,19 @@ type MerchantConfiguration struct {
 	InvoiceMonthlyFloor        *int64 `json:"monthly_floor,omitempty"`
 	InvoiceBillingBoundary     string `json:"billing_period_boundary,omitempty"`
 
+	// ArrearsGraceDays (or#878) is how many days past an invoice's due_at a payer
+	// keeps grace before the debt is called DELINQUENT. Business policy, so it is
+	// the merchant's: a cloud vendor may give 7 days where a SaaS gives 30. Nil ⇒
+	// delinquency.DefaultGraceDays (14). Zero is a valid explicit choice.
+	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
+
+	// ArrearsDelinquencyFloor (or#878, micros) is the smallest overdue balance
+	// that can escalate a payer to delinquent. Nil ⇒ DERIVED from
+	// InvoiceMonthlyFloor — a debt already declared too small to collect is too
+	// small to cut anyone off for — falling back to
+	// delinquency.DefaultAmountFloor.
+	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
+
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers. Missing or empty windows use the service default.
 	DelegatedInvokerWastedSpendWindows []BudgetWindowPolicy `json:"delegated_invoker_wasted_spend_windows,omitempty"`

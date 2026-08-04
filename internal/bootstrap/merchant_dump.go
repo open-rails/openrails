@@ -92,11 +92,15 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			SupportURL:  conf.Profile.SupportURL,
 			SignupURL:   conf.Profile.SignupURL,
 		}
-		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil || strings.TrimSpace(conf.InvoiceBillingBoundary) != "" {
+		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil ||
+			strings.TrimSpace(conf.InvoiceBillingBoundary) != "" ||
+			conf.ArrearsGraceDays != nil || conf.ArrearsDelinquencyFloor != nil {
 			mt.Invoice = &InvoiceConfig{
-				CollectionThreshold:   conf.InvoiceCollectionThreshold,
-				MonthlyFloor:          conf.InvoiceMonthlyFloor,
-				BillingPeriodBoundary: strings.TrimSpace(conf.InvoiceBillingBoundary),
+				CollectionThreshold:    conf.InvoiceCollectionThreshold,
+				MonthlyFloor:           conf.InvoiceMonthlyFloor,
+				BillingPeriodBoundary:  strings.TrimSpace(conf.InvoiceBillingBoundary),
+				DelinquencyGraceDays:   conf.ArrearsGraceDays,
+				DelinquencyAmountFloor: conf.ArrearsDelinquencyFloor,
 			}
 		}
 		for _, w := range conf.DelegatedInvokerWastedSpendWindows {

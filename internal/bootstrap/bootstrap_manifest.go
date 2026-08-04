@@ -121,6 +121,12 @@ func validateManifestInvoice(slug string, inv *InvoiceConfig) error {
 	if inv.MonthlyFloor != nil && *inv.MonthlyFloor < 0 {
 		return fmt.Errorf("merchant %q invoice.monthly_floor must be >= 0", slug)
 	}
+	if inv.DelinquencyGraceDays != nil && *inv.DelinquencyGraceDays < 0 {
+		return fmt.Errorf("merchant %q invoice.delinquency_grace_days must be >= 0", slug)
+	}
+	if inv.DelinquencyAmountFloor != nil && *inv.DelinquencyAmountFloor < 0 {
+		return fmt.Errorf("merchant %q invoice.delinquency_amount_floor must be >= 0", slug)
+	}
 	if b := strings.ToLower(strings.TrimSpace(inv.BillingPeriodBoundary)); b != "" {
 		if _, ok := validInvoiceBoundaries[b]; !ok {
 			return fmt.Errorf("merchant %q invoice.billing_period_boundary must be calendar_month, anniversary, or fixed_interval", slug)
