@@ -454,7 +454,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 }
 
 func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured map[string]struct{}) bool {
-	requiredKeys := []string{}
+	var requiredKeys []string
 	switch row.Rail {
 	case "stripe":
 		requiredKeys = []string{"secret_key"}

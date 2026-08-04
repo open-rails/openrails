@@ -122,9 +122,7 @@ Two more sit in the GUC group: `internal/db/merchant_scope.go` reads
 `app.merchant_id` via `current_setting` (`AssertMerchantScope` checks the LIVE
 session, which is the whole point — a context value would prove nothing), and
 `internal/integrationharness/harness.go` sets it via `set_config`. Neither is a
-query. `internal/modules/money/ledger/diagnostics.go` is the dynamic case: the
-conservation and counter-drift statements take an optional merchant filter, so
-the predicate is composed rather than fixed.
+query.
 
 `internal/river/progress.go` is PERMANENT for a different reason: it reads
 **River's own** `river_job` table, which is not part of OpenRails' schema, is

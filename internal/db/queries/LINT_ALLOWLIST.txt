@@ -21,7 +21,6 @@ PERMANENT internal/http/handlers/admin_payments.go  # pg_advisory_xact_lock only
 PERMANENT internal/modules/metrics/service.go       # compiled metric SQL (compile.go builds it)
 PERMANENT internal/controlplane/fleet_analytics.go  # cross-merchant analytics, dynamic grouping
 PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series, dynamic buckets
-PERMANENT internal/modules/money/ledger/diagnostics.go # conservation/counter-drift SQL, dynamic merchant filter
 PERMANENT internal/bootstrap/merchant_dump.go       # dump/restore over a dynamic table list
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
 PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
@@ -52,7 +51,6 @@ DEBT internal/modules/money/metered_rating.go
 DEBT internal/modules/money/money_service.go
 DEBT internal/modules/productaccess/grant_repo.go
 DEBT internal/modules/solana/solanasubs/subscription_repo.go
-DEBT cmd/openrails/ledger_audit.go
 DEBT internal/river/jobs_ledger_integrity.go
 DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
