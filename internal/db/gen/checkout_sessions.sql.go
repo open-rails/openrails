@@ -52,17 +52,17 @@ const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 INSERT INTO openrails.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, rail_fields, rail_state,
+    subscription_id, metadata, rail_fields, rail_state, routing_reason,
     psp_id, created_at, updated_at
 ) VALUES (
     $1, $8::uuid, $2, $3, $4, $5, $6, $7,
     $9,
     $10, $11, $12,
     $13, $14, $15,
-    $16, $17,
-    $18,
-    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $16, $17, $18,
+    $19,
+    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($21::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -84,6 +84,7 @@ type CreateCheckoutSessionParams struct {
 	Metadata       []byte
 	RailFields     []byte
 	RailState      []byte
+	RoutingReason  []byte
 	PspID          *uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -109,6 +110,7 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 		arg.Metadata,
 		arg.RailFields,
 		arg.RailState,
+		arg.RoutingReason,
 		arg.PspID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -168,7 +170,7 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckout
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions WHERE id = $1
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions WHERE id = $1
   AND deleted_at IS NULL
 `
 
@@ -198,12 +200,13 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (Ope
 		&i.PspID,
 		&i.DeletedAt,
 		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1
@@ -235,12 +238,13 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *
 		&i.PspID,
 		&i.DeletedAt,
 		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions cs
 WHERE cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
@@ -289,6 +293,7 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		&i.PspID,
 		&i.DeletedAt,
 		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }

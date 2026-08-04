@@ -322,6 +322,13 @@ func CheckoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*CheckoutSession, e
 	if err := FromJSONB(c.RailState, &m.RailState, "checkout_sessions.rail_state"); err != nil {
 		return nil, err
 	}
+	if len(c.RoutingReason) > 0 {
+		var reason CheckoutRoutingReason
+		if err := FromJSONB(c.RoutingReason, &reason, "checkout_sessions.routing_reason"); err != nil {
+			return nil, err
+		}
+		m.RoutingReason = &reason
+	}
 	return m, nil
 }
 

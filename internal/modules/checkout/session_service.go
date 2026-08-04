@@ -93,14 +93,6 @@ type railMerchantAccountIDResolver interface {
 	ResolvePSPID(ctx context.Context, rail string) *uuid.UUID
 }
 
-// railTargetResolver is the OPTIONAL executor capability (#848): resolve the
-// wire payment.rail selector (PSP key first, unambiguous rail-kind fallback)
-// into the target PSP + rail kind. Satisfied by *CheckoutService; test fakes
-// may omit it (the wire value is then treated as the rail kind directly).
-type railTargetResolver interface {
-	resolveRailTarget(ctx context.Context, requested string) (railTarget, error)
-}
-
 type solanaPaymentService interface {
 	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
 	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
@@ -430,9 +422,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if strings.TrimSpace(req.PriceID) == "" {
 		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
 	}
-	if strings.TrimSpace(req.Payment.Rail) == "" {
-		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
-	}
 
 	// #774: price_id accepts a price_key too.
 	price, err := catalog.ResolveReference(ctx, s.priceService, req.PriceID)
@@ -450,32 +439,51 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
 
-	// #848: the wire payment.rail value speaks PSP vocabulary. Resolve it ONCE
-	// (PSP key first, unambiguous rail-kind fallback) into the rail KIND — used
-	// for dispatch and row vocabulary — plus the PSP the charge must land on.
+	// or#288 + #848: resolve the processor ONCE, before the session exists.
+	// A request that NAMES a PSP gets that PSP (the #848 wire value: PSP key
+	// first, unambiguous rail-kind fallback); a request that names none is
+	// routed by the merchant's policy, falling through unavailable candidates.
+	// Either way this yields the rail KIND — used for dispatch and row
+	// vocabulary — plus the PSP the charge must land on, and the trace that
+	// explains the choice.
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
 	pspSelector := rail
 	var pspID *uuid.UUID
-	if resolver, ok := s.checkoutService.(railTargetResolver); ok {
-		target, err := resolver.resolveRailTarget(ctx, rail)
+	var routingReason *models.CheckoutRoutingReason
+	if _, ok := s.checkoutService.(*CheckoutService); ok {
+		decision, err := s.Route(ctx, RoutingInput{
+			Price:    price,
+			Product:  product,
+			Mode:     checkoutModeForRail(price, ""),
+			Country:  strings.TrimSpace(req.Payment.Country),
+			Selector: rail,
+		})
 		if err != nil {
 			var ambiguous *AmbiguousRailError
 			var unknown *UnknownRailError
-			if errors.As(err, &ambiguous) || errors.As(err, &unknown) {
+			if errors.As(err, &ambiguous) || errors.As(err, &unknown) || errors.Is(err, ErrNoRoutableProcessor) {
 				return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 			}
 			return nil, err
 		}
-		rail = target.Rail
-		pspSelector = target.PSP
+		rail = decision.Target.Rail
+		pspSelector = decision.Target.PSP
+		routingReason = decision.Reason()
 		// #704: pin provenance with the REAL resolved account — never invented.
-		if target.Scope != nil && target.Scope.ID != uuid.Nil {
-			id := target.Scope.ID
+		if decision.Target.Scope != nil && decision.Target.Scope.ID != uuid.Nil {
+			id := decision.Target.Scope.ID
 			pspID = &id
 		}
-	} else if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-		// #704 fallback for executors without target resolution (test fakes).
-		pspID = resolver.ResolvePSPID(ctx, rail)
+	} else {
+		// Executors without the concrete checkout service (test fakes) cannot
+		// route: the wire value is the rail kind directly.
+		if rail == "" {
+			return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
+		}
+		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
+			// #704 fallback for executors without target resolution.
+			pspID = resolver.ResolvePSPID(ctx, rail)
+		}
 	}
 	if pspID != nil {
 		ctx = db.WithPSPID(ctx, *pspID)
@@ -526,12 +534,15 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		Metadata:   normalizeMetadata(req.Metadata),
 		RailFields: railFields,
 		RailState:  railState,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		PspID:      pspID,
-		LastFour:   &req.Payment.LastFour,
-		CardType:   &req.Payment.CardType,
-		ExpiryDate: &req.Payment.ExpiryDate,
+		// or#288: the decision trace is written with the row and never rewritten
+		// (UpdateCheckoutSession does not name the column).
+		RoutingReason: routingReason,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		PspID:         pspID,
+		LastFour:      &req.Payment.LastFour,
+		CardType:      &req.Payment.CardType,
+		ExpiryDate:    &req.Payment.ExpiryDate,
 	}
 
 	if idempotencyKey != "" {
@@ -583,6 +594,9 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 	if existing == nil || requested == nil {
 		return nil, fmt.Errorf("%w: idempotent checkout session unavailable", ErrCheckoutSessionConflict)
 	}
+	// or#288: Rail and PspID are part of the match, so a retry whose routing
+	// would now resolve elsewhere (arming or policy moved between attempts)
+	// CONFLICTS rather than quietly switching processors mid-idempotency.
 	storedFingerprint, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
 	requestedFingerprint, _ := requested.RailState[checkoutSessionFingerprintKey].(string)
 	parametersMatch := existing.CustomerID == requested.CustomerID &&

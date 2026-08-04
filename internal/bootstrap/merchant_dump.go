@@ -114,6 +114,18 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 				Currency: w.Currency,
 			})
 		}
+		for _, rule := range conf.CheckoutRouting {
+			mt.CheckoutRouting = append(mt.CheckoutRouting, CheckoutRoutingRuleConfig{
+				Match: CheckoutRoutingMatchConfig{
+					Currency: rule.Match.Currency,
+					Product:  rule.Match.Product,
+					Price:    rule.Match.Price,
+					Mode:     rule.Match.Mode,
+					Country:  rule.Match.Country,
+				},
+				Prefer: rule.Prefer,
+			})
+		}
 	}
 
 	// provider accounts (identity + lifecycle + secret references).

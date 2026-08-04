@@ -50,7 +50,7 @@ func TestCheckoutModeForRail(t *testing.T) {
 	}
 }
 
-func TestCheckoutRailOptionReady(t *testing.T) {
+func TestCheckoutRailSkipReason(t *testing.T) {
 	t.Parallel()
 
 	stripePrice := railOptionPrice(true, "stripe", map[string]string{
@@ -83,7 +83,8 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 		target         railTarget
 		providerConfig *config.PSPConfig
 		mode           models.CheckoutSessionMode
-		expected       bool
+		// wantSkip is the or#288 skip class, "" when the PSP is ready.
+		wantSkip string
 	}{
 		{
 			name:    "stripe recurring ready",
@@ -94,8 +95,7 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				Rail:   models.RailStripe,
 				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
 			},
-			mode:     models.CheckoutSessionModeSubscription,
-			expected: true,
+			mode: models.CheckoutSessionModeSubscription,
 		},
 		{
 			name:    "stripe missing price link",
@@ -106,7 +106,8 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				Rail:   models.RailStripe,
 				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
 			},
-			mode: models.CheckoutSessionModeSubscription,
+			mode:     models.CheckoutSessionModeSubscription,
+			wantSkip: models.CheckoutRoutingSkipLinkMissing,
 		},
 		{
 			name:    "stripe ambiguous account links",
@@ -120,7 +121,8 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				Rail:   models.RailStripe,
 				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
 			},
-			mode: models.CheckoutSessionModeSubscription,
+			mode:     models.CheckoutSessionModeSubscription,
+			wantSkip: models.CheckoutRoutingSkipLinkMissing,
 		},
 		{
 			name:    "nmi recurring ready for exact provider",
@@ -131,8 +133,7 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				Rail: models.RailNMI,
 				NMI:  &config.NMIRailConfig{SecurityKey: "security_test"},
 			},
-			mode:     models.CheckoutSessionModeSubscription,
-			expected: true,
+			mode: models.CheckoutSessionModeSubscription,
 		},
 		{
 			name:    "nmi recurring missing exact provider plan",
@@ -143,7 +144,8 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				Rail: models.RailNMI,
 				NMI:  &config.NMIRailConfig{SecurityKey: "security_test"},
 			},
-			mode: models.CheckoutSessionModeSubscription,
+			mode:     models.CheckoutSessionModeSubscription,
+			wantSkip: models.CheckoutRoutingSkipLinkMissing,
 		},
 		{
 			name:    "ccbill recurring ready",
@@ -155,8 +157,7 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				AccountID: "945280-0000",
 				CCBill:    &config.CCBillRailConfig{},
 			},
-			mode:     models.CheckoutSessionModeSubscription,
-			expected: true,
+			mode: models.CheckoutSessionModeSubscription,
 		},
 		{
 			name:    "ccbill one off unsupported",
@@ -168,7 +169,8 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 				AccountID: "945280-0000",
 				CCBill:    &config.CCBillRailConfig{},
 			},
-			mode: models.CheckoutSessionModeOneOff,
+			mode:     models.CheckoutSessionModeOneOff,
+			wantSkip: models.CheckoutRoutingSkipModeUnsupported,
 		},
 		{
 			name:    "solana recurring ready",
@@ -181,8 +183,7 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 					"USDC": {Mint: "mint_test"},
 				}},
 			},
-			mode:     models.CheckoutSessionModeSubscription,
-			expected: true,
+			mode: models.CheckoutSessionModeSubscription,
 		},
 		{
 			name:    "solana recurring services unavailable",
@@ -195,14 +196,15 @@ func TestCheckoutRailOptionReady(t *testing.T) {
 					"USDC": {Mint: "mint_test"},
 				}},
 			},
-			mode: models.CheckoutSessionModeSubscription,
+			mode:     models.CheckoutSessionModeSubscription,
+			wantSkip: models.CheckoutRoutingSkipServiceUnavailable,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, tt.service.checkoutRailOptionReady(tt.price, tt.target, tt.providerConfig, tt.mode))
+			assert.Equal(t, tt.wantSkip, tt.service.checkoutRailSkipReason(tt.price, tt.target, tt.providerConfig, tt.mode))
 		})
 	}
 }
@@ -255,7 +257,7 @@ func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T
 		checkoutService: checkoutService,
 	}
 
-	options, err := svc.listCheckoutRailOptionsForPrice(context.Background(), checkoutService, price)
+	options, err := svc.listCheckoutRailOptionsForPrice(context.Background(), price, &models.Product{})
 	require.NoError(t, err)
 	require.Equal(t, []CheckoutRailOption{
 		{Selector: "stripe", Rail: "stripe", Mode: "subscription"},

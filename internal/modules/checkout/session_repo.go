@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,6 +48,12 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	if err != nil {
 		return err
 	}
+	var routingReason []byte
+	if session.RoutingReason != nil {
+		if routingReason, err = json.Marshal(session.RoutingReason); err != nil {
+			return fmt.Errorf("encode checkout session routing reason: %w", err)
+		}
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -69,6 +76,7 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 		Metadata:       meta,
 		RailFields:     fields,
 		RailState:      state,
+		RoutingReason:  routingReason,
 		PspID:          session.PspID,
 		CreatedAt:      session.CreatedAt,
 		UpdatedAt:      session.UpdatedAt,

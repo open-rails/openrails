@@ -302,6 +302,35 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 	return scope, true, nil
 }
 
+// PSPKeyArchived reports whether key names an ARCHIVED account for this
+// merchant/environment. It is the complement of PSPScopeByKey (which sees only
+// live rows) and exists so routing can say "retired" instead of "unknown".
+func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, environment string) (bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(key) == "" {
+		return false, nil
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return false, fmt.Errorf("provider account environment must be live or test")
+	}
+	archived := false
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM openrails.psps
+					 WHERE merchant_id = $1::uuid
+					   AND lower(key) = lower($2)
+					   AND environment = $3
+					   AND archived = true
+				)
+			`, id.String(), strings.TrimSpace(key), environment).Scan(&archived)
+	})
+	if err != nil {
+		return false, fmt.Errorf("load archived provider account by key %s/%s: %w", key, environment, err)
+	}
+	return archived, nil
+}
+
 // PSPScopeByKey resolves a declared, non-archived account by
 // its manifest account key (e.g. "mobius") for the given
 // environment. This is how the payment-provider vocabulary used by the catalog

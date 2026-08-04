@@ -63,6 +63,12 @@ type CheckoutSession struct {
 	RailFields map[string]any `json:"rail_fields,omitempty"`
 	RailState  map[string]any `json:"rail_state,omitempty"`
 
+	// RoutingReason (or#288) is the decision trace that picked this session's
+	// PSP: which policy and rule matched, and what was skipped and why. Written
+	// once at creation and never rewritten — support answers "why did this
+	// customer get CCBill" from the row, not from a reconstruction.
+	RoutingReason *CheckoutRoutingReason `json:"routing_reason,omitempty"`
+
 	// IdempotencyKey is request-scoped only (Redis owns checkout idempotency,
 	// #702 dropped the column); never persisted or round-tripped from the DB.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
@@ -77,4 +83,71 @@ type CheckoutSession struct {
 	LastFour   *string `json:"last_four,omitempty"`
 	CardType   *string `json:"card_type,omitempty"`
 	ExpiryDate *string `json:"expiry_date,omitempty"`
+}
+
+// Checkout routing policy sources (or#288). Recorded on every session so the
+// trace names WHO decided, not just what was decided.
+const (
+	// CheckoutRoutingPolicyExplicit: the request named the PSP. Honoured
+	// verbatim — an explicitly named processor is NEVER silently switched,
+	// because the browser has already committed to that rail's flow.
+	CheckoutRoutingPolicyExplicit = "explicit"
+	// CheckoutRoutingPolicyMerchant: a declared merchant routing rule matched.
+	CheckoutRoutingPolicyMerchant = "merchant"
+	// CheckoutRoutingPolicyDefault: no policy declared (or none matched) — the
+	// built-in preference order decided.
+	CheckoutRoutingPolicyDefault = "default"
+)
+
+// Checkout routing skip classes (or#288): why a candidate ahead of the winner
+// was passed over. These are PRE-CHARGE availability facts only. A decline is
+// deliberately absent — it is a per-charge outcome, not a routing failure, and
+// never re-routes a session.
+const (
+	// CheckoutRoutingSkipUnknownSelector: not a declared PSP key or rail kind.
+	CheckoutRoutingSkipUnknownSelector = "unknown_selector"
+	// CheckoutRoutingSkipAmbiguousSelector: a bare rail kind with more than one
+	// armed PSP — the #848 selector demands the PSP key.
+	CheckoutRoutingSkipAmbiguousSelector = "ambiguous_selector"
+	// CheckoutRoutingSkipNotArmed: no active non-archived psps row.
+	CheckoutRoutingSkipNotArmed = "not_armed"
+	// CheckoutRoutingSkipCredentialsMissing: armed, but the credentials the rail
+	// needs to charge are absent or malformed.
+	CheckoutRoutingSkipCredentialsMissing = "credentials_missing"
+	// CheckoutRoutingSkipLinkMissing: the price carries no usable psp_link for
+	// this PSP (absent, or pointing at a different remote object than execution).
+	CheckoutRoutingSkipLinkMissing = "link_missing"
+	// CheckoutRoutingSkipModeUnsupported: the rail cannot serve this checkout
+	// mode for this price (CCBill one-off, Stripe paid intro).
+	CheckoutRoutingSkipModeUnsupported = "mode_unsupported"
+	// CheckoutRoutingSkipServiceUnavailable: the runtime service backing the
+	// rail is not wired in this deployment.
+	CheckoutRoutingSkipServiceUnavailable = "service_unavailable"
+	// CheckoutRoutingSkipResolveFailed: the selector could not be resolved at
+	// all (backend error). Fail closed: skip, never guess.
+	CheckoutRoutingSkipResolveFailed = "resolve_failed"
+)
+
+// CheckoutRoutingReason is the compact decision trace persisted on
+// checkout_sessions.routing_reason.
+type CheckoutRoutingReason struct {
+	// Policy is who decided: explicit | merchant | default.
+	Policy string `json:"policy"`
+	// Rule is the matched merchant-rule index (0-based). Merchant policy only.
+	Rule *int `json:"rule,omitempty"`
+	// Selected is the winning checkout selector (the PSP key), and Rail its kind.
+	Selected string `json:"selected"`
+	Rail     string `json:"rail"`
+	// Fallbacks are the remaining ELIGIBLE selectors, still ranked — what the
+	// next session would get if the winner went away.
+	Fallbacks []string `json:"fallbacks,omitempty"`
+	// Skipped names every candidate passed over ahead of the winner, with its
+	// class.
+	Skipped []CheckoutRoutingSkip `json:"skipped,omitempty"`
+}
+
+// CheckoutRoutingSkip is one passed-over candidate and its class.
+type CheckoutRoutingSkip struct {
+	Selector string `json:"selector"`
+	Reason   string `json:"reason"`
 }

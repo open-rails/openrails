@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -351,6 +352,10 @@ type serviceMerchantSettingsRequest struct {
 	// derived from monthly_floor.
 	ArrearsGraceDays        *int   `json:"arrears_grace_days,omitempty"`
 	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
+	// CheckoutRouting (or#288): the processor-routing policy. Omitted preserves
+	// the stored policy; present replaces it whole (an empty array clears it
+	// back to the built-in default order).
+	CheckoutRouting                   *[]models.CheckoutRoutingRule         `json:"checkout_routing,omitempty"`
 	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
 	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
 	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
@@ -390,6 +395,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		RepriceNoticeWindowDays:           cfg.RepriceNoticeWindowDays,
 		ArrearsGraceDays:                  cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:           cfg.ArrearsDelinquencyFloor,
+		CheckoutRouting:                   cfg.CheckoutRouting,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
@@ -406,6 +412,16 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
+	}
+
+	// or#288: a malformed routing policy is a client error, not a server one.
+	// Run the SAME normalizer the service will run, so the caller gets the
+	// exact reason instead of a bare 500.
+	if req.CheckoutRouting != nil {
+		if _, err := merchantconfig.NormalizeCheckoutRouting(*req.CheckoutRouting); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendLimits))
@@ -426,6 +442,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
 		ArrearsGraceDays:                   req.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            req.ArrearsDelinquencyFloor,
+		CheckoutRouting:                    req.CheckoutRouting,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")

@@ -18,7 +18,9 @@ import (
 )
 
 type checkoutSessionPaymentParams struct {
-	Rail            string `json:"rail" binding:"required"`
+	// Rail is the PSP the caller wants (the #848 selector). OPTIONAL since
+	// or#288: omitting it hands the choice to the merchant's routing policy.
+	Rail            string `json:"rail,omitempty" binding:"omitempty"`
 	PaymentMethodID string `json:"payment_method_id,omitempty" binding:"omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	TokenSymbol     string `json:"token_symbol,omitempty" binding:"omitempty"`
@@ -85,9 +87,14 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	if err := checkoutRailUsable(r, req.Payment.Rail); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
+	// The pre-gate checks a NAMED PSP. An omitted selector is the routing
+	// request (or#288) — there is nothing to pre-gate, and routing itself fails
+	// closed when no PSP can serve the price.
+	if strings.TrimSpace(req.Payment.Rail) != "" {
+		if err := checkoutRailUsable(r, req.Payment.Rail); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	req.IdempotencyKey = middleware.IdempotencyKeyFromRequest(r.Request)
 	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
