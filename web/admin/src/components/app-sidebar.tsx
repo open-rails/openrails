@@ -21,6 +21,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -156,16 +157,18 @@ function UserMenu() {
             }
           />
           <DropdownMenuContent side="top" align="start" className="min-w-56">
-            <DropdownMenuLabel className="font-normal">
-              <div className="grid leading-tight">
-                <span className="text-sm font-medium">{name}</span>
-                {me.email && (
-                  <span className="text-xs text-muted-foreground">
-                    {me.email}
-                  </span>
-                )}
-              </div>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">
+                <div className="grid leading-tight">
+                  <span className="text-sm font-medium">{name}</span>
+                  {me.email && (
+                    <span className="text-xs text-muted-foreground">
+                      {me.email}
+                    </span>
+                  )}
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate("/settings")}>
               <HugeiconsIcon icon={Settings01Icon} />

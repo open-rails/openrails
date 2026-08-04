@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,7 @@ import { useApiData } from "@/hooks/use-api-data"
 import { ApiError } from "@/lib/api/client"
 import {
   metricsQuery,
+  type MetricsRange,
   type MetricsResult,
   type Widget,
 } from "@/lib/api/metrics"
@@ -33,82 +35,102 @@ import { WidgetVizView } from "./widget-viz"
 
 export function WidgetTile({
   widget,
+  range,
   onEdit,
   onDelete,
 }: {
   widget: Widget
+  range: MetricsRange
   onEdit: () => void
   onDelete: () => void
 }) {
-  const queryKey = JSON.stringify(widget.query)
+  const query = { ...widget.query, range }
+  const queryKey = JSON.stringify(query)
   const { data, loading, error, reload } = useApiData(
-    () => metricsQuery(widget.query),
+    () => metricsQuery(query),
     [queryKey]
   )
   const link = widget.viz === "stat" ? deepLinkFor(widget.query) : null
 
+  const isStat = widget.viz === "stat"
+
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card text-card-foreground shadow-sm">
-      <div className="flex items-center gap-1 border-b px-3 py-1.5">
+    <Card className="group/tile relative h-full gap-2">
+      <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
         <HugeiconsIcon
           icon={DragDropVerticalIcon}
-          className="widget-drag-handle size-3.5 shrink-0 cursor-grab text-muted-foreground/60 active:cursor-grabbing"
+          aria-hidden
+          className="widget-drag-handle size-6 shrink-0 cursor-grab p-1.5 text-muted-foreground active:cursor-grabbing"
         />
-        <span className="truncate text-sm font-medium" title={widget.title}>
-          {widget.title}
-        </span>
         {link ? (
           <Link
             to={link}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
+            className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground"
             title="Open matching list"
+            aria-label="Open matching list"
           >
             <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3.5" />
           </Link>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            onClick={reload}
-            title="Refresh"
-          >
-            <HugeiconsIcon
-              icon={Refresh01Icon}
-              className={cn("size-3.5", loading && "animate-spin")}
-            />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon" className="size-6">
-                  <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>
-                <HugeiconsIcon icon={PencilIcon} className="size-3.5" /> Edit
-                widget
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onDelete} variant="destructive">
-                <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />{" "}
-                Remove
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={reload}
+          title="Refresh"
+          aria-label="Refresh widget"
+        >
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className={cn("size-3.5", loading && "animate-spin")}
+          />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6"
+                aria-label="Widget menu"
+              >
+                <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onEdit}>
+              <HugeiconsIcon icon={PencilIcon} className="size-3.5" /> Edit
+              widget
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onDelete} variant="destructive">
+              <HugeiconsIcon icon={Delete02Icon} className="size-3.5" /> Remove
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
+        <span
+          className={cn(
+            "truncate",
+            isStat
+              ? "text-xs font-medium tracking-wider text-muted-foreground uppercase"
+              : "text-sm font-medium"
+          )}
+          title={widget.title}
+        >
+          {widget.title}
+        </span>
+        <div className="min-h-0 flex-1">
+          <TileBody
+            loading={loading && !data}
+            error={error}
+            widget={widget}
+            data={data}
+          />
         </div>
-      </div>
-      <div className="min-h-0 flex-1 p-3">
-        <TileBody
-          loading={loading && !data}
-          error={error}
-          widget={widget}
-          data={data}
-        />
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 

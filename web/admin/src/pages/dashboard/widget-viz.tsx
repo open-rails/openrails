@@ -275,6 +275,7 @@ function DonutViz({ result }: { result: MetricsResult }) {
           dataKey="value"
           nameKey="name"
           innerRadius="55%"
+          stroke="var(--card)"
           strokeWidth={2}
         >
           {slices.map((s, i) => (
@@ -288,6 +289,13 @@ function DonutViz({ result }: { result: MetricsResult }) {
 
 // --- table --------------------------------------------------------------------------
 
+// humanizeColumn turns raw result column names (rail_account) into labels
+// (Rail account).
+function humanizeColumn(name: string): string {
+  const words = name.replaceAll("_", " ").trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 function TableViz({ result }: { result: MetricsResult }) {
   const idx = indexColumns(result.columns)
   if (result.rows.length === 0) return <Empty label="no data in range" />
@@ -297,8 +305,14 @@ function TableViz({ result }: { result: MetricsResult }) {
         <TableHeader>
           <TableRow>
             {result.columns.map((c) => (
-              <TableHead key={c.name} className="text-xs whitespace-nowrap">
-                {c.name}
+              <TableHead
+                key={c.name}
+                className={cn(
+                  "text-xs whitespace-nowrap",
+                  c.kind === "measure" && "text-right"
+                )}
+              >
+                {humanizeColumn(c.name)}
               </TableHead>
             ))}
           </TableRow>
@@ -324,7 +338,7 @@ function TableViz({ result }: { result: MetricsResult }) {
                     key={c.name}
                     className={cn(
                       "text-xs",
-                      c.kind === "measure" && "tabular-nums"
+                      c.kind === "measure" && "text-right tabular-nums"
                     )}
                   >
                     {rendered}

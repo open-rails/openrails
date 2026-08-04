@@ -50,7 +50,7 @@ export function AppLayout() {
         <SidebarInset>
           <SiteHeader title={title} />
           <main className="flex flex-1 flex-col p-4 md:p-8">
-            <div className="mx-auto w-full max-w-5xl">
+            <div className="mx-auto w-full max-w-7xl">
               <Outlet />
             </div>
           </main>
