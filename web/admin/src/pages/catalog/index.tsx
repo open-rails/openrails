@@ -70,7 +70,7 @@ import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 
 const LINE_TAB =
-  "flex-none px-0 group-data-horizontal/tabs:after:bottom-[-1px]"
+  "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
 
 function catalogCopilotEnabled(): boolean {
   try {
@@ -116,7 +116,7 @@ export function CatalogPage() {
       >
         <TabsList
           variant="line"
-          className="w-full justify-start gap-6 rounded-none border-b border-border p-0"
+          className="w-full justify-start gap-6 rounded-none p-0"
         >
           <TabsTrigger value="products" className={LINE_TAB}>
             Products

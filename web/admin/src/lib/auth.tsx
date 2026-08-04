@@ -20,7 +20,13 @@ import {
   setUnauthorizedHandler,
   type BootstrapConfig,
 } from "@/lib/api/client"
-import type { AuthCapabilities, AuthTokens, Me } from "@/lib/api/types"
+import type {
+  AuthCapabilities,
+  AuthTokens,
+  Me,
+  MerchantMembership,
+  MerchantMembershipList,
+} from "@/lib/api/types"
 
 interface AuthState {
   ready: boolean
@@ -28,12 +34,53 @@ interface AuthState {
   config?: BootstrapConfig
   capabilities?: AuthCapabilities
   me: Me | null
+  merchants: MerchantMembership[]
+  activeMerchant?: MerchantMembership
+  selectMerchant: (slug: string) => void
   loginWithPassword: (login: string, password: string) => Promise<void>
   startOIDC: (providerId: string) => void
   logout: () => Promise<void>
 }
 
 const AuthContext = React.createContext<AuthState | undefined>(undefined)
+
+function merchantMemberships(groups: MerchantMembershipList) {
+  return [...groups.data]
+    .filter((group) => group.persona === "merchant")
+    .sort((a, b) => a.instance_slug.localeCompare(b.instance_slug))
+}
+
+async function loadIdentity(
+  expectedSession: NonNullable<ReturnType<typeof getTokens>>
+) {
+  const who = await authApi<Me>("/me")
+  const groups = await authApi<MerchantMembershipList>("/me/groups")
+  if (!sameTokenSession(expectedSession, getTokens())) {
+    throw new Error("Your session changed while your account was loading")
+  }
+
+  const merchants = merchantMemberships(groups)
+  const storedSession = getTokens()
+  if (!storedSession) {
+    throw new Error("Your session ended while your account was loading")
+  }
+  const activeMerchant =
+    merchants.find(
+      (merchant) => merchant.instance_slug === storedSession.merchant
+    ) ?? merchants[0]
+
+  if (storedSession.merchant !== activeMerchant?.instance_slug) {
+    const updated = {
+      ...storedSession,
+      merchant: activeMerchant?.instance_slug,
+    }
+    if (!setTokensIfCurrent(updated, storedSession)) {
+      throw new Error("Your session changed while your account was loading")
+    }
+  }
+
+  return { who, merchants, activeMerchant }
+}
 
 // consumeOIDCFragment reads AuthKit's browser-OIDC fragment redirect
 // (#access_token=…&refresh_token=…&merchant=…) if present and stores the
@@ -65,9 +112,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = React.useState<BootstrapConfig>()
   const [capabilities, setCapabilities] = React.useState<AuthCapabilities>()
   const [me, setMe] = React.useState<Me | null>(null)
+  const [merchants, setMerchants] = React.useState<MerchantMembership[]>([])
+  const [activeMerchant, setActiveMerchant] =
+    React.useState<MerchantMembership>()
 
   React.useEffect(() => {
-    setUnauthorizedHandler(() => setMe(null))
+    setUnauthorizedHandler(() => {
+      setMe(null)
+      setMerchants([])
+      setActiveMerchant(undefined)
+    })
     return () => setUnauthorizedHandler(null)
   }, [])
 
@@ -90,8 +144,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const session = getTokens()
         if (session) {
           try {
-            const who = await authApi<Me>("/me")
-            if (!cancelled && sameTokenSession(session, getTokens())) setMe(who)
+            const identity = await loadIdentity(session)
+            if (!cancelled) {
+              setMe(identity.who)
+              setMerchants(identity.merchants)
+              setActiveMerchant(identity.activeMerchant)
+            }
           } catch (err) {
             if (
               err instanceof ApiError &&
@@ -142,13 +200,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!setTokensIfCurrent(session, expectedSession)) {
         throw new Error("Your session changed while sign-in was completing")
       }
-      const who = await authApi<Me>("/me")
-      if (!sameTokenSession(session, getTokens())) {
-        throw new Error("Your session changed while sign-in was completing")
-      }
-      setMe(who)
+      const identity = await loadIdentity(session)
+      setMe(identity.who)
+      setMerchants(identity.merchants)
+      setActiveMerchant(identity.activeMerchant)
     },
     []
+  )
+
+  const selectMerchant = React.useCallback(
+    (slug: string) => {
+      const selected = merchants.find(
+        (merchant) => merchant.instance_slug === slug
+      )
+      const session = getTokens()
+      if (
+        !selected ||
+        !session ||
+        session.merchant === selected.instance_slug
+      ) {
+        return
+      }
+      if (
+        !setTokensIfCurrent(
+          { ...session, merchant: selected.instance_slug },
+          session
+        )
+      ) {
+        return
+      }
+      window.location.reload()
+    },
+    [merchants]
   )
 
   const startOIDC = React.useCallback((providerId: string) => {
@@ -161,6 +244,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const session = getTokens()
     setTokens(null)
     setMe(null)
+    setMerchants([])
+    setActiveMerchant(undefined)
     if (!session) return
     try {
       await logoutSession(session)
@@ -176,6 +261,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       config,
       capabilities,
       me,
+      merchants,
+      activeMerchant,
+      selectMerchant,
       loginWithPassword,
       startOIDC,
       logout,
@@ -186,6 +274,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       config,
       capabilities,
       me,
+      merchants,
+      activeMerchant,
+      selectMerchant,
       loginWithPassword,
       startOIDC,
       logout,

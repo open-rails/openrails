@@ -512,6 +512,17 @@ export interface Me {
   entitlements?: string[]
 }
 
+export interface MerchantMembership {
+  persona: string
+  instance_slug: string
+  role: string
+}
+
+export interface MerchantMembershipList {
+  object: "list"
+  data: MerchantMembership[]
+}
+
 // --- Alerting (#736) ---
 
 export type AlertSeverity = "warning" | "critical"

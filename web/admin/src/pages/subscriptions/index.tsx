@@ -271,13 +271,13 @@ export function SubscriptionsPage() {
       <Tabs value={status} onValueChange={(v) => setParam("status", v ?? "")}>
         <TabsList
           variant="line"
-          className="w-full justify-start gap-6 rounded-none border-b border-border p-0"
+          className="w-full justify-start gap-6 rounded-none p-0"
         >
           {statusTabs.map((t) => (
             <TabsTrigger
               key={t.value}
               value={t.value}
-              className="flex-none px-0 group-data-horizontal/tabs:after:bottom-[-1px]"
+              className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
             >
               {t.label}
             </TabsTrigger>
