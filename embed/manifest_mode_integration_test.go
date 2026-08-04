@@ -88,7 +88,7 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 	cfg := manifestModeConfig(dsn)
 	manifest, err := embed.LoadMerchantConfigManifest(manifestRaw)
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
@@ -310,7 +310,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("m405%d", nano)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
@@ -382,7 +382,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// API mode still allows the bare identity bind.
@@ -435,7 +435,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 		MerchantSource: config.MerchantSourceAPI,
 		DB:             &config.DBConfig{URL: dsn},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -473,7 +473,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 
 	manifest, err := embed.LoadMerchantConfigManifest(manifestModeManifestYAML(slug, gatewayID))
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -518,7 +518,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 	// Writer host (doujins shape) declares the merchant.
 	writerCfg := manifestModeConfig(dsn)
-	writer, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: writerCfg}})
+	writer, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: writerCfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = writer.Close(context.Background()) })
 	id, err := writer.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
@@ -529,7 +529,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 	// Reader host (hentai0 shape): empty MerchantConfig — pure bind.
 	readerCfg := manifestModeConfig(dsn)
-	reader, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: readerCfg}})
+	reader, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: readerCfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reader.Close(context.Background()) })
 	boundID, err := reader.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
@@ -548,7 +548,7 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{

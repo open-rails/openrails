@@ -245,7 +245,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
 	rt, err := embed.New(h.ctx, embed.Options{
-		Options: embedded.Options{Config: cfg, Redis: h.Redis},
+		Options: embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()},
 	})
 	require.NoError(h.t, err, "embed.New")
 	h.cleanup(func() { _ = rt.Close(context.Background()) })

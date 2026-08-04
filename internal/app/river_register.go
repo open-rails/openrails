@@ -294,17 +294,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add findings digest worker: %w", err)
 	}
-	// Worker health checker (#689): evaluates per-kind health rows written by the
-	// WorkerHealthMiddleware and raises repair alerts for never-succeeded /
-	// failing / stale kinds. Registered last so every kind above is already noted.
-	if err := addTrackedWorker(r, workers, &riverjobs.WorkerHealthCheckWorker{
-		DB:                  r.DB,
-		Clock:               clock,
-		Registrations:       r.workerHealthRegistrations(),
-		NotificationService: r.NotificationService,
-	}); err != nil {
-		return fmt.Errorf("add worker health check worker: %w", err)
-	}
+	// #895: there is deliberately NO worker-health-check WORKER here any more.
+	// The detector used to be a River periodic job, so a stalled River stalled
+	// its own detector and could only report health where health was never in
+	// doubt. It now lives outside River entirely, as riverjobs.ProgressMonitor —
+	// a plain goroutine started by Runtime.StartRiverProgressMonitor.
 	return nil
 }
 
@@ -753,18 +747,10 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 5 minutes: worker health check (#689). RunOnStart=true so health rows
-	// are seeded (and lingering incidents re-evaluated) right after boot.
-	jobs = append(jobs, r.healthPeriodic(
-		5*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.WorkerHealthCheckArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	))
+	// #895: the worker-health check is NOT scheduled here any more. Scheduling
+	// the detector as a periodic job is what made "River is not running"
+	// undetectable — the detector could not run either. riverjobs.ProgressMonitor
+	// replaces it, outside River.
 
 	return jobs, nil
 }

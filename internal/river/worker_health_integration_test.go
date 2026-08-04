@@ -20,11 +20,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #689 end-to-end through a REAL River client: the one middleware records every
-// worked job's outcome in openrails.worker_health, and the checker routes
-// unhealthy kinds to the existing repair-alert channel (notification_queue
-// system alerts) — the failure mode of #673 (a worker failing 100% of its runs
-// since birth) becomes a durable alert instead of log wallpaper.
+// #689/#895 end-to-end through a REAL River client: the middleware records every
+// worked job's outcome in openrails.worker_health, and ProgressMonitor — which
+// is NOT a River job (#895) — routes unhealthy kinds to the existing
+// repair-alert channel (notification_queue system alerts). The failure mode of
+// #673 (a worker failing 100% of its runs since birth) becomes a durable alert
+// instead of log wallpaper, and unlike the retired WorkerHealthCheckWorker the
+// evaluation runs even when River itself never worked a job.
 
 const (
 	whFailingKind = "test.wh_always_failing"
@@ -88,7 +90,7 @@ func cleanupWorkerHealth(t *testing.T, dbi *db.DB, kinds ...string) {
 		}
 		mctx := dbtest.WithTestMerchant(ctx)
 		_ = dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE event_type = 'system_alert' AND data->>'operation' = 'worker_health'`)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE event_type = 'system_alert' AND data->>'operation' = 'river_progress'`)
 			if !systemCustomerExisted {
 				_, _ = dbi.Qx(ctx).Exec(ctx,
 					`DELETE FROM openrails.customers c
@@ -179,7 +181,7 @@ func countWorkerHealthAlertsForMerchant(t *testing.T, dbi *db.DB, merchantID mer
 		return dbi.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.notification_queue
 			 WHERE merchant_id = $1 AND event_type = 'system_alert'
-			   AND data->>'operation' = 'worker_health' AND data->>'worker_kind' = $2`,
+			   AND data->>'operation' = 'river_progress' AND data->>'worker_kind' = $2`,
 			merchantID.UUID(), kind).Scan(&n)
 	}))
 	return n
@@ -193,7 +195,7 @@ func alertReason(t *testing.T, dbi *db.DB, kind string) string {
 		return dbi.Qx(ctx).QueryRow(ctx,
 			`SELECT data->>'reason' FROM openrails.notification_queue
 			 WHERE merchant_id = $1 AND event_type = 'system_alert'
-			   AND data->>'operation' = 'worker_health' AND data->>'worker_kind' = $2
+			   AND data->>'operation' = 'river_progress' AND data->>'worker_kind' = $2
 			 ORDER BY created_at DESC LIMIT 1`,
 			dbtest.TestMerchantID.UUID(), kind).Scan(&reason)
 	}))
@@ -205,14 +207,15 @@ func TestWorkerHealth_MiddlewareRecordsAndCheckerAlerts(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbtest.SharedPGXPool(t)
 	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbi.Pool())
-	cleanupWorkerHealth(t, dbi, whFailingKind, whHealthyKind, KindWorkerHealthCheck)
+	cleanupWorkerHealth(t, dbi, whFailingKind, whHealthyKind)
 
 	regs := NewWorkerRegistrations()
 	regs.NoteKind(whFailingKind)
 	regs.NoteKind(whHealthyKind)
-	regs.NoteKind(KindWorkerHealthCheck)
 
-	checker := &WorkerHealthCheckWorker{
+	// #895: the detector is a plain object, not a worker. It is never registered
+	// with River and never enqueued — it is simply called.
+	monitor := &ProgressMonitor{
 		DB:               dbi,
 		Registrations:    regs,
 		FailureThreshold: 3,
@@ -222,7 +225,6 @@ func TestWorkerHealth_MiddlewareRecordsAndCheckerAlerts(t *testing.T) {
 	workers := river.NewWorkers()
 	require.NoError(t, river.AddWorkerSafely(workers, &whFailingWorker{}))
 	require.NoError(t, river.AddWorkerSafely(workers, &whHealthyWorker{}))
-	require.NoError(t, river.AddWorkerSafely(workers, checker))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:            map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 4}},
@@ -267,25 +269,21 @@ func TestWorkerHealth_MiddlewareRecordsAndCheckerAlerts(t *testing.T) {
 	require.NotNil(t, okSuccess, "healthy worker recorded a success")
 	require.EqualValues(t, 0, okStreak)
 
-	// The checker (run through the client like any worker) trips the streak rule
-	// for the failing kind and stays quiet for the healthy one.
-	_, err = client.Insert(ctx, WorkerHealthCheckArgs{}, &river.InsertOpts{MaxAttempts: 1})
+	// The monitor trips the streak rule for the failing kind and stays quiet for
+	// the healthy one — evaluated OUT of band, with nothing enqueued.
+	report, err := monitor.Check(ctx)
 	require.NoError(t, err)
-	awaitJobs(t, events, 1)
+	require.NoError(t, monitor.RaiseAlerts(ctx, report))
 
 	require.Equal(t, 1, countWorkerHealthAlerts(t, dbi, whFailingKind), "failing kind alerts within threshold")
 	require.Equal(t, "consecutive_failures", alertReason(t, dbi, whFailingKind))
 	require.Equal(t, 0, countWorkerHealthAlerts(t, dbi, whHealthyKind), "healthy kind never alerts")
 
-	// Re-running the checker within the re-alert window does NOT duplicate.
-	_, err = client.Insert(ctx, WorkerHealthCheckArgs{}, &river.InsertOpts{MaxAttempts: 1})
+	// Re-running the monitor within the re-alert window does NOT duplicate.
+	report, err = monitor.Check(ctx)
 	require.NoError(t, err)
-	awaitJobs(t, events, 1)
+	require.NoError(t, monitor.RaiseAlerts(ctx, report))
 	require.Equal(t, 1, countWorkerHealthAlerts(t, dbi, whFailingKind), "alert deduped while incident persists")
-
-	// The checker heartbeats through the same table (visible if IT wedges).
-	chkSuccess, _, _, _ := workerHealthRow(t, dbi, KindWorkerHealthCheck)
-	require.NotNil(t, chkSuccess, "checker recorded its own heartbeat")
 }
 
 // TestWorkerHealth_NeverSucceededMerchantRequire reproduces #673: a periodic
@@ -296,14 +294,13 @@ func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbtest.SharedPGXPool(t)
 	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbi.Pool())
-	cleanupWorkerHealth(t, dbi, whNoMerchKind, KindWorkerHealthCheck)
+	cleanupWorkerHealth(t, dbi, whNoMerchKind)
 
 	regs := NewWorkerRegistrations()
 	regs.NoteKind(whNoMerchKind)
 	regs.NotePeriod(whNoMerchKind, time.Second) // "hourly" in miniature
-	regs.NoteKind(KindWorkerHealthCheck)
 
-	checker := &WorkerHealthCheckWorker{
+	monitor := &ProgressMonitor{
 		DB:               dbi,
 		Registrations:    regs,
 		FailureThreshold: 99, // force the never-succeeded rule to be what trips
@@ -313,7 +310,6 @@ func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 
 	workers := river.NewWorkers()
 	require.NoError(t, river.AddWorkerSafely(workers, &whNoMerchWorker{}))
-	require.NoError(t, river.AddWorkerSafely(workers, checker))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:            map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 2}},
@@ -346,18 +342,18 @@ func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 	require.Contains(t, *errMsg, "merchant")
 	require.EqualValues(t, 1, streak)
 
-	// First checker pass seeds the row; backdate registration past the grace
-	// window (in production the row simply ages), then re-run the checker.
-	_, err = client.Insert(ctx, WorkerHealthCheckArgs{}, &river.InsertOpts{MaxAttempts: 1})
+	// First monitor pass seeds the row; backdate registration past the grace
+	// window (in production the row simply ages), then re-run the monitor.
+	report, err := monitor.Check(ctx)
 	require.NoError(t, err)
-	awaitJobs(t, events, 1)
+	require.NoError(t, monitor.RaiseAlerts(ctx, report))
 	_, execErr := dbi.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.worker_health SET registered_at = now() - interval '1 hour' WHERE worker_kind = $1`, whNoMerchKind)
 	require.NoError(t, execErr)
 
-	_, err = client.Insert(ctx, WorkerHealthCheckArgs{}, &river.InsertOpts{MaxAttempts: 1})
+	report, err = monitor.Check(ctx)
 	require.NoError(t, err)
-	awaitJobs(t, events, 1)
+	require.NoError(t, monitor.RaiseAlerts(ctx, report))
 
 	require.Equal(t, 1, countWorkerHealthAlerts(t, dbi, whNoMerchKind))
 	require.Equal(t, "never_succeeded", alertReason(t, dbi, whNoMerchKind))
@@ -401,8 +397,8 @@ func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
 	}
 	cleanupNewFanoutSystemCustomers(t, super, kind)
 
-	checker := &WorkerHealthCheckWorker{DB: appDB}
-	err = checker.raiseAlert(ctx, gen.OpenrailsWorkerHealth{WorkerKind: kind}, "stale", time.Now().UTC())
+	monitor := &ProgressMonitor{DB: appDB}
+	err = monitor.raiseAlert(ctx, gen.OpenrailsWorkerHealth{WorkerKind: kind}, "stale", time.Now().UTC(), ProgressReport{})
 	require.NoError(t, err)
 
 	for _, merchantID := range []merchant.ID{merchantA, merchantB} {
@@ -468,10 +464,10 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	checker := &WorkerHealthCheckWorker{DB: appDB}
+	monitor := &ProgressMonitor{DB: appDB}
 	row := gen.OpenrailsWorkerHealth{WorkerKind: kind, RegisteredAt: time.Now().Add(-time.Hour).UTC()}
 	now := time.Now().UTC()
-	err = checker.raiseAlert(ctx, row, "stale", now)
+	err = monitor.raiseAlert(ctx, row, "stale", now, ProgressReport{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, merchantB.String())
 	require.Equal(t, 1, countWorkerHealthAlertsForMerchant(t, appDB, merchantA, kind),
@@ -479,9 +475,9 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 	require.Equal(t, 0, countWorkerHealthAlertsForMerchant(t, appDB, merchantB, kind),
 		"failed merchant delivery must not be reported as successful")
 
-	// River retries the entire checker job after a partial fan-out failure. The
-	// successful merchant must not receive another copy of the same incident.
-	err = checker.raiseAlert(ctx, row, "stale", now.Add(time.Minute))
+	// The monitor re-evaluates on its next tick after a partial fan-out failure.
+	// The successful merchant must not receive another copy of the same incident.
+	err = monitor.raiseAlert(ctx, row, "stale", now.Add(time.Minute), ProgressReport{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, merchantB.String())
 	require.Equal(t, 1, countWorkerHealthAlertsForMerchant(t, appDB, merchantA, kind),

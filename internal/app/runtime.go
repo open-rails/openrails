@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -222,6 +221,11 @@ type Runtime struct {
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally
 
+	// progressLifecycle owns the #895 out-of-River progress detector: a plain
+	// goroutine that answers "is the periodic fleet progressing?" without
+	// needing a job to run to find out.
+	progressLifecycle
+
 	// workerHealthRegs captures every registered worker kind + periodic cadence
 	// for the #689 health checker; lazily built (see workerHealthRegistrations).
 	workerHealthRegs     *riverjobs.WorkerRegistrations
@@ -277,6 +281,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
+
+	// #895: stop the out-of-River progress detector first — it outlives the
+	// River client on purpose, so nothing else will cancel it.
+	r.stopRiverProgressMonitor()
 
 	// Stop Solana Pay poller
 	if r.SolanaPayPoller != nil {
@@ -346,8 +354,9 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build river workers: %w", err)
 	}
-	// #689: one middleware covers every registered worker's health bookkeeping.
-	client, pool, err := buildRiverClient(r.Config, workers, []rivertype.Middleware{r.WorkerHealthMiddleware()})
+	// #895: health bookkeeping rides on each worker (addTrackedWorker), not on
+	// the client, so it cannot be omitted by whoever builds the client.
+	client, pool, err := buildRiverClient(r.Config, workers, nil)
 	if err != nil {
 		return err
 	}

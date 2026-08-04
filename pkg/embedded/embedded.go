@@ -58,6 +58,13 @@ type Options struct {
 	// admin_console.enabled without assets refuses to build the standalone
 	// surface. Hosts using embed.New pass embed.WithAdminConsole instead.
 	ConsoleAssets fs.FS
+	// River declares who owns the River job fleet. REQUIRED (#895): OpenRails'
+	// periodic fleet is where the money moves, so construction refuses rather
+	// than returning an engine whose money jobs silently never run. Use
+	// RiverFromHost(bind) when the host owns River (the embedded posture), or
+	// RiverManagedByOpenRails() to have OpenRails construct and run its own
+	// (standalone). The zero value is the rejected "nobody" state.
+	River RiverOwnership
 }
 
 type Embedded struct {
@@ -73,6 +80,13 @@ type Embedded struct {
 func New(opts Options) (*Embedded, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
+	}
+	// #895: refuse BEFORE building the application graph — an engine with no
+	// declared River owner is not a usable engine, and returning one is what
+	// made "the host forgot River entirely" indistinguishable from a healthy
+	// boot.
+	if !opts.River.declared() {
+		return nil, ErrRiverRequired
 	}
 	if err := applyEmbeddedDefaults(opts.Config); err != nil {
 		return nil, err
@@ -92,7 +106,17 @@ func New(opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 
-	return &Embedded{app: application, consoleAssets: opts.ConsoleAssets}, nil
+	e := &Embedded{app: application, consoleAssets: opts.ConsoleAssets}
+	ctx := context.Background()
+	if err := e.bindRiver(ctx, opts.River); err != nil {
+		_ = application.Close(ctx)
+		return nil, err
+	}
+	// #895: start the out-of-River progress detector. It is deliberately started
+	// at CONSTRUCTION, not in RunWorkers — a host that never calls RunWorkers is
+	// exactly the case that used to be undetectable.
+	application.Runtime.StartRiverProgressMonitor(ctx)
+	return e, nil
 }
 
 // applyEmbeddedDefaults enforces the posture embedded construction must

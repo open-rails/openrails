@@ -34,7 +34,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 
 	slug := fmt.Sprintf("mount-order-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 

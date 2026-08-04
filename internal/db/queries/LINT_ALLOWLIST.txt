@@ -22,6 +22,7 @@ PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series
 PERMANENT internal/bootstrap/merchant_dump.go       # dump/restore over a dynamic table list
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
 PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
+PERMANENT internal/river/progress.go                # reads River's OWN river_job table (not OpenRails' schema)
 
 # --- PERMANENT: privileged, runs before merchant context/RLS exists ---------
 PERMANENT internal/crypto/dek_store_db.go      # DEK bootstrap on the privileged pool
