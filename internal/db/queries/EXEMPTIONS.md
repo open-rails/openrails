@@ -118,6 +118,13 @@ dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
 
+`internal/river/progress.go` is PERMANENT for a different reason: it reads
+**River's own** `river_job` table, which is not part of OpenRails' schema, is
+created by River's migrator rather than `migrations/`, and lives in a schema
+named at runtime (`config.RiverSchema`). sqlc has no type information for it and
+could not express the schema-qualified name anyway. Only the schema is
+interpolated, after an identifier check; the kind list is a bound parameter.
+
 **DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
 Nothing about them requires raw SQL.
 

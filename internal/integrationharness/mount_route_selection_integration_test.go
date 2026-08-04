@@ -56,6 +56,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 				DB:       &config.DBConfig{URL: h.DSN},
 			},
 			Redis: h.Redis,
+			River: embedded.RiverManagedByOpenRails(),
 		},
 	})
 	require.NoError(t, err)

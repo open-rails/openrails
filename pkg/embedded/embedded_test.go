@@ -80,10 +80,24 @@ func TestNewRejectsMissingConfig(t *testing.T) {
 
 func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 	cfg := &config.Config{} // no Env, no TestMode, no DB
-	_, err := New(Options{Config: cfg})
+	_, err := New(Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.Env is required")
 
 	cfg = &config.Config{Env: "development"}
-	_, err = New(Options{Config: cfg})
+	_, err = New(Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.TestMode is required")
+}
+
+// #895: an undeclared River owner is refused BEFORE the posture checks and
+// before any DB work — a host that forgot the fleet entirely must never get an
+// engine back, because every read API would keep working while the money stops.
+func TestNewRequiresRiverOwnership(t *testing.T) {
+	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox}
+	_, err := New(Options{Config: cfg})
+	require.ErrorIs(t, err, ErrRiverRequired)
+
+	// And the declaration is the ONLY thing that changes: with it, construction
+	// proceeds far enough to reach the ordinary DB-dependent failure.
+	_, err = New(Options{Config: cfg, River: RiverManagedByOpenRails()})
+	require.NotErrorIs(t, err, ErrRiverRequired)
 }

@@ -200,7 +200,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -276,7 +276,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceAPI)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// API mode: bare identity bind; rail truth arrives over the HTTP API.
@@ -361,7 +361,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// Merchant exists but declares NO rail accounts at all.

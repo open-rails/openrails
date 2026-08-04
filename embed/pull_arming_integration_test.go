@@ -44,7 +44,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: cfg}, // deliberately NO PaymentProviders
+		Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}, // deliberately NO PaymentProviders
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -176,7 +176,7 @@ func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg}})
+	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)

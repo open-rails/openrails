@@ -37,7 +37,7 @@ func TestNew_EmbeddedBootRefusesBypassRLSRoleOutsideDev(t *testing.T) {
 		ProviderWriteMode: config.ProviderWriteModeReadOnly,
 		DB:                &config.DBConfig{URL: superDSN},
 	}
-	_, err = New(Options{Config: cfg, PGXPool: pool})
+	_, err = New(Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.Error(t, err, "an embedded host connected as a BYPASSRLS role must refuse to boot outside development")
 	require.ErrorContains(t, err, "bypasses RLS")
 	require.ErrorContains(t, err, "openrails_app")
@@ -56,7 +56,7 @@ func TestNew_EmbeddedBootWarnsOnBypassRLSRoleInDev(t *testing.T) {
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: superDSN},
 	}
-	e, err := New(Options{Config: cfg, PGXPool: pool})
+	e, err := New(Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.NoError(t, err, "development must only warn, never fail, on a bypass-RLS role")
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 }
@@ -75,7 +75,7 @@ func TestNew_EmbeddedBootSucceedsAsAppRoleOutsideDev(t *testing.T) {
 		ProviderWriteMode: config.ProviderWriteModeReadOnly,
 		DB:                &config.DBConfig{URL: appDSN},
 	}
-	e, err := New(Options{Config: cfg, PGXPool: pool})
+	e, err := New(Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.NoError(t, err, "an RLS-enforcing role must boot outside development")
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 }
