@@ -44,6 +44,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE SET
   subject = EXCLUDED.subject,
   last_seen_at = now()
+WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
 RETURNING id
 `
 
@@ -57,7 +58,10 @@ type EnsureCustomerParams struct {
 // balance keyed by its UUID id (#364); the caller/merchant supplies the id.
 // Materialize (or refresh) the customers row for a payable UUID id under a
 // merchant. The caller supplies id (the payable UUID). ON CONFLICT refreshes
-// last_seen_at so concurrent first-touch is safe.
+// last_seen_at so concurrent first-touch is safe. The merchant_id guard makes a
+// foreign id return NO ROW instead of re-pointing another merchant's customer
+// (#889) — RLS already blocks it on enforcing roles, this holds for the
+// privileged ones (bootstrap, import, dev owner) too.
 func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Subject)
 	var id uuid.UUID
@@ -65,10 +69,18 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 	return id, err
 }
 
-const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES ($1, $2, $3)
-ON CONFLICT DO NOTHING
+const ensureCustomerRow = `-- name: EnsureCustomerRow :one
+WITH inserted AS (
+  INSERT INTO openrails.customers (id, merchant_id, subject)
+  VALUES ($1, $2, $3)
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id
+)
+SELECT id FROM inserted
+UNION ALL
+SELECT c.id FROM openrails.customers c
+WHERE c.id = $1 AND c.merchant_id = $2
+LIMIT 1
 `
 
 type EnsureCustomerRowParams struct {
@@ -77,10 +89,15 @@ type EnsureCustomerRowParams struct {
 	Subject    *string
 }
 
-// FK-target materialization before commerce inserts; no-op when present.
-func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) error {
-	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID, arg.Subject)
-	return err
+// FK-target materialization before commerce inserts; no-op when present. It
+// RETURNS the id it materialized so a conflicting row owned by ANOTHER merchant
+// yields no row rather than a silent success (#889): FK checks bypass RLS, so a
+// silent no-op would let the caller's row attach to a foreign customer.
+func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, ensureCustomerRow, arg.ID, arg.MerchantID, arg.Subject)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockCustomerForMerchant = `-- name: LockCustomerForMerchant :one
@@ -219,6 +236,7 @@ ON CONFLICT (id) DO UPDATE SET
   subject = EXCLUDED.subject,
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
+WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
 RETURNING id
 `
 
@@ -230,6 +248,9 @@ type UpsertCustomerBySubjectParams struct {
 
 // Customer identity is the merchant plus the host/AuthKit stable UUID subject.
 // The row id is that subject UUID; issuer is kept only as last-seen audit source.
+// The merchant_id guard refuses a subject already registered under a DIFFERENT
+// merchant (#889) — one AuthKit instance can serve several merchants, and the
+// unguarded upsert handed the second merchant an id owned by the first.
 func (q *Queries) UpsertCustomerBySubject(ctx context.Context, arg UpsertCustomerBySubjectParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertCustomerBySubject, arg.Subject, arg.MerchantID, arg.Issuer)
 	var id uuid.UUID

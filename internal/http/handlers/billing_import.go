@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/billingimport"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -49,6 +51,17 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 	})
 	if err != nil {
 		msg := err.Error()
+		// A book naming a customer that belongs to another merchant is an
+		// unusable book, not a server fault (#889).
+		if errors.Is(err, db.ErrCustomerOwnedByAnotherMerchant) {
+			r.APIError(&api.APIError{
+				HTTPStatus: http.StatusBadRequest,
+				Type:       api.ErrorTypeInvalidRequest,
+				Code:       "customer_owned_by_another_merchant",
+				Message:    msg,
+			})
+			return
+		}
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") {
 			r.ErrorJSON(http.StatusBadRequest, msg)
 			return

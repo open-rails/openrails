@@ -477,9 +477,7 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 		}
 		tenantID = tid.UUID()
 	}
-	return q.EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
-		ID: tsid, MerchantID: tenantID, Subject: stringPtr(tsid.String()),
-	})
+	return db.EnsureCustomerRowQ(ctx, q, tenantID, tsid)
 }
 
 func stringPtr(s string) *string { return &s }

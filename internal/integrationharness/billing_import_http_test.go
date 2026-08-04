@@ -142,17 +142,11 @@ func TestBillingImportHTTP(t *testing.T) {
 
 	t.Run("wrong-merchant credential cannot bind the book", func(t *testing.T) {
 		b := surface.ProvisionOwnedMerchant("bimp" + sfx)
-		// B posts A's book: the price uuid belongs to A, so under B's RLS scope
-		// every row blocks — nothing lands under A OR B.
+		// B posts A's book: its customer uuids are A's customers, so the book is
+		// refused at the door (#889) — nothing lands under A OR B.
 		status, body := requestJSON(t, http.MethodPost, importURL, b.APIKey, book)
-		require.Equalf(t, http.StatusOK, status, "wrong merchant import: %s", string(body))
-		var res importResult
-		require.NoError(t, json.Unmarshal(body, &res))
-		require.ElementsMatch(t, sourceIDs, res.Blocked)
-		require.Empty(t, res.Imported)
-		for _, reason := range res.Reasons {
-			require.Contains(t, reason, "price not found")
-		}
+		require.Equalf(t, http.StatusBadRequest, status, "wrong merchant import: %s", string(body))
+		require.Contains(t, string(body), "owned by another merchant")
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1`, b.MerchantID.UUID()).Scan(&n))
