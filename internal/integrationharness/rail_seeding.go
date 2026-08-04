@@ -57,6 +57,9 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		mctx := merchant.WithID(ctx, mid)
 		archived := proc.Archived
 		require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+			// Key is the declared manifest key, not decoration: the #848 wire
+			// selector names a PSP by it, so a NULL key makes a merchant's
+			// second armed PSP unreachable (or#890).
 			_, err := rt.DB.Gen(cctx).UpsertPSP(cctx, gen.UpsertPSPParams{
 				ID:          id,
 				MerchantID:  mid.UUID(),
