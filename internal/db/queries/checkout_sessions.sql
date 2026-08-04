@@ -4,14 +4,14 @@
 INSERT INTO openrails.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, rail_fields, rail_state,
+    subscription_id, metadata, rail_fields, rail_state, routing_reason,
     psp_id, created_at, updated_at
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7,
     sqlc.arg(currency),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
-    sqlc.narg(rail_fields), sqlc.narg(rail_state),
+    sqlc.narg(rail_fields), sqlc.narg(rail_state), sqlc.narg(routing_reason),
     sqlc.narg(psp_id),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())

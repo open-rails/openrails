@@ -161,6 +161,38 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   stale intents expire/supersede. Rules:
   [operations.md → Durability model](operations.md#durability-model).
 
+### Processor routing
+
+Checkout is one processor at a time, chosen **before** the session exists. A request that
+names a PSP gets that PSP; a request that omits `payment.rail` is routed.
+
+- **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
+  serve the price.
+- **Policy**: `checkout_routing` in the merchant manifest (mode 1) or
+  `checkout_routing` on `PUT /v1/merchant/settings` (mode 2). Ordered
+  rules, first match wins; each rule's `prefer` list is both the ranking and the
+  whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
+  `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the
+  catch-all and must be last.
+
+```yaml
+checkout_routing:
+  - match: { currency: eur, mode: subscription }
+    prefer: [ccbill, mobius]
+  - prefer: [mobius, ccbill, solana]
+```
+
+- **Fallback** is availability-only and evaluated pre-charge: `not_armed`,
+  `credentials_missing`, `link_missing`, `mode_unsupported`, `service_unavailable`,
+  `ambiguous_selector`, `unknown_selector`, `resolve_failed`. A **decline is not one of
+  them** — routing never retries a charge on a second processor.
+- **Why did this customer get CCBill?** `checkout_sessions.routing_reason` holds the
+  decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
+  with its class. Written once at creation, never rewritten.
+- **Preview without charging**: `POST /v1/merchant/payment-providers/routing/dry-run`
+  with `{"price_id": "...", "country": "US"}` returns the same decision a real session
+  would make, including the exact `routing_reason` it would store.
+
 ### Observability
 
 - **Metrics / analytics API**: `GET /v1/merchant/metrics/schema` (self-describing

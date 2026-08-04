@@ -26,6 +26,13 @@ type MerchantConfig = boot.MerchantConfig
 type InvoiceConfig = boot.InvoiceConfig
 type MerchantProfileConfig = boot.MerchantProfileConfig
 type PSPConfig = boot.PSPConfig
+
+// CheckoutRoutingRuleConfig / CheckoutRoutingMatchConfig alias the or#288
+// processor-routing policy block so embedded hosts can declare it
+// programmatically alongside their PSPs.
+type CheckoutRoutingRuleConfig = boot.CheckoutRoutingRuleConfig
+type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig
+
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type RailMerchantAccountSignerConfig = boot.RailMerchantAccountSignerConfig
 type RemoteApplicationConfig = boot.RemoteApplicationConfig
@@ -145,6 +152,7 @@ func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
 		m.RemoteApplication != nil ||
 		m.Invoice != nil ||
 		len(m.DelegatedInvokerWastedSpendWindows) > 0 ||
+		len(m.CheckoutRouting) > 0 ||
 		strings.TrimSpace(m.Profile.DisplayName) != "" ||
 		strings.TrimSpace(m.Profile.LogoURL) != "" ||
 		strings.TrimSpace(m.Profile.FromEmail) != "" ||

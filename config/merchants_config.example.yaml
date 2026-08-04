@@ -41,6 +41,32 @@ merchants:
       - { key: burst, window: 15m, limit: 5_000_000 }
       - { key: sustained, window: 5h, limit: 20_000_000 }
 
+    # or#288 processor routing: ordered rules, FIRST MATCH WINS. `prefer` is both
+    # the ranked candidate list and the whitelist — a PSP the winning rule does
+    # not name cannot be routed to, which is how you pin a product to one rail.
+    # Candidates that cannot serve the price right now (unarmed, archived,
+    # credentials missing, no price link, mode unsupported) are skipped and the
+    # next one is taken; the skipped set and its reasons land on the session's
+    # routing_reason. Entries speak the checkout selector vocabulary (#848): PSP
+    # keys, or a rail kind where exactly one PSP is armed on it.
+    #
+    # OMIT THIS BLOCK ENTIRELY for the built-in order (stripe, nmi, ccbill,
+    # solana) — it is the right answer for a merchant with one PSP per rail.
+    # A declared rule REPLACES the policy whole; a rule with an empty `match`
+    # matches everything and must therefore be last.
+    #
+    # A request that NAMES a PSP always gets that PSP: routing decides only when
+    # checkout's payment.rail is omitted, and an explicit choice never falls back.
+    checkout_routing:
+      # EU subscriptions go to CCBill first, NMI second.
+      - match: { currency: eur, mode: subscription }
+        prefer: [ccbill, mobius]
+      # This one product is card-only; solana must never be offered for it.
+      - match: { product: enterprise }
+        prefer: [stripe, mobius]
+      # Catch-all.
+      - prefer: [mobius, ccbill, solana]
+
     # Operator-declared PSP catalog: one word everywhere — this key, the DB table
     # (openrails.psps) and the merchant-secret name prefix (`psps/…`). One rail each.
     psps:

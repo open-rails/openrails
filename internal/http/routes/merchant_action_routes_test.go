@@ -75,6 +75,14 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantPaymentProvidersRead,
 		},
 		{
+			// or#288: the routing dry run reads PSP state, so it rides the
+			// payment-providers READ grant even though it is a POST.
+			name:   "checkout routing dry run",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/payment-providers/routing/dry-run",
+			perm:   controlplane.PermMerchantPaymentProvidersRead,
+		},
+		{
 			name:   "payment providers write",
 			method: http.MethodPut,
 			path:   "/billing/v1/merchant/payment-providers/stripe",

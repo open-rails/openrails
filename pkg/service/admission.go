@@ -372,6 +372,11 @@ type MerchantConfiguration struct {
 	// merchant's InvoiceMonthlyFloor respectively.
 	ArrearsGraceDays        *int
 	ArrearsDelinquencyFloor *int64
+	// CheckoutRouting (or#288) is the processor-routing policy — the mode-2
+	// twin of the manifest's checkout_routing block. A nil pointer preserves
+	// the stored policy; a non-nil pointer replaces it whole (an empty slice
+	// clears it back to the built-in default order).
+	CheckoutRouting *[]models.CheckoutRoutingRule
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -384,6 +389,13 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		return MerchantConfiguration{}, false, err
 	}
 	alertEmail := cfg.AlertEmail
+	// A nil pointer means "no policy declared" — distinct from a pointer to an
+	// empty list, which a writer uses to CLEAR one.
+	var routing *[]models.CheckoutRoutingRule
+	if len(cfg.CheckoutRouting) > 0 {
+		rules := cfg.CheckoutRouting
+		routing = &rules
+	}
 	out := MerchantConfiguration{
 		Profile:                            &cfg.Profile,
 		InvoiceCollectionThreshold:         cfg.InvoiceCollectionThreshold,
@@ -393,6 +405,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		RepriceNoticeWindowDays:            cfg.RepriceNoticeWindowDays,
 		ArrearsGraceDays:                   cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            cfg.ArrearsDelinquencyFloor,
+		CheckoutRouting:                    routing,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -462,6 +475,13 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 			return fmt.Errorf("arrears_delinquency_floor must be >= 0")
 		}
 		cfg.ArrearsDelinquencyFloor = in.ArrearsDelinquencyFloor
+	}
+	if in.CheckoutRouting != nil {
+		routing, err := merchantconfig.NormalizeCheckoutRouting(*in.CheckoutRouting)
+		if err != nil {
+			return err
+		}
+		cfg.CheckoutRouting = routing
 	}
 	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {

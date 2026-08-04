@@ -90,7 +90,7 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
 - `price_id` (required)
 - `mode` (optional) — `one_off` or `subscription`; resolved from the price if omitted
 - `payment` (required):
-  - `rail` (required) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`)
+  - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
   - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
   - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
   - billing details for `ccbill`/`stripe`: `email`, `first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`
@@ -325,6 +325,7 @@ manifest-guarded like catalog writes).
 | GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
 | PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets |
 | DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
+| POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
 
 ### Metrics, dashboard, alerts, notifications
 

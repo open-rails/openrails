@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 const (
@@ -58,6 +59,12 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		}
 		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
 			return err
+		}
+		// or#288: the routing policy is validated by the SAME normalizer the
+		// mode-2 config API uses, so a manifest cannot declare a policy the API
+		// would refuse.
+		if _, err := merchantconfig.NormalizeCheckoutRouting(checkoutRoutingRules(t.CheckoutRouting)); err != nil {
+			return fmt.Errorf("merchant %q %w", slug, err)
 		}
 		for key, account := range t.PSPs {
 			if err := validateManifestRailMerchantAccount(slug, key, account); err != nil {

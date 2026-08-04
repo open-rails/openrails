@@ -385,3 +385,24 @@ func custodianHeld(target railTarget) bool {
 	custody, err := config.ParseCustodySettings(target.Scope.Settings)
 	return err == nil && custody.ThirdParty()
 }
+
+// pspKeyArchived reports whether selector names a declared-but-archived PSP
+// (or#288). Best-effort by design: it only refines a skip CLASS in the routing
+// trace, never a routing outcome, so a resolver that cannot answer leaves the
+// class as-is rather than failing the checkout.
+func (s *CheckoutService) pspKeyArchived(ctx context.Context, selector string) bool {
+	resolver, ok := s.ProviderSecrets.(merchants.ArchivedPSPKeyResolver)
+	if !ok {
+		return false
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false
+	}
+	archived, err := resolver.PSPKeyArchived(ctx, tid, selector, s.pspEnvironment())
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Debug("checkout routing: archived-PSP lookup failed")
+		return false
+	}
+	return archived
+}

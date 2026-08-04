@@ -212,6 +212,14 @@ type PSPRailScopesResolver interface {
 	ActivePSPScopesForRail(ctx context.Context, merchantID merchant.ID, rail, environment string) ([]PSPScope, error)
 }
 
+// ArchivedPSPKeyResolver reports whether a key names an ARCHIVED account
+// (or#288). Routing needs it to tell "you retired this PSP" (not_armed) from
+// "no such PSP was ever declared" (unknown_selector) — two very different
+// answers to "why didn't my checkout go there".
+type ArchivedPSPKeyResolver interface {
+	PSPKeyArchived(ctx context.Context, merchantID merchant.ID, key, environment string) (bool, error)
+}
+
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
 // operation is namespaced by merchant id so one merchant can never read or
 // overwrite another merchant's Stripe credentials or webhook signing secrets.

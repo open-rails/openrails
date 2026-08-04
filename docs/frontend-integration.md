@@ -13,7 +13,9 @@ All money amounts are **micros** (millionths of a currency unit): `$5.00 = 5_000
 A **rail** is the gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a **PSP** is the
 merchant's account on a rail, named by its key (`mobius` = an NMI account). Checkout's
 `payment.rail` value is the PSP key; a bare rail kind is also accepted when the merchant
-has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys).
+has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys). Omitting
+`payment.rail` entirely lets the merchant's routing policy pick — see
+[Letting the merchant route](#letting-the-merchant-route).
 
 ### Auth: two shapes
 
@@ -162,7 +164,8 @@ POST /v1/me/checkout
   "price_id": "price_...",
   "mode": "subscription",            // optional; inferred from the price
   "payment": {
-    "rail": "mobius | ccbill | stripe | solana",  // PSP key (rail kind ok if unambiguous)
+    "rail": "mobius | ccbill | stripe | solana",  // PSP key (rail kind ok if unambiguous);
+                                     // omit to let the merchant's routing policy pick
     "payment_method_id": "pm_...",   // saved card — mobius/stripe
     "payment_token": "tok_...",      // fresh browser-tokenized card — mobius/stripe
     "token_symbol": "USDC",          // solana
@@ -175,6 +178,26 @@ POST /v1/me/checkout
 
 Send an `Idempotency-Key` header on create — retries with the same key replay the
 original response instead of double-charging.
+
+#### Letting the merchant route
+
+`payment.rail` is optional. Name a PSP and you get that PSP — an explicit choice is never
+silently switched, because your page has already committed to that PSP's flow. Omit it and
+the merchant's routing policy picks: the first PSP in their preference order that can
+actually serve this price right now, skipping any that is unarmed, archived, missing
+credentials, missing a price link, or unable to serve the mode. Merchants who declare no
+policy get the built-in order (stripe, nmi, ccbill, solana).
+
+Only omit it when your page can drive whatever comes back — read `flow` for the returned
+`payment.rail` from `/v1/checkout-config` and branch on it. If you have already collected a
+card token, name the PSP you tokenized against.
+
+The chosen PSP and the reason for it are recorded on the session
+(`checkout_sessions.routing_reason`), so support can answer "why did this customer get
+CCBill" without guessing. Merchants can preview a decision without creating anything:
+`POST /v1/merchant/payment-providers/routing/dry-run` with `{"price_id": "...", "country":
+"US"}` returns the winner, the ranked fallbacks, and every skipped candidate with its
+reason.
 
 The response's `next_action` tells the frontend what to do next:
 

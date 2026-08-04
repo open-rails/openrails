@@ -672,6 +672,11 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
 
 	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
+	// or#288 routing dry run: read-only "which PSP would this checkout get, and
+	// why" — same permission as reading the PSP catalog, since the answer is a
+	// projection of it. Registered before "/:provider" so "routing" is never
+	// captured as a provider name.
+	providers.Handle(http.MethodPost, "/routing/dry-run", h(httphandlers.MerchantDryRunCheckoutRouting), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
 	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
 	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).

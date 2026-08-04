@@ -269,6 +269,9 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	if len(src.DelegatedInvokerWastedSpendWindows) > 0 {
 		dst.DelegatedInvokerWastedSpendWindows = src.DelegatedInvokerWastedSpendWindows
 	}
+	if len(src.CheckoutRouting) > 0 {
+		dst.CheckoutRouting = src.CheckoutRouting
+	}
 	if len(src.PSPs) > 0 {
 		if dst.PSPs == nil {
 			dst.PSPs = map[string]PSPConfig{}
@@ -376,6 +379,50 @@ type MerchantConfig struct {
 	// DB table (openrails.psps) and the merchant-secret name prefix (`psps/…`)
 	// speak the same vocabulary as this key.
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
+	// CheckoutRouting (or#288) is the merchant's processor preference policy:
+	// ordered rules, first match wins, each naming a ranked PSP list. Omitted
+	// leaves the stored policy untouched; declared REPLACES it whole (an
+	// ordered list has no meaningful per-element merge).
+	CheckoutRouting []CheckoutRoutingRuleConfig `yaml:"checkout_routing,omitempty" koanf:"checkout_routing"`
+}
+
+// CheckoutRoutingRuleConfig is one manifest routing rule. Prefer speaks the
+// checkout selector vocabulary (#848): PSP keys, or a rail kind where exactly
+// one PSP is armed on it.
+type CheckoutRoutingRuleConfig struct {
+	Match  CheckoutRoutingMatchConfig `yaml:"match,omitempty" koanf:"match"`
+	Prefer []string                   `yaml:"prefer" koanf:"prefer"`
+}
+
+// CheckoutRoutingMatchConfig is a rule's condition; every set field must match,
+// and an all-empty match is the catch-all (which must be the last rule).
+type CheckoutRoutingMatchConfig struct {
+	Currency string `yaml:"currency,omitempty" koanf:"currency"`
+	Product  string `yaml:"product,omitempty" koanf:"product"`
+	Price    string `yaml:"price,omitempty" koanf:"price"`
+	Mode     string `yaml:"mode,omitempty" koanf:"mode"`
+	Country  string `yaml:"country,omitempty" koanf:"country"`
+}
+
+// checkoutRoutingRules projects the manifest rules onto the stored model.
+func checkoutRoutingRules(in []CheckoutRoutingRuleConfig) []models.CheckoutRoutingRule {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]models.CheckoutRoutingRule, 0, len(in))
+	for _, rule := range in {
+		out = append(out, models.CheckoutRoutingRule{
+			Match: models.CheckoutRoutingMatch{
+				Currency: rule.Match.Currency,
+				Product:  rule.Match.Product,
+				Price:    rule.Match.Price,
+				Mode:     rule.Match.Mode,
+				Country:  rule.Match.Country,
+			},
+			Prefer: rule.Prefer,
+		})
+	}
+	return out
 }
 
 // InvoiceConfig is the merchant invoice/collection policy block, mirroring
@@ -824,7 +871,7 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	// Apply the merchant_configurations payload (#646): profile, invoice/collection
 	// policy, and delegated-invoker abuse windows. Load once, mutate only the
 	// declared parts (omit = leave-as-is), upsert if anything changed.
-	if hasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 {
+	if hasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 || len(mt.CheckoutRouting) > 0 {
 		store := merchantconfig.NewStore(database)
 		conf, _, err := store.Get(mctx)
 		if err != nil {
@@ -874,6 +921,14 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 				})
 			}
 			conf.DelegatedInvokerWastedSpendWindows = windows
+		}
+		if len(mt.CheckoutRouting) > 0 {
+			// or#288: the declared order IS the policy, so it replaces whole.
+			routing, err := merchantconfig.NormalizeCheckoutRouting(checkoutRoutingRules(mt.CheckoutRouting))
+			if err != nil {
+				return err
+			}
+			conf.CheckoutRouting = routing
 		}
 		if err := store.Upsert(mctx, conf); err != nil {
 			return fmt.Errorf("upsert merchant configuration: %w", err)
