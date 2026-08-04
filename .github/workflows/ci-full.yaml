@@ -1,13 +1,20 @@
 name: Validate Code (full)
 
 # FULL pipeline (#855): the complete suite, no path filtering, no scoping.
-# Runs on master pushes, nightly, and on demand — never on PRs or ordinary
-# branch pushes (PRs get the fast path-filtered pipeline in ci.yaml). Job ids
-# carry a -full suffix so branch-protection required checks (which must point
-# at ci.yaml's PR-scoped jobs) never reference these.
+# Runs on integration-branch pushes, nightly, and on demand — never on PRs or
+# ordinary branch pushes (PRs get the fast path-filtered pipeline in ci.yaml).
+# Job ids carry a -full suffix so branch-protection required checks (which must
+# point at ci.yaml's PR-scoped jobs) never reference these.
+#
+# It also PRIMES THE CACHES for every PR. GitHub scopes a cache to the branch
+# that wrote it plus that branch's descendants, so a PR restores from its BASE
+# branch. These jobs therefore mirror ci.yaml's split one-for-one and pass the
+# same `variant` to .github/actions/go-env: a push here leaves a warm build
+# cache for each build configuration the PR pipeline uses. Merging the split
+# back together would silently cost every PR the cold-compile time again.
 on:
   push:
-    branches: [ master ]
+    branches: [ master, dev ]
   schedule:
     # 05:00 UTC nightly.
     - cron: '0 5 * * *'
@@ -29,13 +36,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # setup-go's built-in cache (keyed on go.sum) covers ~/go/pkg/mod AND
-      # ~/.cache/go-build. Never add an explicit actions/cache step for those
-      # paths: restoring over a populated dir fails with "tar: File exists".
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: vet
       - name: Download modules
         run: go mod download
       - name: Vet
@@ -44,8 +47,49 @@ jobs:
         run: go build ./...
       - name: Vet (integration tag)
         run: go vet -tags integration ./...
-      - name: Test
-        run: go test -race ./...
+      - name: Build examples
+        run: |
+          for d in examples/*/; do
+            (cd "$d" && go build ./... && go vet ./...)
+          done
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
+  unit-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/go-env
+        with:
+          variant: race
+      - name: Download modules
+        run: go mod download
+      - name: Test (race)
+        run: go test -count=1 -race ./...
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
+  # Mirrors ci.yaml's `lint` so a push here leaves the `lint` build cache warm
+  # for PRs, same as every other variant.
+  lint-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/go-env
+        with:
+          variant: lint
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.4
+          args: --timeout=15m
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
 
   sqlc-full:
     runs-on: ubuntu-latest
@@ -66,10 +110,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: sqlc
       # or#855: pinned + checksum-verified downloads instead of compiling both
       # tools from source on every run (see scripts/ci-install-tool.sh).
       - name: Install pinned tools (task, sqlc)
@@ -80,6 +123,9 @@ jobs:
         env:
           POSTGRES_HOST_PORT: "5434"
         run: "$TASK_BIN sqlc-check"
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
 
   console-full:
     runs-on: ubuntu-latest
@@ -94,30 +140,39 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/admin/pnpm-lock.yaml
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: console
       - name: Build console (pnpm install + tsc + vite)
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
       - name: Lint console
         run: pnpm run lint
         working-directory: web/admin
+      # Full tier keeps the WHOLE-TREE tagged vet that the PR tier narrows to
+      # the one package carrying tag-conditional source. Same reasoning as the
+      # PR job, opposite trade: nothing here is racing a 3-minute bar, so pay
+      # the 68s for the belt-and-braces version.
       - name: Tagged Go build embeds the dist
         run: go vet -tags console_assets ./...
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
 
   integration-full:
     runs-on: ubuntu-latest
     # ENFORCING (#694): the suite runs green. The serial run is ~20-25 min (go
     # test itself is capped at 25m inside the script); the job timeout adds
     # headroom for image pulls + module download.
+    #
+    # NOT sharded, on purpose: this is the tier that must reproduce the real
+    # serial ordering across ALL packages on ONE stack. Sharding is a PR-tier
+    # wall-clock trade; the authority run keeps the single stack.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/go-env
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: integration
       - name: Download modules
         run: go mod download
       # Integration tests share one compose-backed Postgres/Garnet stack and
@@ -126,3 +181,6 @@ jobs:
       # fallbacks for direct package runs, not the normal CI path.
       - name: Integration test (complete suite)
         run: bash scripts/test_integration.sh ./...
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
