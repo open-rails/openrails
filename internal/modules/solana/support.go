@@ -162,7 +162,12 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 }
 
 // FormatBaseUnits renders base units as a fixed-point decimal string with
-// `decimals` fractional digits. Display only — pure integer, no float rounding.
+// `decimals` fractional digits. Pure integer, no float rounding. This is the
+// ONLY Solana amount formatter (#863 collapsed pay.go's trailing-zero-trimming
+// twin into it): it reaches the Solana Pay `amount=` wire as well as display.
+// Fixed precision is deliberate — it states the scale on the wire, so a wrong
+// `decimals` makes the wallet reject the URL (decimal places > mint decimals)
+// instead of silently transferring a 10^n-wrong amount.
 func FormatBaseUnits(units uint64, decimals int) string {
 	if decimals <= 0 {
 		return strconv.FormatUint(units, 10)

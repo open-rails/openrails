@@ -2,12 +2,9 @@ package solana
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/stretchr/testify/require"
 )
@@ -25,22 +22,12 @@ func TestTransferRequestURLIncludesPurchaseMemo(t *testing.T) {
 	)
 	sessionID := uuid.MustParse("0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42")
 
-	s := &SolanaPayService{rails: railresolve.FixedSet{
-		"solana": {
-			Rail:      models.RailSolana,
-			AccountID: recipient,
-			Solana: &config.SolanaRailConfig{
-				Tokens: map[string]config.TokenConfig{
-					"USDC": {Mint: usdcMint, Decimals: 6},
-				},
-			},
-		},
-	}}
+	s := &SolanaPayService{}
 
-	got := s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, usdcMint, "USDC", reference, solanarpc.PurchaseMemo(sessionID))
+	got := s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, 6, usdcMint, "USDC", reference, solanarpc.PurchaseMemo(sessionID))
 	require.Equal(t,
 		"solana:"+recipient+
-			"?amount=5"+
+			"?amount=5.000000"+
 			"&spl-token="+usdcMint+
 			"&reference="+reference+
 			"&memo=openrails%3A1%3A0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42"+
@@ -48,6 +35,6 @@ func TestTransferRequestURLIncludesPurchaseMemo(t *testing.T) {
 		got)
 
 	// No memo (defensive: e.g. an empty stamp) omits the param entirely.
-	got = s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, usdcMint, "USDC", reference, "")
+	got = s.buildTransferRequestURL(context.Background(), recipient, 5_000_000, 6, usdcMint, "USDC", reference, "")
 	require.NotContains(t, got, "memo=")
 }
