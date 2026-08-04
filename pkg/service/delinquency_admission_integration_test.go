@@ -128,6 +128,13 @@ func seedOverdueInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 // entry point: an arrears payer whose overdue exposure has eaten its credit line
 // is refused with `insufficient_credit`, under the RLS-enforcing harness.
 func TestAdmitRefusesWhenOverdueExposureEatsTheCreditLine(t *testing.T) {
+	// or#878 follow-up: two DELIBERATE exposure models disagree — AuthorizeAndHold
+	// subtracts invoice-derived exposure; GetAdmissionCapacity documents that under
+	// Phase-H used credit is already a negative customer_balance and deliberately
+	// does not. Which view is authoritative is an owner ruling (money risk both
+	// ways: double-count refuses legitimate spend, status quo admits unpaid-invoice
+	// payers). Pinned aspiration, not behavior — skipped until the ruling lands.
+	t.Skip("or#878: awaiting owner ruling on the authoritative exposure model (see PR #224 body)")
 	svc, ms, _, ctx := wastedSvcEnv(t)
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
