@@ -14,13 +14,6 @@ import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -210,8 +203,8 @@ export function AlertsTab() {
   const templateList = templates.data?.data ?? []
 
   return (
-    <div className="flex max-w-4xl flex-col gap-6">
-      <AlertEmailCard
+    <div className="flex max-w-4xl flex-col gap-10">
+      <AlertEmailSection
         key={settings.data?.alert_email ?? "∅"}
         settings={settings.data ?? undefined}
         loading={settings.loading}
@@ -237,7 +230,7 @@ export function AlertsTab() {
 
 // --- Alert email -----------------------------------------------------------
 
-function AlertEmailCard({
+function AlertEmailSection({
   settings,
   loading,
   onSaved,
@@ -246,7 +239,7 @@ function AlertEmailCard({
   loading: boolean
   onSaved: () => void
 }) {
-  // Initial value is seeded from props; the parent remounts this card (key on
+  // Initial value is seeded from props; the parent remounts this section (key on
   // alert_email) when the saved value changes, so no props→state effect.
   const initial = settings?.alert_email ?? ""
   const [email, setEmail] = React.useState(initial)
@@ -255,51 +248,53 @@ function AlertEmailCard({
   const dirty = email.trim() !== initial
 
   return (
-    <Card className="max-w-xl">
-      <CardHeader>
-        <CardTitle className="text-sm">Alert email</CardTitle>
-        <CardDescription>
-          Where operator alerts are sent when a rule uses the email channel.
-          Leave empty and the email channel stays inactive — alerts fail soft to
-          in-app and any webhooks.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-[1fr_auto] gap-2">
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="grid gap-1">
+          <h2 className="text-base font-semibold">Email delivery</h2>
+          <p className="text-sm text-muted-foreground">
+            Send email alerts to this address.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          disabled={busy || loading || !dirty}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              // Preserve existing settings; only change alert_email.
+              await putMerchantSettings({
+                ...(settings ?? {}),
+                alert_email: email.trim() || undefined,
+              })
+              toast.success(
+                email.trim() ? "Alert email saved" : "Alert email cleared"
+              )
+              onSaved()
+            } catch (err) {
+              toastApiError(err, "Save alert email")
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
+        <Label htmlFor="alert-email">Alert email</Label>
+        <div className="min-w-0">
           <Input
+            id="alert-email"
             type="email"
             placeholder="alerts@example.com"
             value={email}
             disabled={loading}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <Button
-            variant="outline"
-            disabled={busy || loading || !dirty}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                // Preserve existing settings; only change alert_email.
-                await putMerchantSettings({
-                  ...(settings ?? {}),
-                  alert_email: email.trim() || undefined,
-                })
-                toast.success(
-                  email.trim() ? "Alert email saved" : "Alert email cleared"
-                )
-                onSaved()
-              } catch (err) {
-                toastApiError(err, "Save alert email")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save"}
-          </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
 
@@ -369,14 +364,13 @@ function RulesSection({
   const canCreate = templates.length > 0
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-medium">Alert rules</h2>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Threshold alerts run on a slow cadence over your live metrics and
-            push a warning the moment a threshold is crossed — before a rail
-            fines you or churn spikes.
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="grid max-w-2xl gap-1">
+          <h2 className="text-base font-semibold">Alert rules</h2>
+          <p className="text-sm text-pretty text-muted-foreground">
+            Monitor billing risks and notify your team when thresholds are
+            crossed.
           </p>
         </div>
         {canCreate ? (
@@ -396,61 +390,38 @@ function RulesSection({
       {loading || templatesLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : rules.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-            <HugeiconsIcon
-              icon={Notification01Icon}
-              className="size-6 text-muted-foreground"
-            />
-            <div>
-              <p className="text-sm font-medium">No alert rules yet</p>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Alerting watches the metrics that can fine or bankrupt you —
-                chargeback ratio, dunning spikes, credit depletion, expiring
-                cards — and notifies you when a threshold is crossed. Start from
-                a template.
-              </p>
-            </div>
-            {canCreate && (
-              <RuleDialog
+        <p className="py-2 text-sm text-muted-foreground">
+          No alert rules configured.
+        </p>
+      ) : (
+        <Table className="min-w-[48rem]">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-muted-foreground">Rule</TableHead>
+              <TableHead className="text-muted-foreground">Severity</TableHead>
+              <TableHead className="text-muted-foreground">Channels</TableHead>
+              <TableHead className="text-muted-foreground">State</TableHead>
+              <TableHead className="text-muted-foreground">Enabled</TableHead>
+              <TableHead className="text-right text-muted-foreground">
+                Action
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rules.map((r) => (
+              <RuleRow
+                key={r.id}
+                rule={r}
                 templates={templates}
                 webhooks={webhooks}
                 alertEmail={alertEmail}
-                onDone={onChanged}
-                cta
+                onChanged={onChanged}
               />
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Rule</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Channels</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Enabled</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rules.map((r) => (
-                <RuleRow
-                  key={r.id}
-                  rule={r}
-                  templates={templates}
-                  webhooks={webhooks}
-                  alertEmail={alertEmail}
-                  onChanged={onChanged}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -504,7 +475,7 @@ function RuleRow({
 
   return (
     <TableRow className={rule.enabled ? undefined : "opacity-60"}>
-      <TableCell>
+      <TableCell className="py-3">
         <span className="font-medium">{label}</span>
         {def?.digest && (
           <span className="block text-xs text-muted-foreground">
@@ -512,13 +483,13 @@ function RuleRow({
           </span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         <SeverityBadge severity={rule.severity} />
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         <ChannelSummary channels={rule.channels} />
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         {firing ? (
           <Badge
             variant="secondary"
@@ -530,7 +501,7 @@ function RuleRow({
           <span className="text-xs text-muted-foreground">ok</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="py-3">
         <Switch
           checked={rule.enabled}
           disabled={busy}
@@ -544,7 +515,7 @@ function RuleRow({
           }
         />
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         <div className="flex justify-end gap-1">
           <Button variant="ghost" size="sm" disabled={busy} onClick={runTest}>
             <HugeiconsIcon icon={SentIcon} className="size-3.5" /> Test
@@ -599,7 +570,6 @@ function RuleDialog({
   alertEmail,
   onDone,
   trigger,
-  cta,
 }: {
   rule?: AlertRule
   templates: AlertTemplateInfo[]
@@ -607,7 +577,6 @@ function RuleDialog({
   alertEmail: string
   onDone: () => void
   trigger?: React.ReactElement
-  cta?: boolean
 }) {
   const editing = !!rule
   const [open, setOpen] = React.useState(false)
@@ -708,8 +677,7 @@ function RuleDialog({
         render={
           trigger ?? (
             <Button size="sm">
-              <HugeiconsIcon icon={Add01Icon} className="size-4" />{" "}
-              {cta ? "Create your first rule" : "New rule"}
+              <HugeiconsIcon icon={Add01Icon} className="size-4" /> New rule
             </Button>
           )
         }
@@ -933,16 +901,12 @@ function WebhooksSection({
   onChanged: () => void
 }) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-medium">Webhooks</h2>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Deliver alerts to a chat channel or your own receiver. Paste a
-            Discord or Slack channel webhook URL — no bot needed — or point
-            “generic” at your own endpoint. There is no standalone test for a
-            webhook — add it to a rule&apos;s channels and use that rule&apos;s
-            Test button.
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="grid max-w-2xl gap-1">
+          <h2 className="text-base font-semibold">Webhooks</h2>
+          <p className="text-sm text-pretty text-muted-foreground">
+            Send alerts to Discord, Slack, or your own endpoint.
           </p>
         </div>
         <WebhookDialog onDone={onChanged} />
@@ -950,30 +914,29 @@ function WebhooksSection({
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : webhooks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No webhooks yet. Add one to route alerts to Discord, Slack, or a
-          custom URL.
+        <p className="py-2 text-sm text-muted-foreground">
+          No webhooks configured.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Format</TableHead>
-                <TableHead>URL</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {webhooks.map((w) => (
-                <WebhookRow key={w.id} webhook={w} onChanged={onChanged} />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <Table className="min-w-[36rem]">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-muted-foreground">Name</TableHead>
+              <TableHead className="text-muted-foreground">Format</TableHead>
+              <TableHead className="text-muted-foreground">URL</TableHead>
+              <TableHead className="text-right text-muted-foreground">
+                Action
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {webhooks.map((w) => (
+              <WebhookRow key={w.id} webhook={w} onChanged={onChanged} />
+            ))}
+          </TableBody>
+        </Table>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -987,14 +950,17 @@ function WebhookRow({
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   return (
     <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
-      <TableCell className="font-medium">{webhook.name}</TableCell>
-      <TableCell>
+      <TableCell className="py-3 font-medium">{webhook.name}</TableCell>
+      <TableCell className="py-3">
         <Badge variant="secondary">{webhook.format}</Badge>
       </TableCell>
-      <TableCell className="max-w-[22rem] truncate text-xs" title={webhook.url}>
+      <TableCell
+        className="max-w-[22rem] truncate py-3 text-xs text-muted-foreground"
+        title={webhook.url}
+      >
         {webhook.url}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="py-3 text-right">
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
