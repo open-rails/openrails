@@ -163,6 +163,8 @@ func TestReconcileEngineIntegration(t *testing.T) {
 			Local:     &PGLocalStateLoader{DB: appDB},
 			Writer:    &PGLocalWriter{DB: appDB},
 			Decisions: NewDecisionApplier(appDB, nil),
+			// or#859: an enforce pass with no run record refuses.
+			Runs: &PGDestructiveRunRecorder{DB: appDB},
 		}
 	}
 
@@ -425,6 +427,8 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 			Local:     &PGLocalStateLoader{DB: appDB},
 			Writer:    &PGLocalWriter{DB: appDB},
 			Decisions: NewDecisionApplier(appDB, nil),
+			// or#859: an enforce pass with no run record refuses.
+			Runs: &PGDestructiveRunRecorder{DB: appDB},
 		}
 	}
 
