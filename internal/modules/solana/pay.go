@@ -268,14 +268,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// checkout session id on the wallet-built tx: per the Solana Pay spec the
 	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
 	// Discovery hint, never money truth.
-	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenCfg.Decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
-		TokenAmount:    formatTokenAmount(tokenUnits, tokenCfg.Decimals),
+		TokenAmount:    FormatBaseUnits(tokenUnits, tokenCfg.Decimals),
 		TokenUnits:     tokenUnits,
 		TokenMint:      tokenMint,
 		Recipient:      recipient,
@@ -289,26 +289,16 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}, nil
 }
 
-// buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
-func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference, memo string) string {
+// buildTransferRequestURL constructs the solana: URL per the Solana Pay spec.
+// `decimals` is the caller's already-resolved token precision — re-reading it
+// here from a map without an ok-check turned an unknown symbol into decimals=0,
+// i.e. the raw base-unit count on the wire (a 10^d overcharge).
+func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, decimals int, tokenMint, tokenSymbol, reference, memo string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
-	// Get token config for decimals
-	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
-	if err != nil {
-		return baseURL // fallback without params if not configured
-	}
-	if solanaProc.Solana == nil {
-		return baseURL
-	}
-	tokenCfg := solanaProc.Solana.Tokens[tokenSymbol]
-
-	// Format amount with proper decimals
-	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)
-
 	// Add query params
-	params := fmt.Sprintf("?amount=%s", formattedAmount)
+	params := fmt.Sprintf("?amount=%s", FormatBaseUnits(amount, decimals))
 
 	// Add spl-token param if not native SOL
 	if tokenMint != "" && tokenSymbol != "SOL" {
@@ -601,26 +591,4 @@ func (s *SolanaPayService) getPaymentByReference(ctx context.Context, reference 
 	// Once a payment is confirmed, it's identified by its transaction signature.
 	// Return not found - callers should check Redis for pending status.
 	return nil, fmt.Errorf("payment not found for reference")
-}
-
-// formatTokenAmount formats a token amount with the appropriate decimal places
-func formatTokenAmount(amount uint64, decimals int) string {
-	if decimals <= 0 {
-		return fmt.Sprintf("%d", amount)
-	}
-	// Convert to string with decimal point
-	divisor := uint64(1)
-	for i := 0; i < decimals; i++ {
-		divisor *= 10
-	}
-	whole := amount / divisor
-	frac := amount % divisor
-	if frac == 0 {
-		return fmt.Sprintf("%d", whole)
-	}
-	// Format fractional part with leading zeros
-	fracStr := fmt.Sprintf("%0*d", decimals, frac)
-	// Trim trailing zeros
-	fracStr = strings.TrimRight(fracStr, "0")
-	return fmt.Sprintf("%d.%s", whole, fracStr)
 }
