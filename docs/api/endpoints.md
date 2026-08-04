@@ -225,6 +225,8 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
 | GET | `/v1/merchant/credit-limit` | `merchant:customer-settings:read` | Read a customer's credit limit |
 | PUT | `/v1/merchant/credit-limit` | `merchant:customer-settings:update` | Set a customer's credit limit |
+| GET | `/v1/merchant/delinquency` | `merchant:customer-settings:read` | Arrears delinquency roster (grace + delinquent, oldest debt first) plus the effective policy. `?state=grace\|delinquent`, `?limit=`. See [arrears-delinquency.md](../arrears-delinquency.md) |
+| GET | `/v1/merchant/customers/{customer_id}/delinquency` | `merchant:customer-settings:read` | One payer's delinquency state per currency; empty = never overdue |
 | GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
 | POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }`. Idempotent per `(customer_id, credit_type, source, source_id)` when `source_id` is set |
 | POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |

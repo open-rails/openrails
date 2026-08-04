@@ -282,6 +282,24 @@ type OpenrailsCustomer struct {
 	LastSeenAt time.Time
 }
 
+// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_lifecycle_events signal; the operator owns the shutoff.
+type OpenrailsCustomerDelinquency struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	State      string
+	// The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.
+	OverdueSince    *time.Time
+	EnteredAt       time.Time
+	OverdueAmount   int64
+	OverdueInvoices int64
+	// Bumped only when state changes; the idempotency coordinate of the emitted host_lifecycle_events row.
+	TransitionSeq int64
+	EvaluatedAt   time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // #798 per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
 type OpenrailsCustomerInvoiceProfile struct {
 	MerchantID       uuid.UUID
@@ -423,6 +441,21 @@ type OpenrailsGrant struct {
 	Currency     *string
 	Reason       *string
 	CreatedAt    time.Time
+}
+
+// or#878 durable host-consumption queue for lifecycle signals the embedding host must act on — today only arrears delinquency transitions (delinquency.grace / delinquency.entered / delinquency.cleared). Consumers ack after idempotent processing; delivered rows are pruned. OpenRails emits the signal and never performs the shutoff: it does not know what the host is running.
+type OpenrailsHostLifecycleEvent struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	EventType   string
+	SubjectType string
+	SubjectID   uuid.UUID
+	Currency    *string
+	OccurredAt  time.Time
+	Data        []byte
+	DeliveredAt *time.Time
+	// Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.
+	DedupeKey string
 }
 
 // Append-only imported legacy dunning history (#735; doujins #387 import target). Display/forensics evidence only.

@@ -223,6 +223,13 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		h(httphandlers.ServicePutCustomerSpendDelegation),
 		writeMW...,
 	)
+	// or#878: the delinquency state OpenRails derived, and the roster of who is
+	// overdue. Read-only on purpose — the state is a reading of invoice truth,
+	// so it is settled by paying the invoice, never by an API call.
+	customers.Handle(http.MethodGet, "/delinquency",
+		h(httphandlers.ServiceGetCustomerDelinquency),
+		readMW...,
+	)
 
 	entitlements := group.Group("/entitlements")
 	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
@@ -249,6 +256,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
 	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
+	group.Handle(http.MethodGet, "/delinquency", h(httphandlers.ServiceListDelinquency), readMW...)
 
 	admissions := group.Group("/admissions")
 	admissions.Handle(http.MethodPost, "/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)

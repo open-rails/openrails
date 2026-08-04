@@ -33,6 +33,10 @@ merchants:
       billing_period_boundary: calendar_month
       collection_threshold: 50_000_000
       monthly_floor: 1_000_000
+      # or#878 arrears delinquency: days past due_at before new spend is refused
+      # and the host is signalled to shut off. Default 14; the amount floor
+      # defaults to monthly_floor. See docs/arrears-delinquency.md.
+      delinquency_grace_days: 7
 
     delegated_invoker_wasted_spend_windows:
       - { key: burst, window: 15m, limit: 5_000_000 }

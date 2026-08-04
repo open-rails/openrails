@@ -95,7 +95,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	}
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
 		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows).
-		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient))
+		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
+		WithDelinquency(s.delinquencyService())
 
 	var exp time.Time
 	switch {
@@ -364,6 +365,13 @@ type MerchantConfiguration struct {
 	// reprice service falls back to
 	// subscriptions.DefaultRepriceNoticeWindowDays when unset).
 	RepriceNoticeWindowDays *int
+	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878) are the arrears
+	// delinquency policy: how long past due_at a payer keeps grace, and the
+	// smallest overdue balance that can escalate. A nil pointer preserves the
+	// stored value; unset falls back to delinquency.DefaultGraceDays and to the
+	// merchant's InvoiceMonthlyFloor respectively.
+	ArrearsGraceDays        *int
+	ArrearsDelinquencyFloor *int64
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -383,6 +391,8 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
 		AlertEmail:                         &alertEmail,
 		RepriceNoticeWindowDays:            cfg.RepriceNoticeWindowDays,
+		ArrearsGraceDays:                   cfg.ArrearsGraceDays,
+		ArrearsDelinquencyFloor:            cfg.ArrearsDelinquencyFloor,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -440,6 +450,18 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 			return fmt.Errorf("reprice_notice_window_days must be >= 0")
 		}
 		cfg.RepriceNoticeWindowDays = in.RepriceNoticeWindowDays
+	}
+	if in.ArrearsGraceDays != nil {
+		if *in.ArrearsGraceDays < 0 {
+			return fmt.Errorf("arrears_grace_days must be >= 0")
+		}
+		cfg.ArrearsGraceDays = in.ArrearsGraceDays
+	}
+	if in.ArrearsDelinquencyFloor != nil {
+		if *in.ArrearsDelinquencyFloor < 0 {
+			return fmt.Errorf("arrears_delinquency_floor must be >= 0")
+		}
+		cfg.ArrearsDelinquencyFloor = in.ArrearsDelinquencyFloor
 	}
 	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {

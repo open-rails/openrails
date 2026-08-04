@@ -359,7 +359,29 @@ no wire counterpart) — reach it via type assertion. `embed.WithCurrency` /
 opt one back in with `openrails.WithTimeout`). `rt.Service()` is the escape hatch for
 engine-native types (`identity.CustomerID` etc.) instead of wire types.
 
-### 8. Webhooks and ops
+### 8. Acting on delinquency
+
+For arrears billing, OpenRails decides when a payer's unpaid debt has outlived
+the merchant's grace window and refuses their new spend at admission — but only
+your app can shut off what your app runs. Transitions land on a durable,
+acknowledged feed you drain:
+
+```go
+events, err := controlplane.ListPendingHostLifecycleEvents(ctx, app, mid, 100)
+for _, ev := range events {
+    switch ev.EventType {
+    case "delinquency.entered": // shut off their resources
+    case "delinquency.cleared": // restore them
+    }
+    _ = controlplane.AcknowledgeHostLifecycleEvent(ctx, app, mid, ev.ID)
+}
+```
+
+Ack after your action is durable — an unacked event is redelivered. OpenRails
+never revokes an entitlement for an unpaid arrears bill. Full boundary and policy:
+[arrears-delinquency.md](arrears-delinquency.md).
+
+### 9. Webhooks and ops
 
 Point each rail's webhook at the webhook routes on **your** server, under your mount
 prefix (paths in [api/endpoints.md](api/endpoints.md)). OpenRails verifies rail
@@ -367,6 +389,7 @@ signatures and updates subscriptions/entitlements; your app just reads the resul
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,
-dunning, the intents ledger), [rate-limiting.md](rate-limiting.md),
+dunning, the intents ledger), [arrears-delinquency.md](arrears-delinquency.md),
+[rate-limiting.md](rate-limiting.md),
 [auth.md](auth.md) (the full one-credential-per-trust-domain rationale),
 [self-hosting-mode1.md](self-hosting-mode1.md).
