@@ -114,7 +114,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: test
           account_id: "579145"
           secrets:
             security_key: sandbox-security-key

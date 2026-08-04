@@ -378,7 +378,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	}
 
 	// Provider-config writes.
-	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"environment":"live","account_id":"acct_x"}`))
+	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`))
 	assertManifestDriven(do(http.MethodDelete, "/v1/merchant/payment-providers/stripe", ""))
 	// Catalog mutations — including plan-only publish (documented: the plan is
 	// computed at boot from the YAML; the CLI dry-run remains available).
@@ -435,7 +435,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	payload := fmt.Sprintf(`{"environment":"live","account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
+	payload := fmt.Sprintf(`{"account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
 	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/merchant/payment-providers/stripe", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
