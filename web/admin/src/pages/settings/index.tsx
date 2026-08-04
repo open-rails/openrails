@@ -4,13 +4,6 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -654,111 +647,170 @@ function CustomerControlsTab() {
   const [customerID, setCustomerID] = React.useState("")
   const [currency, setCurrency] = React.useState("usd")
   const [result, setResult] = React.useState<{
+    customerID: string
+    currency: string
     creditLimit: number
     trustLevel: string
   }>()
   const [newLimit, setNewLimit] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const [lookupBusy, setLookupBusy] = React.useState(false)
+  const [saveBusy, setSaveBusy] = React.useState(false)
+  const parsedNewLimit = microsFromInput(newLimit)
+  const newLimitValid =
+    newLimit !== "" && parsedNewLimit !== null && parsedNewLimit >= 0
 
-  const lookup = async () => {
-    setBusy(true)
+  const lookup = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const nextCustomerID = customerID.trim()
+    const nextCurrency = currency.trim().toLowerCase()
+    setLookupBusy(true)
     try {
       const [cl, tt] = await Promise.all([
-        getCreditLimit(customerID.trim(), currency.trim()),
-        getTrustLevel(customerID.trim(), currency.trim()),
+        getCreditLimit(nextCustomerID, nextCurrency),
+        getTrustLevel(nextCustomerID, nextCurrency),
       ])
       setResult({
+        customerID: nextCustomerID,
+        currency: cl.currency || nextCurrency,
         creditLimit: cl.credit_limit_amount,
         trustLevel: tt.trust_level,
       })
+      setNewLimit("")
     } catch (err) {
       toastApiError(err, "Lookup customer controls")
       setResult(undefined)
     } finally {
-      setBusy(false)
+      setLookupBusy(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">Credit limit & trust level</CardTitle>
-        <CardDescription>
-          Per-customer, per-currency: the arrears credit limit is writable; the
-          trust level is graduated by spend history (read-only here).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <div className="grid grid-cols-[1fr_8rem_auto] gap-2">
-          <Input
-            placeholder="customer id (UUID)"
-            value={customerID}
-            onChange={(e) => setCustomerID(e.target.value)}
-          />
-          <Input
-            placeholder="currency"
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-          />
-          <Button
-            variant="outline"
-            disabled={busy || !customerID.trim() || !currency.trim()}
-            onClick={lookup}
-          >
-            Look up
-          </Button>
+    <div className="grid gap-10">
+      <section className="grid gap-5">
+        <div className="grid gap-1">
+          <h2 className="text-base font-semibold">Customer lookup</h2>
+          <p className="text-sm text-muted-foreground">
+            Find a customer by ID and currency.
+          </p>
         </div>
-        {result && (
-          <div className="grid gap-3 rounded-md border p-3 text-sm">
-            <p>
-              Trust level:{" "}
-              <Badge variant="secondary">
-                {result.trustLevel || "default"}
-              </Badge>
+        <form
+          onSubmit={lookup}
+          className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end"
+        >
+          <Field label="Customer ID" id="customer-controls-id">
+            <Input
+              id="customer-controls-id"
+              placeholder="Customer UUID"
+              value={customerID}
+              onChange={(event) => setCustomerID(event.target.value)}
+            />
+          </Field>
+          <Field label="Currency" id="customer-controls-currency">
+            <Input
+              id="customer-controls-currency"
+              placeholder="USD"
+              value={currency}
+              onChange={(event) => setCurrency(event.target.value)}
+            />
+          </Field>
+          <Button
+            type="submit"
+            variant="outline"
+            disabled={
+              lookupBusy || saveBusy || !customerID.trim() || !currency.trim()
+            }
+          >
+            {lookupBusy ? "Looking up…" : "Look up"}
+          </Button>
+        </form>
+      </section>
+
+      {result && (
+        <section className="grid gap-5">
+          <div className="grid gap-1">
+            <h2 className="text-base font-semibold">Credit and trust</h2>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-mono text-xs break-all text-foreground">
+                {result.customerID}
+              </span>{" "}
+              · {result.currency.toUpperCase()}
             </p>
-            <p>
-              Credit limit:{" "}
-              {result.creditLimit
-                ? formatMicros(result.creditLimit, currency)
-                : "off (0)"}
-            </p>
-            <div className="grid grid-cols-[1fr_auto] gap-2">
-              <Input
-                placeholder={`new limit in ${currency} (major units, 0 = off)`}
-                type="number"
-                step="any"
-                min="0"
-                value={newLimit}
-                onChange={(e) => setNewLimit(e.target.value)}
-              />
-              <Button
-                disabled={
-                  busy || newLimit === "" || microsFromInput(newLimit) === null
-                }
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    await setCreditLimit(
-                      customerID.trim(),
-                      currency.trim(),
-                      microsFromInput(newLimit) ?? 0
-                    )
-                    toast.success("Credit limit updated")
-                    lookup()
-                  } catch (err) {
-                    toastApiError(err, "Set credit limit")
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
-              >
-                Set limit
-              </Button>
-            </div>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <dl className="grid gap-4">
+            <SettingDetail
+              label="Trust level"
+              value={result.trustLevel || "Default"}
+            />
+            <SettingDetail
+              label="Credit limit"
+              value={
+                result.creditLimit
+                  ? formatMicros(result.creditLimit, result.currency)
+                  : "Off"
+              }
+            />
+          </dl>
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault()
+              if (
+                newLimit === "" ||
+                parsedNewLimit === null ||
+                parsedNewLimit < 0
+              )
+                return
+              setSaveBusy(true)
+              try {
+                await setCreditLimit(
+                  result.customerID,
+                  result.currency,
+                  parsedNewLimit
+                )
+                setResult((current) =>
+                  current
+                    ? { ...current, creditLimit: parsedNewLimit }
+                    : current
+                )
+                setNewLimit("")
+                toast.success("Credit limit updated")
+              } catch (err) {
+                toastApiError(err, "Set credit limit")
+              } finally {
+                setSaveBusy(false)
+              }
+            }}
+          >
+            <SettingEditField
+              label={`New limit (${result.currency.toUpperCase()})`}
+              id="customer-controls-limit"
+            >
+              <div className="grid gap-1.5">
+                <div className="flex gap-2">
+                  <Input
+                    id="customer-controls-limit"
+                    placeholder="0.00"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={newLimit}
+                    onChange={(event) => setNewLimit(event.target.value)}
+                  />
+                  <Button
+                    type="submit"
+                    disabled={saveBusy || lookupBusy || !newLimitValid}
+                  >
+                    {saveBusy ? "Updating…" : "Update"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter 0 to turn credit off.
+                </p>
+              </div>
+            </SettingEditField>
+          </form>
+        </section>
+      )}
+    </div>
   )
 }
 
