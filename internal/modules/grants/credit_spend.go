@@ -22,15 +22,15 @@ var ErrInsufficientCredits = errors.New("grants: insufficient credits")
 // of money write (or#894) — AND grant_id = the lot it draws from. Per-lot remaining is derived from the ledger — no
 // mutable remaining column. Atomic: nothing is applied unless the full amount is
 // covered. Compose inside a tx for isolation.
-func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string, coord ledger.Coord) error {
+func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string, coord ledger.Coord) (applied bool, err error) {
 	if amount <= 0 {
-		return fmt.Errorf("grants: spend amount must be positive, got %d", amount)
+		return false, fmt.Errorf("grants: spend amount must be positive, got %d", amount)
 	}
 	lots, err := l.q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
 		MerchantID: l.merchant, CustomerID: customer, Currency: currency, AsOf: l.now(),
 	})
 	if err != nil {
-		return fmt.Errorf("grants: list credit lots: %w", err)
+		return false, fmt.Errorf("grants: list credit lots: %w", err)
 	}
 	var total int64
 	for _, lot := range lots {
@@ -39,16 +39,16 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 		}
 	}
 	if total < amount {
-		return fmt.Errorf("%w (need %d, have %d %s)", ErrInsufficientCredits, amount, total, currency)
+		return false, fmt.Errorf("%w (need %d, have %d %s)", ErrInsufficientCredits, amount, total, currency)
 	}
 
 	cust, err := l.money.EnsureCustomerBalance(ctx, customer, currency)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rev, err := l.money.EnsureSystemAccount(ctx, ledger.PlatformRevenue, currency)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	left := amount
@@ -64,15 +64,20 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 			take = left
 		}
 		lotID, c, inv, res := lot.ID, customer, invoker, resource
-		if _, err := l.money.Apply(ctx, ledger.Transfer{
+		_, lotApplied, aerr := l.money.ApplyIdempotent(ctx, ledger.Transfer{
 			Debit: cust, Credit: rev, Amount: take, Currency: currency, Type: ledger.CreditSpend,
 			Coord: coord, GrantID: &lotID, Customer: &c, Invoker: &inv, Resource: &res,
-		}); err != nil {
-			return fmt.Errorf("grants: credit spend from lot %s: %w", lot.ID, err)
+		})
+		if aerr != nil {
+			return applied, fmt.Errorf("grants: credit spend from lot %s: %w", lot.ID, aerr)
 		}
+		// A spend fans out one leg per lot. Any leg that actually inserted means
+		// this operation moved money now; all legs replaying means the whole
+		// spend was already committed at this coordinate.
+		applied = applied || lotApplied
 		left -= take
 	}
-	return nil
+	return applied, nil
 }
 
 // LockCustomer takes the per-customer spend mutex (#491/#677): the same

@@ -222,17 +222,46 @@ type Transfer struct {
 
 // Apply appends one (posted, single-phase) transfer, enforcing the debit
 // account's sign constraint before it posts to the balance counters.
+//
+// Deprecated in favour of ApplyIdempotent, which reports whether the write
+// actually landed. Apply keeps the old shape for read-through call sites that
+// genuinely do not care; it is a thin wrapper and carries no second contract.
 func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, error) {
+	tr, _, err := l.ApplyIdempotent(ctx, t)
+	return tr, err
+}
+
+// ApplyIdempotent is THE durable money write (or#892). Every ledger movement in
+// the system funnels through it, and once-only is enforced by the DATABASE:
+// the insert is ON CONFLICT DO NOTHING against
+// idx_ledger_transfers_operation_once, so a replay at the same coordinate
+// inserts nothing no matter what order the caller took its locks in.
+//
+// applied reports what happened:
+//   - true  — this call posted the transfer; the balance counters moved.
+//   - false — the coordinate was already committed. NOTHING moved in this call,
+//     and the returned row is the transfer that DID land. This is the
+//     applied-vs-replayed signal consumers were rebuilding claim tables to get.
+//
+// The sign-constraint check runs before the insert, so a replay of a transfer
+// that would now breach the floor still resolves as a replay rather than a
+// spurious insufficient-funds error: the money already moved once, legitimately.
+func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.OpenrailsLedgerTransfer, applied bool, err error) {
 	// The coordinate is validated HERE, at the one insert every money movement
 	// funnels through, so no new spend path can post an unkeyed or ambiguous leg.
 	if err := t.Coord.Validate(); err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.OpenrailsLedgerTransfer{}, false, err
+	}
+	// A replay must not be turned away by the floor: resolve it first.
+	if existing, found, gerr := l.transferAt(ctx, t); gerr != nil {
+		return gen.OpenrailsLedgerTransfer{}, false, gerr
+	} else if found {
+		return existing, false, nil
 	}
 	if err := l.checkDebitFloor(ctx, t.Debit, t.Amount, t.AllowDebitNegativeUpTo); err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.OpenrailsLedgerTransfer{}, false, err
 	}
-	source, sourceID := t.Coord.Source, t.Coord.SourceID
-	tr, err := l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
+	tr, err = l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
 		MerchantID:             l.merchant,
 		DebitAccountID:         t.Debit,
 		CreditAccountID:        t.Credit,
@@ -241,22 +270,58 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 		TransferType:           string(t.Type),
 		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
 		Operation:              string(t.Coord.Operation),
-		Source:                 &source,
-		SourceID:               &sourceID,
+		Source:                 t.Coord.Source,
+		SourceID:               t.Coord.SourceID,
 		GrantID:                t.GrantID,
 		CustomerID:             t.Customer,
 		InvokerID:              t.Invoker,
 		Resource:               t.Resource,
 		InvoiceID:              t.Invoice,
 	})
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && strings.Contains(pgErr.Message, "ledger_insufficient_funds") {
-			return gen.OpenrailsLedgerTransfer{}, fmt.Errorf("%w: %s", ErrInsufficientFunds, pgErr.Message)
-		}
-		return gen.OpenrailsLedgerTransfer{}, err
+	if err == nil {
+		return tr, true, nil
 	}
-	return tr, nil
+	// Zero rows = ON CONFLICT DO NOTHING fired: a concurrent transaction
+	// committed this coordinate between the read above and this insert. The
+	// database, not the lock order, is what refused it.
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, found, gerr := l.transferAt(ctx, t)
+		if gerr != nil {
+			return gen.OpenrailsLedgerTransfer{}, false, gerr
+		}
+		if !found {
+			return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf(
+				"ledger: insert at %s conflicted but no committed row is visible", t.Coord)
+		}
+		return existing, false, nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.Contains(pgErr.Message, "ledger_insufficient_funds") {
+		return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf("%w: %s", ErrInsufficientFunds, pgErr.Message)
+	}
+	return gen.OpenrailsLedgerTransfer{}, false, err
+}
+
+// transferAt resolves the row already committed at a transfer's full physical
+// identity (coordinate + lot), if any.
+func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, bool, error) {
+	row, err := l.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
+		MerchantID:   l.merchant,
+		CustomerID:   t.Customer,
+		Currency:     t.Currency,
+		TransferType: string(t.Type),
+		Operation:    string(t.Coord.Operation),
+		Source:       t.Coord.Source,
+		SourceID:     t.Coord.SourceID,
+		GrantID:      t.GrantID,
+	})
+	if err == nil {
+		return row, true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.OpenrailsLedgerTransfer{}, false, nil
+	}
+	return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf("ledger: resolve transfer at %s: %w", t.Coord, err)
 }
 
 func (l *Ledger) checkDebitFloor(ctx context.Context, account uuid.UUID, amount, floor int64) error {
@@ -312,16 +377,23 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 // caller and nets out when PayOwed settles it. arrears_liability's net balance
 // (which goes negative as debt accrues) is the conserved owed exposure.
 func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+	tr, _, err := l.AccrueOwedIdempotent(ctx, customer, currency, amount, coord, invoice)
+	return tr, err
+}
+
+// AccrueOwedIdempotent is AccrueOwed reporting whether the accrual actually
+// posted, or replayed a coordinate already committed.
+func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, bool, error) {
 	liab, err := l.EnsureSystemAccount(ctx, ArrearsLiability, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.OpenrailsLedgerTransfer{}, false, err
 	}
 	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.OpenrailsLedgerTransfer{}, false, err
 	}
 	c := customer
-	return l.Apply(ctx, Transfer{
+	return l.ApplyIdempotent(ctx, Transfer{
 		Debit: liab, Credit: rev, Amount: amount, Currency: currency, Type: OwedAccrual,
 		Coord: coord, Customer: &c, Invoice: invoice,
 	})

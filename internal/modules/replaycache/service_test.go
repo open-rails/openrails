@@ -1,4 +1,4 @@
-package idempotency
+package replaycache
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 func TestTryTakeoverPendingMemory(t *testing.T) {
 	ctx := context.Background()
-	svc := NewIdempotencyService(nil)
+	svc := NewStore(nil)
 
 	_, exists, err := svc.Begin(ctx, "webhook.test", "evt_1")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestTryTakeoverPendingMemory(t *testing.T) {
 
 func TestRenewPendingMemory(t *testing.T) {
 	ctx := context.Background()
-	svc := NewIdempotencyService(nil)
+	svc := NewStore(nil)
 
 	if _, _, err := svc.Begin(ctx, "webhook.test", "evt_hb"); err != nil {
 		t.Fatalf("begin: %v", err)
@@ -71,7 +71,7 @@ func TestRenewPendingMemory(t *testing.T) {
 		t.Fatal("completed record must not be renewed")
 	}
 	rec, _ = svc.Get(ctx, "webhook.test", "evt_hb")
-	if rec == nil || rec.Status != IdempotencyStatusSuccess {
+	if rec == nil || rec.Status != StatusSuccess {
 		t.Fatal("completed record must stay success")
 	}
 }

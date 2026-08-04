@@ -1,4 +1,31 @@
-package idempotency
+// Package replaycache is REQUEST-REPLAY COORDINATION over Redis. It was called
+// `idempotency`, and that name was the problem (or#892).
+//
+// THE BOUNDARY, stated once so it stops being re-derived:
+//
+//   - MONEY idempotency is `money.IdempotencyKey` + the unique index behind
+//     `ledger.ApplyIdempotent`. It is a POSTGRES fact. Losing Redis cannot
+//     double-charge anyone.
+//   - THIS package is a CACHE with a per-process in-memory fallback. It
+//     coordinates duplicate work and serves cached HTTP responses. It is NOT a
+//     durable claim, and nothing whose correctness is money may rest on it.
+//
+// A package named `idempotency` sitting beside a money key that means something
+// stricter is exactly the ambiguity that let `SpendCredits` ship with an
+// optional key while `CaptureAuthorized` required one. The rename does not
+// change behaviour; it stops the next reader assuming this store is the
+// guarantee.
+//
+// For webhook dedup the line is already drawn correctly — the replay truth
+// lives in Postgres (openrails.webhook_events, #678), so losing Redis costs
+// duplicate work coordination, never correctness.
+//
+// KNOWN GAP, deliberately not fixed here: the checkout path still uses this as
+// its SOLE store, so a flush there loses the claim outright. That is the same
+// class as the wasted-spend SetNX (or#894 §4.23) and wants its own induced
+// measurement before anyone calls it safe — tracked in or#892, not closed by
+// this rename.
+package replaycache
 
 import (
 	"context"
@@ -11,35 +38,33 @@ import (
 )
 
 const (
-	DefaultIdempotencyTTL = 5 * time.Minute
-	idempotencyKeyPrefix  = "idemp:"
-	// HTTPIdempotencyTTL is the replay window for the client-facing Idempotency-Key
+	DefaultTTL           = 5 * time.Minute
+	idempotencyKeyPrefix = "idemp:"
+	// HTTPReplayTTL is the replay window for the client-facing Idempotency-Key
 	// middleware (#579). 24h matches Stripe's documented window.
-	HTTPIdempotencyTTL = 24 * time.Hour
+	HTTPReplayTTL = 24 * time.Hour
 )
 
-type IdempotencyStatus string
+type Status string
 
 const (
-	IdempotencyStatusPending IdempotencyStatus = "pending"
-	IdempotencyStatusSuccess IdempotencyStatus = "success"
-	IdempotencyStatusFailed  IdempotencyStatus = "failed"
+	StatusPending Status = "pending"
+	StatusSuccess Status = "success"
+	StatusFailed  Status = "failed"
 )
 
-type IdempotencyRecord struct {
-	Status    IdempotencyStatus `json:"status"`
-	Result    json.RawMessage   `json:"result,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
+type Record struct {
+	Status    Status          `json:"status"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
-// IdempotencyService is a Redis-backed pending/success/failed record store,
-// with a per-process in-memory fallback when no Redis client is configured.
-// For webhook dedup it is COORDINATION + CACHE only — the replay truth lives
-// in Postgres (openrails.webhook_events, #678) — so losing Redis (or falling
-// back to the memStore) costs duplicate work coordination, never correctness
-// there. Other consumers (e.g. checkout) still use it as their sole store.
-type IdempotencyService struct {
+// Store is a Redis-backed pending/success/failed record store, with a
+// per-process in-memory fallback when no Redis client is configured. See the
+// package doc for the boundary against money idempotency: this is coordination
+// and cache, never a durable claim.
+type Store struct {
 	client *redis.Client
 	ttl    time.Duration
 
@@ -50,14 +75,14 @@ type IdempotencyService struct {
 }
 
 type memEntry struct {
-	record    *IdempotencyRecord
+	record    *Record
 	expiresAt time.Time
 }
 
-func NewIdempotencyService(redisClient *redis.Client) *IdempotencyService {
-	s := &IdempotencyService{
+func NewStore(redisClient *redis.Client) *Store {
+	s := &Store{
 		client:   redisClient,
-		ttl:      DefaultIdempotencyTTL,
+		ttl:      DefaultTTL,
 		memStore: make(map[string]*memEntry),
 		stopCh:   make(chan struct{}),
 	}
@@ -67,8 +92,8 @@ func NewIdempotencyService(redisClient *redis.Client) *IdempotencyService {
 	return s
 }
 
-func NewIdempotencyServiceWithTTL(redisClient *redis.Client, ttl time.Duration) *IdempotencyService {
-	s := &IdempotencyService{
+func NewStoreWithTTL(redisClient *redis.Client, ttl time.Duration) *Store {
+	s := &Store{
 		client:   redisClient,
 		ttl:      ttl,
 		memStore: make(map[string]*memEntry),
@@ -78,7 +103,7 @@ func NewIdempotencyServiceWithTTL(redisClient *redis.Client, ttl time.Duration) 
 	return s
 }
 
-func (s *IdempotencyService) cleanupLoop() {
+func (s *Store) cleanupLoop() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
@@ -99,7 +124,7 @@ func (s *IdempotencyService) cleanupLoop() {
 	}
 }
 
-func (s *IdempotencyService) Close() {
+func (s *Store) Close() {
 	if s == nil {
 		return
 	}
@@ -111,7 +136,7 @@ func (s *IdempotencyService) Close() {
 	})
 }
 
-func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error) {
+func (s *Store) Begin(ctx context.Context, operation, key string) (*Record, bool, error) {
 	fullKey := s.buildKey(operation, key)
 
 	if s.client != nil {
@@ -125,7 +150,7 @@ func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (
 	return s.beginMemory(fullKey)
 }
 
-func (s *IdempotencyService) TryTakeoverPending(ctx context.Context, operation, key string, olderThan time.Duration) (bool, error) {
+func (s *Store) TryTakeoverPending(ctx context.Context, operation, key string, olderThan time.Duration) (bool, error) {
 	fullKey := s.buildKey(operation, key)
 	if s.client != nil {
 		return s.tryTakeoverPendingRedis(ctx, fullKey, olderThan)
@@ -136,11 +161,11 @@ func (s *IdempotencyService) TryTakeoverPending(ctx context.Context, operation, 
 // RenewPending refreshes a still-pending record's CreatedAt (lease heartbeat)
 // so stale-pending takeover only fires for dead holders, not slow ones (#678).
 // No-op (false) if the record is gone or no longer pending.
-func (s *IdempotencyService) RenewPending(ctx context.Context, operation, key string) (bool, error) {
+func (s *Store) RenewPending(ctx context.Context, operation, key string) (bool, error) {
 	return s.TryTakeoverPending(ctx, operation, key, 0)
 }
 
-func (s *IdempotencyService) tryTakeoverPendingRedis(ctx context.Context, redisKey string, olderThan time.Duration) (bool, error) {
+func (s *Store) tryTakeoverPendingRedis(ctx context.Context, redisKey string, olderThan time.Duration) (bool, error) {
 	taken := false
 	err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 		record, err := s.getRedisTx(ctx, tx, redisKey)
@@ -150,7 +175,7 @@ func (s *IdempotencyService) tryTakeoverPendingRedis(ctx context.Context, redisK
 			}
 			return err
 		}
-		if record.Status != IdempotencyStatusPending || time.Since(record.CreatedAt) <= olderThan {
+		if record.Status != StatusPending || time.Since(record.CreatedAt) <= olderThan {
 			return nil
 		}
 		record.CreatedAt = time.Now()
@@ -176,14 +201,14 @@ func (s *IdempotencyService) tryTakeoverPendingRedis(ctx context.Context, redisK
 	return taken, nil
 }
 
-func (s *IdempotencyService) tryTakeoverPendingMemory(key string, olderThan time.Duration) bool {
+func (s *Store) tryTakeoverPendingMemory(key string, olderThan time.Duration) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.memStore[key]
 	if !ok || entry == nil || entry.record == nil {
 		return false
 	}
-	if entry.record.Status != IdempotencyStatusPending || time.Since(entry.record.CreatedAt) <= olderThan {
+	if entry.record.Status != StatusPending || time.Since(entry.record.CreatedAt) <= olderThan {
 		return false
 	}
 	entry.record.CreatedAt = time.Now()
@@ -191,7 +216,7 @@ func (s *IdempotencyService) tryTakeoverPendingMemory(key string, olderThan time
 	return true
 }
 
-func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*IdempotencyRecord, bool, error) {
+func (s *Store) beginRedis(ctx context.Context, redisKey string) (*Record, bool, error) {
 	existing, err := s.getRedis(ctx, redisKey)
 	if err == nil {
 		return existing, true, nil
@@ -200,8 +225,8 @@ func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*
 		return nil, false, fmt.Errorf("redis get: %w", err)
 	}
 
-	record := &IdempotencyRecord{
-		Status:    IdempotencyStatusPending,
+	record := &Record{
+		Status:    StatusPending,
 		CreatedAt: time.Now(),
 	}
 
@@ -226,20 +251,20 @@ func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*
 	return record, false, nil
 }
 
-func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, error) {
+func (s *Store) beginMemory(key string) (*Record, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
 	if entry, ok := s.memStore[key]; ok {
 		if now.Before(entry.expiresAt) {
-			return cloneIdempotencyRecord(entry.record), true, nil
+			return cloneRecord(entry.record), true, nil
 		}
 		delete(s.memStore, key)
 	}
 
-	record := &IdempotencyRecord{
-		Status:    IdempotencyStatusPending,
+	record := &Record{
+		Status:    StatusPending,
 		CreatedAt: now,
 	}
 	s.memStore[key] = &memEntry{
@@ -247,14 +272,14 @@ func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, 
 		expiresAt: now.Add(s.ttl),
 	}
 
-	return cloneIdempotencyRecord(record), false, nil
+	return cloneRecord(record), false, nil
 }
 
-func (s *IdempotencyService) Complete(ctx context.Context, operation, key string, result json.RawMessage) error {
+func (s *Store) Complete(ctx context.Context, operation, key string, result json.RawMessage) error {
 	fullKey := s.buildKey(operation, key)
 
-	record := &IdempotencyRecord{
-		Status:    IdempotencyStatusSuccess,
+	record := &Record{
+		Status:    StatusSuccess,
 		Result:    result,
 		CreatedAt: time.Now(),
 	}
@@ -270,7 +295,7 @@ func (s *IdempotencyService) Complete(ctx context.Context, operation, key string
 	return nil
 }
 
-func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, failure error) error {
+func (s *Store) Fail(ctx context.Context, operation, key string, failure error) error {
 	fullKey := s.buildKey(operation, key)
 
 	errMsg := ""
@@ -278,8 +303,8 @@ func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, fa
 		errMsg = failure.Error()
 	}
 
-	record := &IdempotencyRecord{
-		Status:    IdempotencyStatusFailed,
+	record := &Record{
+		Status:    StatusFailed,
 		Error:     errMsg,
 		CreatedAt: time.Now(),
 	}
@@ -300,7 +325,7 @@ func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, fa
 	return nil
 }
 
-func (s *IdempotencyService) Get(ctx context.Context, operation, key string) (*IdempotencyRecord, error) {
+func (s *Store) Get(ctx context.Context, operation, key string) (*Record, error) {
 	fullKey := s.buildKey(operation, key)
 
 	if s.client != nil {
@@ -317,24 +342,24 @@ func (s *IdempotencyService) Get(ctx context.Context, operation, key string) (*I
 	return s.getMemory(fullKey), nil
 }
 
-func (s *IdempotencyService) getRedis(ctx context.Context, redisKey string) (*IdempotencyRecord, error) {
+func (s *Store) getRedis(ctx context.Context, redisKey string) (*Record, error) {
 	data, err := s.client.Get(ctx, redisKey).Bytes()
 	if err != nil {
 		return nil, err
 	}
-	return decodeIdempotencyRecord(data)
+	return decodeRecord(data)
 }
 
-func (s *IdempotencyService) getRedisTx(ctx context.Context, tx *redis.Tx, redisKey string) (*IdempotencyRecord, error) {
+func (s *Store) getRedisTx(ctx context.Context, tx *redis.Tx, redisKey string) (*Record, error) {
 	data, err := tx.Get(ctx, redisKey).Bytes()
 	if err != nil {
 		return nil, err
 	}
-	return decodeIdempotencyRecord(data)
+	return decodeRecord(data)
 }
 
-func decodeIdempotencyRecord(data []byte) (*IdempotencyRecord, error) {
-	var record IdempotencyRecord
+func decodeRecord(data []byte) (*Record, error) {
+	var record Record
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)
 	}
@@ -342,23 +367,23 @@ func decodeIdempotencyRecord(data []byte) (*IdempotencyRecord, error) {
 	return &record, nil
 }
 
-func (s *IdempotencyService) getMemory(key string) *IdempotencyRecord {
+func (s *Store) getMemory(key string) *Record {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if entry, ok := s.memStore[key]; ok {
 		if time.Now().Before(entry.expiresAt) {
-			return cloneIdempotencyRecord(entry.record)
+			return cloneRecord(entry.record)
 		}
 	}
 	return nil
 }
 
-func (s *IdempotencyService) setRedis(ctx context.Context, key string, record *IdempotencyRecord) error {
+func (s *Store) setRedis(ctx context.Context, key string, record *Record) error {
 	return s.setRedisWithTTL(ctx, key, record, s.ttl)
 }
 
-func (s *IdempotencyService) setRedisWithTTL(ctx context.Context, key string, record *IdempotencyRecord, ttl time.Duration) error {
+func (s *Store) setRedisWithTTL(ctx context.Context, key string, record *Record, ttl time.Duration) error {
 	recordJSON, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshal record: %w", err)
@@ -366,20 +391,20 @@ func (s *IdempotencyService) setRedisWithTTL(ctx context.Context, key string, re
 	return s.client.Set(ctx, key, recordJSON, ttl).Err()
 }
 
-func (s *IdempotencyService) setMemory(key string, record *IdempotencyRecord) {
+func (s *Store) setMemory(key string, record *Record) {
 	s.setMemoryWithTTL(key, record, s.ttl)
 }
 
-func (s *IdempotencyService) setMemoryWithTTL(key string, record *IdempotencyRecord, ttl time.Duration) {
+func (s *Store) setMemoryWithTTL(key string, record *Record, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.memStore[key] = &memEntry{
-		record:    cloneIdempotencyRecord(record),
+		record:    cloneRecord(record),
 		expiresAt: time.Now().Add(ttl),
 	}
 }
 
-func cloneIdempotencyRecord(record *IdempotencyRecord) *IdempotencyRecord {
+func cloneRecord(record *Record) *Record {
 	if record == nil {
 		return nil
 	}
@@ -388,6 +413,6 @@ func cloneIdempotencyRecord(record *IdempotencyRecord) *IdempotencyRecord {
 	return &clone
 }
 
-func (s *IdempotencyService) buildKey(operation, key string) string {
+func (s *Store) buildKey(operation, key string) string {
 	return idempotencyKeyPrefix + operation + ":" + key
 }

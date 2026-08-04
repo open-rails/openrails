@@ -123,7 +123,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
 		if params.Amount > 0 {
-			if _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false); derr != nil {
+			if _, _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false); derr != nil {
 				return derr
 			}
 			// Link the usage event to the durable #512 spend transfer (the balance

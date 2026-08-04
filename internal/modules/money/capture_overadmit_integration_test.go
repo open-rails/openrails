@@ -117,7 +117,7 @@ func TestSpendCredits_PrepaidStillGatesAfterFix(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency,
 		Amount: 150, Key: money.MustIdempotencyKey(money.OpSpend, "s", "x1"),
 	})

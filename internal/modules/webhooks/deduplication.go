@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -28,7 +28,7 @@ const (
 // completed keys plus the pending-lease coordination layer — flushing it
 // costs extra Postgres checks and lost lease coordination, never a replay.
 type DeduplicationService struct {
-	idem *idempotency.IdempotencyService
+	idem *replaycache.Store
 	// db hosts the webhook_events truth table; nil = Redis/memory-only
 	// dedup (legacy behavior, unit tests).
 	db *db.DB
@@ -75,7 +75,7 @@ func IsWebhookErrorNonRetryable(err error) bool {
 
 // NewDeduplicationService creates a webhook deduplication service. database
 // carries the Postgres truth table; nil degrades to Redis/memory-only dedup.
-func NewDeduplicationService(idem *idempotency.IdempotencyService, database *db.DB) *DeduplicationService {
+func NewDeduplicationService(idem *replaycache.Store, database *db.DB) *DeduplicationService {
 	return &DeduplicationService{idem: idem, db: database}
 }
 
@@ -230,7 +230,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			if err != nil {
 				return fmt.Errorf("failed to begin idempotency: %w", err)
 			}
-			if alreadyExists && rec.Status == idempotency.IdempotencyStatusSuccess {
+			if alreadyExists && rec.Status == replaycache.StatusSuccess {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
@@ -238,7 +238,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
-			if alreadyExists && rec.Status == idempotency.IdempotencyStatusPending {
+			if alreadyExists && rec.Status == replaycache.StatusPending {
 				if time.Since(rec.CreatedAt) > s.lease() {
 					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, s.lease())
 					if err != nil {
@@ -267,7 +267,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 					return fmt.Errorf("webhook already in progress")
 				}
 			} else {
-				shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
+				shouldRecordOutcome = rec == nil || rec.Status != replaycache.StatusSuccess
 			}
 		}
 

@@ -12,14 +12,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // These tests cover the client-facing Idempotency-Key HTTP replay middleware
 // (#579). Pattern follows ratelimit_http_test.go: httptest + a real
-// idempotency.IdempotencyService backed by the in-memory fallback (nil Redis).
+// replaycache.Store backed by the in-memory fallback (nil Redis).
 
 func idempotencyTestHandler(counter *atomic.Int64, status int, body string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +49,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("replay: same key same body twice returns the same response, handler runs once", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -76,7 +76,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("conflict: same key different body returns 409, handler runs once", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -99,7 +99,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("passthrough: no header means no dedup, handler runs twice", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusOK, `{}`))
@@ -117,7 +117,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("passthrough: GET with header is not mutating, handler runs twice", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusOK, `{}`))
@@ -137,7 +137,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("hard cut: X-Idempotency-Key is ignored, no dedup", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -163,7 +163,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("5xx not cached: second call with same key re-runs the handler", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		var status atomic.Int64
@@ -193,7 +193,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("merchant scoping: same key+body under different merchants both run", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -220,7 +220,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("panic releases the pending key (retry re-runs, not locked)", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +254,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 	})
 
 	t.Run("query string is part of the key (different query is not conflated)", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -283,7 +283,7 @@ func TestIdempotencyHTTP(t *testing.T) {
 // acting principal.
 func TestIdempotencyHTTPAuthorizationBinding(t *testing.T) {
 	t.Run("poisoned 401 does not answer a later authorized request", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		// Stands in for the route gate: no credential => 401, otherwise 201.
@@ -322,7 +322,7 @@ func TestIdempotencyHTTPAuthorizationBinding(t *testing.T) {
 	})
 
 	t.Run("4xx is not cached: the same caller's retry re-runs the handler", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		var status atomic.Int64
@@ -349,7 +349,7 @@ func TestIdempotencyHTTPAuthorizationBinding(t *testing.T) {
 	})
 
 	t.Run("distinct principals do not share a bucket", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))
@@ -374,7 +374,7 @@ func TestIdempotencyHTTPAuthorizationBinding(t *testing.T) {
 	})
 
 	t.Run("same principal still replays", func(t *testing.T) {
-		svc := idempotency.NewIdempotencyService(nil)
+		svc := replaycache.NewStore(nil)
 		t.Cleanup(svc.Close)
 		var calls atomic.Int64
 		h := IdempotencyHTTP(svc)(idempotencyTestHandler(&calls, http.StatusCreated, `{"id":"1"}`))

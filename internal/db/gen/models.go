@@ -609,8 +609,8 @@ type OpenrailsLedgerTransfer struct {
 	// Debit-account floor used by the counter trigger for debits_must_not_exceed_credits accounts. Usually 0; arrears paths pass the current credit-line allowance.
 	AllowDebitNegativeUpTo int64
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
-	Source   *string
-	SourceID *string
+	Source   string
+	SourceID string
 	// Credit-lot attribution. grant_id/invoice_id/customer_id deliberately carry NO FKs (ledger purity, #709): the append-only ledger never blocks or cascades on control-plane rows.
 	GrantID    *uuid.UUID
 	CustomerID *uuid.UUID

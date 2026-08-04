@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -44,3 +45,9 @@ func seedCustomer(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uu
 		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 }
+
+// spendErr collapses SpendCredits' (transaction, error) to just the error, so a
+// test that only cares that the spend succeeded can stay a one-liner:
+// require.NoError(t, spendErr(svc.SpendCredits(...))). or#892 gave SpendCredits
+// a return value; tests asserting on Replayed bind it normally instead.
+func spendErr(_ *models.MoneyTransaction, err error) error { return err }

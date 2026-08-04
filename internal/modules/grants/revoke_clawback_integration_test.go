@@ -34,7 +34,8 @@ func TestGrants_RevokeClawback(t *testing.T) {
 	require.NoError(t, err)
 
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
-	require.NoError(t, l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-1"}))
+	_, csErr := l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-1"})
+	require.NoError(t, csErr)
 	mustBal(t, ctx, ml, custAcc, 70)
 
 	_, err = l.Revoke(ctx, lot.ID, "admin removed")

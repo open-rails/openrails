@@ -14,7 +14,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -87,7 +87,7 @@ func isMutatingMethod(m string) bool {
 // ONLY on mutating methods that carry the header; every other request passes
 // through unchanged, so this is a pure opt-in for clients. It layers on top of
 // any route-level/business-level idempotency, never replacing it.
-func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
+func IdempotencyHTTP(svc *replaycache.Store) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if svc == nil || !isMutatingMethod(r.Method) {
@@ -133,11 +133,11 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 
 			if exists {
 				switch rec.Status {
-				case idempotency.IdempotencyStatusPending:
+				case replaycache.StatusPending:
 					writeIdempotencyError(w, http.StatusConflict, "idempotency_in_progress",
 						"a request with this Idempotency-Key is still being processed")
 					return
-				case idempotency.IdempotencyStatusSuccess:
+				case replaycache.StatusSuccess:
 					var captured capturedResponse
 					if json.Unmarshal(rec.Result, &captured) == nil {
 						if captured.Fingerprint != fp {
@@ -149,7 +149,7 @@ func IdempotencyHTTP(svc *idempotency.IdempotencyService) HTTPMiddleware {
 						return
 					}
 					// Unreadable cache — fall through and re-run.
-				case idempotency.IdempotencyStatusFailed:
+				case replaycache.StatusFailed:
 					// Prior attempt failed with no cached response — allow a retry.
 				}
 				next.ServeHTTP(w, r)

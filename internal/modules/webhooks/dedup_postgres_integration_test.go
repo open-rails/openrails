@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +43,7 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyServiceWithTTL(rdb, time.Hour)
+	idem := replaycache.NewStoreWithTTL(rdb, time.Hour)
 	defer idem.Close()
 	svc := NewDeduplicationService(idem, dbi)
 
@@ -69,7 +69,7 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.TestEvent", eventID)
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }
 
 // Two replicas with NO shared Redis (independent per-process memStores) but
@@ -78,9 +78,9 @@ func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idemA := idempotency.NewIdempotencyService(nil)
+	idemA := replaycache.NewStore(nil)
 	defer idemA.Close()
-	idemB := idempotency.NewIdempotencyService(nil)
+	idemB := replaycache.NewStore(nil)
 	defer idemB.Close()
 	replicaA := NewDeduplicationService(idemA, dbi)
 	replicaB := NewDeduplicationService(idemB, dbi)
@@ -103,7 +103,7 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
 	svc := NewDeduplicationService(idem, dbi)
 
@@ -143,7 +143,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
 	svc := NewDeduplicationService(idem, dbi)
 
@@ -190,7 +190,7 @@ func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := context.Background() // deliberately no merchant
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
 	svc := NewDeduplicationService(idem, dbi)
 
@@ -212,7 +212,7 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
 	svc := NewDeduplicationService(idem, dbi)
 
@@ -228,7 +228,7 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.ccbill.TestEvent", eventID))
 
 	// Fresh replica (empty memStore = post-flush): still skipped via Postgres.
-	idem2 := idempotency.NewIdempotencyService(nil)
+	idem2 := replaycache.NewStore(nil)
 	defer idem2.Close()
 	svc2 := NewDeduplicationService(idem2, dbi)
 	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,

@@ -38,7 +38,7 @@ func TestOr891_SpendCreditsRefusesAnEmptyKey(t *testing.T) {
 
 	// The zero key — the only unkeyed value a caller can still hand in — is
 	// refused at the entrypoint, and moves nothing.
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 1_000,
 	})
 	require.ErrorContains(t, err, "idempotency key required")
@@ -78,9 +78,9 @@ func TestOr891_KeyedSpendReplayMovesNoMoney(t *testing.T) {
 
 	key := uuid.NewString()
 	for i := 0; i < 3; i++ {
-		require.NoError(t, svc.SpendCredits(ctx, money.SpendParams{
+		require.NoError(t, spendErr(svc.SpendCredits(ctx, money.SpendParams{
 			Payer: &payer, Invoker: "u", Currency: cur, Amount: 1_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
-		}))
+		})))
 	}
 	bal, berr := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.NoError(t, berr)
@@ -108,7 +108,7 @@ func TestOr891_ConcurrentKeyedSpendsDebitOnce(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = svc.SpendCredits(ctx, money.SpendParams{
+			_, errs[i] = svc.SpendCredits(ctx, money.SpendParams{
 				Payer: &payer, Invoker: "u", Currency: cur, Amount: 1_500, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
 			})
 		}(i)
@@ -133,11 +133,11 @@ func TestOr891_SpendReusedKeyChangedAmountIsRefused(t *testing.T) {
 	require.NoError(t, err)
 
 	key := uuid.NewString()
-	require.NoError(t, svc.SpendCredits(ctx, money.SpendParams{
+	require.NoError(t, spendErr(svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 1_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
-	}))
+	})))
 
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 4_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
 	})
 	require.ErrorIs(t, err, money.ErrIdempotencyKeyReused,
@@ -258,15 +258,15 @@ func TestOr891_OwedLegAccruesOneInvoiceItemPerKey(t *testing.T) {
 
 	key := uuid.NewString()
 	// 1000 from balance, 2000 to owed.
-	require.NoError(t, svc.SpendCredits(ctx, money.SpendParams{
+	require.NoError(t, spendErr(svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 3_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
-	}))
-	require.NoError(t, svc.SpendCredits(ctx, money.SpendParams{
+	})))
+	require.NoError(t, spendErr(svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 3_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
-	}))
-	require.NoError(t, svc.SpendCredits(ctx, money.SpendParams{
+	})))
+	require.NoError(t, spendErr(svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: cur, Amount: 3_000, Key: money.MustIdempotencyKey(money.OpSpend, "invoke", key),
-	}))
+	})))
 
 	owed, oerr := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.NoError(t, oerr)
@@ -296,7 +296,7 @@ func TestOr891_KeylessSpendCannotReachTheOwedLeg(t *testing.T) {
 	_, kerr := money.NewIdempotencyKey(money.OpSpend, "invoke", "")
 	require.ErrorContains(t, kerr, "source and source_id required")
 	for i := 0; i < 3; i++ {
-		err = svc.SpendCredits(ctx, money.SpendParams{
+		_, err = svc.SpendCredits(ctx, money.SpendParams{
 			Payer: &payer, Invoker: "u", Currency: cur, Amount: 3_000,
 		})
 		require.ErrorContains(t, err, "idempotency key required")

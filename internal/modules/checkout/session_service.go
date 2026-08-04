@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -54,15 +54,15 @@ const (
 // Idempotency types are the idempotency module's own (#666 — the copy that
 // lived here, plus the payments adapter that translated between the two, is
 // gone; checkout consumes the module's types directly).
-type IdempotencyStatus = idempotency.IdempotencyStatus
+type IdempotencyStatus = replaycache.Status
 
 const (
-	IdempotencyStatusPending = idempotency.IdempotencyStatusPending
-	IdempotencyStatusSuccess = idempotency.IdempotencyStatusSuccess
-	IdempotencyStatusFailed  = idempotency.IdempotencyStatusFailed
+	IdempotencyStatusPending = replaycache.StatusPending
+	IdempotencyStatusSuccess = replaycache.StatusSuccess
+	IdempotencyStatusFailed  = replaycache.StatusFailed
 )
 
-type IdempotencyRecord = idempotency.IdempotencyRecord
+type IdempotencyRecord = replaycache.Record
 
 type checkoutSessionIdempotencyResult struct {
 	RequestFingerprint string                   `json:"request_fingerprint"`

@@ -56,7 +56,7 @@ func TestPostedSpend_ConservesTotal(t *testing.T) {
 	require.Equal(t, int64(0), bal0.HeldBalance)
 
 	payer := identity.CustomerIDFromString(userID)
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
@@ -81,7 +81,7 @@ func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 	seedSpendable(t, ctx, svc, userID, initial)
 
 	payer := identity.CustomerIDFromString(userID)
-	err := svc.SpendCredits(ctx, money.SpendParams{
+	_, err := svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
@@ -89,7 +89,7 @@ func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-replay-1"),
 	})
 	require.NoError(t, err)
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,

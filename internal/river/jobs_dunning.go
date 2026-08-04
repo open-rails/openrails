@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -74,7 +74,7 @@ type DunningWorker struct {
 	// ONLY credential plane). Consulted at the charge gate; the rebill
 	// handler re-resolves at charge time (no caching).
 	NMIResolver        money.NMIClientResolver
-	IdempotencyService *idempotency.IdempotencyService
+	IdempotencyService *replaycache.Store
 	// DeferDelete schedules the rail-side delete for terminal cancellations
 	// (#344). Threaded into the per-run lifecycle so an evidence-backed terminal
 	// decline stops the remote NMI subscription via the ONE scheduled mechanism

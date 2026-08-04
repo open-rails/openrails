@@ -291,8 +291,9 @@ func TestMONEY8_TransferAmountAndFloorChecks(t *testing.T) {
 	insert := func(amount int64, d, c uuid.UUID, floor int64) error {
 		return attemptInTx(ctx, tx,
 			`INSERT INTO openrails.ledger_transfers
-			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
-			 VALUES ($1,$2,$3,$4,'USD','credit_spend',$5)`, merchantID, d, c, amount, floor)
+			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
+			    operation, source, source_id)
+			 VALUES ($1,$2,$3,$4,'USD','credit_spend',$5,'spend','audit',gen_random_uuid()::text)`, merchantID, d, c, amount, floor)
 	}
 	require.Error(t, insert(0, debit, credit, 0), "MONEY-8: amount = 0 must be rejected")
 	require.Error(t, insert(-1, debit, credit, 0), "MONEY-8: negative amount must be rejected")
@@ -320,8 +321,9 @@ func TestCUR3_CrossCurrencyTransferRaises(t *testing.T) {
 	// guard pointed at the right failure is luck, not design.
 	err := attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
-		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type)
-		 VALUES ($1,$2,$3,100,'USD','credit_spend')`, merchantID, debit, eurCredit)
+		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
+		    operation, source, source_id)
+		 VALUES ($1,$2,$3,100,'USD','credit_spend','spend','audit',gen_random_uuid()::text)`, merchantID, debit, eurCredit)
 	require.ErrorContains(t, err, "cross-currency transfer",
 		"CUR-3: a transfer whose account currency differs from the transfer currency must raise")
 }
@@ -335,8 +337,9 @@ func TestLED2_MissingAccountRaises(t *testing.T) {
 
 	_, err := tx.Exec(ctx,
 		`INSERT INTO openrails.ledger_transfers
-		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type)
-		 VALUES ($1,$2,$3,100,'USD','credit_spend')`, merchantID, debit, uuid.New())
+		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
+		    operation, source, source_id)
+		 VALUES ($1,$2,$3,100,'USD','credit_spend','spend','audit',gen_random_uuid()::text)`, merchantID, debit, uuid.New())
 	require.Error(t, err, "LED-2: an unknown credit account must raise, never silently apply")
 }
 
@@ -347,8 +350,9 @@ func TestLED3_InsufficientFundsFloorRaises(t *testing.T) {
 
 	err := attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
-		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
-		 VALUES ($1,$2,$3,500,'USD','credit_spend',0)`, merchantID, debit, credit)
+		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
+		    operation, source, source_id)
+		 VALUES ($1,$2,$3,500,'USD','credit_spend',0,'spend','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
 	require.ErrorContains(t, err, "ledger_insufficient_funds",
 		"LED-3: debiting an empty balance-floored account must raise")
 
@@ -356,8 +360,9 @@ func TestLED3_InsufficientFundsFloorRaises(t *testing.T) {
 	// rather than a blanket refusal.
 	err = attemptInTx(ctx, tx,
 		`INSERT INTO openrails.ledger_transfers
-		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to)
-		 VALUES ($1,$2,$3,500,'USD','owed_accrual',500)`, merchantID, debit, credit)
+		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
+		    operation, source, source_id)
+		 VALUES ($1,$2,$3,500,'USD','owed_accrual',500,'arrears_accrual','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
 	require.NoError(t, err, "LED-3: a debit within the declared floor must be allowed")
 }
 
@@ -370,8 +375,9 @@ func TestLED7_CreditLotTerminatesOnce(t *testing.T) {
 	dep := func() error {
 		_, err := tx.Exec(ctx,
 			`INSERT INTO openrails.ledger_transfers
-			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, grant_id)
-			 VALUES ($1,$2,$3,100,'USD','deposit',$4)`, merchantID, debit, credit, lot)
+			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, grant_id,
+			    operation, source, source_id)
+			 VALUES ($1,$2,$3,100,'USD','deposit',$4,'deposit','audit',gen_random_uuid()::text)`, merchantID, debit, credit, lot)
 		return err
 	}
 	require.NoError(t, dep())
@@ -386,8 +392,9 @@ func TestGAP7_TransferTypeIsConstrained(t *testing.T) {
 
 	_, err := tx.Exec(ctx,
 		`INSERT INTO openrails.ledger_transfers
-		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type)
-		 VALUES ($1,$2,$3,100,'USD','depsoit')`, merchantID, debit, credit)
+		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
+		    operation, source, source_id)
+		 VALUES ($1,$2,$3,100,'USD','depsoit','deposit','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
 	require.Error(t, err, "GAP-7: an unknown transfer_type must be rejected by a CHECK")
 }
 
