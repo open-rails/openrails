@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -304,9 +305,9 @@ func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *
 
 	profile := money.CustomerInvoiceProfile{CollectionMethod: money.CollectionChargeAutomatically}
 	created, err := svc.EnsureCustomerInvoiceProfile(ctx, foreignPayer, profile)
-	require.ErrorContains(t, err, "payer belongs to another merchant")
+	require.ErrorIs(t, err, db.ErrCustomerOwnedByAnotherMerchant)
 	require.False(t, created)
-	require.ErrorContains(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), "payer belongs to another merchant")
+	require.ErrorIs(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), db.ErrCustomerOwnedByAnotherMerchant)
 }
 
 // TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals pins the #798

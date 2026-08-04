@@ -3,9 +3,11 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -53,6 +55,13 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 		Issuer:     issuerPtr,
 		Subject:    &subjectID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded upsert matches no row when the subject is already a
+		// customer of a DIFFERENT merchant (#889). One AuthKit instance can
+		// serve several merchants, so refuse instead of handing back an id the
+		// merchant does not own.
+		return uuid.Nil, fmt.Errorf("%w: subject %s under merchant %s", db.ErrCustomerOwnedByAnotherMerchant, subjectID, merchantID)
+	}
 	if err != nil {
 		return uuid.Nil, err
 	}
