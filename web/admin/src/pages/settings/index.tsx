@@ -51,17 +51,37 @@ import { AlertsTab } from "./alerts"
 import { ApiKeysTab } from "./api-keys"
 import { TeamTab } from "./team"
 
+const LINE_TAB =
+  "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+
 export function SettingsPage() {
   return (
     <Tabs defaultValue="merchant" className="flex flex-col gap-4">
-      <TabsList>
-        <TabsTrigger value="merchant">Merchant</TabsTrigger>
-        <TabsTrigger value="team">Team</TabsTrigger>
-        <TabsTrigger value="alerts">Alerts</TabsTrigger>
-        <TabsTrigger value="providers">Payment providers</TabsTrigger>
-        <TabsTrigger value="api-keys">API keys</TabsTrigger>
-        <TabsTrigger value="customer-controls">Customer controls</TabsTrigger>
-      </TabsList>
+      <div className="overflow-x-auto">
+        <TabsList
+          variant="line"
+          className="w-max min-w-full justify-start gap-6 rounded-none p-0"
+        >
+          <TabsTrigger value="merchant" className={LINE_TAB}>
+            Merchant
+          </TabsTrigger>
+          <TabsTrigger value="team" className={LINE_TAB}>
+            Team
+          </TabsTrigger>
+          <TabsTrigger value="alerts" className={LINE_TAB}>
+            Alerts
+          </TabsTrigger>
+          <TabsTrigger value="providers" className={LINE_TAB}>
+            Payment providers
+          </TabsTrigger>
+          <TabsTrigger value="api-keys" className={LINE_TAB}>
+            API keys
+          </TabsTrigger>
+          <TabsTrigger value="customer-controls" className={LINE_TAB}>
+            Customer controls
+          </TabsTrigger>
+        </TabsList>
+      </div>
       <TabsContent value="merchant">
         <MerchantSettingsTab />
       </TabsContent>
@@ -91,7 +111,7 @@ function MerchantSettingsTab() {
   }, [error])
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
-    <div className="grid gap-4">
+    <div className="grid max-w-3xl gap-10">
       <MerchantProfileForm initial={data?.profile} />
       <RepriceNoticeWindowForm initial={data?.reprice_notice_window_days} />
     </div>
@@ -114,73 +134,138 @@ function MerchantProfileForm({
   const [fromEmail, setFromEmail] = React.useState(initial?.from_email ?? "")
   const [supportURL, setSupportURL] = React.useState(initial?.support_url ?? "")
   const [logoURL, setLogoURL] = React.useState(initial?.logo_url ?? "")
+  const [savedProfile, setSavedProfile] = React.useState({
+    displayName: initial?.display_name ?? "",
+    fromEmail: initial?.from_email ?? "",
+    supportURL: initial?.support_url ?? "",
+    logoURL: initial?.logo_url ?? "",
+  })
   const [busy, setBusy] = React.useState(false)
+  const [editing, setEditing] = React.useState(false)
+
+  const reset = () => {
+    setDisplayName(savedProfile.displayName)
+    setFromEmail(savedProfile.fromEmail)
+    setSupportURL(savedProfile.supportURL)
+    setLogoURL(savedProfile.logoURL)
+  }
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      await putMerchantSettings({
+        profile: {
+          display_name: displayName || undefined,
+          from_email: fromEmail || undefined,
+          support_url: supportURL || undefined,
+          logo_url: logoURL || undefined,
+        },
+      })
+      setSavedProfile({ displayName, fromEmail, supportURL, logoURL })
+      toast.success("Profile saved")
+      setEditing(false)
+    } catch (err) {
+      toastApiError(err, "Save profile")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
-    <Card className="max-w-xl">
-      <CardHeader>
-        <CardTitle className="text-sm">Merchant profile</CardTitle>
-        <CardDescription>
-          Shown on invoices and customer-facing emails.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <Field label="Display name" id="s-name">
-          <Input
-            id="s-name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-          />
-        </Field>
-        <Field label="From email" id="s-email">
-          <Input
-            id="s-email"
-            type="email"
-            value={fromEmail}
-            onChange={(e) => setFromEmail(e.target.value)}
-          />
-        </Field>
-        <Field label="Support URL" id="s-support">
-          <Input
-            id="s-support"
-            value={supportURL}
-            onChange={(e) => setSupportURL(e.target.value)}
-          />
-        </Field>
-        <Field label="Logo URL" id="s-logo">
-          <Input
-            id="s-logo"
-            value={logoURL}
-            onChange={(e) => setLogoURL(e.target.value)}
-          />
-        </Field>
-        <div>
-          <Button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await putMerchantSettings({
-                  profile: {
-                    display_name: displayName || undefined,
-                    from_email: fromEmail || undefined,
-                    support_url: supportURL || undefined,
-                    logo_url: logoURL || undefined,
-                  },
-                })
-                toast.success("Settings saved")
-              } catch (err) {
-                toastApiError(err, "Save settings")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save"}
-          </Button>
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="grid gap-1">
+          <h2 className="text-base font-semibold">Merchant profile</h2>
+          <p className="text-sm text-pretty text-muted-foreground">
+            Customer-facing merchant details used on invoices and emails.
+          </p>
         </div>
-      </CardContent>
-    </Card>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                reset()
+                setEditing(false)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              form="merchant-profile-form"
+              disabled={busy}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+        )}
+      </div>
+
+      {editing ? (
+        <form id="merchant-profile-form" onSubmit={save} className="grid gap-4">
+          <SettingEditField label="Display name" id="s-name">
+            <Input
+              id="s-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              autoComplete="organization"
+            />
+          </SettingEditField>
+          <SettingEditField label="From email" id="s-email">
+            <Input
+              id="s-email"
+              type="email"
+              value={fromEmail}
+              onChange={(event) => setFromEmail(event.target.value)}
+              autoComplete="email"
+            />
+          </SettingEditField>
+          <SettingEditField label="Support URL" id="s-support">
+            <Input
+              id="s-support"
+              type="url"
+              value={supportURL}
+              onChange={(event) => setSupportURL(event.target.value)}
+              placeholder="https://example.com/support"
+            />
+          </SettingEditField>
+          <SettingEditField label="Logo URL" id="s-logo">
+            <Input
+              id="s-logo"
+              type="url"
+              value={logoURL}
+              onChange={(event) => setLogoURL(event.target.value)}
+              placeholder="https://example.com/logo.png"
+            />
+          </SettingEditField>
+        </form>
+      ) : (
+        <dl className="grid gap-4">
+          <SettingDetail
+            label="Display name"
+            value={savedProfile.displayName}
+          />
+          <SettingDetail label="From email" value={savedProfile.fromEmail} />
+          <SettingDetail label="Support URL" value={savedProfile.supportURL} />
+          <SettingDetail label="Logo URL" value={savedProfile.logoURL} />
+        </dl>
+      )}
+    </section>
   )
 }
 
@@ -191,53 +276,92 @@ function MerchantProfileForm({
 // it regardless of what the console shows.
 function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
   const [days, setDays] = React.useState(String(initial ?? 30))
+  const [savedDays, setSavedDays] = React.useState(String(initial ?? 30))
   const [busy, setBusy] = React.useState(false)
+  const [editing, setEditing] = React.useState(false)
   const parsed = Number(days)
   const valid = days.trim() !== "" && Number.isInteger(parsed) && parsed >= 0
 
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      await putMerchantSettings({
+        reprice_notice_window_days: parsed,
+      })
+      setSavedDays(days)
+      toast.success("Notice window saved")
+      setEditing(false)
+    } catch (err) {
+      toastApiError(err, "Save notice window")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <Card className="max-w-xl">
-      <CardHeader>
-        <CardTitle className="text-sm">Price-increase notice window</CardTitle>
-        <CardDescription>
-          Minimum days' advance notice a scheduled subscription price INCREASE
-          must give existing subscribers before it takes effect. Decreases are
-          never gated. Default 30 days.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <Field label="Notice window (days)" id="s-notice-window">
-          <Input
-            id="s-notice-window"
-            type="number"
-            step="1"
-            min="0"
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-          />
-        </Field>
-        <div>
-          <Button
-            disabled={busy || !valid}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await putMerchantSettings({
-                  reprice_notice_window_days: parsed,
-                })
-                toast.success("Settings saved")
-              } catch (err) {
-                toastApiError(err, "Save settings")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save"}
-          </Button>
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="grid max-w-2xl gap-1">
+          <h2 className="text-base font-semibold">Pricing policies</h2>
+          <p className="text-sm text-pretty text-muted-foreground">
+            Set how much notice customers receive before a price increase.
+          </p>
         </div>
-      </CardContent>
-    </Card>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setDays(savedDays)
+                setEditing(false)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              form="notice-window-form"
+              disabled={busy || !valid}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+        )}
+      </div>
+
+      {editing ? (
+        <form id="notice-window-form" onSubmit={save}>
+          <SettingEditField label="Notice period (days)" id="s-notice-window">
+            <Input
+              id="s-notice-window"
+              type="number"
+              step="1"
+              min="0"
+              value={days}
+              onChange={(event) => setDays(event.target.value)}
+            />
+          </SettingEditField>
+        </form>
+      ) : (
+        <dl>
+          <SettingDetail label="Notice period" value={`${savedDays} days`} />
+        </dl>
+      )}
+    </section>
   )
 }
 
@@ -611,6 +735,40 @@ function Field({
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       {children}
+    </div>
+  )
+}
+
+function SettingDetail({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="grid gap-1.5 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-6">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd
+        className={
+          value
+            ? "min-w-0 text-sm break-words"
+            : "text-sm text-muted-foreground"
+        }
+      >
+        {value || "Not set"}
+      </dd>
+    </div>
+  )
+}
+
+function SettingEditField({
+  label,
+  id,
+  children,
+}: {
+  label: string
+  id: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
