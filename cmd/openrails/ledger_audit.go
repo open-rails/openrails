@@ -51,12 +51,9 @@ type ledgerAuditResult struct {
 
 func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	if cfg == nil || cfg.DB == nil {
-		return fmt.Errorf("config not loaded")
-	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := openCLIDB(cmd.Context(), cfg)
 	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
+		return err
 	}
 	defer func() { _ = database.Close() }()
 
