@@ -10,7 +10,7 @@ INSERT INTO openrails.host_lifecycle_events
     (merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data, dedupe_key)
 VALUES (
     sqlc.arg(merchant_id), sqlc.arg(event_type)::text, sqlc.arg(subject_type)::text,
-    sqlc.arg(subject_id), sqlc.narg(currency)::text, sqlc.arg(occurred_at)::timestamptz,
+    sqlc.arg(subject_id), sqlc.arg(currency)::text, sqlc.arg(occurred_at)::timestamptz,
     sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
 

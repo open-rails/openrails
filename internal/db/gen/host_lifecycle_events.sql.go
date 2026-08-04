@@ -69,7 +69,7 @@ type EnqueueHostLifecycleEventParams struct {
 	EventType   string
 	SubjectType string
 	SubjectID   uuid.UUID
-	Currency    *string
+	Currency    string
 	OccurredAt  time.Time
 	Data        []byte
 	DedupeKey   string
@@ -118,7 +118,7 @@ type ListPendingHostLifecycleEventsRow struct {
 	EventType   string
 	SubjectType string
 	SubjectID   uuid.UUID
-	Currency    *string
+	Currency    string
 	OccurredAt  time.Time
 	Data        []byte
 }

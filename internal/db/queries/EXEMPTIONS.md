@@ -196,6 +196,7 @@ ran. The rules stay armed for new migrations.
 | `0027` merchant_exports→merchant_purge_inventories | `renaming-table`, `renaming-column` | Same hard-cut rationale as `0025`; breaking a client that still names `merchant_exports` is the point of or#858. |
 | `0031` vault_fingerprint→fingerprint | `renaming-column` | Same hard-cut rationale as `0025` (or#871): `vault` is reserved for HashiCorp Vault, and a caller still naming `vault_fingerprint` must fail loudly rather than read a stale alias. |
 | `0031` payments token_type CHECK | `constraint-missing-not-valid` | The two `UPDATE`s immediately above rewrite every row the re-added CHECK then validates, in the same transaction — the constraint is dropped and restored only to move `provider_vault`/`pan_via_vault` to their new names. |
+| `0044` host_lifecycle_events.currency | `adding-not-nullable-field` | The rule's own suggested fix — stay nullable, add a `CHECK` — provably cannot satisfy the invariant it exists for: CUR-1 reads `information_schema.columns.is_nullable`, so only the column attribute counts. The scan is inherent to `SET NOT NULL`, not the constraint two-step the sibling rule covers, so no file split reduces it. The table is a delivery feed created in `0037` and pruned after delivery, so the scan is over a small, short-lived table. |
 
 A new migration that genuinely needs one of these must add the constraint
 `NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction

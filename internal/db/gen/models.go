@@ -452,7 +452,8 @@ type OpenrailsHostLifecycleEvent struct {
 	EventType   string
 	SubjectType string
 	SubjectID   uuid.UUID
-	Currency    *string
+	// The transition's currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
+	Currency    string
 	OccurredAt  time.Time
 	Data        []byte
 	DeliveredAt *time.Time

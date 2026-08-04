@@ -81,9 +81,7 @@ func (c *ControlPlane) ListPendingHostLifecycleEvents(ctx context.Context, merch
 			SubjectType: row.SubjectType,
 			SubjectID:   row.SubjectID,
 			OccurredAt:  row.OccurredAt,
-		}
-		if row.Currency != nil {
-			event.Currency = *row.Currency
+			Currency:    row.Currency,
 		}
 		if len(row.Data) > 0 {
 			if err := json.Unmarshal(row.Data, &event.Data); err != nil {
