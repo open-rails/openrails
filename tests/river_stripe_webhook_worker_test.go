@@ -38,6 +38,16 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	const accountID = "acct_river_e2e"
 	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")
+	// Self-cleaning: a SECOND armed stripe PSP left behind makes every later
+	// bare-rail checkout in this package ambiguous ("multiple armed PSPs").
+	// Archive, don't delete — rows stamped with the psp id hold FK references.
+	t.Cleanup(func() {
+		// By natural key: seedRailMerchantAccountWithEvidence lets the DB assign
+		// the row id, so PSPNaturalKey's deterministic id would match nothing.
+		_, _ = suite.MerchantPool().Exec(context.Background(),
+			`UPDATE openrails.psps SET archived = true
+			  WHERE rail = 'stripe' AND environment = $1 AND account_id = $2`, env, accountID)
+	})
 
 	keyName, err := merchants.PSPSecretName("stripe", env, accountID, "secret_key")
 	require.NoError(t, err)

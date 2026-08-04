@@ -174,6 +174,8 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewNMISubscriptionCreateIntentHandler(svc)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	return &subIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, svc: svc,

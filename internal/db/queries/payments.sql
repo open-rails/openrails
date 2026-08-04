@@ -13,7 +13,8 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
+    money_movement
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
@@ -27,7 +28,8 @@ INSERT INTO openrails.payments (
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
     sqlc.narg(psp_id),
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
-    sqlc.narg(token_type)
+    sqlc.narg(token_type),
+    sqlc.arg(money_movement)::text
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -37,7 +39,8 @@ INSERT INTO openrails.payments (
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
-    attempt_kind, failure_code, failure_reason, reversal_kind, token_type
+    attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
+    money_movement
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
@@ -51,7 +54,8 @@ INSERT INTO openrails.payments (
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
     sqlc.narg(psp_id),
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
-    sqlc.narg(token_type)
+    sqlc.narg(token_type),
+    sqlc.arg(money_movement)::text
 )
 ON CONFLICT DO NOTHING;
 
@@ -121,9 +125,11 @@ WHERE purch.refunded_payment_id = $1
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
+-- The rail confirmed the reversal and named it, so the row now records real
+-- (negative) money movement (or#827).
 -- name: CompleteRefundReservation :execrows
 UPDATE openrails.payments
-SET transaction_id = $2, status = 'completed', metadata = $3
+SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
 WHERE id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
@@ -136,9 +142,12 @@ WHERE purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
+-- The attempt row becomes the real charge here: it takes the rail's own
+-- transaction id, so it declares money movement (or#827) — this is the update
+-- the settlement trigger fires on.
 -- name: CompleteProviderAttempt :execrows
 UPDATE openrails.payments
-SET transaction_id = $2, status = 'completed', metadata = $3
+SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
 WHERE id = $1
   AND amount > 0
   AND status = 'pending'
@@ -148,10 +157,12 @@ WHERE id = $1
 -- (NMI subscription checkout): the row keeps its synthetic transaction_id and
 -- is excluded from listings via the nmi_subscription_order_id metadata key,
 -- but its status must still reach a terminal state — leaving it 'pending'
--- forever reads as a stuck payment.
+-- forever reads as a stuck payment. It keeps money_movement = 'none' (or#827):
+-- the money moved on the separate real charge row, and this anchor reaching
+-- 'completed' must not publish a second settlement to the host.
 -- name: CompleteProviderAttemptInPlace :execrows
 UPDATE openrails.payments
-SET metadata = $2, status = 'completed'
+SET metadata = $2, status = 'completed', money_movement = 'none'
 WHERE id = $1
   AND amount > 0
   AND status = 'pending'

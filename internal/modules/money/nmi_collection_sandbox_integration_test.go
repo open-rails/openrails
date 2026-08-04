@@ -64,7 +64,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	railCustomerRef := createNMISandboxVault(t, client)
 	t.Logf("NMI sandbox customer vault created: %s", railCustomerRef)
 	t.Cleanup(func() {
-		if derr := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef}); derr != nil {
+		if derr := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef}); derr != nil {
 			t.Logf("sandbox vault cleanup (non-fatal): %v", derr)
 		}
 	})

@@ -160,6 +160,13 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
 	group.Handle(http.MethodGet, "/prices", h(httphandlers.GetPrices), optional)
+	// #829: public per-merchant checkout discovery — the merchant's ARMED PSPs
+	// and the public-by-nature values a browser needs to tokenize on each.
+	// Deliberately unauthenticated (the values are public; secrets are
+	// structurally unreachable, see handlers.GetCheckoutConfig) and not gated on
+	// providerRoutes: it is exactly the endpoint that TELLS a frontend which
+	// rails this merchant has.
+	group.Handle(http.MethodGet, "/checkout-config", h(httphandlers.GetCheckoutConfig))
 	if providerRoutes.Solana {
 		group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
 		group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -39,10 +38,6 @@ func TestLocalClientAdmit(t *testing.T) {
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
 	t.Run("merchant pinned: verdict + spend delegations", func(t *testing.T) {
-		pool, err := pgxpool.New(ctx, dsn)
-		require.NoError(t, err)
-		t.Cleanup(pool.Close)
-
 		// The admission gate (spendgate) requires Redis; without it Admit fails
 		// before ever reaching merchant.Require, masking the regression this test
 		// targets.
@@ -55,10 +50,10 @@ func TestLocalClientAdmit(t *testing.T) {
 
 		// Bind the merchant the normal provisioning way (UpsertMerchantConfig),
 		// not a raw ctx/runtime-field pin.
-		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+		boundID, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 		require.NoError(t, err)
 
-		customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "c7c7c7c7-0000-4000-8000-000000000042")
+		customerID := seedCustomerForBoundMerchant(ctx, t, boundID)
 
 		client := rt.Client()
 		admitter, ok := client.(embed.SingleAdmitter)
@@ -137,10 +132,6 @@ func TestMerchantPinMismatch(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
 	slug := fmt.Sprintf("embed-merchant-pin-mismatch-%d", time.Now().UnixNano())
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
@@ -150,7 +141,7 @@ func TestMerchantPinMismatch(t *testing.T) {
 	require.NoError(t, err)
 
 	otherID := openrails.MerchantID(uuid.New())
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "e9e9e9e9-0000-4000-8000-000000000042")
+	customerID := seedCustomerForBoundMerchant(ctx, t, boundID)
 
 	client := rt.Client()
 
@@ -196,4 +187,20 @@ func TestMerchantPinMismatch(t *testing.T) {
 		}})
 		require.NoError(t, err, "a ctx pin matching the bound merchant must not be refused")
 	})
+}
+
+// seedCustomerForBoundMerchant materializes the customers row under the merchant
+// the engine is BOUND to. dbtest.EnsureCustomerIDPgx hardcodes the canonical test
+// merchant, so a runtime bound to its own freshly provisioned merchant would be
+// writing to another merchant's customer — which the openrails_app role now
+// refuses with a 42501 (and which a superuser harness used to let through).
+func seedCustomerForBoundMerchant(ctx context.Context, t *testing.T, boundID openrails.MerchantID) uuid.UUID {
+	t.Helper()
+	pool := dbtest.SharedMerchantPool(t, uuid.UUID(boundID))
+	customerID := uuid.New()
+	_, err := pool.Exec(ctx,
+		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
+		customerID, uuid.UUID(boundID), customerID.String())
+	require.NoError(t, err, "seed customer under the bound merchant")
+	return customerID
 }

@@ -10,8 +10,8 @@
 --    WHERE permission_group_id IS NOT NULL AND deleted_at IS NULL
 --    GROUP BY 1 HAVING count(*) > 1;
 
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 DROP INDEX openrails.idx_merchants_permission_group_id;
 

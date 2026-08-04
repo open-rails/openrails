@@ -1165,15 +1165,14 @@ func (q *Queries) ListUnknownOutcomeInvoices(ctx context.Context, arg ListUnknow
 
 const markInvoiceCollectionOutcomeUnknown = `-- name: MarkInvoiceCollectionOutcomeUnknown :execrows
 UPDATE openrails.invoices
-SET status = 'past_due',
-    next_collection_attempt_at = NULL,
+SET next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_outcome_unknown',
     last_collection_failure_message = NULL,
     updated_at = $3::timestamptz
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $4
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND amount_due > 0
   AND last_collection_failure_code = 'collection_attempt_in_progress'
 `
@@ -1185,6 +1184,10 @@ type MarkInvoiceCollectionOutcomeUnknownParams struct {
 	InvoiceID  uuid.UUID
 }
 
+// Parking an in-doubt outcome, like claiming an attempt, says nothing about
+// whether the invoice is late — so it leaves `status` where the clock put it
+// (or#828: the collection machinery does not move an invoice along the
+// delinquency axis; only a terminal outcome and MarkInvoicesPastDue do).
 func (q *Queries) MarkInvoiceCollectionOutcomeUnknown(ctx context.Context, arg MarkInvoiceCollectionOutcomeUnknownParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markInvoiceCollectionOutcomeUnknown,
 		arg.MerchantID,
@@ -1298,7 +1301,11 @@ const recordInvoiceCollectionFailure = `-- name: RecordInvoiceCollectionFailure 
 UPDATE openrails.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, $3::timestamptz),
-    status = CASE WHEN $4::boolean THEN 'uncollectible' ELSE 'past_due' END,
+    status = CASE
+        WHEN $4::boolean THEN 'uncollectible'
+        WHEN $5::timestamptz IS NULL THEN status
+        ELSE 'past_due'
+    END,
     next_collection_attempt_at = $5::timestamptz,
     last_collection_failure_code = $6,
     last_collection_failure_message = $7,
@@ -1323,6 +1330,20 @@ type RecordInvoiceCollectionFailureParams struct {
 	ExpectedFailureCount int32
 }
 
+// or#828/or#870, three buckets, three dispositions. The two arguments encode
+// them totally and disjointly, because collection.FailureAction does:
+//
+//	terminal                       -> bucket 3, or a bucket-1 schedule that ran
+//	                                  out. The invoice is uncollectible.
+//	no terminal, NULL next attempt -> bucket 2. Charging STOPS because the
+//	                                  customer must fix their instrument.
+//	a next attempt                 -> bucket 1. Still dunning.
+//
+// Bucket 2 leaves `status` exactly where it was on purpose. A decline bucket
+// answers "what do we do about the CARD"; `past_due` is a reading of the CLOCK
+// (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
+// (or#878). Our decision to stop attempting must not age the customer's
+// invoice: it stays open, it stays collectible, and it stays theirs to settle.
 func (q *Queries) RecordInvoiceCollectionFailure(ctx context.Context, arg RecordInvoiceCollectionFailureParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordInvoiceCollectionFailure,
 		arg.MerchantID,
@@ -1352,7 +1373,7 @@ SET status = $3::text,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $9
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND last_collection_failure_code IN ('collection_attempt_in_progress', 'collection_outcome_unknown')
 `
 
@@ -1407,7 +1428,7 @@ type ResolveInvoiceCollectionUnknownParams struct {
 }
 
 // #828: an unknown outcome was RESOLVED (verifier provider read, or admin
-// unpark): clear the park so the schedule resumes. Status stays past_due.
+// unpark): clear the park so the schedule resumes. Status is untouched.
 func (q *Queries) ResolveInvoiceCollectionUnknown(ctx context.Context, arg ResolveInvoiceCollectionUnknownParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resolveInvoiceCollectionUnknown,
 		arg.MerchantID,
@@ -1422,9 +1443,54 @@ func (q *Queries) ResolveInvoiceCollectionUnknown(ctx context.Context, arg Resol
 	return result.RowsAffected(), nil
 }
 
+const resumeStoppedInvoiceCollection = `-- name: ResumeStoppedInvoiceCollection :execrows
+UPDATE openrails.invoices
+SET next_collection_attempt_at = $3::timestamptz,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = $4
+  AND status IN ('open', 'past_due')
+  AND amount_due > 0
+  AND collection_method = 'charge_automatically'
+  AND collection_failure_count > 0
+  AND next_collection_attempt_at IS NULL
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown'
+`
+
+type ResumeStoppedInvoiceCollectionParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+	Currency   string
+}
+
+// or#828 bucket-2 resume. A stopped invoice is one that failed at least once
+// and has NO next attempt scheduled — charging halted because the instrument
+// needs replacing. When the payer designates a collection payment method they
+// have done the thing the notice asked for, so those invoices become due again
+// immediately.
+//
+// Untouched on purpose: `uncollectible` invoices (terminal needs an operator,
+// not a new card) and rows mid-claim or in-doubt, which the claim and verifier
+// machinery owns.
+func (q *Queries) ResumeStoppedInvoiceCollection(ctx context.Context, arg ResumeStoppedInvoiceCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resumeStoppedInvoiceCollection,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.Currency,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setInvoiceCollectionClaim = `-- name: SetInvoiceCollectionClaim :execrows
 UPDATE openrails.invoices
-SET status = 'past_due',
+SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
     next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_attempt_in_progress',
     last_collection_failure_message = NULL,
@@ -1446,6 +1512,12 @@ type SetInvoiceCollectionClaimParams struct {
 	InvoiceID  uuid.UUID
 }
 
+// Claiming an attempt says nothing about whether the invoice is late, so it no
+// longer stamps past_due on an invoice the clock has not aged (or#828/or#878):
+// otherwise a bucket-2 decline could never leave the invoice open, because the
+// claim would have moved it before the decline was even read. Reclaiming an
+// `uncollectible` invoice DOES reopen it — that is a manual retry undoing a
+// terminal outcome, a real state change.
 func (q *Queries) SetInvoiceCollectionClaim(ctx context.Context, arg SetInvoiceCollectionClaimParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setInvoiceCollectionClaim,
 		arg.MerchantID,

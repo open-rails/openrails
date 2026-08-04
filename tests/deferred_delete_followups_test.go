@@ -148,7 +148,12 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	if updated.DeletionScheduledAt == nil {
 		assert.Equal(t, intents.StatusSucceeded, status, "marker may only be cleared by a succeeded delete intent")
 	} else {
-		assert.WithinDuration(t, time.Now(), *updated.DeletionScheduledAt, time.Minute)
+		// or#842: an AUTOMATED terminal cancel defers its irreversible rail-side
+		// delete by SystemDeleteCoolingOff. This fixture's period already ended,
+		// so there is no known future rebill to clamp against — the full window
+		// applies.
+		assert.WithinDuration(t, time.Now().Add(subscriptions.SystemDeleteCoolingOff),
+			*updated.DeletionScheduledAt, time.Minute)
 	}
 }
 
@@ -196,12 +201,16 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 	updated := suite.GetSubscription(sub.ID)
 	require.Equal(t, models.StatusCancelled, updated.Status)
 	require.NotNil(t, updated.DeletionScheduledAt, "durable deletion marker must persist with the cancellation")
-	assert.WithinDuration(t, time.Now(), *updated.DeletionScheduledAt, time.Minute)
+	// or#842: the marker and the scheduled run both sit a cooling-off window out,
+	// not at `now` — this fixture's period already ended, so nothing clamps it.
+	coolOff := time.Now().Add(subscriptions.SystemDeleteCoolingOff)
+	assert.WithinDuration(t, coolOff, *updated.DeletionScheduledAt, time.Minute)
 
 	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled")
 	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 	assert.Equal(t, updated.CustomerID.String(), recorder.scheduled[0].UserID)
-	assert.WithinDuration(t, time.Now(), recorder.scheduled[0].RunAt, time.Minute)
+	assert.WithinDuration(t, coolOff, recorder.scheduled[0].RunAt, time.Minute,
+		"the marker and the scheduler must agree on when the delete becomes due")
 }
 
 // TestFailMembershipLimitedModeQueuesDeleteButGatesExecution verifies the #345 gate:

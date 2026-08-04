@@ -263,7 +263,7 @@ func (h *TopupChargeHandler) findNMISale(ctx context.Context, intent gen.Openrai
 	if !ok || client == nil {
 		return "", false, fmt.Errorf("nmi rail %q is not armed for this merchant", rail)
 	}
-	return client.FindSuccessfulSaleByOrderID(wireRef)
+	return client.FindSuccessfulSaleByOrderID(ctx, wireRef)
 }
 
 func isNMIRail(rail string) bool {

@@ -16,7 +16,7 @@ import (
 )
 
 // #796: approval_rate by token_type — the network-token uplift number. Seeds
-// its own merchant: pan_via_vault 2 settled + 2 failed (0.5), provider_vault
+// its own merchant: pan_via_proxy 2 settled + 2 failed (0.5), psp_token
 // 3 settled + 1 failed (0.75), one NULL-token_type row folding to 'unknown'.
 func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 	ctx := context.Background()
@@ -37,8 +37,8 @@ func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 		status, tokenType string
 	}
 	rows := []row{
-		{"completed", "pan_via_vault"}, {"completed", "pan_via_vault"}, {"failed", "pan_via_vault"}, {"failed", "pan_via_vault"},
-		{"completed", "provider_vault"}, {"completed", "provider_vault"}, {"completed", "provider_vault"}, {"failed", "provider_vault"},
+		{"completed", "pan_via_proxy"}, {"completed", "pan_via_proxy"}, {"failed", "pan_via_proxy"}, {"failed", "pan_via_proxy"},
+		{"completed", "psp_token"}, {"completed", "psp_token"}, {"completed", "psp_token"}, {"failed", "psp_token"},
 		{"completed", ""}, // legacy NULL -> 'unknown'
 	}
 	for i, r := range rows {
@@ -48,7 +48,7 @@ func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 		}
 		exec(ctx, t, pool, `INSERT INTO openrails.payments
 			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, token_type, purchased_at)
-			VALUES ($1, $2, $3, $4, 'vaulted_card', $5, 1990000, 1990000, 'USD', $6::openrails.payment_status, $7, '2026-06-10')`,
+			VALUES ($1, $2, $3, $4, 'nmi', $5, 1990000, 1990000, 'USD', $6::openrails.payment_status, $7, '2026-06-10')`,
 			uuid.New(), m, customerID, priceID, "tt-txn-"+suffix+"-"+strings.Repeat("x", i+1), r.status, tt)
 	}
 
@@ -57,14 +57,14 @@ func TestMetrics_ApprovalRateByTokenType(t *testing.T) {
 		By:       []string{"token_type"},
 		Range:    juneQ,
 	}))
-	require.InDelta(t, 0.5, cell(t, res, map[string]string{"token_type": "pan_via_vault"}, "approval_rate").(float64), 1e-9)
-	require.InDelta(t, 0.75, cell(t, res, map[string]string{"token_type": "provider_vault"}, "approval_rate").(float64), 1e-9)
+	require.InDelta(t, 0.5, cell(t, res, map[string]string{"token_type": "pan_via_proxy"}, "approval_rate").(float64), 1e-9)
+	require.InDelta(t, 0.75, cell(t, res, map[string]string{"token_type": "psp_token"}, "approval_rate").(float64), 1e-9)
 	require.Equal(t, int64(1), cell(t, res, map[string]string{"token_type": "unknown"}, "payment_count"))
 
 	// Filtering to one token_type excludes legacy-unknown rows entirely.
 	filtered := run(t, svc, mctx, usd(&metrics.Query{
 		Measures: []string{"payment_count"},
-		Filters:  map[string][]string{"token_type": {"provider_vault"}},
+		Filters:  map[string][]string{"token_type": {"psp_token"}},
 		Range:    juneQ,
 	}))
 	require.Len(t, filtered.Rows, 1)

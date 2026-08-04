@@ -237,8 +237,13 @@ func TestDriftDedupeKeyStable(t *testing.T) {
 			DetectedAt:            now,
 		}
 	}
-	if driftDedupeKey(mk()) != driftDedupeKey(mk()) {
-		t.Fatal("dedupe key must be stable for the same divergence")
+	// Two INDEPENDENTLY built copies of the same divergence must key the same.
+	// Written through variables so it is a real comparison of two computed
+	// values, not two syntactically identical expressions that staticcheck
+	// (correctly) reads as an assertion that can never fail — or#865/or#869.
+	first, second := driftDedupeKey(mk()), driftDedupeKey(mk())
+	if first != second {
+		t.Fatalf("dedupe key must be stable for the same divergence: %q vs %q", first, second)
 	}
 	other := mk()
 	other.Field = "description"

@@ -23,8 +23,8 @@ import (
 // attacker can mint auth tokens (or reaches a destructive path some other way),
 // they must NOT be able to cancel/refund/delete-payment-method for thousands of
 // users in seconds. Cap destructive billing ops to a HANDFUL per rolling hour —
-// globally and per-actor — so operators have time to NOTICE and ROTATE the bad
-// credential before most users are harmed.
+// per-merchant and per-actor — so operators have time to NOTICE and ROTATE the
+// bad credential before most users are harmed.
 //
 // This is a TIGHTER sibling of the #679 per-merchant volume breaker at the SAME
 // chokepoint (the intents producer): #679 catches slow mass-drift over a day,
@@ -44,20 +44,22 @@ const (
 	// PerActorHourlyCeiling caps ONE authenticated principal (admin user id or
 	// self-service customer id). Root/owner INCLUDED — no bypass, deliberately.
 	PerActorHourlyCeiling = 5
-	// GlobalHourlyCeiling caps the WHOLE deployment (all actors, all merchants) —
-	// the absolute frying-protection ceiling even if many actor identities are
-	// forged.
-	GlobalHourlyCeiling = 15
+	// PerMerchantHourlyCeiling caps ONE merchant's human-originated
+	// (user/admin) destructive ops per rolling hour — the frying-protection
+	// wall that holds even when many actor identities are forged.
+	//
+	// PER MERCHANT, not deployment-wide (or#887). The number is right; the
+	// scope was not. A shared deployment budget means merchant A's ordinary
+	// customer cancellations exhaust it and merchant B's next cancellation is
+	// refused — cross-tenant denial of service on a platform built for
+	// thousands of merchants, where the first busy tenant permanently denies
+	// everyone else. Scoping to the merchant keeps the anti-theft property (a
+	// forged-identity burst is still walled at 15 inside the merchant it
+	// targets, and the per-actor leg below still follows one credential ACROSS
+	// merchants) while confining the blast radius to the tenant it came from.
+	PerMerchantHourlyCeiling = 15
 	// PerMerchantSystemHourlyCeiling caps ONE merchant's AUTOMATED
 	// (origin='system') destructive queueing per rolling hour (or#842).
-	//
-	// Shape, not just a number: the user/admin ceilings above are
-	// deployment-wide because a stolen credential is a deployment-wide event.
-	// System origin is not — it is a thousand merchants each converging their
-	// own book, so a flat global wall would stop legitimate dunning at fleet
-	// scale, which is a worse failure than the one it prevents. Per merchant,
-	// the fleet scales linearly and a runaway loop or a poisoned roster inside
-	// ONE merchant still hits a wall.
 	//
 	// 50/h sits deliberately above any legitimate automated burst: every
 	// convergence pass is already capped at 25 cancellations
@@ -66,13 +68,13 @@ const (
 	// per-merchant volume breaker remains the slower, daily control at the
 	// executor; this one stops the QUEUE from filling in the first place.
 	PerMerchantSystemHourlyCeiling = 50
-	// perActorWarnThreshold / globalWarnThreshold / systemMerchantWarnThreshold
-	// are the running op counts (prior ops + this one) at which an op first
-	// crosses 50% of a ceiling. An op in the warning band raises an
-	// EARLY-WARNING finding — operators see the burst building BEFORE it hits
-	// the wall, which is what buys the notice-and-rotate time.
+	// perActorWarnThreshold / perMerchantWarnThreshold /
+	// systemMerchantWarnThreshold are the running op counts (prior ops + this
+	// one) at which an op first crosses 50% of a ceiling. An op in the warning
+	// band raises an EARLY-WARNING finding — operators see the burst building
+	// BEFORE it hits the wall, which is what buys the notice-and-rotate time.
 	perActorWarnThreshold       = 3  // ceil(PerActorHourlyCeiling * 0.5)
-	globalWarnThreshold         = 8  // ceil(GlobalHourlyCeiling * 0.5)
+	perMerchantWarnThreshold    = 8  // ceil(PerMerchantHourlyCeiling * 0.5)
 	systemMerchantWarnThreshold = 25 // ceil(PerMerchantSystemHourlyCeiling * 0.5)
 )
 
@@ -89,18 +91,24 @@ type ceilingKind string
 
 const (
 	ceilingPerActor       ceilingKind = "per_actor"
-	ceilingGlobal         ceilingKind = "global"
+	ceilingPerMerchant    ceilingKind = "per_merchant"
 	ceilingSystemMerchant ceilingKind = "system_merchant"
 )
 
 // ceilingCounts are the rolling-window counts an admission decision saw. Which
-// legs are populated depends on the origin: user/admin ops count per-actor and
-// deployment-wide, system ops count per-merchant.
+// legs are populated depends on the origin: user/admin ops count per-actor
+// (across merchants) and per-merchant, system ops count per-merchant.
 type ceilingCounts struct {
 	actor          int64
-	global         int64
+	merchant       int64
 	systemMerchant int64
 }
+
+// antiTheftOrigins is the human-originated origin set the anti-theft walls
+// count. origin='system' is deliberately excluded — no principal produced those,
+// so they must not burn a budget that exists to bound a stolen credential; they
+// have their own per-merchant window (checkSystem).
+var antiTheftOrigins = []string{string(OriginUser), string(OriginAdmin)}
 
 // ErrRateCeilingTripped is the errors.Is sentinel for a ceiling refusal, so the
 // HTTP boundary can map it to 429 without depending on the concrete type.
@@ -116,7 +124,7 @@ type RateCeilingError struct {
 	Actor               string
 	IntentType          string
 	ActorCount          int64
-	GlobalCount         int64
+	MerchantCount       int64
 	SystemMerchantCount int64
 }
 
@@ -128,9 +136,9 @@ func (e *RateCeilingError) Error() string {
 func (e *RateCeilingError) Is(target error) bool { return target == ErrRateCeilingTripped }
 
 // RateCeiling is the gate. It holds the ROOT pool-backed DB (independent of the
-// producer's own connection/tx) because its counts must span ALL merchants and
-// its findings must persist on an INDEPENDENT transaction — the operator alert
-// has to survive the refused op rolling back the caller's transaction.
+// producer's own connection/tx) because the per-actor count must span merchants
+// and its findings must persist on an INDEPENDENT transaction — the operator
+// alert has to survive the refused op rolling back the caller's transaction.
 type RateCeiling struct {
 	db *db.DB
 }
@@ -143,7 +151,7 @@ func NewRateCeiling(d *db.DB) *RateCeiling { return &RateCeiling{db: d} }
 type CheckParams struct {
 	// Actor is the authenticated principal id (admin user id or self-service
 	// customer id). Empty when unresolved — the per-actor ceiling is then
-	// skipped but the GLOBAL ceiling still applies.
+	// skipped but the per-merchant ceiling still applies.
 	Actor      string
 	MerchantID uuid.UUID
 	IntentType string
@@ -158,11 +166,11 @@ type CheckParams struct {
 //     must refuse; a compromised path must never sail through a broken gate).
 //
 // Every destructive (DestructiveIntentTypes) op is gated, on the ceiling shape
-// its origin calls for: user/admin ops on the deployment-wide anti-theft
-// ceilings, system ops on the per-merchant automation ceiling (or#842 — the
-// gate used to return nil for system origin, i.e. it was absent for exactly the
-// paths that queue the most irreversible work). Non-destructive types and
-// unknown origins return nil immediately.
+// its origin calls for: user/admin ops on the anti-theft ceilings (per-actor
+// across merchants + per-merchant), system ops on the per-merchant automation
+// ceiling (or#842 — the gate used to return nil for system origin, i.e. it was
+// absent for exactly the paths that queue the most irreversible work).
+// Non-destructive types and unknown origins return nil immediately.
 func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) error {
 	// Non-gated ops always pass — never fail them closed on a gate misconfig.
 	if !IsDestructiveIntentType(p.IntentType) {
@@ -180,25 +188,33 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	if c == nil || c.db == nil {
 		return fmt.Errorf("rate ceiling: db not configured") // fail closed
 	}
+	// Same fail-closed reason as the system leg (or#887): the wall is now the
+	// merchant's window, and an op with no merchant has no window to count in.
+	if p.MerchantID == uuid.Nil {
+		return fmt.Errorf("rate ceiling: destructive op has no merchant to scope its ceiling to") // fail closed
+	}
 
 	since := now.Add(-RateCeilingWindow).UTC()
 	types := DestructiveIntentTypes()
-	// Counts MUST span all merchants — and the base pool CANNOT do that. It is
-	// the same openrails_app role; dropping the GUC does not bypass rail_intents'
-	// policy, it fails it, so the count came back 0 and this ceiling never
-	// tripped (or#860). Both queries now call migration 0021's SECURITY DEFINER
-	// readers, which RAISE if their owner cannot bypass RLS — so a mis-owned
-	// schema fails loudly here instead of silently permitting the burst.
-	// GenDirectory is still the right accessor: the definer needs no merchant
-	// GUC, and a merchant-pinned connection would scope nothing.
+	// Neither count can run on the base pool. It is the same openrails_app role;
+	// dropping the GUC does not bypass rail_intents' policy, it fails it, so the
+	// count came back 0 and this ceiling never tripped (or#860). Both queries
+	// call SECURITY DEFINER readers (migrations 0021/0028) which RAISE if their
+	// owner cannot bypass RLS — so a mis-owned schema fails loudly here instead
+	// of silently permitting the burst. That still holds for the per-merchant
+	// count: this handle is the ROOT pool and carries no app.merchant_id, so a
+	// plain RLS-scoped SELECT would match `merchant_id = NULL` and fail OPEN.
+	// GenDirectory is the right accessor: the definer needs no merchant GUC.
 	q := c.db.GenDirectory()
 
-	globalCount, err := q.CountDestructiveIntentsGlobalSince(ctx, gen.CountDestructiveIntentsGlobalSinceParams{
+	merchantCount, err := q.CountDestructiveIntentsForMerchantSince(ctx, gen.CountDestructiveIntentsForMerchantSinceParams{
+		MerchantID:  p.MerchantID,
+		Origins:     antiTheftOrigins,
 		IntentTypes: types,
 		Since:       since,
 	})
 	if err != nil {
-		return fmt.Errorf("rate ceiling: global count: %w", err) // fail closed
+		return fmt.Errorf("rate ceiling: merchant count: %w", err) // fail closed
 	}
 	var actorCount int64
 	if p.Actor != "" {
@@ -212,30 +228,30 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 		}
 	}
 
-	counts := ceilingCounts{actor: actorCount, global: globalCount}
-	// Trip: per-actor first (more specific/actionable), then the global wall.
+	counts := ceilingCounts{actor: actorCount, merchant: merchantCount}
+	// Trip: per-actor first (more specific/actionable), then the merchant wall.
 	if p.Actor != "" && actorCount >= PerActorHourlyCeiling {
 		return c.trip(ctx, p, ceilingPerActor, counts, now)
 	}
-	if globalCount >= GlobalHourlyCeiling {
-		return c.trip(ctx, p, ceilingGlobal, counts, now)
+	if merchantCount >= PerMerchantHourlyCeiling {
+		return c.trip(ctx, p, ceilingPerMerchant, counts, now)
 	}
 
 	// Early warning: this op crosses 50% of a ceiling (still below the wall).
 	if p.Actor != "" && actorCount+1 >= perActorWarnThreshold {
 		c.warn(ctx, p, ceilingPerActor, counts, now)
 	}
-	if globalCount+1 >= globalWarnThreshold {
-		c.warn(ctx, p, ceilingGlobal, counts, now)
+	if merchantCount+1 >= perMerchantWarnThreshold {
+		c.warn(ctx, p, ceilingPerMerchant, counts, now)
 	}
 	return nil
 }
 
 // checkSystem is the origin='system' leg: ONE merchant's automated destructive
-// queueing per rolling hour. No actor exists on these paths (no principal
-// produced them), so the per-actor ceiling has nothing to key on and the
-// deployment-wide one would punish fleet size; the merchant IS the blast
-// radius, so it is the window.
+// queueing per rolling hour, on its OWN window (disjoint origin set), so
+// automation never burns the anti-theft budget and vice versa. No actor exists
+// on these paths (no principal produced them), so the per-actor ceiling has
+// nothing to key on; the merchant IS the blast radius, so it is the window.
 func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.Time) error {
 	// FAIL CLOSED, same as the anti-theft legs: a destructive automated op must
 	// never sail through a gate that cannot evaluate. An unscoped op has no
@@ -248,12 +264,14 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 		return fmt.Errorf("rate ceiling: system-origin destructive op has no merchant to scope its ceiling to") // fail closed
 	}
 
-	// The definer reader (migration 0024), for the same reason the anti-theft
-	// legs use one: this DB is the root pool and carries no app.merchant_id, so
-	// a plain SELECT would match `merchant_id = NULL`, count 0 and fail OPEN.
-	count, err := c.db.GenDirectory().CountSystemDestructiveIntentsForMerchantSince(ctx,
-		gen.CountSystemDestructiveIntentsForMerchantSinceParams{
+	// The same definer reader the anti-theft leg uses, with the system origin
+	// set (migration 0028 generalized 0024's system-only function): this DB is
+	// the root pool and carries no app.merchant_id, so a plain SELECT would
+	// match `merchant_id = NULL`, count 0 and fail OPEN.
+	count, err := c.db.GenDirectory().CountDestructiveIntentsForMerchantSince(ctx,
+		gen.CountDestructiveIntentsForMerchantSinceParams{
 			MerchantID:  p.MerchantID,
+			Origins:     []string{string(OriginSystem)},
 			IntentTypes: DestructiveIntentTypes(),
 			Since:       now.Add(-RateCeilingWindow).UTC(),
 		})
@@ -283,10 +301,10 @@ func (c *RateCeiling) trip(ctx context.Context, p CheckParams, which ceilingKind
 		"intent_type":           p.IntentType,
 		"origin":                string(p.Origin),
 		"actor_count":           counts.actor,
-		"global_count":          counts.global,
+		"merchant_count":        counts.merchant,
 		"system_merchant_count": counts.systemMerchant,
 		"per_actor_max":         PerActorHourlyCeiling,
-		"global_max":            GlobalHourlyCeiling,
+		"per_merchant_max":      PerMerchantHourlyCeiling,
 		"system_merchant_max":   PerMerchantSystemHourlyCeiling,
 		"window":                RateCeilingWindow.String(),
 	}
@@ -304,7 +322,7 @@ func (c *RateCeiling) trip(ctx context.Context, p CheckParams, which ceilingKind
 		Actor:               p.Actor,
 		IntentType:          p.IntentType,
 		ActorCount:          counts.actor,
-		GlobalCount:         counts.global,
+		MerchantCount:       counts.merchant,
 		SystemMerchantCount: counts.systemMerchant,
 	}
 }
@@ -313,13 +331,13 @@ func (c *RateCeiling) trip(ctx context.Context, p CheckParams, which ceilingKind
 func (c *RateCeiling) warn(ctx context.Context, p CheckParams, which ceilingKind, counts ceilingCounts, now time.Time) {
 	subjectKey := c.subjectKey(which, p)
 	action := fmt.Sprintf(
-		"destructive-op burst crossing 50%% of the %s ceiling (per-actor %d/%d, global %d/%d, this merchant's automation %d/%d in %s) — watch for credential compromise or runaway automation; approve (ack) to clear once verified normal",
-		which, counts.actor, PerActorHourlyCeiling, counts.global, GlobalHourlyCeiling,
+		"destructive-op burst on merchant %s crossing 50%% of the %s ceiling (per-actor %d/%d, this merchant %d/%d, this merchant's automation %d/%d in %s) — watch for credential compromise or runaway automation; approve (ack) to clear once verified normal",
+		p.MerchantID, which, counts.actor, PerActorHourlyCeiling, counts.merchant, PerMerchantHourlyCeiling,
 		counts.systemMerchant, PerMerchantSystemHourlyCeiling, RateCeilingWindow)
 	evidence := c.evidence(which, p, counts, now, false)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"gate": "destructive_rate_ceiling", "ceiling": string(which), "actor": p.Actor,
-		"merchant_id": p.MerchantID, "actor_count": counts.actor, "global_count": counts.global,
+		"merchant_id": p.MerchantID, "actor_count": counts.actor, "merchant_count": counts.merchant,
 		"system_merchant_count": counts.systemMerchant,
 	}).Warn("destructive-operation rate ceiling: burst crossing 50% of a ceiling")
 	if err := c.emitFinding(ctx, p.MerchantID, RateCeilingWarningFindingType, subjectKey, "high", action, evidence); err != nil {
@@ -328,7 +346,11 @@ func (c *RateCeiling) warn(ctx context.Context, p CheckParams, which ceilingKind
 }
 
 // subjectKey keeps ONE standing finding per (merchant, type, subject): per-actor
-// events key on the actor; global events on a fixed "global" subject.
+// events key on the actor, the two merchant-wide walls on the merchant (they are
+// separate subjects — a human burst and a runaway automation are different
+// investigations). The merchant-wide anti-theft key was the literal "global"
+// while the wall was deployment-wide; migration 0028 re-keys the findings that
+// carry it, so no operator alert is orphaned by the rename (or#887).
 func (c *RateCeiling) subjectKey(which ceilingKind, p CheckParams) string {
 	switch which {
 	case ceilingPerActor:
@@ -336,7 +358,7 @@ func (c *RateCeiling) subjectKey(which ceilingKind, p CheckParams) string {
 	case ceilingSystemMerchant:
 		return "system:" + p.MerchantID.String()
 	default:
-		return "global"
+		return "merchant:" + p.MerchantID.String()
 	}
 }
 
@@ -353,8 +375,8 @@ func (c *RateCeiling) trippedSubjectAction(which ceilingKind, p CheckParams, cou
 			counts.systemMerchant, RateCeilingWindow, PerMerchantSystemHourlyCeiling)
 	default:
 		action = fmt.Sprintf(
-			"the GLOBAL destructive ceiling tripped (%d in %s ≥ %d across all actors/merchants) — LIKELY CREDENTIAL COMPROMISE; verify and rotate, then approve (ack) to clear",
-			counts.global, RateCeilingWindow, GlobalHourlyCeiling)
+			"merchant %s hit its destructive ceiling (%d in %s ≥ %d across all of this merchant's actors) — LIKELY CREDENTIAL COMPROMISE on this merchant; verify and rotate, then approve (ack) to clear. Other merchants are unaffected: this wall is per-merchant",
+			p.MerchantID, counts.merchant, RateCeilingWindow, PerMerchantHourlyCeiling)
 	}
 	return subjectKey, action
 }
@@ -366,11 +388,12 @@ func (c *RateCeiling) evidence(which ceilingKind, p CheckParams, counts ceilingC
 		"actor":                   p.Actor,
 		"origin":                  string(p.Origin),
 		"intent_type":             p.IntentType,
+		"merchant_id":             p.MerchantID.String(),
 		"actor_count":             counts.actor,
-		"global_count":            counts.global,
+		"merchant_count":          counts.merchant,
 		"system_merchant_count":   counts.systemMerchant,
 		"per_actor_ceiling":       PerActorHourlyCeiling,
-		"global_ceiling":          GlobalHourlyCeiling,
+		"per_merchant_ceiling":    PerMerchantHourlyCeiling,
 		"system_merchant_ceiling": PerMerchantSystemHourlyCeiling,
 		"window_hours":            int(RateCeilingWindow / time.Hour),
 		"observed_at":             now.UTC().Format(time.RFC3339),
@@ -408,7 +431,7 @@ func (c *RateCeiling) emitFinding(ctx context.Context, merchantID uuid.UUID, fin
 // ResolveActor picks the actor for a producing enqueue: an explicit override
 // wins, otherwise the ambient authenticated principal on the context (set by
 // the auth middleware). Empty for system/background paths that carry no
-// principal — the per-actor ceiling is then inert (global still applies).
+// principal — the per-actor ceiling is then inert (per-merchant still applies).
 func ResolveActor(ctx context.Context, explicit string) string {
 	if explicit != "" {
 		return explicit

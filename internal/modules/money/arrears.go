@@ -13,7 +13,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -343,9 +345,12 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 	cleanupCtx, cancel := collectionCleanupContext(ctx)
 	defer cancel()
 	if res.Declined {
-		// Arrears invoices bill on the monthly cadence; the schedule is the ONE
-		// collection-core table (#828) — the same offsets subscription dunning uses.
-		action := collection.FailureAction(collection.MonthlyCycleHours, res.Rail, res.FailureCode, int(r.FailureCount), r.FirstFailureAt, now)
+		// or#828: ONE decision function. The invoice consumer classifies this
+		// decline with collection.FailureAction — the same or#870 three-bucket
+		// doctrine subscription rebill uses — on the invoice's REAL billing
+		// cycle rather than a hardcoded month.
+		action := collection.FailureAction(invoiceCycleHours(claim), res.Rail, res.FailureCode, int(r.FailureCount), r.FirstFailureAt, now)
+		logInvoiceDeclineDecision(ctx, r.InvoiceID, res.Rail, res.FailureCode, action)
 		if err := s.recordInvoiceCollectionFailure(cleanupCtx, claim, optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, action, now); err != nil {
 			markCtx, markCancel := collectionCleanupContext(ctx)
 			defer markCancel()
@@ -354,6 +359,7 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 			}
 			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
 		}
+		s.notifyInvoiceCollectionOutcome(cleanupCtx, claim, action, res.FailureCode, now)
 		return false, nil
 	}
 
@@ -478,6 +484,114 @@ func (s *MoneyService) settleClaimedInvoiceCharge(ctx context.Context, claim *in
 		return false, err
 	}
 	return charged, nil
+}
+
+// invoiceCycleHours is the invoice consumer's answer to "what is this thing's
+// billing cycle" — the question BillingCycleHoursOf answers for a subscription
+// off its price cadence. An invoice carries its own period, so the cycle is
+// the statement window itself: a weekly statement dunned on the weekly
+// offsets, an annual one on the monthly ones. Before or#828 this was the
+// constant collection.MonthlyCycleHours for every invoice ever issued.
+//
+// 0 (no invoice on the claim, or a degenerate period) means unknown, which the
+// schedule handles defensively as monthly.
+//
+// The one place the invoice consumer departs from the subscription reading: a
+// statement period SHORTER than the shortest retriable cycle is floored, not
+// taken literally. The 0-retry tier exists so a SUBSCRIPTION is never still
+// dunning last period when the next charge is due; an invoice is a discrete
+// debt collected independently of every other invoice, so that constraint does
+// not apply to it. Threshold-triggered statements (ListInvoiceThresholdCandidates)
+// routinely cover an hour, and writing such a debt off as uncollectible on its
+// first decline would be the schedule's shape leaking into a decision it was
+// never about.
+func invoiceCycleHours(claim *invoiceCollectionClaim) int {
+	if claim == nil || claim.previous == nil {
+		return 0
+	}
+	cycleHours := collection.CycleHoursBetween(claim.previous.PeriodFrom, claim.previous.PeriodTo)
+	if cycleHours > 0 && cycleHours < collection.MinRetryCycleHours {
+		return collection.MinRetryCycleHours
+	}
+	return cycleHours
+}
+
+// logInvoiceDeclineDecision names the bucket and its invoice-shaped consequence
+// on every decline, the way the subscription consumer's declineLog does. The
+// consequences differ because the products differ — an invoice is not a
+// subscription, so nothing here cancels anything.
+func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+	entry := log.WithContext(ctx).WithFields(log.Fields{
+		"invoice_id":      invoiceID,
+		"rail":            rail,
+		"failure_code":    derefStr(failureCode),
+		"decline_outcome": action.Outcome.String(),
+	})
+	switch {
+	case action.AwaitingPaymentMethod():
+		entry.Warn("invoice collection: customer's card needs fixing (or#870 bucket 2); charging STOPS, the invoice stays OPEN, access and the stored card are untouched")
+	case action.Terminal && !action.ScheduleExhausted():
+		entry.Error("invoice collection: non-recoverable decline (or#870 bucket 3); the invoice is uncollectible — no subscription is cancelled and the stored payment method is NOT touched")
+	case action.Terminal:
+		entry.Error("invoice collection: the retry schedule is exhausted (or#870 bucket 1); the invoice is uncollectible")
+	default:
+		entry.WithField("next_attempt_at", action.NextAttemptAt).
+			Warn("invoice collection: retryable decline (or#870 bucket 1); will retry on the invoice's own billing cycle")
+	}
+}
+
+// notifyInvoiceCollectionOutcome is the or#870 notification ladder, shaped for
+// an invoice. One rung per bucket, so a payer is never silent-treated through a
+// whole dunning cycle and then handed an uncollectible invoice:
+//
+//	bucket 1, still trying  -> payment_method_failed ("we will keep trying")
+//	bucket 1, schedule out  -> invoice_collection_stopped / schedule_exhausted
+//	bucket 2                -> payment_method_update_required ("fix the card;
+//	                           the invoice stays open and your access is untouched")
+//	bucket 3                -> invoice_collection_stopped / non_recoverable
+//
+// Deliberately absent: any entitlement, access or subscription effect. A
+// decline bucket says what to do about the CARD. What an unpaid invoice does to
+// SERVICE is a separate, time-based, per-merchant opt-in axis (or#878), and
+// conflating them is how our judgement costs a customer access.
+//
+// Notification failure never fails collection: the money outcome is already
+// durable, and losing a rung is not a reason to re-attempt a charge.
+func (s *MoneyService) notifyInvoiceCollectionOutcome(ctx context.Context, claim *invoiceCollectionClaim, action collection.Action, failureCode *string, now time.Time) {
+	r := claim.account
+	data := map[string]any{
+		"invoice_id":      r.InvoiceID.String(),
+		"currency":        r.Currency,
+		"amount_due":      r.AmountDue,
+		"failure_code":    derefStr(failureCode),
+		"decline_outcome": action.Outcome.String(),
+	}
+	eventType := models.NotificationPaymentMethodFailed
+	switch {
+	case action.AwaitingPaymentMethod():
+		eventType = models.NotificationPaymentMethodUpdateRequired
+	case action.Terminal:
+		eventType = models.NotificationInvoiceCollectionStopped
+		reason := "non_recoverable"
+		if action.ScheduleExhausted() {
+			reason = "schedule_exhausted"
+		}
+		data["reason"] = reason
+	case action.NextAttemptAt != nil:
+		data["next_attempt_at"] = action.NextAttemptAt.UTC().Format(time.RFC3339)
+	}
+	notification := &models.NotificationQueue{
+		ID:         uuidutil.NewV7(),
+		CustomerID: r.CustomerID,
+		EventType:  eventType,
+		Data:       data,
+		CreatedAt:  now,
+	}
+	if err := subscriptions.NewNotificationQueueRepo(s.db).Create(ctx, notification); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"invoice_id": r.InvoiceID, "customer_id": r.CustomerID, "event_type": eventType,
+		}).Error("failed to queue invoice collection notification")
+	}
 }
 
 func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim *invoiceCollectionClaim, rail, railPaymentID, failureCode, failureMessage *string, action collection.Action, now time.Time) error {

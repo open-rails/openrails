@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
@@ -26,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
 )
 
 // -------------------------------- Products --------------------------------
@@ -948,6 +950,15 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 
 // -------------------------------- Solana Tokens --------------------------------
 
+// solanaMintDecimals returns the runtime's on-chain mint-decimals resolver
+// (#817), or nil when the Solana rail is not armed.
+func (s *Service) solanaMintDecimals() solanamodule.MintDecimalsSource {
+	if s == nil || s.rt == nil || s.rt.SolanaMintDecimals == nil {
+		return nil
+	}
+	return s.rt.SolanaMintDecimals
+}
+
 // GetSupportedTokens returns the list of supported Solana tokens with prices.
 func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
 	if _, err := s.requireConfig(); err != nil {
@@ -974,11 +985,18 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 		if name == "" {
 			name = symbol
 		}
+		// #817: decimals are the mint's, read on-chain. An unreadable mint is a
+		// token we cannot price — drop it loudly rather than invent a precision.
+		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMintDecimals(), t.Mint)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			continue
+		}
 		tokens = append(tokens, SolanaToken{
 			Symbol:   symbol,
 			Name:     name,
 			Mint:     t.Mint,
-			Decimals: t.Decimals,
+			Decimals: decimals,
 			Price:    0,
 		})
 	}

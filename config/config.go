@@ -52,7 +52,12 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 	return nil
 }
 
-const ConfigContextKey string = "config"
+// configContextKey is a distinct type so this key cannot collide with another
+// package storing "config" in the same context (SA1029, or#869).
+type configContextKey string
+
+// ConfigContextKey is the context key the CLI stores the loaded *Config under.
+const ConfigContextKey configContextKey = "config"
 
 // CredentialPosture is the sandbox-credential axis (#355/#745): "sandbox" or
 // "live", never a bare true/false. The Go zero value (empty string) means
@@ -80,12 +85,13 @@ func (p *CredentialPosture) UnmarshalText(text []byte) error {
 
 type Config struct {
 	// Env is the deployment environment and it is REQUIRED (SEC-18). It is the
-	// switch behind RequiresRLS and RequiresSecretEncryption, so an unset value
-	// must never read as "development": a container shipped without ENV would
-	// otherwise boot with PLAINTEXT merchant secrets (NMI security_key, Stripe
-	// sk_, CCBill DataLink passwords, webhook signing secrets) after a single
-	// warning, and stop requiring the DB role to enforce RLS — silently, and in
-	// exactly the deployment least likely to be watching. Load() refuses an
+	// switch behind RequiresSecretEncryption, so an unset value must never read
+	// as "development": a container shipped without ENV would otherwise boot
+	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
+	// DataLink passwords, webhook signing secrets) after a single warning —
+	// silently, and in exactly the deployment least likely to be watching. (The
+	// DB role must enforce RLS in every environment; that one is not on this
+	// switch.) Load() refuses an
 	// empty ENV, and IsDev() reads empty as NOT development so any path that
 	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
@@ -664,11 +670,15 @@ type PSPConfig struct {
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
 	// the typed block — there is no flat fallback.
-	NMI         *NMIRailConfig
-	CCBill      *CCBillRailConfig
-	Stripe      *StripeRailConfig
-	Solana      *SolanaRailConfig
-	VaultedCard *VaultedCardRailConfig
+	NMI    *NMIRailConfig
+	CCBill *CCBillRailConfig
+	Stripe *StripeRailConfig
+	Solana *SolanaRailConfig
+
+	// Custody (or#879) is the axis orthogonal to the rail: nil / CustodianPSP
+	// means the PSP holds its own instruments. A third-party custodian holds
+	// the card and proxies it into THIS PSP's gateway.
+	Custody *CustodyConfig
 }
 
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
@@ -712,26 +722,26 @@ type SolanaRailConfig struct {
 	Network string
 }
 
-// VaultedCardRailConfig (#795) is the RESOLVED runtime credential shape for
-// the vaulted_card rail: the BT private application key plus the destination
-// NMI gateway credentials resolved from the account's settings.gateway_account
-// reference at resolution time. AccountID on the parent config = BT tenant id.
-type VaultedCardRailConfig struct {
-	// APIKey is the BT PRIVATE application key — the only custodial secret.
+// CustodyConfig (#795 / or#879) is the RESOLVED runtime shape of a PSP's
+// third-party custody arrangement: who holds the card, under what tenant
+// identity, and the credentials to detokenize it into THIS PSP's gateway. The
+// gateway credentials themselves stay on the rail block — one source of truth.
+type CustodyConfig struct {
+	// Custodian is the declared holder (models.CustodianBasisTheory).
+	Custodian string
+	// AccountID is the custodian-native tenant id (operator-declared).
+	AccountID string
+	// APIKey is the custodian's PRIVATE application key — the only custodial
+	// secret; it authorizes detokenization, never a charge on its own.
 	APIKey string
-	// Gateway destination (the linked NMI account): its security key transits
-	// the BT proxy; the PAN never touches OpenRails.
-	GatewayAccountID     string
-	GatewaySecurityKey   string
-	GatewayDirectPostURL string // "" = the NMI client default
+	// PublicAPIKey is checkout-page config (not a secret).
+	PublicAPIKey string
 	// NetworkTokens arms NT provisioning on instrument creation (never
 	// load-bearing; charge routing stays pan_proxy on NMI gateways).
 	NetworkTokens bool
-	// PublicAPIKey is checkout-page config (not a secret).
-	PublicAPIKey string
-	// WebhookKeyURL overrides the BT CDN webhook public-key URL (tests only).
+	// WebhookKeyURL overrides the custodian's CDN webhook public-key URL (tests only).
 	WebhookKeyURL string
-	// APIBaseURL overrides the BT API base URL (tests only; "" = production).
+	// APIBaseURL overrides the custodian API base URL (tests only; "" = production).
 	APIBaseURL string
 }
 
@@ -806,9 +816,6 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	if p.Solana != nil {
 		blockCount++
 	}
-	if p.VaultedCard != nil {
-		blockCount++
-	}
 	if blockCount == 0 {
 		return nil
 	}
@@ -831,10 +838,6 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	case models.RailSolana:
 		if p.Solana == nil {
 			return fmt.Errorf("rail '%s' type solana must use solana block", name)
-		}
-	case models.RailVaultedCard:
-		if p.VaultedCard == nil {
-			return fmt.Errorf("rail '%s' type vaulted_card must use vaulted_card block", name)
 		}
 	default:
 		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
@@ -862,9 +865,10 @@ func (p *PSPConfig) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
 }
 
-// IsVaultedCard returns true if this rail config is for the vaulted_card rail.
-func (p *PSPConfig) IsVaultedCard(name string) bool {
-	return p.EffectiveRail(name) == models.RailVaultedCard
+// HasThirdPartyCustody reports whether a custodian other than the PSP holds
+// the instruments charged through this PSP (or#879).
+func (p *PSPConfig) HasThirdPartyCustody() bool {
+	return p != nil && p.Custody != nil && p.Custody.Custodian != "" && p.Custody.Custodian != models.CustodianPSP
 }
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
@@ -977,26 +981,33 @@ type AuthConfig struct {
 }
 
 // TokenConfig defines configuration for a specific Solana token.
+//
+// There is deliberately NO `decimals` field (#817): an SPL token's base-unit
+// precision is a property of the MINT on-chain, immutable since InitializeMint,
+// and the chain is the source of truth. A merchant-settable copy is a field
+// they can get wrong, and a wrong value misprices every charge by a power of
+// ten. Decimals are read from the mint (internal/integrations/solana.
+// ReadMintDecimals) and cached, never declared.
 type TokenConfig struct {
-	Mint     string `json:"mint"`     // Token mint address accepted on the configured Solana network.
-	Name     string `json:"name"`     // Token name.
-	Decimals int    `json:"decimals"` // Token base-unit precision; REQUIRED (see ValidateTokenDecimals).
+	Mint string `json:"mint"` // Token mint address accepted on the configured Solana network.
+	Name string `json:"name"` // Token name.
 }
 
-// Token base-unit precision bounds. SPL mints top out at 9 in practice; the
-// slack guards the 10^n rescale against absurd configuration.
+// Payable base-unit precision bounds for an SPL mint. Applied to the value READ
+// FROM THE MINT, not to configuration. SPL mints top out at 9 in practice; the
+// slack accommodates exotic mints while still refusing an absurd 10^n rescale.
+// 0 is rejected: a whole-unit token cannot represent a sub-unit charge, so it is
+// not usable as a payment token here.
 const (
 	MinTokenDecimals = 1
 	MaxTokenDecimals = 18
 )
 
-// ValidateTokenDecimals rejects an unusable base-unit precision. Zero is
-// rejected on purpose (#817): an OMITTED `decimals` decodes as 0, and treating
-// that as whole-token precision silently misprices every charge by 10^6.
-func ValidateTokenDecimals(symbol string, decimals int) error {
+// ValidateTokenDecimals rejects an on-chain precision unusable for payments.
+func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	if decimals < MinTokenDecimals || decimals > MaxTokenDecimals {
-		return fmt.Errorf("solana token %s: decimals must be %d..%d (got %d) — declare it in the merchant's solana tokens config",
-			symbol, MinTokenDecimals, MaxTokenDecimals, decimals)
+		return fmt.Errorf("solana token %s: on-chain mint decimals %d are outside the payable range %d..%d",
+			mintOrSymbol, decimals, MinTokenDecimals, MaxTokenDecimals)
 	}
 	return nil
 }
@@ -1505,12 +1516,11 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 			if err := validateSolanaRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case models.RailVaultedCard:
-			if err := validateVaultedCardRail(name, proc, isDev); err != nil {
-				return err
-			}
 		default:
 			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
+		}
+		if err := validateCustody(name, proc, isDev); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1607,23 +1617,26 @@ func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
 	return nil
 }
 
-// validateVaultedCardRail validates a vaulted_card-type rail (#795).
-func validateVaultedCardRail(name string, proc *PSPConfig, isDev bool) error {
-	vc := proc.VaultedCard
-	if vc == nil {
-		return fmt.Errorf("rail '%s' (vaulted_card): vaulted_card block is required", name)
+// validateCustody validates a PSP's third-party custody arrangement (or#879).
+// Custody is a MODIFIER on a rail, so it is checked for every rail: only rails
+// with a proxy charge path may declare one, and a declared custodian must be
+// fully armed or the checkout it backs is silently dead.
+func validateCustody(name string, proc *PSPConfig, isDev bool) error {
+	if !proc.HasThirdPartyCustody() {
+		return nil
 	}
-	if strings.TrimSpace(proc.AccountID) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): account_id (the BT tenant id) is required", name)
+	rail := proc.EffectiveRail(name)
+	if rail != models.RailNMI {
+		return fmt.Errorf("rail '%s' (%s): custodian %q is not supported on this rail — only nmi has a detokenizing proxy charge path", name, rail, proc.Custody.Custodian)
+	}
+	if strings.TrimSpace(proc.Custody.AccountID) == "" {
+		return fmt.Errorf("rail '%s': custodian %q requires custodian_account_id (the custodian-native tenant id)", name, proc.Custody.Custodian)
 	}
 	if isDev {
 		return nil
 	}
-	if strings.TrimSpace(vc.APIKey) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): api_key (BT private application key) is required", name)
-	}
-	if strings.TrimSpace(vc.GatewaySecurityKey) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): gateway security key is required (resolved from the linked NMI account)", name)
+	if strings.TrimSpace(proc.Custody.APIKey) == "" {
+		return fmt.Errorf("rail '%s': custodian %q requires the %s secret (its private application key)", name, proc.Custody.Custodian, CustodianSecretAPIKey)
 	}
 	return nil
 }
@@ -1762,16 +1775,14 @@ func (cfg *Config) IsDev() bool {
 	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
 
-// RequiresRLS reports whether startup must fail if the connected Postgres role
-// bypasses row-level security. Development may use a privileged local DB role;
-// every non-development environment must connect as an RLS-enforcing role.
-func (cfg *Config) RequiresRLS() bool {
-	return cfg != nil && !cfg.IsDev()
-}
+// RLS enforcement is deliberately NOT a config knob (or#782). Every
+// environment, development included, must connect as an RLS-enforcing role;
+// db.EnforceRLSPosture takes no environment argument, so there is nothing here
+// to point back at a superuser.
 
 // RequiresSecretEncryption reports whether startup must fail if the DB-backed
 // merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
-// Same environment gate as RequiresRLS (#667): only development may run without.
+// Only development may run without a key (#667).
 func (cfg *Config) RequiresSecretEncryption() bool {
 	return cfg != nil && !cfg.IsDev()
 }
@@ -1831,8 +1842,12 @@ func GetDefaultBillingConfig() *Config {
 			Host:     "localhost",
 			Port:     "5434",
 			Database: "openrails_db",
-			Username: "admin",
-			Password: "admin_password",
+			// The unprivileged NOBYPASSRLS role, matching docker-compose
+			// (or#782). The default must NOT be the superuser: boot refuses a
+			// BYPASSRLS role in every environment, and a superuser default
+			// would only teach developers to reach for one.
+			Username: "openrails_app",
+			Password: "openrails_app_password",
 			SSLMode:  "disable",
 			Schema:   DefaultSchema,
 		},
@@ -2143,11 +2158,12 @@ func Load(configPath string) (*Config, error) {
 	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
 	// closed on its own; this one decides WHICH way the others fail, so it must
 	// be declared, not inferred. Silently reading unset as "development" meant a
-	// container deployed without ENV kept merchant secrets in PLAINTEXT and
-	// stopped requiring the DB role to enforce RLS.
+	// container deployed without ENV kept merchant secrets in PLAINTEXT. (The
+	// DB role is no longer on this switch — or#782 made RLS enforcement
+	// unconditional.)
 	cfg.Env = strings.TrimSpace(cfg.Env)
 	if cfg.Env == "" {
-		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one")
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
 	}
 
 	// These sections are intentionally tolerated for operator visibility during

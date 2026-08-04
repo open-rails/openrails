@@ -73,7 +73,8 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, newPrice.ID, payment.PriceID)
 	require.Equal(t, newPrice.Amount, payment.Amount)
 	require.Equal(t, newPrice.Amount, payment.ListAmount)
-	require.Equal(t, "usd", payment.Currency)
+	// Canonical UPPER (migration 0020's CHECK on payments.currency).
+	require.Equal(t, "USD", payment.Currency)
 
 	oldLookup := suite.GetSubscriptionByRailID(originalRailSubID)
 	require.Nil(t, oldLookup)

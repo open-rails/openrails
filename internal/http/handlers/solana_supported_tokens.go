@@ -195,22 +195,31 @@ func GetSupportedTokens(r *httprequest.Request) {
 		mint := strings.TrimSpace(t.Mint)
 		price := prices[symbol]
 
+		// #817: decimals are the MINT's, read on-chain. A mint we cannot read is
+		// a token we cannot price or render — drop it loudly rather than publish
+		// an invented precision.
+		decimals, err := solanamodule.RequireMintDecimals(ctx, r.State.SolanaMintDecimals, mint)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			continue
+		}
+
 		tokenInfo := TokenInfo{
 			Symbol:            symbol,
 			Name:              name,
 			Mint:              mint,
-			Decimals:          t.Decimals,
+			Decimals:          decimals,
 			Price:             price,
 			Preferred:         symbol == solanatokens.PreferredStablecoin,
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		}
 
 		if priceAmount > 0 && price > 0 && quoteError == "" {
-			tokenInfo.Quote = calculateQuoteForToken(ctx, r, symbol, t, priceAmount, priceCurrency, quotedAt, quoteExpiry)
+			tokenInfo.Quote = calculateQuoteForToken(ctx, r, symbol, mint, decimals, priceAmount, priceCurrency, quotedAt, quoteExpiry)
 		}
 
 		if query.Wallet != "" && walletError == "" {
-			tokenInfo.Balance = calculateBalanceForToken(symbol, t, mint, balances, solBalance)
+			tokenInfo.Balance = calculateBalanceForToken(symbol, decimals, mint, balances, solBalance)
 			if tokenInfo.Quote != nil && tokenInfo.Balance != nil {
 				tokenInfo.Balance.Sufficient = tokenInfo.Balance.Units >= tokenInfo.Quote.Units
 			}
@@ -257,11 +266,17 @@ func GetSolanaConfig(r *httprequest.Request) {
 		if name == "" {
 			name = symbol
 		}
+		mint := strings.TrimSpace(t.Mint)
+		decimals, err := solanamodule.RequireMintDecimals(r.Request.Context(), r.State.SolanaMintDecimals, mint)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			continue
+		}
 		tokens = append(tokens, TokenInfo{
 			Symbol:            symbol,
 			Name:              name,
-			Mint:              strings.TrimSpace(t.Mint),
-			Decimals:          t.Decimals,
+			Mint:              mint,
+			Decimals:          decimals,
 			Preferred:         symbol == solanatokens.PreferredStablecoin,
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		})
@@ -409,8 +424,8 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 	return balances, solBalance, ""
 }
 
-func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.TokenConfig, amountMicros int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
-	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(amountMicros), currency, r.State.FXProvider, r.State.SolanaPriceProvider)
+func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol, mint string, decimals int, amountMicros int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
+	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, mint, decimals, moneyutil.Micros(amountMicros), currency, r.State.FXProvider, r.State.SolanaPriceProvider)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenSymbol).Warn("Failed to calculate token quote")
 		return nil
@@ -427,7 +442,7 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSy
 	}
 }
 
-func calculateBalanceForToken(tokenSymbol string, tokenCfg config.TokenConfig, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
+func calculateBalanceForToken(tokenSymbol string, decimals int, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
 	var units uint64
 
 	if strings.EqualFold(tokenSymbol, "SOL") {
@@ -437,7 +452,7 @@ func calculateBalanceForToken(tokenSymbol string, tokenCfg config.TokenConfig, m
 	}
 
 	return &TokenBalance{
-		Amount:     solanamodule.FormatBaseUnits(units, tokenCfg.Decimals), // display only
+		Amount:     solanamodule.FormatBaseUnits(units, decimals), // display only
 		Units:      units,
 		Sufficient: false,
 	}

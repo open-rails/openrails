@@ -19,7 +19,7 @@ import (
 
 // destructiveType is a stable destructive intent type for seeding (the ceiling
 // consumes the WHOLE DestructiveIntentTypes() set, not any one member).
-const ceilingTestType = TypeNMIVaultDelete
+const ceilingTestType = TypeNMIPaymentMethodDelete
 
 // seedCeilingMerchant inserts a bare merchant and registers cleanup of its
 // rail_intents + findings + row.
@@ -109,21 +109,18 @@ func TestRateCeiling_PerActorTripsAtSixth(t *testing.T) {
 	assert.Equal(t, "requires_review", status)
 }
 
-// Each test in this file takes its OWN non-overlapping hour window: the global
-// ceiling deliberately counts across merchants, so tests sharing one bucket see
-// each other's intents. (They did not before or#860 fixed the count, which
-// returned 0 forever.)
-//
-// Global ceiling trips at the 16th op across ALL actors/merchants in the hour —
-// distinct actors so the per-actor ceiling never fires; the global wall does.
-func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
+// The merchant-wide anti-theft wall trips at the 16th op in ONE merchant's
+// rolling hour — distinct actors so the per-actor ceiling never fires; only the
+// merchant wall does. Every test in this file gets a FRESH merchant, so the
+// count is independent by construction: no shared budget, no window juggling.
+func TestRateCeiling_PerMerchantTripsAtSixteenth(t *testing.T) {
 	ctx := context.Background()
 	merchant := seedCeilingMerchant(t, dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	gate := NewRateCeiling(dbi)
 	base := time.Now().UTC().Add(5 * time.Hour)
 
-	// 14 prior ops (distinct actors): the 15th is still under the global wall.
+	// 14 prior ops (distinct actors): the 15th is still under the wall.
 	for i := 0; i < 14; i++ {
 		insertCeilingIntent(t, dbi, merchant, fmt.Sprintf("g-%d-%s", i, uuid.NewString()), OriginUser, base)
 	}
@@ -131,7 +128,7 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 		Actor: "probe-" + uuid.NewString(), MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginUser,
 	}, base), "15th op (14 prior) must be allowed")
 
-	// 15 prior ops: the 16th trips the global ceiling.
+	// 15 prior ops: the 16th trips this merchant's ceiling.
 	insertCeilingIntent(t, dbi, merchant, "g-14-"+uuid.NewString(), OriginUser, base)
 	err := gate.Check(ctx, CheckParams{
 		Actor: "probe-" + uuid.NewString(), MerchantID: merchant, IntentType: ceilingTestType, Origin: OriginUser,
@@ -140,12 +137,43 @@ func TestRateCeiling_GlobalTripsAtSixteenth(t *testing.T) {
 	require.True(t, errors.Is(err, ErrRateCeilingTripped))
 	var rce *RateCeilingError
 	require.ErrorAs(t, err, &rce)
-	assert.Equal(t, ceilingGlobal, rce.Ceiling)
-	assert.EqualValues(t, 15, rce.GlobalCount)
+	assert.Equal(t, ceilingPerMerchant, rce.Ceiling)
+	assert.EqualValues(t, 15, rce.MerchantCount)
 
-	n, severity, _ := trippedFindingCount(t, dbi, merchant, RateCeilingTrippedFindingType, "global")
-	assert.Equal(t, 1, n, "global trip must raise a global finding")
+	n, severity, _ := trippedFindingCount(t, dbi, merchant, RateCeilingTrippedFindingType, "merchant:"+merchant.String())
+	assert.Equal(t, 1, n, "a merchant-wide trip must raise a merchant-keyed finding")
 	assert.Equal(t, "critical", severity)
+}
+
+// or#887: the anti-theft ceiling is PER MERCHANT. One merchant exhausting its
+// hourly destructive budget must not refuse another merchant's FIRST op — a
+// deployment-wide budget makes merchant A's ordinary customer cancellations
+// deny service to merchant B, which is cross-tenant DoS on a platform built for
+// thousands of merchants.
+func TestRateCeiling_OneMerchantsBurstDoesNotRefuseAnother(t *testing.T) {
+	ctx := context.Background()
+	root := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	loud := seedCeilingMerchant(t, root)
+	quiet := seedCeilingMerchant(t, root)
+	base := time.Now().UTC().Add(20 * time.Hour)
+
+	// Merchant A burns its whole budget: distinct actors, so only the
+	// merchant-wide wall is in play, never the per-actor one.
+	loudDB := dbtest.OpenMerchantDB(t, loud)
+	for i := 0; i < PerMerchantHourlyCeiling; i++ {
+		insertCeilingIntent(t, loudDB, loud, fmt.Sprintf("loud-%d-%s", i, uuid.NewString()), OriginUser, base)
+	}
+	err := NewRateCeiling(loudDB).Check(ctx, CheckParams{
+		Actor: "loud-probe-" + uuid.NewString(), MerchantID: loud, IntentType: ceilingTestType, Origin: OriginUser,
+	}, base)
+	require.Error(t, err, "the merchant that burned its budget is walled")
+	require.True(t, errors.Is(err, ErrRateCeilingTripped))
+
+	// Merchant B has posted NOTHING. Its first destructive op must be admitted.
+	quietDB := dbtest.OpenMerchantDB(t, quiet)
+	require.NoError(t, NewRateCeiling(quietDB).Check(ctx, CheckParams{
+		Actor: "quiet-" + uuid.NewString(), MerchantID: quiet, IntentType: ceilingTestType, Origin: OriginUser,
+	}, base), "a neighbour merchant's burst must never refuse this merchant's first destructive op")
 }
 
 // System-origin destructive ops do NOT burn the anti-theft budget — that budget
@@ -282,18 +310,20 @@ func TestRateCeiling_EarlyWarningFires(t *testing.T) {
 // intent never exists, so the destructive op cannot happen).
 func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	// rail_intents is RLS-forced with a WITH CHECK on app.merchant_id, so the
+	// handle must be pinned to the merchant whose rows this test writes — seeding
+	// through a handle pinned to a DIFFERENT merchant makes every insert fail.
+	// (merchants itself is RLS-exempt, hence the two-step.)
+	bootstrap := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	merchant := seedCeilingMerchant(t, bootstrap)
+	dbi := dbtest.OpenMerchantDB(t, merchant)
 	pool := dbi.Pool()
-	merchant := seedCeilingMerchant(t, dbi)
 
-	// Clean the rolling window of any leftover user/admin destructive rows so the
-	// global count cannot be inflated by earlier tests in this package.
-	_, err := pool.Exec(ctx,
-		`DELETE FROM openrails.rail_intents
-		  WHERE origin IN ('user','admin') AND intent_type = ANY($1::text[])
-		    AND created_at >= now() - interval '1 hour'`, DestructiveIntentTypes())
-	require.NoError(t, err)
-
+	// No window scrubbing: the ceiling counts THIS merchant's rows and the
+	// merchant is freshly seeded, so no sibling test can inflate it. It needed
+	// scrubbing while the wall was deployment-wide — and under enforced RLS that
+	// DELETE could not even reach another merchant's rows, which is precisely
+	// the fleet-scale failure or#887 removed rather than papered over.
 	gated := NewStoreGated(dbi, NewRateCeiling(dbi))
 	actor := "cust-" + uuid.NewString()
 
@@ -315,7 +345,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		require.NoError(t, enqueue(i), "op %d must be admitted", i+1)
 	}
-	err = enqueue(5)
+	err := enqueue(5)
 	require.Error(t, err, "the 6th destructive op must be refused")
 	require.True(t, errors.Is(err, ErrRateCeilingTripped))
 

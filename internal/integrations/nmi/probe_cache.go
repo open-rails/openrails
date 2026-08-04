@@ -127,7 +127,7 @@ type ArmDecision struct {
 // once the caller has confirmed test_mode is enabled and client.SecurityKey is
 // non-empty — this performs a real (harmless-on-live, #348) network probe
 // against the gateway.
-func CheckTestModeArm(q *gen.Queries, client *NMIClient, cacheKey string) ArmDecision {
+func CheckTestModeArm(ctx context.Context, q *gen.Queries, client *NMIClient, cacheKey string) ArmDecision {
 	keyHash := ProbeKeyHash(client.SecurityKey)
 	if verdict, checkedAt, ok := LookupProbeVerdict(q, cacheKey, keyHash); ok {
 		switch ProbeCacheDecision(verdict, checkedAt, time.Now()) {
@@ -137,7 +137,7 @@ func CheckTestModeArm(q *gen.Queries, client *NMIClient, cacheKey string) ArmDec
 			return ArmDecision{Cached: true, CheckedAt: checkedAt}
 		}
 	}
-	result, probeErr := client.ProbeTestMode()
+	result, probeErr := client.ProbeTestMode(ctx)
 	switch result {
 	case ProbeLive:
 		StoreProbeVerdict(q, cacheKey, keyHash, ProbeVerdictLive)

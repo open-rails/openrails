@@ -9,33 +9,34 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// VaultedCardCollectionAdapter collects invoices and top-ups from vaulted_card
-// instruments (#795) through the #297 charge seam: a merchant-initiated
-// unscheduled CoF charge, detokenized through the BT proxy into the linked NMI
-// gateway. Same anchor semantics as the NMI adapter.
-type VaultedCardCollectionAdapter struct {
-	Charger *vaultedcard.Charger
+// CustodianProxyCollectionAdapter collects invoices and top-ups from
+// custodian-held instruments (#795) through the #297 charge seam: a
+// merchant-initiated unscheduled CoF charge, detokenized through the
+// custodian's proxy into the PSP's own NMI gateway. Same anchor semantics as
+// the NMI adapter — it IS the NMI rail (or#879), reached differently.
+type CustodianProxyCollectionAdapter struct {
+	Charger *nmiproxy.Charger
 }
 
-func NewVaultedCardCollectionAdapter(charger *vaultedcard.Charger) *VaultedCardCollectionAdapter {
-	return &VaultedCardCollectionAdapter{Charger: charger}
+func NewCustodianProxyCollectionAdapter(charger *nmiproxy.Charger) *CustodianProxyCollectionAdapter {
+	return &CustodianProxyCollectionAdapter{Charger: charger}
 }
 
-func (a *VaultedCardCollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
+func (a *CustodianProxyCollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
 	if a == nil || a.Charger == nil {
-		return ChargeResult{}, fmt.Errorf("vaulted_card collection adapter not initialized")
+		return ChargeResult{}, fmt.Errorf("custodian-proxy collection adapter not initialized")
 	}
 	if strings.TrimSpace(method.RailMethodRef) == "" {
-		return ChargeResult{}, fmt.Errorf("vaulted_card payment method missing BT token reference")
+		return ChargeResult{}, fmt.Errorf("custodian-held payment method missing its custodian token reference")
 	}
-	// Parked instrument (#795 B6): the vault-side credential is gone — fail
+	// Parked instrument (#795 B6): the custody-side credential is gone — fail
 	// LOUDLY; re-collection or operator repair is the only way forward.
 	if strings.TrimSpace(method.ParkReason) != "" {
-		return ChargeResult{}, fmt.Errorf("vaulted_card instrument %s is parked (%s): vault token unusable; re-collect the card", method.ID, method.ParkReason)
+		return ChargeResult{}, fmt.Errorf("custodian-held instrument %s is parked (%s): custodian token unusable; re-collect the card", method.ID, method.ParkReason)
 	}
 	if req.AmountCents <= 0 {
 		return ChargeResult{}, fmt.Errorf("amount_cents must be positive")
@@ -44,7 +45,7 @@ func (a *VaultedCardCollectionAdapter) ChargeSavedMethod(ctx context.Context, me
 	// currency is the exact failure MONEY/CUR exist to prevent.
 	currency := normalizeCurrency(req.Currency)
 	if err := moneyutil.ValidateCurrency(currency); err != nil {
-		return ChargeResult{}, fmt.Errorf("vaulted_card collection: refusing to charge without an established currency: %w", err)
+		return ChargeResult{}, fmt.Errorf("custodian-proxy collection: refusing to charge without an established currency: %w", err)
 	}
 	description := strings.TrimSpace(req.Description)
 	if description == "" {
@@ -55,17 +56,17 @@ func (a *VaultedCardCollectionAdapter) ChargeSavedMethod(ctx context.Context, me
 	if priorRef == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"payment_method_id": method.ID,
-		}).Warn("vaulted_card collection: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+		}).Warn("custodian-proxy collection: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
 	}
 
-	res, err := a.Charger.WithSource(vaultedcard.Source{
+	res, err := a.Charger.WithSource(nmiproxy.Source{
 		TokenID:        strings.TrimSpace(method.RailMethodRef),
 		Via:            method.ChargeVia,
 		NetworkTokenID: strings.TrimSpace(method.NetworkTokenID),
 	}).Charge(ctx, charge.Request{
 		Instrument: charge.Instrument{
 			PaymentMethodID: method.ID,
-			Rail:            vaultedcard.Rail,
+			Rail:            nmiproxy.Rail,
 			MethodRef:       strings.TrimSpace(method.RailMethodRef),
 		},
 		AmountMinor: req.AmountCents,
@@ -78,7 +79,7 @@ func (a *VaultedCardCollectionAdapter) ChargeSavedMethod(ctx context.Context, me
 		return ChargeResult{}, err
 	}
 	return ChargeResult{
-		Rail:                        vaultedcard.Rail,
+		Rail:                        nmiproxy.Rail,
 		TransactionID:               res.TransactionID,
 		Declined:                    res.Declined,
 		FailureCode:                 res.FailureCode,

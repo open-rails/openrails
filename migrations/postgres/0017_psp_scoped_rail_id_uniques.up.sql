@@ -13,6 +13,9 @@
 -- the nullable psp_id to the nil uuid gives ONE total index that both closes that hole
 -- and keeps per-PSP separation. Same technique as rail_refresh_watermarks.psp_key.
 
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 DROP INDEX IF EXISTS openrails.uq_payments_merchant_rail_transaction;
 DROP INDEX IF EXISTS openrails.uq_subscriptions_merchant_rail_subscription_id;
 

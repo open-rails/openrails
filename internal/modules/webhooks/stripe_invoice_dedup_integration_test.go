@@ -88,6 +88,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		ListAmount:    2900,
 		Currency:      "USD",
 		Status:        payments.PaymentStatusCompletedValue,
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   now,
 		CreatedAt:     now,
 		Metadata: map[string]any{

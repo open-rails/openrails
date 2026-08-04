@@ -142,10 +142,28 @@ WHERE merchant_id = $1
   AND updated_at <= sqlc.arg(stale_before)::timestamptz;
 
 -- name: RecordInvoiceCollectionFailure :execrows
+-- or#828/or#870, three buckets, three dispositions. The two arguments encode
+-- them totally and disjointly, because collection.FailureAction does:
+--
+--   terminal                       -> bucket 3, or a bucket-1 schedule that ran
+--                                     out. The invoice is uncollectible.
+--   no terminal, NULL next attempt -> bucket 2. Charging STOPS because the
+--                                     customer must fix their instrument.
+--   a next attempt                 -> bucket 1. Still dunning.
+--
+-- Bucket 2 leaves `status` exactly where it was on purpose. A decline bucket
+-- answers "what do we do about the CARD"; `past_due` is a reading of the CLOCK
+-- (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
+-- (or#878). Our decision to stop attempting must not age the customer's
+-- invoice: it stays open, it stays collectible, and it stays theirs to settle.
 UPDATE openrails.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, sqlc.arg(now)::timestamptz),
-    status = CASE WHEN sqlc.arg(terminal)::boolean THEN 'uncollectible' ELSE 'past_due' END,
+    status = CASE
+        WHEN sqlc.arg(terminal)::boolean THEN 'uncollectible'
+        WHEN sqlc.narg(next_attempt_at)::timestamptz IS NULL THEN status
+        ELSE 'past_due'
+    END,
     next_collection_attempt_at = sqlc.narg(next_attempt_at)::timestamptz,
     last_collection_failure_code = sqlc.narg(failure_code),
     last_collection_failure_message = sqlc.narg(failure_message),
@@ -156,6 +174,30 @@ WHERE merchant_id = $1
   AND id = sqlc.arg(invoice_id)
   AND status IN ('open', 'past_due')
   AND collection_failure_count = sqlc.arg(expected_failure_count)::integer;
+
+-- name: ResumeStoppedInvoiceCollection :execrows
+-- or#828 bucket-2 resume. A stopped invoice is one that failed at least once
+-- and has NO next attempt scheduled — charging halted because the instrument
+-- needs replacing. When the payer designates a collection payment method they
+-- have done the thing the notice asked for, so those invoices become due again
+-- immediately.
+--
+-- Untouched on purpose: `uncollectible` invoices (terminal needs an operator,
+-- not a new card) and rows mid-claim or in-doubt, which the claim and verifier
+-- machinery owns.
+UPDATE openrails.invoices
+SET next_collection_attempt_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = sqlc.arg(currency)
+  AND status IN ('open', 'past_due')
+  AND amount_due > 0
+  AND collection_method = 'charge_automatically'
+  AND collection_failure_count > 0
+  AND next_collection_attempt_at IS NULL
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown';
 
 -- name: MarkInvoicesPastDue :execrows
 -- #798: net-N receivables whose due date has passed become past_due. The
@@ -309,8 +351,14 @@ WHERE p.merchant_id = $1
   AND p.invoice_id = $3;
 
 -- name: SetInvoiceCollectionClaim :execrows
+-- Claiming an attempt says nothing about whether the invoice is late, so it no
+-- longer stamps past_due on an invoice the clock has not aged (or#828/or#878):
+-- otherwise a bucket-2 decline could never leave the invoice open, because the
+-- claim would have moved it before the decline was even read. Reclaiming an
+-- `uncollectible` invoice DOES reopen it — that is a manual retry undoing a
+-- terminal outcome, a real state change.
 UPDATE openrails.invoices
-SET status = 'past_due',
+SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
     next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_attempt_in_progress',
     last_collection_failure_message = NULL,
@@ -326,16 +374,19 @@ WHERE merchant_id = $1
 ;
 
 -- name: MarkInvoiceCollectionOutcomeUnknown :execrows
+-- Parking an in-doubt outcome, like claiming an attempt, says nothing about
+-- whether the invoice is late — so it leaves `status` where the clock put it
+-- (or#828: the collection machinery does not move an invoice along the
+-- delinquency axis; only a terminal outcome and MarkInvoicesPastDue do).
 UPDATE openrails.invoices
-SET status = 'past_due',
-    next_collection_attempt_at = NULL,
+SET next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_outcome_unknown',
     last_collection_failure_message = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = sqlc.arg(invoice_id)
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND amount_due > 0
   AND last_collection_failure_code = 'collection_attempt_in_progress';
 
@@ -363,7 +414,7 @@ LIMIT 1;
 
 -- name: ResolveInvoiceCollectionUnknown :execrows
 -- #828: an unknown outcome was RESOLVED (verifier provider read, or admin
--- unpark): clear the park so the schedule resumes. Status stays past_due.
+-- unpark): clear the park so the schedule resumes. Status is untouched.
 UPDATE openrails.invoices
 SET last_collection_failure_code = NULL,
     last_collection_failure_message = NULL,
@@ -385,7 +436,7 @@ SET status = sqlc.arg(status)::text,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = sqlc.arg(invoice_id)
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND last_collection_failure_code IN ('collection_attempt_in_progress', 'collection_outcome_unknown');
 
 -- name: VoidInvoiceForPayer :one

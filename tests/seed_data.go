@@ -777,6 +777,7 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 		TransactionID:  "txn-" + uuid.New().String()[:8],
 		Amount:         9_990_000,
 		Currency:       "usd",
+		MoneyMovement:  models.MoneyMovementRail,
 		PurchasedAt:    now,
 		CreatedAt:      now,
 	}
@@ -831,6 +832,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 		TransactionID:     opts.TransactionID,
 		Amount:            opts.Amount,
 		Currency:          opts.Currency,
+		MoneyMovement:     models.MoneyMovementRail,
 		PurchasedAt:       opts.PurchasedAt,
 		CreatedAt:         now,
 	}

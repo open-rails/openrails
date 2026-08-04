@@ -51,7 +51,10 @@ type Runner struct {
 	Store    ledger
 	Logger   MutationLogger
 	Registry *Registry
-	// Config gates execution by origin x operating mode. nil (tests) = full.
+	// Config gates execution by origin x operating mode. nil FAILS CLOSED
+	// (or#865): every intent parks rather than executing, because a runner that
+	// cannot tell which mode it is in must not attempt a provider write. A
+	// missing Config is a wiring bug, not a test convenience.
 	Config ModeView
 	// Breaker halts destructive intent execution on merchant-level volume
 	// anomalies (#679). nil = ungated (unit tests, non-destructive-only runners).

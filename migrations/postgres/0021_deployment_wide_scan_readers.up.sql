@@ -24,8 +24,8 @@
 --     policy. A deployment-wide *scan* is legitimate; a deployment-wide *read*
 --     of merchant rows is not, and nothing here grants one.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 -- --------------------------------------------------------------------------
 -- #732 anti-credential-compromise rate ceiling (or#860)

@@ -138,6 +138,10 @@ func newWebhookTestSvc(t *testing.T, fake *fakeStripeWebhooks) *StripeCatalogSer
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 	return &StripeCatalogService{
+		// Config is required for the write paths: or#865 made
+		// stripeapi.Client(nil, …) fail closed, so a service with no declared
+		// operating mode is read-only — exactly what a wiring bug should get.
+		Config:  &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails:   railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
 		BaseURL: srv.URL,
 	}

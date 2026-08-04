@@ -3,6 +3,9 @@ package payments
 import (
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 // Normalized failure_reason vocabulary (#733). The raw rail code is always
@@ -160,17 +163,26 @@ var solanaFailureReasons = map[string]string{
 // preserved (documented as partial coverage in /schema caveats).
 var ccbillFailureReasons = map[string]string{}
 
-// DefaultTokenTypeForRail is the #796 token_type stamp for charge records
-// created OFF the seam (provider-driven renewals, webhook/converge folds),
-// where no charge.Result carries the rail's answer: NMI charges its own
-// customer vault; vaulted_card proxies the detokenized FPAN (NT charging is
-// config-gated off on NMI gateways). "" = not a stamped card rail.
-func DefaultTokenTypeForRail(rail string) string {
+// DefaultTokenType is the #796 token_type stamp for charge records created OFF
+// the seam (provider-driven renewals, webhook/converge folds), where no
+// charge.Result carries the rail's answer. It needs BOTH axes (or#879): the
+// rail says a card was charged at all, the CUSTODIAN says which credential form
+// reached the network — the PSP's own stored token, or a detokenized FPAN
+// proxied in from a third party (NT charging is config-gated off on NMI
+// gateways). "" = not a stamped card rail.
+func DefaultTokenType(rail, custodian string) string {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
 	case "nmi", "mobius":
-		return "provider_vault"
-	case "vaulted_card":
-		return "pan_via_vault"
+		switch strings.TrimSpace(custodian) {
+		case models.CustodianBasisTheory:
+			return charge.TokenTypePANViaProxy
+		case models.CustodianPSP:
+			return charge.TokenTypePSPToken
+		default:
+			// Custody unstated: stamp nothing. A guessed form would skew the
+			// approval_rate dimension token_type exists to measure.
+			return ""
+		}
 	default:
 		return ""
 	}
@@ -183,9 +195,9 @@ func NormalizeFailureReason(rail, rawCode string) string {
 		return FailureUnknown
 	}
 	switch rail {
-	case "nmi", "mobius", "vaulted_card":
-		// vaulted_card parses NMI classic responses through the same taxonomy
-		// (#795: one decline vocabulary, two transports).
+	case "nmi", "mobius":
+		// A custodian-proxied charge lands on the SAME NMI gateway and returns
+		// the SAME classic response (or#879) — one taxonomy, two transports.
 		if n, err := strconv.Atoi(rawCode); err == nil {
 			if r, ok := nmiFailureReasons[n]; ok {
 				return r

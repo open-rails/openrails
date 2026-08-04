@@ -1,6 +1,7 @@
 package basistheory
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -50,7 +51,7 @@ func TestWebhookVerifier(t *testing.T) {
 	v := NewWebhookVerifier(srv.URL)
 
 	t.Run("valid signature verifies", func(t *testing.T) {
-		if err := v.Verify(body, signPSS(t, key, body), "v1"); err != nil {
+		if err := v.Verify(context.Background(), body, signPSS(t, key, body), "v1"); err != nil {
 			t.Fatalf("verify: %v", err)
 		}
 	})
@@ -58,19 +59,19 @@ func TestWebhookVerifier(t *testing.T) {
 	t.Run("tampered body fails", func(t *testing.T) {
 		tampered := append([]byte(nil), body...)
 		tampered[len(tampered)-2] = 'X'
-		if err := v.Verify(tampered, signPSS(t, key, body), "v1"); !errors.Is(err, ErrWebhookSignatureInvalid) {
+		if err := v.Verify(context.Background(), tampered, signPSS(t, key, body), "v1"); !errors.Is(err, ErrWebhookSignatureInvalid) {
 			t.Fatalf("want invalid signature, got %v", err)
 		}
 	})
 
 	t.Run("wrong version fails loudly", func(t *testing.T) {
-		if err := v.Verify(body, signPSS(t, key, body), "v9"); !errors.Is(err, ErrWebhookVersionUnknown) {
+		if err := v.Verify(context.Background(), body, signPSS(t, key, body), "v9"); !errors.Is(err, ErrWebhookVersionUnknown) {
 			t.Fatalf("want version error, got %v", err)
 		}
 	})
 
 	t.Run("missing signature fails", func(t *testing.T) {
-		if err := v.Verify(body, "", "v1"); !errors.Is(err, ErrWebhookSignatureMissing) {
+		if err := v.Verify(context.Background(), body, "", "v1"); !errors.Is(err, ErrWebhookSignatureMissing) {
 			t.Fatalf("want missing signature, got %v", err)
 		}
 	})
@@ -80,7 +81,7 @@ func TestWebhookVerifier(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := v.Verify(body, signPSS(t, other, body), "v1"); !errors.Is(err, ErrWebhookSignatureInvalid) {
+		if err := v.Verify(context.Background(), body, signPSS(t, other, body), "v1"); !errors.Is(err, ErrWebhookSignatureInvalid) {
 			t.Fatalf("want invalid signature, got %v", err)
 		}
 	})
@@ -100,11 +101,11 @@ func TestWebhookVerifierKeyRotation(t *testing.T) {
 
 	v := NewWebhookVerifier(srv.URL)
 	body := []byte(`{"id":"evt_2"}`)
-	if err := v.Verify(body, signPSS(t, oldKey, body), "v1"); err != nil {
+	if err := v.Verify(context.Background(), body, signPSS(t, oldKey, body), "v1"); err != nil {
 		t.Fatalf("initial verify: %v", err)
 	}
 	current = &newKey.PublicKey // CDN rotates
-	if err := v.Verify(body, signPSS(t, newKey, body), "v1"); err != nil {
+	if err := v.Verify(context.Background(), body, signPSS(t, newKey, body), "v1"); err != nil {
 		t.Fatalf("post-rotation verify should self-heal: %v", err)
 	}
 }

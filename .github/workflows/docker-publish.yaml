@@ -78,6 +78,16 @@ jobs:
             -e REDIS_ADDR=127.0.0.1:6380 \
             openrails-smoke:${GITHUB_SHA} migrate pg
 
+      # The baseline migration creates openrails_app NOLOGIN; a real deployment
+      # attaches the login credential out of band. The smoke boot below runs as
+      # that role — NOT as the superuser — so this smoke test actually exercises
+      # the RLS posture the server refuses to boot without (or#782).
+      - name: Attach a login credential to the unprivileged app role
+        run: |
+          docker run --rm --network host -e PGPASSWORD=admin_password postgres:18-alpine \
+            psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5434 -U admin -d openrails_db \
+            -c "ALTER ROLE openrails_app WITH LOGIN PASSWORD 'openrails_app_password'"
+
       - name: Boot server and check readiness
         run: |
           cid="$(docker run -d --network host \
@@ -89,8 +99,8 @@ jobs:
             -e DB_HOST=127.0.0.1 \
             -e DB_PORT=5434 \
             -e DB_DATABASE=openrails_db \
-            -e DB_USERNAME=admin \
-            -e DB_PASSWORD=admin_password \
+            -e DB_USERNAME=openrails_app \
+            -e DB_PASSWORD=openrails_app_password \
             -e DB_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
             openrails-smoke:${GITHUB_SHA} server --no-workers)"

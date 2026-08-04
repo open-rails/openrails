@@ -239,7 +239,7 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	}
 
 	if s.DeduplicationService != nil {
-		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe, evt, func(ctx context.Context) error {
+		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe.EventSource(), evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt)
 		})
 	}
@@ -888,6 +888,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			ListAmount:        original.ListAmount,
 			Currency:          original.Currency,
 			ReversalKind:      func() *string { k := payments.ReversalDisputeReversal; return &k }(),
+			MoneyMovement:     models.MoneyMovementRail, // or#827: Stripe returned the disputed funds.
 			PurchasedAt:       s.now(),
 			CreatedAt:         s.now(),
 		}

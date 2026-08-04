@@ -470,6 +470,9 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		Metadata:                 req.Metadata,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
 		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
+		// or#827: RegisterPurchase records a charge the rail already approved,
+		// keyed on the rail's own transaction id.
+		MoneyMovement: models.MoneyMovementRail,
 	}
 	if req.AttemptKind != "" {
 		k := req.AttemptKind

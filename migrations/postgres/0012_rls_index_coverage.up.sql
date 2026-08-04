@@ -6,10 +6,14 @@
 -- tables had that shape; payment_settlement_events had no merchant_id index at
 -- all. TestMerchantIsolationPolicyIsIndexBacked makes the class a build failure.
 
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 -- Only index was idx_solana_subscriptions_due ... WHERE status = 'active'.
+
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 CREATE INDEX idx_solana_subscriptions_merchant_id
     ON openrails.solana_subscriptions USING btree (merchant_id);
 

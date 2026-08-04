@@ -162,7 +162,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return nil, fmt.Errorf("recurring: invalid plan terms (amount/period)")
 	}
 
-	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

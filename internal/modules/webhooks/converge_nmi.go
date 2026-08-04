@@ -135,7 +135,7 @@ func (s *NMIConvergeService) activatePendingFromProbe(ctx context.Context, rail 
 	}
 
 	since := sub.CreatedAt.UTC().Add(-24 * time.Hour)
-	probe, err := s.NMIClient.ProbeSalesByOrderID(sub.ID.String(), since)
+	probe, err := s.NMIClient.ProbeSalesByOrderID(ctx, sub.ID.String(), since)
 	if err != nil {
 		return fmt.Errorf("nmi converge: probe signup charge for %s: %w", sub.ID, err)
 	}
@@ -267,6 +267,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				Currency:       currency,
 				Status:         "failed",
 				AttemptKind:    func() *string { k := payments.AttemptInitial; return &k }(),
+				MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 				PurchasedAt:    purchasedAt,
 			}
 			if probe.DeclineResponseCode != 0 {
@@ -275,7 +276,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
-			if tt := payments.DefaultTokenTypeForRail(rail); tt != "" {
+			if tt := payments.DefaultTokenType(rail, models.CustodianPSP); tt != "" {
 				failed.TokenType = &tt
 			}
 			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {

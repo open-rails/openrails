@@ -206,6 +206,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		PurchasedAt:    now,
 		CreatedAt:      now,
 		CustomerID:     customerID,
+		MoneyMovement:  string(models.MoneyMovementRail),
 	})
 	require.NoError(t, err)
 

@@ -65,14 +65,14 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 
 	if subj.PeriodEnd != nil {
 		since := subj.PeriodEnd.UTC().Add(-renewalAlignmentSlack)
-		probe, err := p.Client.ProbeSalesByOrderID(subj.LocalID.String(), since)
+		probe, err := p.Client.ProbeSalesByOrderID(ctx, subj.LocalID.String(), since)
 		if err != nil {
 			return nil, err
 		}
 		snap.Transactions = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
 	}
 
-	liveness, err := p.Client.GetRecurringLiveness(subj.RailSubscriptionID)
+	liveness, err := p.Client.GetRecurringLiveness(ctx, subj.RailSubscriptionID)
 	if err != nil {
 		return nil, err
 	}

@@ -24,11 +24,11 @@
 --     and mutates nothing. A legacy NMI book imported into a new deployment is
 --     therefore surveyed on first boot, not cancelled within seconds of it.
 
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE TABLE openrails.destructive_action_switch (
-    id uuid DEFAULT uuidv7() PRIMARY KEY,
+    id uuid DEFAULT uuidv7() NOT NULL PRIMARY KEY,
     singleton boolean DEFAULT true NOT NULL,
     enabled boolean DEFAULT false NOT NULL,
     updated_by text,
@@ -48,7 +48,7 @@ INSERT INTO openrails.destructive_action_switch (enabled, reason)
 VALUES (false, 'default safe (#836): arm deliberately once the first pull''s findings have been reviewed');
 
 CREATE TABLE openrails.merchant_destructive_policy (
-    id uuid DEFAULT uuidv7() PRIMARY KEY,
+    id uuid DEFAULT uuidv7() NOT NULL PRIMARY KEY,
     merchant_id uuid NOT NULL,
     destructive_actions_enabled boolean DEFAULT true NOT NULL,
     enforce_armed_at timestamp with time zone,

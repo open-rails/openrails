@@ -75,13 +75,13 @@ func TestNMIDeclineBuckets(t *testing.T) {
 func TestUnknownCodesAreAlwaysRetry(t *testing.T) {
 	cases := []struct{ rail, code string }{
 		{"nmi", ""},
-		{"nmi", "999"},        // not in NMI's published set
-		{"nmi", "0"},          // no code recorded
-		{"nmi", "wat"},        // not even numeric
+		{"nmi", "999"}, // not in NMI's published set
+		{"nmi", "0"},   // no code recorded
+		{"nmi", "wat"}, // not even numeric
 		{"nmi", "brand_new_localization_id"},
 		{"stripe", "some_code_stripe_added_last_tuesday"},
 		{"stripe", ""},
-		{"ccbill", "261"},     // NMI's number on a rail that does not speak it
+		{"ccbill", "261"}, // NMI's number on a rail that does not speak it
 		{"ccbill", "anything"},
 		{"solana", "anything"},
 		{"a_rail_that_does_not_exist", "252"},
@@ -180,5 +180,42 @@ func TestDeclineRetryIsTheZeroValue(t *testing.T) {
 	}
 	if !DeclineFixPaymentMethod.StopsCharging() || !DeclineNonRecoverable.StopsCharging() {
 		t.Error("buckets 2 and 3 must both stop charging")
+	}
+}
+
+// TestCustodianProxiedDeclinesClassifyThroughNMI (or#879) pins the property
+// that survived deleting the `vaulted_card` alias branch: a Basis-Theory-held
+// card is charged at an NMI gateway and returns NMI's classic response, so it
+// must classify through the NMI taxonomy — same vocabulary, different
+// transport. Before or#879 this worked only because someone remembered to
+// write `case "nmi", "mobius", "vaulted_card":`; now it works because the rail
+// IS nmi and there is no third value to forget.
+func TestCustodianProxiedDeclinesClassifyThroughNMI(t *testing.T) {
+	// One representative of each bucket, in both code shapes the charge path
+	// records (verbatim numeric, and the #733 localization form).
+	cases := []struct {
+		code string
+		want DeclineOutcome
+	}{
+		{"202", DeclineRetry},                         // insufficient funds
+		{"nmi_response_202", DeclineRetry},            // same evidence, other shape
+		{"223", DeclineFixPaymentMethod},              // expired card
+		{"nmi_expired_card", DeclineFixPaymentMethod}, // localization-id shape
+		{"262", DeclineNonRecoverable},                // stop this recurring program
+	}
+	for _, c := range cases {
+		// The rail carried by a proxied charge is plain nmi.
+		if got := ClassifyDecline("nmi", c.code); got != c.want {
+			t.Errorf("ClassifyDecline(nmi, %q) = %q, want %q", c.code, got, c.want)
+		}
+		// The PSP-key spelling the row vocabulary also uses.
+		if got := ClassifyDecline("mobius", c.code); got != c.want {
+			t.Errorf("ClassifyDecline(mobius, %q) = %q, want %q", c.code, got, c.want)
+		}
+		// And the retired value classifies as nothing anyone decided — it must
+		// never reappear as a rail.
+		if got := ClassifyDecline("vaulted_card", c.code); got != DeclineRetry {
+			t.Errorf("ClassifyDecline(vaulted_card, %q) = %q; the value is retired (or#879) and must not carry a taxonomy", c.code, got)
+		}
 	}
 }

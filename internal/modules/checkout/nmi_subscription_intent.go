@@ -177,7 +177,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 	if p.StoredCredentialRef != "" {
 		citContext = charge.RecurringReuse(p.StoredCredentialRef)
 	}
-	resp, err := client.AddRecurringSubscription(nmi.RecurringPaymentData{
+	resp, err := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{
 		BillingID: p.BillingID,
 		CardUserData: nmi.CardUserData{
 			FirstName: p.FirstName,
@@ -220,7 +220,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 					Currency:               p.Currency,
 					FailureCode:            nmidirect.FailureCode(pmErr),
 					AttemptKind:            payments.AttemptInitial,
-					TokenType:              charge.TokenTypeProviderVault,
+					TokenType:              charge.TokenTypePSPToken,
 				})
 			}
 			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
@@ -261,7 +261,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 //
 // resolved=false means "verified not executed" — the caller may (re)send.
 func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
-	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(orderID)
+	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
 		return intents.Ambiguous("pre-send verification read failed: " + err.Error()), true
 	}
@@ -301,7 +301,7 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 	var candidates []string
 	cursor := ""
 	for {
-		page, perr := client.ListSubscriptionsPage(cursor, 0)
+		page, perr := client.ListSubscriptionsPage(ctx, cursor, 0)
 		if perr != nil {
 			return nil, fmt.Errorf("subscription roster read failed: %w", perr)
 		}

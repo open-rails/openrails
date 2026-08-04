@@ -126,6 +126,9 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 		Currency:      orig.Currency,
 		Status:        PaymentStatusCompletedValue,
 		ReversalKind:  &reversalKind,
+		// The reversal settled at the rail; the feed excludes it on
+		// amount/refunded_payment_id, not on this marker (or#827).
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   s.now(),
 		CreatedAt:     s.now(),
 	}
@@ -257,13 +260,13 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if orig.Amount <= 0 || orig.RefundedPaymentID != nil {
 		return errors.New("only successful charge payments can be refunded")
 	}
-	// Synthetic transaction references are placeholders, not gateway charges:
-	// "sub:" rows reference a subscription, and "*_attempt:" rows are NMI
-	// checkout attempt anchors (the real charge is a separate payment row).
-	for _, prefix := range []string{"sub:", "nmi_sub_attempt:", "nmi_sale_attempt:"} {
-		if strings.HasPrefix(strings.TrimSpace(orig.TransactionID), prefix) {
-			return errors.New("synthetic transaction references are not refundable")
-		}
+	// You can only send back money that arrived. Bookkeeping rows — attempt
+	// anchors whose real charge is a different row, declines, placeholders —
+	// carry a locally-minted transaction reference the rail would not
+	// recognise. or#827 replaced the transaction_id prefix denylist this used
+	// to guess from with the row's own positive marker.
+	if orig.MoneyMovement != models.MoneyMovementRail {
+		return errors.New("payment records no money movement at the rail and is not refundable")
 	}
 
 	refundedTotal, err := s.repo.GetRefundTotalByPaymentID(ctx, orig.ID)

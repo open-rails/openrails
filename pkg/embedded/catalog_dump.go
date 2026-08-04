@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -35,7 +36,7 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if out == nil {
 		out = io.Discard
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -108,7 +109,31 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Manifes
 			m.Products = append(m.Products, *p)
 		}
 	}
+	warnGrantUnitMismatches(m)
 	return m, nil
+}
+
+// warnGrantUnitMismatches surfaces stored credits_spec rows whose unit
+// disagrees with the credit balance the grant names — the or#883 defect as it
+// may already exist in data. Those grants deposit into a DIFFERENT money
+// account than the balance the catalog names. Detection only: never rewritten
+// here, because rewriting it moves where money lands.
+func warnGrantUnitMismatches(m *catalog.Manifest) {
+	units := make(map[string]string, len(m.CreditBalances))
+	for _, b := range m.CreditBalances {
+		units[b.Key] = b.Unit
+	}
+	for _, p := range m.Products {
+		for _, g := range p.Credits {
+			want, ok := units[g.Key]
+			if !ok || strings.TrimSpace(g.Unit) == "" || strings.EqualFold(g.Unit, want) {
+				continue
+			}
+			log.Warnf("⚠️  or#883: product %q credit grant %q is stored with unit %q but balance %q declares unit %q — "+
+				"this grant deposits into a different money account than the catalog names; re-apply the manifest to correct it",
+				p.Key, g.Key, g.Unit, g.Key, want)
+		}
+	}
 }
 
 func normalizeDumpProduct(p *catalog.Product) {

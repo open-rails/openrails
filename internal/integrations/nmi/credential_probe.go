@@ -15,7 +15,7 @@ func (c *NMIClient) ProbeCredentials(ctx context.Context) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
-	raw, err := c.sendQueryRequestWithContext(ctx, url.Values{
+	raw, err := c.sendQueryRequest(ctx, url.Values{
 		"report_type":  {"transaction"},
 		"result_limit": {"1"},
 		"security_key": {c.SecurityKey},

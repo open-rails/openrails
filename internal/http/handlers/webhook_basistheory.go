@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Basis Theory webhook ingestion (#795, route /webhooks/basistheory →
-// rail vaulted_card). Signature = RSA-PSS SHA-256 against BT's CDN-published
+// Basis Theory webhook ingestion (#795, route /webhooks/basistheory → event
+// source basis_theory, the CUSTODIAN — not a rail, or#879). Signature = RSA-PSS SHA-256 against BT's CDN-published
 // public key (BT-SIGNATURE / BT-SIGNATURE-VERSION) — no per-merchant secret,
 // so one process-wide verifier per key URL serves every merchant.
 
@@ -46,7 +46,7 @@ func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
 }
 
 // basisTheoryWebhookTenantID extracts the tenant identity the payload-derived
-// surface routes by (the vaulted_card account_id is the BT tenant id).
+// surface routes by (the PSP's custodian_account_id is the BT tenant id).
 func basisTheoryWebhookTenantID(body []byte) string {
 	var evt basistheory.Event
 	if err := json.Unmarshal(body, &evt); err != nil {
@@ -68,10 +68,10 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID mercha
 }
 
 func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID merchant.ID, accountID string, body []byte) bool {
-	rail := string(models.RailVaultedCard)
+	rail := string(models.EventSourceBasisTheory)
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
-	if err := basisTheoryVerifier(r).Verify(body, sig, sigVersion); err != nil {
+	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context(), rail)
 		log.Warn("basistheory webhook signature verification failed")
 		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")

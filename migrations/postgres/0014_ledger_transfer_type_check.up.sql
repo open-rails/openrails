@@ -5,10 +5,16 @@
 -- the duplicate posted. Close the vocabulary. Kept in lockstep with the Go
 -- constants by TestTransferTypeVocabularyMatchesSchema.
 
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
+-- Already applied. NOT VALID buys nothing inside a single-transaction migrator
+-- — the ADD's ACCESS EXCLUSIVE lock is held to COMMIT either way — and it would
+-- leave the file claiming an unvalidated constraint that every migrated
+-- database has already validated. A NEW closed-set CHECK on a hot table should
+-- still be ADD ... NOT VALID here plus VALIDATE CONSTRAINT in a later file.
 ALTER TABLE openrails.ledger_transfers
+    -- squawk-ignore constraint-missing-not-valid
     ADD CONSTRAINT ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY[
         'deposit'::text,
         'credit_spend'::text,
@@ -17,4 +23,4 @@ ALTER TABLE openrails.ledger_transfers
         'credit_reinstate'::text,
         'owed_accrual'::text,
         'owed_payment'::text
-    ]))) NOT VALID;
+    ])));

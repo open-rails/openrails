@@ -96,7 +96,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	for _, target := range targets {
 		manifests = append(manifests, target.Manifest)
 	}
-	rt, svc, cleanup, err := catalogPushRuntime(opts, manifests...)
+	rt, svc, cleanup, err := catalogPushRuntime(ctx, opts, manifests...)
 	if err != nil {
 		return err
 	}
@@ -160,6 +160,7 @@ func catalogPushConfig(opts CatalogPushOptions) *config.Config {
 }
 
 func catalogPushRuntime(
+	ctx context.Context,
 	opts CatalogPushOptions,
 	manifests ...*catalog.Manifest,
 ) (*app.Runtime, *billingservice.Service, func(), error) {
@@ -174,6 +175,7 @@ func catalogPushRuntime(
 		return opts.Runtime.app.Runtime, svc, func() {}, nil
 	}
 	rt, svc, cleanup, err := newCatalogPushRuntime(
+		ctx,
 		catalogPushConfig(opts),
 		opts.PGXPool,
 		manifests...,
@@ -233,8 +235,8 @@ func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error
 	return targets, nil
 }
 
-func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...*catalog.Manifest) (*app.Runtime, *billingservice.Service, func(), error) {
-	database, err := newCatalogPushDB(cfg, pool)
+func newCatalogPushRuntime(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, manifests ...*catalog.Manifest) (*app.Runtime, *billingservice.Service, func(), error) {
+	database, err := openEmbeddedDB(ctx, cfg, pool)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -264,24 +266,6 @@ func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...
 		return nil, nil, nil, fmt.Errorf("construct OpenRails service: %w", err)
 	}
 	return rt, svc, cleanup, nil
-}
-
-func newCatalogPushDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
-	if pool != nil {
-		schema := config.DefaultSchema
-		if cfg != nil && cfg.DB != nil {
-			schema = cfg.DB.SchemaName()
-		}
-		return db.NewWithPGXPool(pool, schema)
-	}
-	if cfg == nil || cfg.DB == nil {
-		return nil, fmt.Errorf("config database is required")
-	}
-	database, err := db.NewDB(cfg.DB)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
-	}
-	return database, nil
 }
 
 func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out io.Writer, dryRun bool, prune bool) error {

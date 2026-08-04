@@ -31,21 +31,19 @@ import (
 var static embed.FS
 
 type config struct {
-	baseURL         string // OPENRAILS_BASE_URL
-	apiKey          string // OPENRAILS_API_KEY (openrails_st_…)
-	merchant        string // MERCHANT_SLUG
-	userID          string // DEMO_USER_ID — the one fake logged-in user (must be a UUID)
-	psp             string // NMI_PSP — the merchant's PSP key (e.g. mobius-sandbox); used to filter prices
-	rail            string // NMI_RAIL — the checkout wire "rail" value. SHOULD be the PSP key (frozen
-	// PSP wire vocabulary), but the engine's checkoutRailConfigured gate
-	// (internal/http/handlers/checkout_session.go) resolves it as a rail KIND and 400s
-	// on PSP keys — so default to "nmi" until that engine bug is fixed.
-	entitlement     string // ENTITLEMENT gating /premium
-	tokenizationKey string // NMI_TOKENIZATION_KEY — public Collect.js key
-	tokenizationURL string // NMI_TOKENIZATION_URL
-	issuer          string // DEMO_ISSUER — must match merchants.yaml remote_application.issuer
-	addr            string
-	sessionSecret   []byte
+	baseURL       string // OPENRAILS_BASE_URL
+	apiKey        string // OPENRAILS_API_KEY (openrails_st_…)
+	merchant      string // MERCHANT_SLUG
+	userID        string // DEMO_USER_ID — the one fake logged-in user (must be a UUID)
+	entitlement   string // ENTITLEMENT gating /premium
+	issuer        string // DEMO_ISSUER — must match merchants.yaml remote_application.issuer
+	addr          string
+	sessionSecret []byte
+	// There is deliberately NO rail/PSP/tokenization config here: the browser
+	// discovers all of it from OpenRails' public GET /v1/checkout-config, which
+	// serves the merchant's armed PSPs and each one's public tokenization
+	// values. Duplicating them in this app's env is exactly the drift #829
+	// removed.
 }
 
 type app struct {
@@ -63,17 +61,13 @@ func env(key, def string) string {
 
 func main() {
 	cfg := config{
-		baseURL:         env("OPENRAILS_BASE_URL", "http://localhost:3053"),
-		apiKey:          os.Getenv("OPENRAILS_API_KEY"),
-		merchant:        env("MERCHANT_SLUG", "demo"),
-		userID:          env("DEMO_USER_ID", "0b5e9f6e-2f1b-4c5e-9a51-0c9f6a3d7e21"),
-		psp:             env("NMI_PSP", "mobius-sandbox"),
-		rail:            env("NMI_RAIL", "nmi"),
-		entitlement:     env("ENTITLEMENT", "premium"),
-		tokenizationKey: os.Getenv("NMI_TOKENIZATION_KEY"),
-		tokenizationURL: env("NMI_TOKENIZATION_URL", "https://secure.networkmerchants.com/token/Collect.js"),
-		issuer:          env("DEMO_ISSUER", "https://gated-premium-page.example"),
-		addr:            ":" + env("PORT", "8080"),
+		baseURL:     env("OPENRAILS_BASE_URL", "http://localhost:3053"),
+		apiKey:      os.Getenv("OPENRAILS_API_KEY"),
+		merchant:    env("MERCHANT_SLUG", "demo"),
+		userID:      env("DEMO_USER_ID", "0b5e9f6e-2f1b-4c5e-9a51-0c9f6a3d7e21"),
+		entitlement: env("ENTITLEMENT", "premium"),
+		issuer:      env("DEMO_ISSUER", "https://gated-premium-page.example"),
+		addr:        ":" + env("PORT", "8080"),
 	}
 	if s := os.Getenv("SESSION_SECRET"); s != "" {
 		cfg.sessionSecret = []byte(s)
@@ -220,16 +214,15 @@ func (a *app) token(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"token": tok, "expires_in": int(ttl.Seconds())})
 }
 
-// configJSON hands the buy page what it needs for browser-direct calls.
-// The tokenization key is public (it is Collect.js' browser key).
+// configJSON hands the buy page the two things only THIS app knows: where
+// OpenRails lives and which entitlement it gates on. Everything payment-shaped
+// — which PSPs are armed, how to drive each one, the public tokenization key
+// and script URL — the page reads straight from OpenRails'
+// GET /v1/checkout-config, so it can never drift from the merchant manifest.
 func (a *app) configJSON(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"openrails_base_url": a.cfg.baseURL,
-		"psp":                a.cfg.psp,
-		"rail":               a.cfg.rail,
 		"entitlement":        a.cfg.entitlement,
-		"tokenization_key":   a.cfg.tokenizationKey,
-		"tokenization_url":   a.cfg.tokenizationURL,
 	})
 }
 

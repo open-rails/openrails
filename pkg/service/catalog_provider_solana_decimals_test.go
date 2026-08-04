@@ -10,9 +10,12 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+const testUSDCMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 // planSubmitterStub satisfies recurring.Submitter without touching a chain.
 type planSubmitterStub struct{ merchantPub solanago.PublicKey }
@@ -25,18 +28,37 @@ func (s *planSubmitterStub) Submit(context.Context, merchant.ID, []solanago.Inst
 	return solanago.Signature{1}, nil
 }
 
-// TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals pins #817 on the
-// plan-publish path: the catalog price is MICROS, the on-chain plan amount is
-// token BASE UNITS, and the merchant's configured decimals is the only thing
-// that converts between them. Shipping micros verbatim (the old bug) was a
+// mintReaderStub answers the mint address with a synthetic SPL mint account at
+// `decimals` and every other address (the plan PDA) with an empty account, so
+// PublishPlan proceeds past its re-publish guard.
+type mintReaderStub struct {
+	mint     string
+	decimals uint8
+	// absent makes the mint read return an empty account (mint not on chain).
+	absent bool
+}
+
+func (r mintReaderStub) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
+	if addr.String() != r.mint || r.absent {
+		return nil, nil
+	}
+	blob := make([]byte, solanaint.MintAccountSize)
+	blob[44] = r.decimals
+	blob[45] = 1 // is_initialized
+	return blob, nil
+}
+
+// TestSolanaAdapter_DeclarativeMintHonoursOnChainDecimals pins #817 on the
+// plan-PUBLISH path: the catalog price is MICROS, the on-chain plan amount is
+// token BASE UNITS, and the MINT's on-chain decimals is the only thing that
+// converts between them. Shipping micros verbatim (the original bug) was a
 // 1000x undercharge on a 9-decimal mint.
-func TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals(t *testing.T) {
-	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+func TestSolanaAdapter_DeclarativeMintHonoursOnChainDecimals(t *testing.T) {
 	hours := 30 * 24
 	days := 30
 
 	cases := []struct {
-		decimals int
+		decimals uint8
 		micros   int64
 		want     uint64
 	}{
@@ -55,10 +77,12 @@ func TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		t.Run(strconv.Itoa(tc.decimals)+"-decimals", func(t *testing.T) {
+		t.Run(strconv.Itoa(int(tc.decimals))+"-decimals", func(t *testing.T) {
 			plan := recurring.NewPlanServiceWithReader(
-				&planSubmitterStub{merchantPub: key.PublicKey()}, nil, "mainnet",
-				map[string]config.TokenConfig{"USDC": {Mint: usdcMint, Decimals: tc.decimals}},
+				&planSubmitterStub{merchantPub: key.PublicKey()},
+				mintReaderStub{mint: testUSDCMint, decimals: tc.decimals},
+				"mainnet",
+				map[string]config.TokenConfig{"USDC": {Mint: testUSDCMint}},
 			)
 			a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 			ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
@@ -86,15 +110,18 @@ func TestSolanaAdapter_DeclarativeMintHonoursTokenDecimals(t *testing.T) {
 	}
 }
 
-// TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals: an omitted `decimals`
-// decodes as 0 and must fail loudly rather than publish a 10^6-off plan.
-func TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals(t *testing.T) {
+// TestSolanaAdapter_DeclarativeMintRejectsUnreadableMint: an unreadable mint
+// must fail the publish loudly. There is no default decimals to fall back to —
+// a guessed 6 would write a permanently wrong on-chain plan amount (#817).
+func TestSolanaAdapter_DeclarativeMintRejectsUnreadableMint(t *testing.T) {
 	key, _ := solanago.NewRandomPrivateKey()
 	hours := 30 * 24
 	days := 30
 	plan := recurring.NewPlanServiceWithReader(
-		&planSubmitterStub{merchantPub: key.PublicKey()}, nil, "mainnet",
-		map[string]config.TokenConfig{"USDC": {Mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"}},
+		&planSubmitterStub{merchantPub: key.PublicKey()},
+		mintReaderStub{mint: testUSDCMint, absent: true},
+		"mainnet",
+		map[string]config.TokenConfig{"USDC": {Mint: testUSDCMint}},
 	)
 	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
@@ -109,6 +136,32 @@ func TestSolanaAdapter_DeclarativeMintRejectsMissingDecimals(t *testing.T) {
 		AccessDurationHours: &hours,
 		BillingCycleDays:    &days,
 	}); err == nil {
-		t.Fatal("expected Attach to reject a token with no configured decimals")
+		t.Fatal("expected Attach to reject a token whose mint cannot be read on-chain")
+	}
+}
+
+// TestSolanaAdapter_AutoCreateRejectsUnarmedChainReader: with no chain reader
+// there is no authoritative decimals source, so the publish must refuse rather
+// than assume one.
+func TestSolanaAdapter_AutoCreateRejectsUnarmedChainReader(t *testing.T) {
+	key, _ := solanago.NewRandomPrivateKey()
+	hours := 30 * 24
+	days := 30
+	plan := recurring.NewPlanServiceWithReader(
+		&planSubmitterStub{merchantPub: key.PublicKey()}, nil, "mainnet",
+		map[string]config.TokenConfig{"USDC": {Mint: testUSDCMint}},
+	)
+	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
+	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+
+	if _, err := a.AutoCreate(ctx, autoCreateContext{
+		PriceID:             uuid.New(),
+		ProductKey:          "premium",
+		Currency:            "usd",
+		UnitAmount:          10_000_000,
+		AccessDurationHours: &hours,
+		BillingCycleDays:    &days,
+	}); err == nil {
+		t.Fatal("expected AutoCreate to refuse publishing with no chain reader armed")
 	}
 }

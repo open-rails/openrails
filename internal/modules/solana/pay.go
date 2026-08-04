@@ -106,6 +106,10 @@ type SolanaPayService struct {
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
 	priceProvider      TokenPriceProvider
+	// mints reads SPL mint decimals from the chain (#817). Late-bound like the
+	// poller's merchant RPC: it needs the per-merchant RPC resolver, which is
+	// armed after service construction. nil = quotes fail closed.
+	mints MintDecimalsSource
 }
 
 // NewSolanaPayService creates a new SolanaPayService
@@ -133,6 +137,11 @@ func NewSolanaPayService(
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
 	}
+}
+
+// SetMintDecimals arms the on-chain mint-decimals resolver (#817).
+func (s *SolanaPayService) SetMintDecimals(mints MintDecimalsSource) {
+	s.mints = mints
 }
 
 func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChecker) {
@@ -216,8 +225,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
+	// Decimals come from the MINT on-chain, never from config (#817).
+	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
+	if err != nil {
+		return nil, err
+	}
+
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -268,14 +283,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// checkout session id on the wallet-built tx: per the Solana Pay spec the
 	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
 	// Discovery hint, never money truth.
-	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenCfg.Decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
-		TokenAmount:    FormatBaseUnits(tokenUnits, tokenCfg.Decimals),
+		TokenAmount:    FormatBaseUnits(tokenUnits, decimals),
 		TokenUnits:     tokenUnits,
 		TokenMint:      tokenMint,
 		Recipient:      recipient,
@@ -290,9 +305,9 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 }
 
 // buildTransferRequestURL constructs the solana: URL per the Solana Pay spec.
-// `decimals` is the caller's already-resolved token precision — re-reading it
-// here from a map without an ok-check turned an unknown symbol into decimals=0,
-// i.e. the raw base-unit count on the wire (a 10^d overcharge).
+// `decimals` is the caller's already-resolved ON-CHAIN mint precision (#817) —
+// re-reading it here from a map without an ok-check turned an unknown symbol
+// into decimals=0, i.e. the raw base-unit count on the wire (a 10^d overcharge).
 func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, decimals int, tokenMint, tokenSymbol, reference, memo string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
@@ -563,11 +578,15 @@ func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, referenc
 
 // GetPaymentStatus checks if a payment is pending, confirmed, or expired
 func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
-	// First check Postgres for confirmed payment
-	payment, err = s.getPaymentByReference(ctx, reference)
-	if err == nil && payment != nil {
-		return "confirmed", payment, nil
-	}
+	// or#869 (staticcheck SA4023): there used to be a "first check Postgres for
+	// a confirmed payment" step here, guarded by `err == nil && payment != nil`.
+	// It could never be taken — its helper, getPaymentByReference, was a stub
+	// that unconditionally returned an error, because a Solana reference is
+	// EPHEMERAL: it exists only for on-chain matching during checkout, and a
+	// confirmed payment is identified by its transaction signature instead.
+	// So there is no confirmed-payment lookup by reference to do, and pretending
+	// to try one made this function read as if there were. Redis is the only
+	// answer this reference can have.
 
 	// Check Redis for pending payment
 	pending, err := s.GetPendingPayment(ctx, reference)

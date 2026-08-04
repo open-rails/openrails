@@ -1,5 +1,5 @@
-SET lock_timeout = '5s';
-SET statement_timeout = '5min';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE INDEX idx_payment_settlement_events_delivered
     ON openrails.payment_settlement_events (merchant_id, delivered_at)

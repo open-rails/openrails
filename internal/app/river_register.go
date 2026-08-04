@@ -342,15 +342,15 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		if r.CheckoutService.NMISaleService != nil {
 			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
 		}
-		if r.CheckoutService.VaultedCardService != nil {
-			registry.Register(checkout.NewVaultedCardSaleIntentHandler(r.CheckoutService.VaultedCardService))
+		if r.CheckoutService.CustodianSaleService != nil {
+			registry.Register(checkout.NewCustodianSaleIntentHandler(r.CheckoutService.CustodianSaleService))
 		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
 	}
 	// #674 tail: durable user-initiated vault deletes (an unwired RailPaymentMethodService
 	// resolves no client, so the handler parks — never fails).
 	if r.RailPaymentMethodService != nil {
-		registry.Register(intents.NewNMIVaultDeleteHandler(r.DB, r.RailPaymentMethodService))
+		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService))
 	}
 	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.CollectionResolver, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine
@@ -377,8 +377,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 }
 
 // intentRunner builds a Runner over a registry. Config is attached only when
-// non-nil so the origin x mode gate's nil check (= full mode in tests) keeps
-// working — a typed-nil ModeView would panic inside the gate.
+// non-nil: since or#865 a nil ModeView fails CLOSED (everything parks), so
+// handing the gate a typed-nil interface would silently park production work.
+// It does NOT panic — (*config.Config).normalizedProviderWriteMode nil-guards
+// its receiver and a typed nil reads as readonly, which parks just the same.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
 		// #732: gate the request-path enqueue chokepoint (vault delete, admin

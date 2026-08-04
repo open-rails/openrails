@@ -126,7 +126,7 @@ func New(opts Options) (*Embedded, error) {
 // called once, early, before the application graph is built.
 func applyEmbeddedDefaults(cfg *config.Config) error {
 	// #745: an empty Env reads as "development" throughout this package
-	// (IsDev/RequiresRLS/RequiresSecretEncryption/Validate's isDev gate),
+	// (IsDev/RequiresSecretEncryption/Validate's isDev gate),
 	// disabling every hard-gate check below. Standalone Load() defaults dev
 	// boots to sandbox-safe behavior on top of that; embedded construction has
 	// no such safety net, so it must never inherit the dev-like default by

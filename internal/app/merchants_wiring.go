@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 )
@@ -52,6 +53,12 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	if err != nil {
 		return r.armingFailure(fmt.Errorf("merchants service unavailable (#699): %w", err))
 	}
+	// or#858: the merchant purge answers to the same #836 kill switch and #835
+	// per-merchant policy as a mass cancellation. Unwired, the service refuses to
+	// purge at all — so this is the wiring that makes the gate real rather than
+	// decorative, not a wiring that makes the purge reachable (Service.Delete
+	// still has no route and no CLI; see merchants.PurgeInventory).
+	svc.WithDestructivePolicy(destructive.New(r.DB))
 	r.ArmMerchantsService(svc, store)
 	r.MerchantSecretPing = ping
 	return nil

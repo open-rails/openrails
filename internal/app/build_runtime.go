@@ -165,16 +165,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
-	// Surface (and, outside development, enforce) the Row Level Security
-	// posture of the connected role (issue #227/#763): RLS policies only
-	// constrain a non-superuser, non-BYPASSRLS role. This ONE call covers BOTH
-	// construction paths above — a config-built standalone pool (createDatabase)
-	// AND a host-injected embedded pool (overrides.DB) — so an embedded host
-	// connecting as a privileged/BYPASSRLS role outside development fails boot
-	// exactly like standalone does, with no separate gate to keep in sync.
-	// Previously this ran only inside createDatabase, so embedded construction
-	// (which always supplies overrides.DB) never hit it at all.
-	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
+	// Enforce the Row Level Security posture of the connected role
+	// (#227/#763/or#782): RLS policies only constrain a non-superuser,
+	// non-BYPASSRLS role, so a privileged role makes merchant isolation inert
+	// AND hides every missing-merchant-scope bug. Unconditional — development
+	// is NOT exempt. This ONE call covers BOTH construction paths above (a
+	// config-built standalone pool and a host-injected embedded pool), so an
+	// embedded host connecting as a privileged role fails boot exactly like
+	// standalone does, with no separate gate to keep in sync.
+	if err := database.EnforceRLSPosture(context.Background()); err != nil {
 		return nil, err
 	}
 
@@ -300,7 +299,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
-		RailPaymentMethodService:             serviceInstances.RailPaymentMethodService,
+		RailPaymentMethodService: serviceInstances.RailPaymentMethodService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
@@ -347,6 +346,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	runtime.CollectionResolver = collectionResolver
 	moneyCharger.SetAdapterResolver(collectionResolver)
 	runtime.SolanaRPCResolver = solanaRPCResolver
+	// #817: decimals come from the SPL mint on-chain, read through the same
+	// per-merchant chain reader and cached (mint decimals are immutable).
+	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
+	if serviceInstances.SolanaPayService != nil {
+		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
+	}
+	if serviceInstances.CheckoutSessionService != nil {
+		serviceInstances.CheckoutSessionService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
@@ -410,14 +418,14 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		if runtime.CheckoutService.NMISaleService != nil {
 			runtime.CheckoutService.NMISaleService.Intents = intentRunner
 		}
-		if runtime.CheckoutService.VaultedCardService != nil {
-			runtime.CheckoutService.VaultedCardService.Intents = intentRunner
+		if runtime.CheckoutService.CustodianSaleService != nil {
+			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner
 		}
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
 	if runtime.RailPaymentMethodService != nil {
-		runtime.RailPaymentMethodService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
@@ -564,7 +572,7 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
-	RailPaymentMethodService             *paymentmethods.RailPaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -861,7 +869,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
-		RailPaymentMethodService:                 railPMService,
+		RailPaymentMethodService:     railPMService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,

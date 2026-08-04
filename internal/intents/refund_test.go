@@ -194,7 +194,7 @@ func TestNMIRefundFindRefundParsesQueryShapes(t *testing.T) {
 			client := newTestNMIClient(t, srv.URL)
 			h := NewNMIRefundHandler(nil, fakeNMIResolver{client: client}, nil)
 
-			txnID, found, err := h.findRefund(client, payload)
+			txnID, found, err := h.findRefund(context.Background(), client, payload)
 			if tc.wantErr {
 				require.Error(t, err)
 				return

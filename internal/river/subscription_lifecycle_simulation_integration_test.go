@@ -57,9 +57,15 @@ import (
 //     stay live through past_due AND unknown, revoked only by a proven
 //     terminal event (FailMembership's terminal cancel).
 func TestSubscriptionLifecycleSimulation(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	// The simulation drives module services and worker INTERNALS directly
+	// (processSubscription, Converge, CreditExpiryWorker) — it stands in for the
+	// layer that opens the merchant connection in production, so it must supply
+	// what that layer supplies. Proving a worker pins its own merchant is a
+	// different test's job (or#862); on an unpinned handle every seed write and
+	// every lifecycle read here hits the FORCEd RLS and the simulation asserts
+	// on nothing.
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	mctx := dbtest.WithTestMerchant(ctx)
@@ -190,13 +196,16 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 			PriceID:        priceID,
 			SubscriptionID: &subID,
 			Rail:           models.RailNMI,
-			TransactionID:  "txn_signup_" + uuid.New().String(),
-			Amount:         999,
-			ListAmount:     999,
-			Currency:       "USD",
-			Status:         payments.PaymentStatusCompletedValue,
-			PurchasedAt:    periodStart,
-			CreatedAt:      periodStart,
+			// or#827: a completed positive charge must DECLARE where the money
+			// moved; the signup payment is a real rail settlement.
+			MoneyMovement: models.MoneyMovementRail,
+			TransactionID: "txn_signup_" + uuid.New().String(),
+			Amount:        999,
+			ListAmount:    999,
+			Currency:      "USD",
+			Status:        payments.PaymentStatusCompletedValue,
+			PurchasedAt:   periodStart,
+			CreatedAt:     periodStart,
 		}))
 	}
 
@@ -340,6 +349,10 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 	worker := &DunningWorker{
 		DB: dbi, Clock: clock,
 		NMIResolver: fakeDunningNMIResolver{client: client},
+		// or#865: the worker's self-assembled intent Runner parks every intent
+		// when no mode is stated — the simulation renews and dunns for real, so
+		// it says "full".
+		Config: fullModeConfig(),
 	}
 
 	engine := converge.NewConvergeEngine(dbi)

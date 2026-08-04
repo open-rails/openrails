@@ -111,21 +111,24 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
 			TransactionID:  "txn_" + uuid.New().String(),
 			SubscriptionID: ccbillSubID,
-			ClientAccnum:   "1234",
-			ClientSubacc:   "0000",
+			ClientAccnum:   suiteCCBillAccnum,
+			ClientSubacc:   suiteCCBillSubacc,
 			Timestamp:      clock.Now().UTC().Format("2006-01-02 15:04:05"),
 			NextRetryDate:  nextRetryDate,
 		})
 		require.NoError(t, err)
 
 		svc := &webhooks.CCBillWebhookService{
+			// The service fails CLOSED with no armed account to authenticate
+			// the callback against; the HTTP handler arms it from the merchant's
+			// PSP catalog in production, and this fixture stands in for it.
+			CCBillClient: suite.CCBillWebhookClient(),
 			Data: webhooks.CCBillWebhookEvent{
 				EventType: webhooks.EventTypeRenewalFailure,
 				EventBody: body,
 			},
 			DB:                  rt.DB,
 			Clock:               clock,
-			CCBillClient:        testCCBillWebhookClient(),
 			SubscriptionService: rt.SubscriptionService,
 		}
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
@@ -151,21 +154,24 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	expBody, err := json.Marshal(webhooks.CCBillExpirationEvent{
 		CCBillCommonFields: webhooks.CCBillCommonFields{
 			SubscriptionID: ccbillSubID,
-			ClientAccnum:   "1234",
-			ClientSubacc:   "0000",
+			ClientAccnum:   suiteCCBillAccnum,
+			ClientSubacc:   suiteCCBillSubacc,
 			Timestamp:      clock.Now().UTC().Format("2006-01-02 15:04:05"),
 		},
 	})
 	require.NoError(t, err)
 
 	expSvc := &webhooks.CCBillWebhookService{
+		// The service fails CLOSED with no armed account to authenticate the
+		// callback against; the HTTP handler arms it from the merchant's PSP
+		// catalog in production, and this fixture stands in for it.
+		CCBillClient: suite.CCBillWebhookClient(),
 		Data: webhooks.CCBillWebhookEvent{
 			EventType: webhooks.EventTypeExpiration,
 			EventBody: expBody,
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
-		CCBillClient:                 testCCBillWebhookClient(),
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		NotificationService:          rt.NotificationService,
@@ -285,8 +291,8 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	successBody, err := json.Marshal(webhooks.CCBillRenewalSuccessEvent{
 		TransactionID:      txid,
 		SubscriptionID:     ccbillSubID,
-		ClientAccnum:       "1234",
-		ClientSubacc:       "0000",
+		ClientAccnum:       suiteCCBillAccnum,
+		ClientSubacc:       suiteCCBillSubacc,
 		Timestamp:          clock.Now().UTC().Format("2006-01-02 15:04:05"),
 		BilledAmount:       "9.99",
 		BilledCurrencyCode: "usd",
@@ -295,13 +301,16 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, err)
 
 	webhook := &webhooks.CCBillWebhookService{
+		// The service fails CLOSED with no armed account to authenticate the
+		// callback against; the HTTP handler arms it from the merchant's PSP
+		// catalog in production, and this fixture stands in for it.
+		CCBillClient: suite.CCBillWebhookClient(),
 		Data: webhooks.CCBillWebhookEvent{
 			EventType: webhooks.EventTypeRenewalSuccess,
 			EventBody: successBody,
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
-		CCBillClient:                 testCCBillWebhookClient(),
 		DeduplicationService:         rt.DeduplicationService,
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,

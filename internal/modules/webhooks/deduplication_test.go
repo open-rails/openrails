@@ -22,7 +22,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 		ctx,
 		"tx-retryable",
 		"RenewalSuccess",
-		models.RailCCBill,
+		models.RailCCBill.EventSource(),
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -39,7 +39,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 		ctx,
 		"tx-retryable",
 		"RenewalSuccess",
-		models.RailCCBill,
+		models.RailCCBill.EventSource(),
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -65,7 +65,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 		ctx,
 		"tx-terminal",
 		"RenewalSuccess",
-		models.RailCCBill,
+		models.RailCCBill.EventSource(),
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -79,7 +79,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 		ctx,
 		"tx-terminal",
 		"RenewalSuccess",
-		models.RailCCBill,
+		models.RailCCBill.EventSource(),
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts++
@@ -110,7 +110,7 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 			ctx,
 			"tx-concurrent",
 			"RenewalSuccess",
-			models.RailCCBill,
+			models.RailCCBill.EventSource(),
 			map[string]any{"sample": "payload"},
 			func(context.Context) error {
 				attempts.Add(1)
@@ -127,7 +127,7 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 		ctx,
 		"tx-concurrent",
 		"RenewalSuccess",
-		models.RailCCBill,
+		models.RailCCBill.EventSource(),
 		map[string]any{"sample": "payload"},
 		func(context.Context) error {
 			attempts.Add(1)
@@ -163,7 +163,7 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 
 	go func() {
 		firstErr <- svc.ProcessWebhook(
-			ctx, "tx-slow", "RenewalSuccess", models.RailCCBill, nil,
+			ctx, "tx-slow", "RenewalSuccess", models.RailCCBill.EventSource(), nil,
 			func(context.Context) error {
 				attempts.Add(1)
 				close(started)
@@ -177,7 +177,7 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 	time.Sleep(3 * svc.pendingLease) // well past the lease; heartbeat must have renewed it
 
 	err := svc.ProcessWebhook(
-		ctx, "tx-slow", "RenewalSuccess", models.RailCCBill, nil,
+		ctx, "tx-slow", "RenewalSuccess", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error {
 			attempts.Add(1)
 			return nil
@@ -208,7 +208,7 @@ func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
 
 	attempts := 0
 	err = svc.ProcessWebhook(
-		ctx, "tx-dead", "RenewalSuccess", models.RailCCBill, nil,
+		ctx, "tx-dead", "RenewalSuccess", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error {
 			attempts++
 			return nil

@@ -157,8 +157,8 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	payID := uuid.New()
 	txnID := "cctxn-" + uuid.NewString()[:8]
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id)
-	        VALUES ($1, $2, 'ccbill', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6)`,
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement)
+	        VALUES ($1, $2, 'ccbill', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
 		payID, fx.price, txnID, subID, fx.customer, fx.merchant)
 	refundFinding := fx.seedFinding("consistency.duplicate.ownership", "cc-refund-"+uuid.NewString()[:8], "critical",
 		"refund the duplicate ccbill charge", &recommend.Recommendation{

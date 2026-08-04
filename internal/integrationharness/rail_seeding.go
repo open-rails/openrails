@@ -121,7 +121,7 @@ func railAccountSettings(proc *config.PSPConfig) map[string]any {
 	if len(proc.Solana.Tokens) > 0 {
 		tokens := map[string]any{}
 		for symbol, token := range proc.Solana.Tokens {
-			tokens[symbol] = map[string]any{"mint": token.Mint, "name": token.Name, "decimals": token.Decimals}
+			tokens[symbol] = map[string]any{"mint": token.Mint, "name": token.Name}
 		}
 		settings[config.SolanaSettingTokens] = tokens
 	}

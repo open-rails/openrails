@@ -22,8 +22,8 @@
 --     an empty set, so the failure that produced #824 can never be silent again.
 
 -- Lock/statement safety (or#838 migration gate), same shape as the 0001 baseline.
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 CREATE FUNCTION openrails.current_merchant_id() RETURNS uuid
     LANGUAGE sql STABLE

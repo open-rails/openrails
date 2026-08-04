@@ -481,6 +481,7 @@ products:
 	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
+	// or#883: a grant's unit is always the named balance's unit — never declared.
 	if got := p.Credits[0].Unit; got != "USD" {
 		t.Fatalf("credit did not derive balance unit: %q", got)
 	}

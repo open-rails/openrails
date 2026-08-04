@@ -93,6 +93,10 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	opts = opts.withDefaults()
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
+	// #835: nothing this cohort holds that predates the deployment's first pull
+	// may cancel anybody — an unknown row on an imported book carries inherited
+	// history by definition.
+	floor := EvidenceFloorFor(ctx, database, merchantID.UUID())
 
 	for _, rail := range reconcilableRails() {
 		provider := Provider(rail)
@@ -181,7 +185,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 				RailSubscriptionID: r.RailSubscriptionID,
 				PeriodEnd:          r.CurrentPeriodEndsAt,
 			}
-			decision := Decide(state, EvidenceBundle{Snapshot: snap}, now, opts.DunningWindow)
+			decision := Decide(state, EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, opts.DunningWindow)
 			if decision.Kind == TransitionNone && prober != nil && r.RailSubscriptionID != "" {
 				// #665: the bulk window couldn't decide this row — ONE targeted
 				// per-sub probe, fed to the SAME decider. A probe failure keeps
@@ -194,11 +198,14 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 						"subscription_id": r.ID, "rail": rail,
 					}).Warn("reconcile unknown: per-subscription probe failed; staying unknown")
 				} else {
-					decision = Decide(state, EvidenceBundle{Snapshot: psnap}, now, opts.DunningWindow)
+					decision = Decide(state, EvidenceBundle{Snapshot: psnap, EvidenceFloor: floor}, now, opts.DunningWindow)
 				}
 			}
 			if decision.Kind == TransitionCancel {
 				cancels++
+			}
+			if decision.EvidenceFloored {
+				recordEvidenceStaleFinding(ctx, q, merchantID, provider, r.ID.String(), decision.Reason)
 			}
 			decisions = append(decisions, pendingDecision{id: r.ID, decision: decision})
 		}
@@ -325,6 +332,12 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
+			// or#827: a mirrored success IS money the rail moved; a mirrored
+			// decline moved nothing and must never reach the host feed.
+			MoneyMovement: string(models.MoneyMovementNone),
+		}
+		if t.Success {
+			params.MoneyMovement = string(models.MoneyMovementRail)
 		}
 		if currencyInherited {
 			params.Metadata = []byte(`{"currency_provenance":"inherited_from_subscription_price"}`)
@@ -344,7 +357,9 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 				params.FailureReason = &reason
 			}
 		}
-		if tt := payments.DefaultTokenTypeForRail(string(sub.Rail)); tt != "" {
+		// Provider-driven: NMI can only rebill a card IT holds, so the custody
+		// fact here is stated, not guessed (or#879).
+		if tt := payments.DefaultTokenType(string(sub.Rail), models.CustodianPSP); tt != "" {
 			params.TokenType = &tt
 		}
 		n, err := q.CreatePaymentIfNotExists(ctx, params)
@@ -354,6 +369,39 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		inserted += int(n)
 	}
 	return inserted, nil
+}
+
+// evidenceStaleAction is the operator prose for a floored cancel.
+func evidenceStaleAction(reason string) string {
+	return "the evidence for this terminal cancel (" + reason + ") predates this deployment's first pull of the merchant, or carries no date at all, " +
+		"so nothing we observed corroborates it — it arrived with the imported book. The subscription is parked as `unknown` with its access intact. " +
+		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before cancelling anything"
+}
+
+// recordEvidenceStaleFinding persists the operator-facing record of a cancel the
+// #835 staleness floor withheld. Best-effort, like every guard finding: the
+// floor has already done its job in memory, and failing to write the record
+// must never turn a SAFE outcome into an error that retries into an unsafe one.
+func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID merchant.ID, provider Provider, subscriptionID, reason string) {
+	action := evidenceStaleAction(reason)
+	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID:        merchantID.UUID(),
+		FindingType:       string(FindingEvidenceStale),
+		SubjectKey:        evidenceStaleSubjectKey(provider, subscriptionID),
+		Severity:          string(SeverityHigh),
+		Status:            string(FindingStatusRequiresReview),
+		RecommendedAction: &action,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"merchant_id": merchantID.String(), "rail": string(provider), "subscription_id": subscriptionID,
+		}).Error("reconcile: could not persist the evidence-staleness finding (the floor still held; the row is parked `unknown`)")
+	}
+}
+
+// evidenceStaleSubjectKey is the stable identity of a floored cancel: one row
+// per (provider, subscription), so re-runs update rather than pile up.
+func evidenceStaleSubjectKey(provider Provider, subscriptionID string) string {
+	return string(provider) + ":subscription:" + subscriptionID
 }
 
 // recordGuardFinding persists the operator-facing record of a pass-level guard

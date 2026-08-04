@@ -50,7 +50,7 @@ type stripeProductLister interface {
 // nmiPlanLister is the subset of the NMI client the loop needs. Defining it as
 // an interface lets unit tests inject fixture plans without a live NMI account.
 type nmiPlanLister interface {
-	ListRecurringPlans() ([]nmi.V5Plan, error)
+	ListRecurringPlans(ctx context.Context) ([]nmi.V5Plan, error)
 }
 
 // localCatalogSnapshot is the OpenRails-side view the diffs compare against.
@@ -555,8 +555,8 @@ func fetchStripeCatalog(ctx context.Context, lister stripeProductLister) ([]cata
 }
 
 // fetchNMIPlans pulls all NMI recurring plans (GET /v5/plans).
-func fetchNMIPlans(lister nmiPlanLister) ([]nmiPlan, error) {
-	plans, err := lister.ListRecurringPlans()
+func fetchNMIPlans(ctx context.Context, lister nmiPlanLister) ([]nmiPlan, error) {
+	plans, err := lister.ListRecurringPlans(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list nmi recurring plans: %w", err)
 	}
@@ -622,7 +622,7 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 	}
 
 	if nmiLister != nil {
-		plans, ferr := fetchNMIPlans(nmiLister)
+		plans, ferr := fetchNMIPlans(ctx, nmiLister)
 		if ferr != nil {
 			return nil, ferr
 		}

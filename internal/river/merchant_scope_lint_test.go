@@ -57,7 +57,7 @@ var workersWithoutMerchantScope = map[string]string{
 		"RunInMerchantScope (or#861)",
 
 	// --- verified: touches no merchant-owned table ---
-	"CreditReconcileWorker":   "MoneyService.Reconcile is a stub in the Redis hold model — it reads nothing",
+	"CreditReconcileWorker": "MoneyService.Reconcile is a stub in the Redis hold model — it reads nothing",
 }
 
 // scopers are the calls that pin app.merchant_id for the work inside them.

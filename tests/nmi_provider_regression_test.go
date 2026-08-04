@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,7 +81,11 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	}
 	require.NotNil(t, completedPayment, "expected a completed payment linked to the activated subscription")
 
-	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(dbtest.WithTestMerchant(context.Background()), userID, "premium", suite.GetClock().Now().UTC())
+	// MerchantCtx, not a bare merchant-in-context: entitlements FORCEs RLS, and
+	// the runtime's EntitlementService runs on the server's BASE pool, so an
+	// unpinned read matches zero rows and reports "not entitled" for a grant
+	// that exists.
+	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(suite.MerchantCtx(), userID, "premium", suite.GetClock().Now().UTC())
 	require.NoError(t, err)
 	assert.True(t, entitled, "NMI checkout should grant premium access synchronously after approval")
 	assert.GreaterOrEqual(t, int(mock.RequestCount), 1, "should have used the configured NMI client")

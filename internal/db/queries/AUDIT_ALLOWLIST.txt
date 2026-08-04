@@ -22,7 +22,6 @@ unbounded-many ListPSPsForMerchant              # psps: operator-declared, units
 unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same small set
 unbounded-many ListAlertRules                   # alert_rules: operator-configured
 unbounded-many ListEnabledAlertRules            # alert_rules: operator-configured
-unbounded-many ListArmedAlertMerchants          # alert_rules: DISTINCT over the same small set
 unbounded-many ListMerchantWebhooks             # merchant_webhooks: operator-configured
 
 # Optional admin filters (`$n IS NULL OR col = $n`) on a paged listing: absent on
@@ -51,7 +50,6 @@ unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge sca
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
 unbounded-many ListActionableReconciliationFindingsByProvider # or#837 converge scan
 unbounded-many CountOpenReconciliationFindingsByTypeSeverity  # or#837 converge scan
-unbounded-many ListArmedFindingsDigestMerchants            # or#837 cross-merchant findings scan
 unbounded-many ListOpenCatalogDriftEvents                  # or#837 scan of all open drift events
 unbounded-many CountOpenCatalogDriftByKind                 # or#837 scan of all open drift events
 unbounded-many ListStuckRailIntents                        # or#837 scan of all live intents
@@ -69,10 +67,6 @@ unbounded-many ListActiveEntitlementRecordsByCustomerIDs # or#837 fan-out per cu
 unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail
 
 # Unbatched sweeps: a large backlog makes each one a single long transaction.
-unscoped-write DeleteCompletedWebhookEventsBefore        # or#837 unbatched retention delete
-unscoped-write DeleteNotificationsBefore                 # or#837 unbatched retention delete
-unscoped-write DeleteSeenNotificationsBefore             # or#837 unbatched retention delete
-unscoped-write ExpireCheckoutSessions                    # or#837 unbatched cross-merchant UPDATE
 unscoped-write AutoResolveVanishedReconciliationFindings # or#837 unbatched cross-merchant UPDATE
 
 # The whole "missing indexes" group is gone: or#846 added them (0012) and every

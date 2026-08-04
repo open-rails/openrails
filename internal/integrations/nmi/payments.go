@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -55,7 +56,7 @@ type RefundResponse struct {
 // live-verified 2026-07-02) and always charges the priority-1 entry, while
 // classic sale + billing_id charges the exact card (same lane the dunning
 // rebill already uses).
-func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
+func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -90,7 +91,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	// cit_mit, but the classic vault-sale lane is the one already live-verified
 	// here — billing-targeted sales and dunning rebills ride it today).
 	if billingID := strings.TrimSpace(params.BillingID); billingID != "" || params.StoredCredential != nil {
-		return c.runClassicSale(params, currency, orderDesc, billingID)
+		return c.runClassicSale(ctx, params, currency, orderDesc, billingID)
 	}
 
 	req := v5PaymentRequest{
@@ -101,7 +102,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	}
 
 	var txn v5Transaction
-	if err := c.sendV5Request(http.MethodPost, "/payments/sale", req, &txn); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPost, "/payments/sale", req, &txn); err != nil {
 		return nil, err
 	}
 	if !txn.approved() {
@@ -119,7 +120,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 // customer_vault_id): billingID targets ONE specific billing entry (see the
 // RunSale doc for why v5 cannot do this); "" charges the priority-1 entry.
 // Stored-credential fields ride this lane (#297).
-func (c *NMIClient) runClassicSale(params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
+func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
 	values := url.Values{
 		"type":              {"sale"},
 		"security_key":      {c.SecurityKey},
@@ -136,7 +137,7 @@ func (c *NMIClient) runClassicSale(params SaleParams, currency, orderDesc, billi
 	}
 	params.StoredCredential.ApplyToForm(values)
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +157,7 @@ func (c *NMIClient) runClassicSale(params SaleParams, currency, orderDesc, billi
 
 // Refund reverses a settled transaction via POST /v5/payments/{id}/refund.
 // Amount 0 refunds the full settled amount (both classic and v5 semantics).
-func (c *NMIClient) Refund(params RefundParams) (*RefundResponse, error) {
+func (c *NMIClient) Refund(ctx context.Context, params RefundParams) (*RefundResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func (c *NMIClient) Refund(params RefundParams) (*RefundResponse, error) {
 	}
 
 	var txn v5Transaction
-	if err := c.sendV5Request(http.MethodPost, "/payments/"+url.PathEscape(txnID)+"/refund", body, &txn); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPost, "/payments/"+url.PathEscape(txnID)+"/refund", body, &txn); err != nil {
 		return nil, err
 	}
 	if !txn.approved() {
@@ -185,7 +186,7 @@ func (c *NMIClient) Refund(params RefundParams) (*RefundResponse, error) {
 }
 
 // Void cancels an unsettled transaction via POST /v5/payments/{id}/void.
-func (c *NMIClient) Void(transactionID string) error {
+func (c *NMIClient) Void(ctx context.Context, transactionID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -195,7 +196,7 @@ func (c *NMIClient) Void(transactionID string) error {
 	}
 
 	var txn v5Transaction
-	if err := c.sendV5Request(http.MethodPost, "/payments/"+url.PathEscape(txnID)+"/void", map[string]any{}, &txn); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPost, "/payments/"+url.PathEscape(txnID)+"/void", map[string]any{}, &txn); err != nil {
 		return err
 	}
 	if !txn.approved() {

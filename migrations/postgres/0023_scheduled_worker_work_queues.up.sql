@@ -16,8 +16,8 @@
 --     read per-merchant inside RunInMerchantScope, under the merchant's own
 --     policy.
 
-SET statement_timeout = '60s';
-SET lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 -- --------------------------------------------------------------------------
 -- or#877 B5: dunning

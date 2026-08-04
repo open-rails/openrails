@@ -976,12 +976,15 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
 		}
 	}
-	// #795: strict vaulted_card settings validation at push time (gateway_account
-	// required; nt_charges hard-errors on NMI gateways).
-	if out.rail == string(models.RailVaultedCard) {
-		if err := config.ValidateVaultedCardAccountSettings(account.Settings); err != nil {
-			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
-		}
+	// or#879: custody is a MODIFIER on any rail, so its settings are validated
+	// for every PSP — a typo'd or retired custody key fails the push loudly
+	// instead of being stored inert on a money path.
+	custody, err := config.ParseCustodySettings(account.Settings)
+	if err != nil {
+		return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+	}
+	if custody.ThirdParty() && out.rail != string(models.RailNMI) {
+		return out, fmt.Errorf("provider account %q: custodian %q is not supported on this rail — only nmi has a detokenizing proxy charge path", out.rail, custody.Custodian)
 	}
 	secrets, err := newManifestSecretValues(out.rail, account.Secrets)
 	if err != nil {
@@ -1241,7 +1244,7 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 	// worker_health and destructive_action_switch), so the base pool genuinely
 	// answers here — unlike the sites or#824's sweep found. The cache key
 	// carries the merchant, so scope is not lost.
-	decision := nmi.CheckTestModeArm(database.GenDirectory(), client, cacheKey)
+	decision := nmi.CheckTestModeArm(ctx, database.GenDirectory(), client, cacheKey)
 	if decision.ProbeErr != nil {
 		log.WithError(decision.ProbeErr).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,

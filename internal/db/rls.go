@@ -49,46 +49,48 @@ func (d *DB) CheckRLSPosture(ctx context.Context) (RLSPosture, error) {
 	return RLSPosture{CurrentUser: user, Enforcing: !bypass}, nil
 }
 
-// EnforceRLSPosture logs the connection's RLS posture and, when require is true,
-// FAILS startup if the connected role does not enforce RLS. OpenRails passes
-// require=true outside development so production cannot boot while connected as
-// a privileged role that bypasses every policy (issue #227).
+// EnforceRLSPosture FAILS startup if the connected role does not enforce RLS.
+// It takes no environment: the requirement is UNCONDITIONAL, development
+// included (or#782).
 //
-// Development passes require=false: RLS is still reported, but a privileged
-// local database role is allowed.
-func (d *DB) EnforceRLSPosture(ctx context.Context, require bool) error {
+// Development used to be exempt, and that exemption was the defect factory. A
+// component that reads an RLS-forced table without a merchant scope has its
+// policy predicate degenerate to `merchant_id = NULL` and gets back zero rows
+// with no error — so it logs success and does nothing. Under a BYPASSRLS role
+// the same query returns rows, so the bug is invisible on the developer's
+// machine and only inert in production (scheduled dunning that never found a
+// due subscription, a webhook endpoint that was never registered, retention
+// sweeps that never deleted). Dev has to run the production role or it keeps
+// manufacturing that class.
+//
+// Migrations legitimately need the privileged role; they run through
+// `openrails migrate`, which never builds the runtime and so never reaches here.
+func (d *DB) EnforceRLSPosture(ctx context.Context) error {
 	posture, err := d.CheckRLSPosture(ctx)
 	if err != nil {
 		return err
 	}
-	fields := logrus.Fields{
-		"db_user":       posture.CurrentUser,
-		"rls_enforcing": posture.Enforcing,
-		"rls_required":  require,
-	}
-	if posture.Enforcing {
-		logrus.WithFields(fields).Info("db: Row Level Security is ENFORCING for the connected role (issue #227)")
-		return nil
-	}
-	if err := rlsPostureError(posture, require); err != nil {
+	if err := rlsPostureError(posture); err != nil {
 		return err
 	}
-	logrus.WithFields(fields).Warn(
-		"db: connected role bypasses Row Level Security; merchant isolation relies on explicit query predicates only " +
-			"(acceptable only in development; non-development envs must connect as openrails_app or another non-BYPASSRLS role)")
+	logrus.WithFields(logrus.Fields{
+		"db_user":       posture.CurrentUser,
+		"rls_enforcing": posture.Enforcing,
+	}).Info("db: Row Level Security is ENFORCING for the connected role (issue #227)")
 	return nil
 }
 
-// rlsPostureError returns a startup-fatal error when RLS enforcement is required,
-// but the connected role bypasses RLS. Pure (no DB) so the decision is unit
-// testable independent of a live Postgres.
-func rlsPostureError(posture RLSPosture, require bool) error {
-	if posture.Enforcing || !require {
+// rlsPostureError returns a startup-fatal error when the connected role bypasses
+// RLS. Pure (no DB) so the decision is unit testable independent of a live
+// Postgres.
+func rlsPostureError(posture RLSPosture) error {
+	if posture.Enforcing {
 		return nil
 	}
 	return fmt.Errorf(
-		"db: RLS enforcement required but role %q bypasses RLS (superuser/BYPASSRLS); "+
-			"connect as the unprivileged openrails_app role (created by 001_schema.up.sql) in managed multi-merchant mode",
+		"db: role %q bypasses RLS (superuser/BYPASSRLS), so every merchant_isolation policy is skipped; "+
+			"connect as the unprivileged openrails_app role (created by 0001_schema.up.sql) — this is required in "+
+			"EVERY environment including development, and migrations are the only job that runs privileged",
 		posture.CurrentUser,
 	)
 }

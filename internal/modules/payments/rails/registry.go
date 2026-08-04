@@ -147,7 +147,10 @@ var descriptors = []Descriptor{
 		nmiAutoBilled,
 		nmiCancelMode,
 		"", // CancelPortalURL
-		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}},
+		// custodian_api_key (or#879): the PRIVATE application key of a
+		// third-party custodian (Basis Theory) whose proxy detokenizes into
+		// THIS gateway. Optional — unset means the NMI vault holds the cards.
+		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}, {"custodian_api_key", true}},
 	},
 	{
 		models.RailCCBill,
@@ -190,19 +193,6 @@ var descriptors = []Descriptor{
 		cancelDestructive,
 		"",                                      // CancelPortalURL
 		[]CredentialKey{{"private_key", false}}, // operator-only signer
-	},
-	{
-		models.RailVaultedCard,
-		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts (account_id = BT tenant id, operator-declared)
-		false,         // HasRemoteCustomer (BT has no customer scope)
-		true,          // SupportsChargeSavedMethod (invoice/top-up MITs through the proxy)
-		true,          // OpenRailsDrivenDunning (no provider-side recurring engine; the engine drives every rebill)
-		false,         // RemoteDeleteOnTerminalCancel (no provider-side schedule to tear down)
-		autoBilledNever,
-		cancelDestructive,                  // no remote schedule; safe default until a resume path is built
-		"",                                 // CancelPortalURL
-		[]CredentialKey{{"api_key", true}}, // BT PRIVATE application key — the only custodial secret (#795)
 	},
 	{
 		models.RailPayPal,

@@ -1,4 +1,5 @@
-BEGIN;
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
 
 DO $$
 DECLARE
@@ -29,5 +30,3 @@ CREATE UNIQUE INDEX checkout_sessions_rail_reference_idx
     ON openrails.checkout_sessions USING btree (rail, reference) WHERE (reference IS NOT NULL);
 CREATE UNIQUE INDEX checkout_sessions_rail_transaction_id_idx
     ON openrails.checkout_sessions USING btree (rail, transaction_id) WHERE (transaction_id IS NOT NULL);
-
-COMMIT;

@@ -277,9 +277,9 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	if opts.Config == nil || opts.Config.DB == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(opts.Config.DB)
+	database, err := openEmbeddedDB(ctx, opts.Config, nil)
 	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
+		return err
 	}
 	defer func() {
 		_ = database.Close()
@@ -340,9 +340,9 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	if cfg == nil || cfg.DB == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := openEmbeddedDB(ctx, cfg, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open postgres: %w", err)
+		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
 	rails := config.PSPSet{}

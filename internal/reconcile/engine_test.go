@@ -536,6 +536,35 @@ func tp(t time.Time) *time.Time { return &t }
 
 var testNow = time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 
+// fakeRunRecorder is the in-memory DestructiveRunRecorder these unit tests need
+// (or#859: an enforce pass with no run record REFUSES). It records nothing that
+// is asserted on here — the reversal itself is proven against Postgres in
+// converge_rollback_integration_test.go.
+type fakeRunRecorder struct {
+	opened   int
+	captured int
+	finished []string
+}
+
+func (r *fakeRunRecorder) Open(context.Context, OpenDestructiveRunParams) (uuid.UUID, error) {
+	r.opened++
+	return uuid.New(), nil
+}
+
+func (r *fakeRunRecorder) CaptureSubscription(context.Context, uuid.UUID, uuid.UUID) (time.Time, error) {
+	r.captured++
+	return testNow, nil
+}
+
+func (r *fakeRunRecorder) StampIntents(context.Context, uuid.UUID, uuid.UUID, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (r *fakeRunRecorder) Finish(_ context.Context, _ uuid.UUID, status string, _ map[string]int) error {
+	r.finished = append(r.finished, status)
+	return nil
+}
+
 func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*Engine, *memStore, *fakeWriter) {
 	store := newMemStore()
 	writer := newFakeWriter(local)
@@ -545,6 +574,7 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 		Local:     local,
 		Writer:    writer,
 		Decisions: &fakeDecisions{local: local, calls: writer.calls},
+		Runs:      &fakeRunRecorder{},
 		Now:       func() time.Time { return testNow },
 	}
 	return eng, store, writer

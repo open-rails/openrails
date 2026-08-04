@@ -472,6 +472,10 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	if err != nil {
 		return nil, fmt.Errorf("life: scan lapsed subscriptions: %w", err)
 	}
+	// #835 evidence-staleness floor. LIFE cannot reach a cancel today (its
+	// certainty legs are unpopulated), but the floor travels with the decider
+	// invocation so the day a plane starts producing them it is already gated.
+	floor := reconcile.EvidenceFloorFor(ctx, p.e.DB, scope.Merchant.UUID())
 	for i := range lapsed {
 		row := lapsed[i]
 		state := reconcile.SubscriptionState{
@@ -489,6 +493,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				RenewalPaymentAfterPeriodEnd: row.RenewalPaymentAfterEnd,
 			},
 			WatermarkNewerThanPeriodEnd: row.WatermarkNewerThanPeriodEnd,
+			EvidenceFloor:               floor,
 		}, now, 0)
 
 		var ftype, severity string

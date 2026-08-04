@@ -1,16 +1,38 @@
 # CVE ignores require a dated justification and an owner to re-check.
-# 2026-07-28: brace-expansion DoS — fix (5.0.8) is published WITHOUT provenance
-# attestation while earlier versions had it; the pnpm supply-chain trust policy
-# (deliberately) refuses the downgrade. Console BUILD-TIME devDependency, not
-# runtime; re-bump when upstream attests. Owner: openrails tracker #853.
-CVE-2026-14257
-# 2026-07-28: fast-uri — same provenance-downgrade refusal, same disposition.
-CVE-2026-16221
-# 2026-07-28: postcss source-map path traversal — BUILD-TIME console dep; the
-# attested-bump path is blocked (existing lockfile predates the tightened pnpm
-# policy, any install refuses). Re-bump with #853.
-GHSA-r28c-9q8g-f849
-# 2026-07-28: react-router CSRF bypass applies to RSC MODE only — the console is
-# a Vite SPA, RSC never enabled; the fix is a breaking 7->8 major. Re-evaluate
-# with #853.
+#
+# 2026-07-29 (#853) re-check: three of the four entries here were retired by
+# bumping the dependency. What they had been suppressed FOR did not survive
+# verification — the recorded reason ("the fixed version is published without
+# provenance attestation while earlier versions had it, so pnpm's
+# trustPolicy: no-downgrade refuses the upgrade") was checked against the npm
+# registry and was false: NO published version of brace-expansion (0 of 44) or
+# fast-uri (0 of 29) has EVER carried a provenance attestation, so there was no
+# downgrade to refuse. For postcss the truth ran the other way — the pinned
+# 8.5.16 was unattested and every fix version (8.5.18+) IS attested, so the
+# bump strengthened provenance. The companion claim that the lockfile "predates
+# the tightened pnpm policy so ANY install refuses" was also false:
+# `pnpm@11.0.0 install --frozen-lockfile` succeeds against the committed
+# lockfile as-is.
+#
+# Re-check procedure (run it, do not re-derive it): compare
+# `registry.npmjs.org/<pkg>/<version>` `.dist.attestations` for the pinned and
+# the fixed version before believing any provenance-based suppression.
+
+# ---------------------------------------------------------------------------
+# GHSA-qwww-vcr4-c8h2 — react-router CSRF bypass, HIGH.
+# Advisory: vulnerable >=7.12.0 <8.3.0, first patched 8.3.0 (published
+# 2026-07-24). Pinned: react-router 7.18.1.
+#
+# Upstream status 2026-07-29: 8.3.0 IS published and IS provenance-attested, so
+# unlike the other three this is NOT blocked on upstream — it is blocked on a
+# breaking 7 -> 8 major of the admin SPA's router. Upstream shipped no 7.x
+# backport: 7.18.2 exists and does NOT carry the fix.
+#
+# Why the suppression still holds: the bypass is reachable only in react-router
+# RSC mode. web/admin is a Vite SPA (react-router-dom 7.18.1, browser router);
+# RSC is never enabled, so no vulnerable code path is built or served, and the
+# console bundle is build-time output rather than a served dependency.
+#
+# This has a re-check TRIGGER, not an expiry date: it dies the moment web/admin
+# adopts RSC, or a react-router 7.x patch appears. Owner: openrails tracker #853.
 GHSA-qwww-vcr4-c8h2

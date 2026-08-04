@@ -201,7 +201,9 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 
 	sel := []string{}
 	group := []string{}
-	firstEdge, lastEdge := plan.To, plan.To // non-time: everything strictly before range end
+	// Read only under plan.HasTime — the non-time path uses plan.To directly
+	// in the WHERE below, so there is no meaningful zero value to seed here.
+	var firstEdge, lastEdge time.Time
 	if plan.HasTime {
 		firstEdge, lastEdge = plan.Buckets[0], plan.Buckets[len(plan.Buckets)-1]
 		sel = append(sel, fmt.Sprintf(

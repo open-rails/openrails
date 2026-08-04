@@ -36,7 +36,7 @@ type RailPaymentMethodService struct {
 	DB                  *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
-	DeleteIntents VaultDeleteExecutor
+	DeleteIntents PaymentMethodDeleteExecutor
 	clock         clockwork.Clock
 	newNMIClient  func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
@@ -197,7 +197,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
-	nmiResponse, err := client.CreateCustomerVault(vaultData)
+	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
 		var nmiErr *nmi.CustomerVaultError
@@ -241,7 +241,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		// Best-effort direct remote cleanup — deliberately NOT intent-routed
 		// (#674 tail): the vault was created milliseconds ago and is referenced
 		// nowhere; losing this delete leaves only an inert orphan entry at NMI.
-		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
+		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		return nil, fmt.Errorf("failed to store payment method locally: %w", err)
 	}
 
@@ -529,7 +529,7 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 		upd.Address2 = *req.Address2
 	}
 
-	if err := client.UpdateCustomerVault(upd); err != nil {
+	if err := client.UpdateCustomerVault(ctx, upd); err != nil {
 		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update vault in NMI")
 		return nil, fmt.Errorf("failed to update payment method: %w", err)
 	}
@@ -565,10 +565,10 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 // intent. Never a lost delete.
 var ErrPaymentMethodDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
 
-// VaultDeleteOutcome mirrors the durable intent's post-execution state without
+// PaymentMethodDeleteOutcome mirrors the durable intent's post-execution state without
 // importing the intents package (import cycle: intents → subscriptions →
 // paymentmethods). Neither Done nor Terminal = still resolving out-of-band.
-type VaultDeleteOutcome struct {
+type PaymentMethodDeleteOutcome struct {
 	// Done: the remote delete is confirmed and the local row is gone.
 	Done bool
 	// Terminal: the delete failed permanently; Reason says why.
@@ -576,10 +576,10 @@ type VaultDeleteOutcome struct {
 	Reason   string
 }
 
-// VaultDeleteExecutor posts the durable nmi_vault_delete intent and executes
-// it inline (#674 write-through). Implemented by intents.VaultDeleteThrough.
-type VaultDeleteExecutor interface {
-	ExecuteVaultDelete(ctx context.Context, pm *models.PaymentMethod) (VaultDeleteOutcome, error)
+// PaymentMethodDeleteExecutor posts the durable nmi_vault_delete intent and executes
+// it inline (#674 write-through). Implemented by intents.PaymentMethodDeleteThrough.
+type PaymentMethodDeleteExecutor interface {
+	ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (PaymentMethodDeleteOutcome, error)
 }
 
 // DeletePaymentMethod deletes a stored payment method the DURABLE way (#674 tail):
@@ -594,7 +594,7 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	if s.DeleteIntents == nil {
 		return errors.New("vault delete intent executor not wired")
 	}
-	out, err := s.DeleteIntents.ExecuteVaultDelete(ctx, pm)
+	out, err := s.DeleteIntents.ExecutePaymentMethodDelete(ctx, pm)
 	if err != nil {
 		return fmt.Errorf("post vault delete intent: %w", err)
 	}
@@ -684,14 +684,14 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 // shared vaults, whole-vault otherwise) followed by the local removal.
 func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
 	if shared {
-		if err := client.DeleteCustomerBillingEntry(pm.RailCustomerRef, pm.RailMethodRef); err != nil {
+		if err := client.DeleteCustomerBillingEntry(ctx, pm.RailCustomerRef, pm.RailMethodRef); err != nil {
 			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
 			return fmt.Errorf("failed to delete payment method entry: %w", err)
 		}
 		return s.PaymentMethodService.Delete(ctx, pm.ID)
 	}
 
-	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
+	if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
 		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault from NMI")
 		return fmt.Errorf("failed to delete payment method: %w", err)
 	}

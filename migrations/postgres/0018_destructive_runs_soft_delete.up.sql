@@ -22,8 +22,11 @@
 -- re-granted therefore conflicts on that exclusion and aborts the whole
 -- rollback transaction — loudly, which is correct.
 
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '10s';
+
 CREATE TABLE openrails.destructive_runs (
-    id uuid DEFAULT uuidv7() NOT NULL,
+    id uuid DEFAULT uuidv7() NOT NULL PRIMARY KEY,
     merchant_id uuid NOT NULL,
     -- NULL = merchant-wide (a declared import, a catalog edit). --prune is
     -- account-bound and always sets it.
@@ -53,9 +56,6 @@ COMMENT ON TABLE openrails.destructive_runs IS 'or#858/or#859 tier 1: every dest
 COMMENT ON COLUMN openrails.destructive_runs.coverage IS 'The SnapshotCoverage absence proof that authorised the run, verbatim — the guard that should have stopped an empty-roster mass cancellation, made auditable after the fact rather than only preventive.';
 COMMENT ON COLUMN openrails.destructive_runs.expected_rows IS 'The operator''s typed confirmation. A run whose discovered row count differs refuses before writing anything.';
 COMMENT ON COLUMN openrails.destructive_runs.status IS 'running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.';
-
-ALTER TABLE ONLY openrails.destructive_runs
-    ADD CONSTRAINT destructive_runs_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY openrails.destructive_runs
     ADD CONSTRAINT destructive_runs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -96,13 +96,25 @@ COMMENT ON COLUMN openrails.subscriptions.deleted_at IS 'or#858 soft delete: set
 COMMENT ON COLUMN openrails.payments.deleted_at IS 'or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.';
 COMMENT ON COLUMN openrails.checkout_sessions.deleted_at IS 'or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `prune rollback` clears it.';
 
+-- Four FKs onto tables that already exist, so squawk cannot see (as it does for
+-- destructive_runs_merchant_fk above) that there is nothing to scan: every
+-- referencing column was added NULL a few statements ago and no row carries a
+-- value yet. The referenced side is the table this file just created, and the
+-- validating scan is over an all-NULL column. Already applied besides; NOT VALID
+-- would only defer that no-op scan and leave the file disagreeing with reality.
+-- A NEW FK onto a column with data in it must still be ADD ... NOT VALID here
+-- plus VALIDATE CONSTRAINT in a later file — the rule stays armed for that.
 ALTER TABLE ONLY openrails.subscriptions
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT subscriptions_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY openrails.payments
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT payments_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY openrails.checkout_sessions
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY openrails.entitlements
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT entitlements_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
 
 -- Rollback is keyed on the run stamp, and only a vanishing fraction of rows
