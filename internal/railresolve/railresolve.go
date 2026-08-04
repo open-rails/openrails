@@ -226,7 +226,11 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		if err != nil {
 			return nil, err
 		}
-		out.Solana = SolanaRailConfigFromSettings(settings, s.testMode())
+		solanaCfg, err := SolanaRailConfigFromSettings(settings, s.testMode())
+		if err != nil {
+			return nil, fmt.Errorf("solana account %s: %w", scope.AccountID, err)
+		}
+		out.Solana = solanaCfg
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
 	}
@@ -267,21 +271,23 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, s
 
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
 // rail account's declared settings: network derives from test_mode alone
-// (#349), the token set starts as the network's curated list and a declared
-// token extends/overrides it per symbol (or#881 — declaring one custom token
-// must never make the merchant re-type the canonical mints), and the #360
-// token pricing policy drops tokens that cannot function (degrade-not-die).
-func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) *config.SolanaRailConfig {
+// (#349), the token set is the network's built-in registry extended by the
+// merchant's declarations (or#881 — a built-in symbol is SELECTED, its mint is
+// never restated), and the #360 pricing policy then drops tokens that cannot
+// function (degrade-not-die). A misdeclared token set is fail-closed: the PSP
+// does not arm rather than arming against a mint nobody vouched for.
+func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) (*config.SolanaRailConfig, error) {
 	network := "mainnet"
 	if testMode {
 		network = "devnet"
 	}
-	out := settings.ApplyTo(&config.SolanaRailConfig{
-		Network: network,
-		Tokens:  solanatokens.ForNetwork(network),
-	})
-	out.Tokens = solanatokens.NormalizeForNetwork(network, out.Tokens)
-	return out
+	resolved, err := solanatokens.ResolveDeclared(network, settings.Tokens)
+	if err != nil {
+		return nil, err
+	}
+	out := settings.ApplyTo(&config.SolanaRailConfig{Network: network})
+	out.Tokens = solanatokens.NormalizeForNetwork(network, resolved)
+	return out, nil
 }
 
 // FixedSet is a static Source over an in-memory PSPSet — a

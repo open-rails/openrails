@@ -37,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -975,6 +976,16 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 		if err := config.ValidateSolanaAccountSettings(account.Settings); err != nil {
 			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
 		}
+		// or#881: the token declaration is resolved against the built-in mint
+		// registry for THIS account's network, so a restated built-in mint or a
+		// custom token with no mint fails the push instead of at arm time.
+		settings, err := config.ParseSolanaAccountSettings(account.Settings)
+		if err != nil {
+			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		}
+		if _, err := solanatokens.ResolveDeclared(manifestSolanaNetwork(environment), settings.Tokens); err != nil {
+			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		}
 	}
 	// or#879: custody is a MODIFIER on any rail, so its settings are validated
 	// for every PSP — a typo'd or retired custody key fails the push loudly
@@ -1371,6 +1382,15 @@ func manifestProviderEnvironment(cfg *config.Config, raw string) (string, error)
 		return config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()), nil
 	}
 	return normalizeProviderEnvironment(raw)
+}
+
+// manifestSolanaNetwork maps a PSP environment onto the Solana network the same
+// way railresolve does at arm time (#349: network derives from test_mode alone).
+func manifestSolanaNetwork(environment string) string {
+	if environment == config.ProviderEnvironmentTest {
+		return "devnet"
+	}
+	return "mainnet"
 }
 
 func normalizeManifestRail(raw string) string {

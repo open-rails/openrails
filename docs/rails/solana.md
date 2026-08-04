@@ -40,12 +40,13 @@ psps:
         recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
         rpc_provider: helius     # helius | public; empty defaults to helius
         rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-        tokens:                  # accepted tokens: SYMBOL -> { name, mint }
-                                 # decimals are NOT configurable: they are read from the
-                                 # SPL mint on-chain, which is the source of truth.
-                                 # A `decimals:` key here is rejected.
-          SOL:  { name: Solana,   mint: So11111111111111111111111111111111111111112 }
-          USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v }
+        # tokens is OPTIONAL — the built-in registry below is always accepted.
+        tokens:
+          USDC: {}               # built-in symbol: SELECTED, mint from the registry.
+                                 # Declaring `mint:` here is an ERROR.
+          MYTK: { name: My Token, mint: replace-with-spl-mint-address }
+                                 # custom symbol: `mint:` is REQUIRED.
+                                 # `decimals:` is rejected on both — read on-chain.
       secrets:
         private_key: replace-with-base58-private-key   # local_keypair mode only
 
@@ -58,6 +59,35 @@ psps:
 
 `settings` keys are strictly validated: a typo'd key fails the manifest push
 loudly. Known keys: `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet`.
+
+#### Accepted tokens
+
+OpenRails ships a built-in mint registry, and it is the source of truth for a
+well-known token's on-chain identity:
+
+| network | built-in symbols |
+|---|---|
+| mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
+| devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD` |
+
+Every symbol in the registry is accepted without declaring anything. A `tokens`
+declaration is **additive** — it extends the registry per symbol, it never
+replaces it, so adding one custom token cannot drop the canonical set.
+
+- **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
+  Declaring `mint:` is an error *even when the address is correct*: a mint you
+  can type is a mint you can mistype, and a wrong mint accepts payment in a
+  different token than the one you priced.
+- **Custom symbol** — `mint:` is required; there the mint *is* the token's
+  identity.
+- **`decimals`** — never configurable (#817): read from the SPL mint on-chain.
+- **Under `test_mode`** the devnet column applies. Devnet mints are
+  per-deployment artefacts with no canonical address, so a built-in symbol with
+  no devnet entry (`USDT`, `USD1`, `USDG`) is simply not built-in there —
+  declare it like any other ad-hoc devnet token, with an explicit `mint:`.
+
+A misdeclared token set is fail-closed: the manifest push is rejected, and a PSP
+whose stored settings are misdeclared does not arm.
 
 ### One-time payments (buyer's view)
 

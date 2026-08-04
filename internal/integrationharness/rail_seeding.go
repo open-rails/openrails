@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,7 +48,7 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		environment := proc.EffectiveEnvironment(testMode)
 
 		var evidence []byte
-		if settings := railAccountSettings(proc); len(settings) > 0 {
+		if settings := railAccountSettings(proc, testMode); len(settings) > 0 {
 			raw, err := json.Marshal(map[string]any{"settings": settings})
 			require.NoError(t, err)
 			evidence = raw
@@ -107,10 +108,15 @@ func railAccountSecrets(proc *config.PSPConfig) map[string]string {
 
 // railAccountSettings maps the typed Solana block onto the rail-account
 // settings evidence shape (#711).
-func railAccountSettings(proc *config.PSPConfig) map[string]any {
+func railAccountSettings(proc *config.PSPConfig, testMode bool) map[string]any {
 	if proc.Solana == nil {
 		return nil
 	}
+	network := "mainnet"
+	if testMode {
+		network = "devnet"
+	}
+	registry := solanatokens.ForNetwork(network)
 	settings := map[string]any{}
 	if proc.Solana.RPCProvider != "" {
 		settings[config.SolanaSettingRPCProvider] = proc.Solana.RPCProvider
@@ -121,7 +127,17 @@ func railAccountSettings(proc *config.PSPConfig) map[string]any {
 	if len(proc.Solana.Tokens) > 0 {
 		tokens := map[string]any{}
 		for symbol, token := range proc.Solana.Tokens {
-			tokens[symbol] = map[string]any{"mint": token.Mint, "name": token.Name}
+			// or#881: a built-in symbol is SELECTED — its mint comes from the
+			// registry and restating it is a push error. Emit the declaration a
+			// real manifest would carry, not a restatement.
+			entry := map[string]any{}
+			if token.Name != "" {
+				entry["name"] = token.Name
+			}
+			if _, builtin := registry[strings.ToUpper(strings.TrimSpace(symbol))]; !builtin {
+				entry["mint"] = token.Mint
+			}
+			tokens[symbol] = entry
 		}
 		settings[config.SolanaSettingTokens] = tokens
 	}

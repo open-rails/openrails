@@ -27,6 +27,9 @@ import (
 //
 //   - USDC  — plain SPL Token, no extensions → eligible (create_plan ACCEPTED on devnet).
 //   - USD1  — plain SPL Token, no extensions → eligible (World Liberty Financial USD; mainnet only).
+//   - USDT  — plain SPL Token, so extension-eligible, but NOT allowlisted: no
+//     devnet deployment exists to run create_plan against, so it stays one-off
+//     until that verification is done.
 //   - PYUSD — Token-2022 w/ PermanentDelegate+TransferFee → REJECTED (devnet error 121 mintHasPermanentDelegate).
 //   - USDG  — Token-2022 w/ PermanentDelegate+TransferFee+ConfidentialTransfer+TransferHook → rejected.
 //   - SOL / volatile — excluded: on-chain plan amounts are immutable, so only a
