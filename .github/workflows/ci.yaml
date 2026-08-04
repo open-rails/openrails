@@ -27,7 +27,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # JOB NAMES ARE THE BRANCH-PROTECTION CONTRACT. The required checks from this
-# file are exactly: changes, build, unit, sqlc, console, integration. The
+# file are exactly: changes, build, unit, lint, sqlc, console, integration. The
 # integration SHARDS are matrix jobs whose names carry the shard index, so they
 # are deliberately NOT the ones to list — the `integration` job below aggregates
 # them into one stable name, which means the shard count can change without
@@ -171,17 +171,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.go == 'true'
-      - uses: actions/setup-go@v5
+      # go-env, not setup-go's own cache: since or#855 nothing writes the shared
+      # `setup-go-…` key any more, so `cache: true` here would miss every time.
+      # `lint` is its own variant because golangci-lint type-checks with its own
+      # build configuration. The action's separate golangci analysis cache is
+      # untouched — it does not restore GOCACHE (Go caching was dropped from the
+      # action in v6), so there is still exactly one restore per path.
+      - uses: ./.github/actions/go-env
         if: needs.changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
-          cache: true
+          variant: lint
       - name: golangci-lint
         if: needs.changes.outputs.go == 'true'
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.6.0
           args: --timeout=15m
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
 
   sqlc:
     runs-on: ubuntu-latest

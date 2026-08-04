@@ -72,6 +72,25 @@ jobs:
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
 
+  # Mirrors ci.yaml's `lint` so a push here leaves the `lint` build cache warm
+  # for PRs, same as every other variant.
+  lint-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/go-env
+        with:
+          variant: lint
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.6.0
+          args: --timeout=15m
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   sqlc-full:
     runs-on: ubuntu-latest
     timeout-minutes: 15
