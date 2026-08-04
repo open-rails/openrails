@@ -85,7 +85,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.6.0
+          version: v2.11.4
           args: --timeout=15m
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''

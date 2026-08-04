@@ -181,11 +181,26 @@ jobs:
         if: needs.changes.outputs.go == 'true'
         with:
           variant: lint
+      # PIN BUMPED FROM v2.6.0 (or#855). v2.6.0 is built with go1.25 and this
+      # module targets go1.26.5, so golangci-lint refused to load the config at
+      # all — "the Go language version (go1.25) used to build golangci-lint is
+      # lower than the targeted Go version (1.26.5)", exit 3, every run. The
+      # gate was structurally incapable of passing: required in name, enforcing
+      # nothing. Its first real execution was on this PR, because ci.yaml runs
+      # only on PRs and the job arrived via a merge to dev.
+      #
+      # v2.11.4 is the smallest bump that loads, and it is green with 0 issues
+      # on the current tree, so what the gate MEANS is unchanged. v2.12.2 was
+      # also tried: it loads too, but its newer govet `inline` analyzer adds 3
+      # findings (reflect.Ptr -> reflect.Pointer in
+      # internal/http/request/request.go). Those are real and want fixing, but
+      # they are source changes, so they belong to whoever takes the next bump —
+      # recorded here rather than silenced with an exclusion.
       - name: golangci-lint
         if: needs.changes.outputs.go == 'true'
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.6.0
+          version: v2.11.4
           args: --timeout=15m
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
