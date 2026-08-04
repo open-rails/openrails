@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -75,6 +76,12 @@ func runConvergeList(cmd *cobra.Command, merchantSlug string, limit int, format 
 	if limit <= 0 {
 		limit = 20
 	}
+	// Clamp AT the int32 narrowing: --limit is an operator-supplied flag and a
+	// wrapped value would reach SQL as a negative LIMIT.
+	if limit > math.MaxInt32 {
+		limit = math.MaxInt32
+	}
+	lim := int32(limit)
 	database, mid, err := convergeOpenDB(cmd, merchantSlug)
 	if err != nil {
 		return err
@@ -87,7 +94,7 @@ func runConvergeList(cmd *cobra.Command, merchantSlug string, limit int, format 
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		runs, e = database.Gen(ctx).ListDestructiveRuns(ctx, gen.ListDestructiveRunsParams{
-			MerchantID: mid.UUID(), Kind: &kind, Lim: int32(limit),
+			MerchantID: mid.UUID(), Kind: &kind, Lim: lim,
 		})
 		return e
 	}); err != nil {

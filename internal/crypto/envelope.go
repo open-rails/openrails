@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -112,7 +113,16 @@ func SecretAAD(merchantID merchant.ID, name string) AAD {
 	out = append(out, "openrails/secret/v1\x00"...)
 	out = binary.BigEndian.AppendUint32(out, uint32(len(id)))
 	out = append(out, id[:]...)
-	out = binary.BigEndian.AppendUint32(out, uint32(len(name)))
+	// Bounds-checked narrowing: a name at the uint32 ceiling is a bug, not an
+	// input (names are addressing keys like psps/<key>/<field>). The clamp
+	// cannot create the collision the prefix exists to prevent — merchantID is
+	// fixed-width, so name is the only variable-length field AND it is last, and
+	// its bytes are appended in full below.
+	nameLen := len(name)
+	if nameLen > math.MaxUint32 {
+		nameLen = math.MaxUint32
+	}
+	out = binary.BigEndian.AppendUint32(out, uint32(nameLen))
 	out = append(out, name...)
 	return out
 }
