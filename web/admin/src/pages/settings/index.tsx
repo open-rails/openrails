@@ -111,7 +111,7 @@ function MerchantSettingsTab() {
   }, [error])
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
-    <div className="grid max-w-3xl gap-10">
+    <div className="grid gap-10">
       <MerchantProfileForm initial={data?.profile} />
       <RepriceNoticeWindowForm initial={data?.reprice_notice_window_days} />
     </div>
@@ -379,7 +379,7 @@ function ProvidersTab() {
   const providerDefinitions = data?.provider_definitions ?? []
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <section className="grid gap-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="grid gap-1">
@@ -680,7 +680,7 @@ function CustomerControlsTab() {
   }
 
   return (
-    <Card className="max-w-xl">
+    <Card>
       <CardHeader>
         <CardTitle className="text-sm">Credit limit & trust level</CardTitle>
         <CardDescription>

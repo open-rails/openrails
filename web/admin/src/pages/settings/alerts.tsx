@@ -203,7 +203,7 @@ export function AlertsTab() {
   const templateList = templates.data?.data ?? []
 
   return (
-    <div className="flex max-w-4xl flex-col gap-10">
+    <div className="flex flex-col gap-10">
       <AlertEmailSection
         key={settings.data?.alert_email ?? "∅"}
         settings={settings.data ?? undefined}
