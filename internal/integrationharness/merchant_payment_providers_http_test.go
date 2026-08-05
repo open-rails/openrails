@@ -137,14 +137,15 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	// used to accept, and any typo, used to return 200 with an EMPTY list —
 	// "this merchant has no PSPs" is the worst possible answer to a capability
 	// question. They are now a client error.
-	for _, retired := range []string{"enabled", "available", "not_archived", "disabled", "legacy", "Archived", "actve"} {
+	for _, retired := range []string{"enabled", "available", "not_archived", "disabled", "legacy", "actve"} {
 		st, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment="+env+"&status="+retired, readToken, nil)
 		require.Equal(t, http.StatusBadRequest, st, string(body))
 		require.Contains(t, string(body), `unknown status`, retired)
 	}
 
-	// "all" is the explicit spelling of the omitted filter.
-	for _, accepted := range []string{"", "all"} {
+	// "all" is the explicit spelling of the omitted filter; case is normalization,
+	// not a synonym.
+	for _, accepted := range []string{"", "all", "Archived", "ACTIVE"} {
 		st, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment="+env+"&status="+accepted, readToken, nil)
 		require.Equal(t, http.StatusOK, st, string(body))
 	}
