@@ -84,6 +84,8 @@ merchants:
           settings:
             public_api_key: <BT public application key>   # checkout-page config
             network_tokens: false
+            account_updater: false                        # batch account updater add-on
+            account_updater_lookahead_days: 14            # optional; default 14
           secrets:
             api_key: <BT private application key>         # the only custodial secret
 ```
@@ -113,6 +115,15 @@ Consequences, all enforced rather than documented:
   `psps/<rail>/<environment>/<account_id>/<key>` already has — and they are read
   through the same or#812 version floor (`custodians.credential_versions`), so a
   rotated custodial key cuts over on every node at once.
+* `account_updater` arms the **batch account updater**: a periodic worker that,
+  ahead of each renewal, asks the custodian to refresh the cards backing
+  subscriptions due inside `account_updater_lookahead_days` (default 14, and
+  also how long a refresh stays fresh — a card is looked up once per cycle).
+  Results are applied through the same writers the custodian's webhooks use: a
+  reissue refreshes the instrument and CLEARS any park, a closed account or a
+  "contact cardholder" answer parks it. Nothing is ever deleted or cancelled.
+  Both settings are off/default until declared — the updater is a priced add-on,
+  and an unarmed custodian is never enumerated by the worker at all.
 * The retired inline keys (`settings.custodian_account_id`,
   `custodian_public_api_key`, `custodian_network_tokens`, the
   `custodian_api_key` secret) and the retired `vaulted_card` keys

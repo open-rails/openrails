@@ -125,6 +125,52 @@ func TestParseSettings(t *testing.T) {
 	}
 }
 
+// or#795: the batch account updater is a CONTRACTED add-on with one window
+// knob. Arming is never implied, the window has one default, and a
+// misdeclared window fails loudly rather than silently becoming the default.
+func TestParseAccountUpdaterSettings(t *testing.T) {
+	bt := models.CustodianBasisTheory
+
+	got, err := ParseSettings(bt, map[string]any{SettingPublicAPIKey: "key_pub"})
+	if err != nil {
+		t.Fatalf("valid settings: %v", err)
+	}
+	if got.AccountUpdater {
+		t.Error("a paid add-on must never be armed by omission")
+	}
+	if got.LookaheadDays() != DefaultAccountUpdaterLookaheadDays {
+		t.Errorf("lookahead default = %d, want %d", got.LookaheadDays(), DefaultAccountUpdaterLookaheadDays)
+	}
+
+	// Every shape a manifest / env overlay / jsonb blob produces for the same
+	// declared number resolves identically.
+	for name, raw := range map[string]any{"int": 21, "float": float64(21), "string": "21"} {
+		got, err := ParseSettings(bt, map[string]any{
+			SettingPublicAPIKey:                "key_pub",
+			SettingAccountUpdater:              "true",
+			SettingAccountUpdaterLookaheadDays: raw,
+		})
+		if err != nil {
+			t.Fatalf("%s lookahead: %v", name, err)
+		}
+		if !got.AccountUpdater || got.LookaheadDays() != 21 {
+			t.Errorf("%s lookahead parsed = %+v", name, got)
+		}
+	}
+
+	for name, settings := range map[string]map[string]any{
+		"zero window":     {SettingPublicAPIKey: "k", SettingAccountUpdaterLookaheadDays: 0},
+		"negative window": {SettingPublicAPIKey: "k", SettingAccountUpdaterLookaheadDays: -3},
+		"fractional":      {SettingPublicAPIKey: "k", SettingAccountUpdaterLookaheadDays: 1.5},
+		"not a number":    {SettingPublicAPIKey: "k", SettingAccountUpdaterLookaheadDays: "a fortnight"},
+		"wrong type":      {SettingPublicAPIKey: "k", SettingAccountUpdaterLookaheadDays: true},
+	} {
+		if _, err := ParseSettings(bt, settings); err == nil {
+			t.Errorf("%s: expected a loud refusal, got none", name)
+		}
+	}
+}
+
 func TestPublicSettingsProjection(t *testing.T) {
 	d, _ := Get(models.CustodianBasisTheory)
 	public, _, ok := d.PublicSettings(map[string]any{

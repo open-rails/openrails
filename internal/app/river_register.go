@@ -89,6 +89,19 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
+	// or#795: the batch account-updater cadence. Ingests results for open
+	// batches, then opens new ones for instruments renewing inside the
+	// custodian's lookahead window. Merchants with no armed custodian are never
+	// visited (the work queue starts at the custodian registry).
+	if err := addTrackedWorker(r, workers, &riverjobs.AccountUpdaterBatchWorker{
+		DB:      r.DB,
+		Config:  r.Config,
+		Clock:   clock,
+		Rails:   r.RailConfigs,
+		Intents: r.intentRunner(intentRegistry, clock),
+	}); err != nil {
+		return fmt.Errorf("add account updater worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CreditExpiryWorker{
 		DB:    r.DB,
 		Clock: clock,
@@ -352,6 +365,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),
+		// or#795: the batch account-updater submit (create job + upload the
+		// token CSV) is a paid provider write, so it rides the ledger like
+		// every other outbound mutation.
+		intents.NewAccountUpdaterBatchHandler(r.DB, r.Config, r.RailConfigs, clock),
 	)
 	// #674 write-through kinds live next to their domain services and register
 	// only when those services are wired (worker-only runtimes may lack them).
@@ -542,6 +559,23 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 6 hours: the batch account-updater cadence (or#795). The window it
+	// works against is weeks wide, so the tick only has to be much finer than
+	// that — 6h gives an in-flight batch four chances a day to be ingested.
+	// RunOnStart=true: a restart is exactly when a batch submitted before the
+	// crash is waiting to be POLLED (never resubmitted — the durable batch row
+	// holds the job ref, and the DB allows one open batch per custodian).
+	jobs = append(jobs, r.healthPeriodic(
+		6*time.Hour,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.AccountUpdaterBatchArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every hour: cleanup expired data (wallet challenges, payment intents, etc.)

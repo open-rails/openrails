@@ -22,11 +22,59 @@ import (
 
 // Account Updater result codes (result CSV v1.2).
 const (
-	AUUpdatedPAN     = "UPD_PAN"
-	AUUpdatedExpDate = "UPD_EXP_DATE"
-	AUNoUpdate       = "NO_UPDATE"
-	AUClosedAccount  = "WRN_CLOSED_ACCOUNT"
+	AUUpdatedPAN        = "UPD_PAN"
+	AUUpdatedExpDate    = "UPD_EXP_DATE"
+	AUNoUpdate          = "NO_UPDATE"
+	AUNoMatch           = "NO_MATCH"
+	AUClosedAccount     = "WRN_CLOSED_ACCOUNT"
+	AUContactCardholder = "WRN_CONTACT_CARDHOLDER"
 )
+
+// AUOutcome is the DOCTRINE class of one result row — what OpenRails is
+// entitled to do about it. The wire code is always recorded verbatim (#651);
+// this is only the mapping onto the actions that already exist.
+type AUOutcome string
+
+const (
+	// AUOutcomeUpdated: the network reissued the credential. Rotate the method
+	// ref / refresh the metadata — and clear any park, because this row is the
+	// newest evidence about the card (or#872).
+	AUOutcomeUpdated AUOutcome = "updated"
+	// AUOutcomeClosed: the account is closed. Park (bucket 2) — never delete,
+	// never terminal-cancel.
+	AUOutcomeClosed AUOutcome = "closed"
+	// AUOutcomeContactCardholder: the network will say nothing more without the
+	// cardholder. Same destination as closed: park and surface, since charging
+	// on regardless is how a book quietly turns into declines.
+	AUOutcomeContactCardholder AUOutcome = "contact_cardholder"
+	// AUOutcomeNoChange: nothing was reported (NO_UPDATE) or the card is not
+	// enrolled/matched (NO_MATCH). No evidence, no action.
+	AUOutcomeNoChange AUOutcome = "no_change"
+	// AUOutcomeUnrecognized: a code this build does not know. Recorded
+	// verbatim, folded by nothing — a guess on a money path is worse than a
+	// gap an operator can see.
+	AUOutcomeUnrecognized AUOutcome = "unrecognized"
+)
+
+// ClassifyAccountUpdaterResult maps a verbatim result code onto its outcome.
+// The UPD_ family is matched by PREFIX on purpose: the row itself carries the
+// new token/expiry, so a future UPD_* variant must still be applied rather than
+// dropped — refusing the network's own repair is the or#872 failure mode.
+func ClassifyAccountUpdaterResult(code string) AUOutcome {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	switch code {
+	case "", AUNoUpdate, AUNoMatch:
+		return AUOutcomeNoChange
+	case AUClosedAccount:
+		return AUOutcomeClosed
+	case AUContactCardholder:
+		return AUOutcomeContactCardholder
+	}
+	if strings.HasPrefix(code, "UPD_") {
+		return AUOutcomeUpdated
+	}
+	return AUOutcomeUnrecognized
+}
 
 type AccountUpdaterJob struct {
 	ID          string     `json:"id"`

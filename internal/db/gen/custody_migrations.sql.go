@@ -82,7 +82,7 @@ func (q *Queries) GetCustodyMigrationForTarget(ctx context.Context, arg GetCusto
 }
 
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at FROM openrails.payment_methods
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
   AND custodian = $2::text
   AND rail_method_ref = $3::text
@@ -128,6 +128,7 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 		&i.ChargeVia,
 		&i.ParkReason,
 		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
 	)
 	return i, err
 }
@@ -186,7 +187,7 @@ func (q *Queries) ListCustodyMigrationsForBatch(ctx context.Context, arg ListCus
 
 const lockPaymentMethodForCustodyRemap = `-- name: LockPaymentMethodForCustodyRemap :one
 
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at FROM openrails.payment_methods
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
 FOR UPDATE
@@ -230,6 +231,7 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 		&i.ChargeVia,
 		&i.ParkReason,
 		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
 	)
 	return i, err
 }
