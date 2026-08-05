@@ -74,7 +74,7 @@ func (r *RunResult) PullProofs() PullProofs {
 // Callers run it merchant-scoped (RLS) after mirror writes were applied
 // (enforce insert+overwrite) — an advisory dry-run proves nothing about the
 // LOCAL mirror.
-func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs, now time.Time) ([]string, error) {
+func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs) ([]string, error) {
 	accounts, err := q.ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: merchantID,
 	})
@@ -108,9 +108,8 @@ func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID
 		if !proven {
 			continue
 		}
-		ts := now.UTC()
 		if _, err := q.UpsertReconciliationState(ctx, gen.UpsertReconciliationStateParams{
-			MerchantID: merchantID, SourceDomain: domain, FullyReconciled: true, LastFullPullAt: &ts,
+			MerchantID: merchantID, SourceDomain: domain, FullyReconciled: true,
 		}); err != nil {
 			return flipped, fmt.Errorf("reconcile: mark %s reconciled: %w", domain, err)
 		}

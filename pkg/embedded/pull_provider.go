@@ -243,7 +243,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			// rail account), never blindly. A full-head --insert --overwrite pull
 			// remains the manual bulk-import way to establish the gate.
 			if opts.Insert && opts.Overwrite {
-				if _, err := reconcile.MarkReconciledSourceDomains(ctx, rt.DB.Gen(ctx), merchantID.UUID(), res.PullProofs(), time.Now().UTC()); err != nil {
+				if _, err := reconcile.MarkReconciledSourceDomains(ctx, rt.DB.Gen(ctx), merchantID.UUID(), res.PullProofs()); err != nil {
 					return fmt.Errorf("mark reconciled domains: %w", err)
 				}
 			}

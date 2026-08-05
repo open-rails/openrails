@@ -181,8 +181,8 @@ production writes. Deliberately not started.
 
 ### The inline exemptions
 
-Fifteen statements, twenty-one rule instances, all classified
-**PERMANENT**. All but `0048` are **history** —
+Twenty-seven statements, forty-two rule instances, all classified
+**PERMANENT**. All but `0048` and `0061` are **history** —
 rewriting them changes no live database and the honest record is what actually
 ran. The rules stay armed for new migrations.
 
@@ -198,6 +198,7 @@ ran. The rules stay armed for new migrations.
 | `0031` payments token_type CHECK | `constraint-missing-not-valid` | The two `UPDATE`s immediately above rewrite every row the re-added CHECK then validates, in the same transaction — the constraint is dropped and restored only to move `provider_vault`/`pan_via_vault` to their new names. |
 | `0044` host_lifecycle_events.currency | `adding-not-nullable-field` | The rule's own suggested fix — stay nullable, add a `CHECK` — provably cannot satisfy the invariant it exists for: CUR-1 reads `information_schema.columns.is_nullable`, so only the column attribute counts. The scan is inherent to `SET NOT NULL`, not the constraint two-step the sibling rule covers, so no file split reduces it. The table is a delivery feed created in `0037` and pruned after delivery, so the scan is over a small, short-lived table. |
 | `0060` rail_refresh_watermarks PSP cut | `ban-drop-column`, `adding-not-nullable-field`, `disallowed-unique-constraint`, `adding-foreign-key-constraint`, `constraint-missing-not-valid` | or#893 deletes the table's NULL/global lane. `psp_key` is a generated column that existed only to key that lane; the `DELETE … WHERE psp_id IS NULL` two statements earlier removes every row the `SET NOT NULL` and the re-keyed UNIQUE then validate. The table is a resumable cursor — one row per (merchant, rail, PSP, domain) — so every scan here is over a handful of rows, and `NOT VALID` buys nothing inside a single-transaction migrator (see `0014`). |
+| `0061` ×12 write-only column drops | `ban-drop-column` (×21) | **Deliberate hard cut, not history.** or#823 drops the columns that are written and read by nothing — the rule's concern is breaking a client that reads them, and the verified fact that qualified each column is that no such client exists (no sqlc query, no generated reader, no raw SQL). Prelaunch: no deployment holds rows, and a column kept "just in case" reads to the next person as evidence something consumes it. The lock is `ACCESS EXCLUSIVE` either way and `DROP COLUMN` is metadata-only in Postgres, so there is no cheaper shape to split this into. |
 | `0048` DROP payer_spend_limits | `ban-drop-table` | **Deliberate hard cut, not history.** or#897 replaces the table with `billing_policies` + `billing_policy_bindings`; the rule's concern (breaking existing clients) is the intended effect, and prelaunch there is no deployment holding rows worth keeping. Leaving the table alongside its replacement would be the two-substrate disease or#878 removed from exposure. |
 
 A new migration that genuinely needs one of these must add the constraint

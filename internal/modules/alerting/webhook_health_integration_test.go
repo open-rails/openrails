@@ -39,11 +39,21 @@ func countRuleNotifications(t *testing.T, pool *pgxpool.Pool, mid, ruleID uuid.U
 	return n
 }
 
-func webhookHealthRow(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID, rail string) (lastAccepted *time.Time, acceptedCount, rejectedCount, driftCount int64) {
+// webhookHealthRow reads the two substrates #786 actually has: the silence
+// watermark on the snapshot row, and the daily counter buckets the metrics read.
+// or#823 dropped webhook_health's lifetime tallies — they were incremented on
+// every event and consulted by nothing, so asserting on them proved only that
+// the write happened.
+func webhookHealthRow(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID, rail string) (lastAccepted *time.Time, rejected, drift int64) {
 	t.Helper()
-	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT last_accepted_at, accepted_count, rejected_count, drift_count FROM openrails.webhook_health WHERE merchant_id=$1 AND rail=$2`,
-		mid, rail).Scan(&lastAccepted, &acceptedCount, &rejectedCount, &driftCount))
+	ctx := context.Background()
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT last_accepted_at FROM openrails.webhook_health WHERE merchant_id=$1 AND rail=$2`,
+		mid, rail).Scan(&lastAccepted))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(rejected),0)::bigint, COALESCE(SUM(drift),0)::bigint
+		   FROM openrails.webhook_health_daily WHERE merchant_id=$1 AND rail=$2`,
+		mid, rail).Scan(&rejected, &drift))
 	return
 }
 
@@ -98,9 +108,8 @@ func TestWebhookHealthAlertCycle(t *testing.T) {
 
 	// 1. Verified-accepted ingest stamps the watermark; nothing fires.
 	rec.Accepted(mctx(mid), "nmi")
-	firstAccepted, acceptedCount, _, _ := webhookHealthRow(t, pool, mid, "nmi")
+	firstAccepted, _, _ := webhookHealthRow(t, pool, mid, "nmi")
 	require.NotNil(t, firstAccepted)
-	require.Equal(t, int64(1), acceptedCount)
 	stats := evaluate()
 	require.Equal(t, 0, stats.Fired)
 	require.Equal(t, 0, countNotifications(t, pool, mid))
@@ -126,11 +135,11 @@ func TestWebhookHealthAlertCycle(t *testing.T) {
 	// stamped watermark is detectable) bump the reject counter but NEVER the
 	// accepted watermark; the third reject crosses the webhook_rejects threshold.
 	clk.Advance(time.Hour)
-	acceptedBefore, _, _, _ := webhookHealthRow(t, pool, mid, "nmi")
+	acceptedBefore, _, _ := webhookHealthRow(t, pool, mid, "nmi")
 	for i := 0; i < 3; i++ {
 		rec.Rejected(mctx(mid), "nmi")
 	}
-	acceptedAfter, _, rejectedCount, _ := webhookHealthRow(t, pool, mid, "nmi")
+	acceptedAfter, rejectedCount, _ := webhookHealthRow(t, pool, mid, "nmi")
 	require.Equal(t, int64(3), rejectedCount)
 	require.Equal(t, acceptedBefore.UTC(), acceptedAfter.UTC(), "a rejected webhook must not stamp the accepted watermark")
 	stats = evaluate()
@@ -157,7 +166,7 @@ func TestWebhookHealthAlertCycle(t *testing.T) {
 		require.True(t, admitted, "correction with stale accepted watermark must count as drift")
 		require.NoError(t, webhookhealth.StampPull(ctx, appDB, "nmi", clk.Now()))
 	})
-	_, _, _, driftCount := webhookHealthRow(t, pool, mid, "nmi")
+	_, _, driftCount := webhookHealthRow(t, pool, mid, "nmi")
 	require.Equal(t, int64(2), driftCount)
 	stats = evaluate()
 	require.Equal(t, 1, stats.Fired)
@@ -171,7 +180,7 @@ func TestWebhookHealthAlertCycle(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, admitted, "webhook-announced change must not count as drift")
 	})
-	_, _, _, driftCount = webhookHealthRow(t, pool, mid, "nmi")
+	_, _, driftCount = webhookHealthRow(t, pool, mid, "nmi")
 	require.Equal(t, int64(2), driftCount)
 }
 

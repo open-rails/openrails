@@ -2,29 +2,24 @@
 -- or a pinned merchant connection); INSERTs pass merchant_id for RLS WITH CHECK.
 
 -- name: RecordWebhookAccepted :exec
--- Verified-accepted webhook: stamp the silence watermark + bump counters.
-WITH health AS (
-    INSERT INTO openrails.webhook_health (merchant_id, rail, last_accepted_at, accepted_count)
-    VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(at)::timestamptz, 1)
-    ON CONFLICT (merchant_id, rail) DO UPDATE SET
-        last_accepted_at = EXCLUDED.last_accepted_at,
-        accepted_count = openrails.webhook_health.accepted_count + 1,
-        updated_at = now()
-)
-INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, accepted)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, date_trunc('day', sqlc.arg(at)::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 1)
-ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
-    accepted = openrails.webhook_health_daily.accepted + 1;
+-- Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
+-- this used to bump were dropped in or#823 — a monotonic total answers no
+-- windowed question, which is what webhook_health_daily is for.
+INSERT INTO openrails.webhook_health (merchant_id, rail, last_accepted_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(at)::timestamptz)
+ON CONFLICT (merchant_id, rail) DO UPDATE SET
+    last_accepted_at = EXCLUDED.last_accepted_at,
+    updated_at = now();
 
 -- name: RecordWebhookRejected :exec
--- Failed signature verification: bump reject counters. NEVER touches
--- last_accepted_at — rejects must not look like liveness.
+-- Failed signature verification: bump the daily reject bucket. NEVER touches
+-- last_accepted_at — rejects must not look like liveness. The snapshot row is
+-- still upserted so a rail that has ONLY ever rejected still has a created_at
+-- for the silence age to measure from.
 WITH health AS (
-    INSERT INTO openrails.webhook_health (merchant_id, rail, last_rejected_at, rejected_count)
-    VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(at)::timestamptz, 1)
+    INSERT INTO openrails.webhook_health (merchant_id, rail)
+    VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text)
     ON CONFLICT (merchant_id, rail) DO UPDATE SET
-        last_rejected_at = EXCLUDED.last_rejected_at,
-        rejected_count = openrails.webhook_health.rejected_count + 1,
         updated_at = now()
 )
 INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, rejected)
@@ -40,9 +35,7 @@ ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
 -- import is not drift. Returns rows affected (0 = gate closed).
 WITH gate AS (
     UPDATE openrails.webhook_health
-    SET last_drift_at = sqlc.arg(at)::timestamptz,
-        drift_count = drift_count + sqlc.arg(n)::bigint,
-        updated_at = now()
+    SET updated_at = now()
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND rail = sqlc.arg(rail)::text
       AND last_pull_at IS NOT NULL

@@ -68,7 +68,6 @@ type MoneyAccount struct {
 	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
 	// self-serve (set via SetCreditLimit, never UpsertAccountSettings).
 	CreditLimitAmount int64      `json:"credit_limit_amount"`
-	LastAlertAt       *time.Time `json:"last_alert_at,omitempty"`
 	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
 	TrustLevel *string `json:"trust_level,omitempty"`

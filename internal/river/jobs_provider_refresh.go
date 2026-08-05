@@ -375,7 +375,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		// PROVES a source domain — flip reconciliation_state before the
 		// convergence pass so held EXCESS repairs can proceed.
 		if len(res.Proofs) > 0 {
-			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
+			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs); err != nil {
 				stats.LaneErrors++
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
 			} else if len(flipped) > 0 {
@@ -555,10 +555,10 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		res, err := engine.Run(ctx, params)
 		if err != nil {
 			out.ProviderErrors++
-			if werr := w.recordWatermarkFailure(ctx, mid, provider, pspID, since, now, err); werr != nil {
-				out.WatermarkErrors++
-				log.WithContext(ctx).WithError(werr).WithField("provider", provider).Warn("Provider Refresh: record failed provider attempt failed")
-			}
+			// or#823: the failure is recorded by the job (log + River's own error
+			// record), not by a watermark column nothing surfaced. The row is
+			// deliberately left alone: an unadvanced watermark IS the durable
+			// statement that this window still needs reading.
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"provider": provider,
 				"since":    since,
@@ -583,7 +583,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 			}
 		}
-		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until, now); err != nil {
+		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until); err != nil {
 			out.WatermarkErrors++
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
@@ -619,36 +619,16 @@ SELECT watermark_at
 	return watermark.UTC(), nil
 }
 
-func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark, attemptedAt time.Time) error {
+func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark time.Time) error {
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, psp_id, event_domain, watermark_at,
-    last_attempted_at, last_succeeded_at, last_error
-) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, $6::timestamptz, NULL)
+    merchant_id, rail, psp_id, event_domain, watermark_at
+) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz)
 ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
 DO UPDATE SET
     watermark_at = EXCLUDED.watermark_at,
-    last_attempted_at = EXCLUDED.last_attempted_at,
-    last_succeeded_at = EXCLUDED.last_succeeded_at,
-    last_error = NULL,
     updated_at = now()
-`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC())
-	return err
-}
-
-func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark, attemptedAt time.Time, cause error) error {
-	errText := cause.Error()
-	_, err := w.DB.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, psp_id, event_domain, watermark_at,
-    last_attempted_at, last_succeeded_at, last_error
-) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, NULL, $7::text)
-ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
-DO UPDATE SET
-    last_attempted_at = EXCLUDED.last_attempted_at,
-    last_error = EXCLUDED.last_error,
-    updated_at = now()
-`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC(), errText)
+`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC())
 	return err
 }
 

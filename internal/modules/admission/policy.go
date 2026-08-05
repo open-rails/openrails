@@ -495,7 +495,6 @@ func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID,
 		Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
 		ScopeKey:      p.ScopeKey,
 		Windows:       windowsJSON,
-		PolicyVersion: 1,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	})

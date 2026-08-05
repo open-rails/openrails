@@ -33,13 +33,12 @@ RETURNING *;
 DELETE FROM openrails.alert_rules WHERE id = $1;
 
 -- name: MarkAlertRuleFired :exec
--- Edge transition: open a new active alert. Records the crossing value/detail.
+-- Edge transition: open a new active alert. Records the crossing value.
 UPDATE openrails.alert_rules
 SET fired_at = sqlc.arg(fired_at)::timestamptz,
     cleared_at = NULL,
     last_evaluated_at = sqlc.arg(evaluated_at)::timestamptz,
     last_value = sqlc.narg(value),
-    last_detail = sqlc.narg(detail),
     updated_at = now()
 WHERE id = $1;
 

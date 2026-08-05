@@ -369,11 +369,6 @@ func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.Openra
 		if exists {
 			continue
 		}
-		sourceID := g.ID
-		if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
-			sourceID = parsed
-		}
-		productKey := spec.ProductKey
 		grantID := g.ID
 		if err := l.q.CreateProductUsageLimitBinding(ctx, gen.CreateProductUsageLimitBindingParams{
 			ID:            uuidutil.NewV7(),
@@ -382,13 +377,9 @@ func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.Openra
 			UsageLimitKey: spec.UsageLimitKey,
 			Measure:       spec.Measure,
 			Windows:       spec.Windows,
-			SourceType:    g.SourceType,
-			SourceID:      &sourceID,
-			ProductKey:    &productKey,
 			GrantID:       &grantID,
 			StartsAt:      g.StartsAt,
 			EndsAt:        g.EndsAt,
-			PolicyVersion: 1,
 		}); err != nil {
 			return fmt.Errorf("grants: materialize usage-limit binding %q: %w", spec.UsageLimitKey, err)
 		}

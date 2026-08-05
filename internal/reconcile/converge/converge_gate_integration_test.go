@@ -77,7 +77,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 
 		// A NON-exhaustive pull proves nothing.
 		flipped, err := reconcile.MarkReconciledSourceDomains(ctx, q, gateMerchant.UUID(),
-			reconcile.PullProofs{reconcile.ProviderNMI: {}}, time.Now().UTC())
+			reconcile.PullProofs{reconcile.ProviderNMI: {}})
 		require.NoError(t, err)
 		require.Empty(t, flipped, "non-exhaustive coverage must not flip any domain")
 		require.False(t, isReconciled(ctx, q, "subscriptions"))
@@ -89,7 +89,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 			reconcile.PullProofs{reconcile.ProviderNMI: {Coverage: reconcile.SnapshotCoverage{
 				SubscriptionsExhaustive: true, TransactionsExhaustive: true,
 				TransactionsPaginatedComplete: true, TransactionWindowSince: &since,
-			}}}, time.Now().UTC())
+			}}})
 		require.NoError(t, err)
 		require.Equal(t, []string{"subscriptions"}, flipped)
 		require.True(t, isReconciled(ctx, q, "subscriptions"))
@@ -111,7 +111,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 		flipped, err = reconcile.MarkReconciledSourceDomains(ctx, q, gateMerchant.UUID(),
 			reconcile.PullProofs{reconcile.ProviderNMI: {Coverage: reconcile.SnapshotCoverage{
 				SubscriptionsExhaustive: true, TransactionsExhaustive: true, TransactionsPaginatedComplete: true,
-			}}}, time.Now().UTC())
+			}}})
 		require.NoError(t, err)
 		require.Empty(t, flipped, "multi-account rail is unprovable by one pull")
 		require.True(t, isReconciled(ctx, q, "subscriptions"), "ratchet: proven domains never unset")
@@ -177,8 +177,7 @@ func TestConverge_EmptyStripeRosterNeverOpensTheAbsenceGate(t *testing.T) {
 		require.NoError(t, err)
 
 		flipped, err := reconcile.MarkReconciledSourceDomains(ctx, q, gateMerchant.UUID(),
-			reconcile.PullProofs{reconcile.ProviderStripe: {Coverage: snap.Coverage, PspID: psp.ID.String()}},
-			time.Now().UTC())
+			reconcile.PullProofs{reconcile.ProviderStripe: {Coverage: snap.Coverage, PspID: psp.ID.String()}})
 		require.NoError(t, err)
 		require.Empty(t, flipped,
 			"an empty Stripe roster proved absence — the confirmed-absence gate is a ratchet, so this opens every retraction for this merchant permanently")

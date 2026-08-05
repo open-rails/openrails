@@ -1063,7 +1063,7 @@ func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListD
 
 const listLapsedSubscriptionsWithEvidence = `-- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail,
-       (s.payment_method_id IS NOT NULL)::bool AS vaulted,
+       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
        (s.current_period_starts_at IS NOT NULL AND EXISTS (
@@ -1112,7 +1112,7 @@ type ListLapsedSubscriptionsWithEvidenceRow struct {
 	ID                          uuid.UUID
 	Status                      OpenrailsSubscriptionStatus
 	Rail                        string
-	Vaulted                     bool
+	HasPaymentMethod            bool
 	RailSubscriptionID          string
 	CurrentPeriodEndsAt         *time.Time
 	GraceEndsAt                 *time.Time
@@ -1158,7 +1158,7 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 			&i.ID,
 			&i.Status,
 			&i.Rail,
-			&i.Vaulted,
+			&i.HasPaymentMethod,
 			&i.RailSubscriptionID,
 			&i.CurrentPeriodEndsAt,
 			&i.GraceEndsAt,
@@ -1860,7 +1860,7 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
+SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY ($1::text[])
@@ -1873,17 +1873,18 @@ type ReconcileListPaymentMethodsByRailsParams struct {
 }
 
 type ReconcileListPaymentMethodsByRailsRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Rail       string
-	VaultID    string
-	LastFour   *string
-	CardType   *string
-	ExpiryDate *string
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Rail            string
+	RailCustomerRef string
+	LastFour        *string
+	CardType        *string
+	ExpiryDate      *string
 }
 
-// Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
-// here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
+// rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
+// the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
+// for HashiCorp Vault, and the column already carries the right name.
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.PspID)
 	if err != nil {
@@ -1897,7 +1898,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 			&i.ID,
 			&i.CustomerID,
 			&i.Rail,
-			&i.VaultID,
+			&i.RailCustomerRef,
 			&i.LastFour,
 			&i.CardType,
 			&i.ExpiryDate,
@@ -2451,23 +2452,21 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 const upsertReconciliationState = `-- name: UpsertReconciliationState :one
 
 INSERT INTO openrails.reconciliation_state (
-    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+    merchant_id, source_domain, fully_reconciled, updated_at
 ) VALUES (
     $1::uuid, $2::text,
-    $3::boolean, $4::timestamptz, now()
+    $3::boolean, now()
 )
 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     fully_reconciled = EXCLUDED.fully_reconciled,
-    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
     updated_at = now()
-RETURNING id, merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+RETURNING id, merchant_id, source_domain, fully_reconciled, updated_at
 `
 
 type UpsertReconciliationStateParams struct {
 	MerchantID      uuid.UUID
 	SourceDomain    string
 	FullyReconciled bool
-	LastFullPullAt  *time.Time
 }
 
 // #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
@@ -2477,22 +2476,16 @@ type UpsertReconciliationStateParams struct {
 // configured provider account whose rail could hold that domain's sources.
 // `grants` is admin/local-sourced, so no pull ever proves it — it stays a
 // manual/bulk-import decision. The flag is a ratchet: never auto-unset.
-// Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
-// last_full_pull_at after a completed authoritative pull/import for that domain.
+// Mark a source domain's reconciliation watermark: pass fully_reconciled=true
+// after a completed authoritative pull/import for that domain.
 func (q *Queries) UpsertReconciliationState(ctx context.Context, arg UpsertReconciliationStateParams) (OpenrailsReconciliationState, error) {
-	row := q.db.QueryRow(ctx, upsertReconciliationState,
-		arg.MerchantID,
-		arg.SourceDomain,
-		arg.FullyReconciled,
-		arg.LastFullPullAt,
-	)
+	row := q.db.QueryRow(ctx, upsertReconciliationState, arg.MerchantID, arg.SourceDomain, arg.FullyReconciled)
 	var i OpenrailsReconciliationState
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
 		&i.SourceDomain,
 		&i.FullyReconciled,
-		&i.LastFullPullAt,
 		&i.UpdatedAt,
 	)
 	return i, err

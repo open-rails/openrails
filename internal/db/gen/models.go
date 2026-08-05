@@ -138,7 +138,6 @@ type OpenrailsAlertRule struct {
 	ClearedAt       *time.Time
 	LastEvaluatedAt *time.Time
 	LastValue       *float64
-	LastDetail      []byte
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -617,11 +616,10 @@ type OpenrailsInvokerSpendLimit struct {
 	CustomerID uuid.UUID
 	Scope      string
 	// Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier).
-	ScopeKey      string
-	Windows       []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ScopeKey  string
+	Windows   []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
@@ -689,10 +687,9 @@ type OpenrailsMerchant struct {
 type OpenrailsMerchantConfiguration struct {
 	MerchantID uuid.UUID
 	// JSONB merchant config. delegated_invoker_wasted_spend_windows is an array of {key, window_seconds, limit}; amount values use the request currency internal precision.
-	Config        []byte
-	ConfigVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	Config    []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.
@@ -700,7 +697,6 @@ type OpenrailsMerchantDek struct {
 	MerchantID uuid.UUID
 	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
 	WrappedDek []byte
-	KeyVersion int32
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -792,7 +788,6 @@ type OpenrailsMoneySetting struct {
 	AutoTopupPaymentMethodID *uuid.UUID
 	// per-account default credit-grant expiry in HOURS; NULL = no default.
 	DefaultCreditExpiryHours *int32
-	LastAlertAt              *time.Time
 	LastTopupAt              *time.Time
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
@@ -1033,15 +1028,10 @@ type OpenrailsProductUsageLimitBinding struct {
 	UsageLimitKey string
 	Measure       string
 	Windows       []byte
-	SourceType    string
-	SourceID      *uuid.UUID
-	// Catalog product key/slug whose current benefits were materialized at grant time.
-	ProductKey    *string
 	GrantID       *uuid.UUID
 	StartsAt      time.Time
 	EndsAt        *time.Time
 	RevokedAt     *time.Time
-	PolicyVersion int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -1138,7 +1128,7 @@ type OpenrailsRailMutationLog struct {
 	CreatedAt time.Time
 }
 
-// Durable Provider Refresh watermarks. A failed or partial provider read records last_error but never advances watermark_at.
+// Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.
 type OpenrailsRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1148,12 +1138,9 @@ type OpenrailsRailRefreshWatermark struct {
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
 	// Exclusive lower bound for the next successful bounded provider event refresh window.
-	WatermarkAt     time.Time
-	LastAttemptedAt *time.Time
-	LastSucceededAt *time.Time
-	LastError       *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	WatermarkAt time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
@@ -1207,7 +1194,6 @@ type OpenrailsReconciliationState struct {
 	MerchantID      uuid.UUID
 	SourceDomain    string
 	FullyReconciled bool
-	LastFullPullAt  *time.Time
 	UpdatedAt       time.Time
 }
 
@@ -1332,10 +1318,9 @@ type OpenrailsTierSchedule struct {
 	// Currency whose cumulative paid amount is compared to this ladder.
 	Currency string
 	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.
-	Rungs           []byte
-	ScheduleVersion int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	Rungs     []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
@@ -1344,8 +1329,7 @@ type OpenrailsUsageEvent struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	// Caller-supplied principal string that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
-	InvokerID   string
-	InvokerType *string
+	InvokerID string
 	// Native OpenRails currency code; amount uses this currency internal precision.
 	Currency string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
@@ -1377,15 +1361,9 @@ type OpenrailsWebhookHealth struct {
 	Rail       string
 	// last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
 	LastAcceptedAt *time.Time
-	AcceptedCount  int64
-	LastRejectedAt *time.Time
-	RejectedCount  int64
-	LastDriftAt    *time.Time
-	// pull-derived corrections applied while last_accepted_at predated the previous pull — changes a webhook should have announced.
-	DriftCount int64
-	LastPullAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	LastPullAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // #786 UTC-day webhook counter buckets backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
@@ -1393,7 +1371,6 @@ type OpenrailsWebhookHealthDaily struct {
 	MerchantID uuid.UUID
 	Rail       string
 	DayAt      time.Time
-	Accepted   int64
 	Rejected   int64
 	Drift      int64
 }

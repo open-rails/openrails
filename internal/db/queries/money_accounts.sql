@@ -93,11 +93,6 @@ WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = sqlc.arg(currency);
 
--- name: StampMoneyAccountAlertAt :exec
-UPDATE openrails.money_settings
-SET last_alert_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
 -- name: StampMoneyAccountTopupAt :exec
 UPDATE openrails.money_settings
 SET last_topup_at = sqlc.arg(now), updated_at = sqlc.arg(now)
@@ -127,7 +122,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
-           s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
+           s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
                SELECT a.credits_posted - a.debits_posted
                FROM openrails.ledger_accounts a
@@ -140,6 +135,6 @@ WITH avail AS (
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,
        auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id,
-       last_alert_at, last_topup_at
+       last_topup_at
 FROM avail
 WHERE available < low_balance_threshold;

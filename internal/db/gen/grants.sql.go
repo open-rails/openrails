@@ -40,13 +40,12 @@ func (q *Queries) AdminGrantExistsForSource(ctx context.Context, arg AdminGrantE
 const createProductUsageLimitBinding = `-- name: CreateProductUsageLimitBinding :exec
 INSERT INTO openrails.product_usage_limit_bindings (
     id, merchant_id, customer_id, usage_limit_key, measure, windows,
-    source_type, source_id, product_key, grant_id, starts_at, ends_at, policy_version
+    grant_id, starts_at, ends_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::text, $5::text, $6::jsonb,
-    $7::text, $8::uuid, $9::text,
-    $10::uuid, $11::timestamptz,
-    $12::timestamptz, $13::bigint
+    $7::uuid, $8::timestamptz,
+    $9::timestamptz
 )
 `
 
@@ -57,13 +56,9 @@ type CreateProductUsageLimitBindingParams struct {
 	UsageLimitKey string
 	Measure       string
 	Windows       []byte
-	SourceType    string
-	SourceID      *uuid.UUID
-	ProductKey    *string
 	GrantID       *uuid.UUID
 	StartsAt      time.Time
 	EndsAt        *time.Time
-	PolicyVersion int64
 }
 
 func (q *Queries) CreateProductUsageLimitBinding(ctx context.Context, arg CreateProductUsageLimitBindingParams) error {
@@ -74,13 +69,9 @@ func (q *Queries) CreateProductUsageLimitBinding(ctx context.Context, arg Create
 		arg.UsageLimitKey,
 		arg.Measure,
 		arg.Windows,
-		arg.SourceType,
-		arg.SourceID,
-		arg.ProductKey,
 		arg.GrantID,
 		arg.StartsAt,
 		arg.EndsAt,
-		arg.PolicyVersion,
 	)
 	return err
 }
@@ -1482,8 +1473,7 @@ func (q *Queries) RevokeEntitlementsByGrant(ctx context.Context, arg RevokeEntit
 const revokeProductUsageLimitBindingsByGrant = `-- name: RevokeProductUsageLimitBindingsByGrant :exec
 UPDATE openrails.product_usage_limit_bindings
 SET revoked_at = $1::timestamptz,
-    updated_at = now(),
-    policy_version = policy_version + 1
+    updated_at = now()
 WHERE merchant_id = $2::uuid
   AND grant_id = $3::uuid
   AND revoked_at IS NULL

@@ -62,7 +62,6 @@ type moneyInAccount struct {
 	AutoTopup       bool
 	TopupAmount     *int64
 	PaymentMethodID *uuid.UUID
-	LastAlertAt     *time.Time
 	LastTopupAt     *time.Time
 }
 
@@ -89,7 +88,6 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 			AutoTopup:       r.AutoTopupEnabled,
 			TopupAmount:     r.AutoTopupAmount,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
-			LastAlertAt:     r.LastAlertAt,
 			LastTopupAt:     r.LastTopupAt,
 		})
 	}
@@ -217,18 +215,3 @@ func (s *MoneyService) StampAutoTopupAttempt(ctx context.Context, customerID uui
 	})
 }
 
-// stampMoneyInTimestamp sets a single timestamp column on the settings row.
-func (s *MoneyService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccount, column string, now time.Time) error {
-	switch column {
-	case "last_alert_at":
-		return s.db.Gen(ctx).StampMoneyAccountAlertAt(ctx, gen.StampMoneyAccountAlertAtParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
-		})
-	case "last_topup_at":
-		return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
-		})
-	default:
-		return fmt.Errorf("money: unknown money-in timestamp column %q", column)
-	}
-}

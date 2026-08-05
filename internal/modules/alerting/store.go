@@ -112,10 +112,12 @@ func (s *store) deleteRule(ctx context.Context, id uuid.UUID) (int64, error) {
 	return s.db.Gen(ctx).DeleteAlertRule(ctx, id)
 }
 
-func (s *store) markFired(ctx context.Context, id uuid.UUID, firedAt, evaluatedAt time.Time, value float64, dims map[string]string) error {
-	detail, _ := json.Marshal(map[string]any{"dimensions": dims})
+// markFired opens the active alert. The crossing DIMENSIONS ride the dispatched
+// alert, which is the surface an operator sees; or#823 dropped the last_detail
+// column that also stored them, because nothing ever read it back.
+func (s *store) markFired(ctx context.Context, id uuid.UUID, firedAt, evaluatedAt time.Time, value float64) error {
 	return s.db.Gen(ctx).MarkAlertRuleFired(ctx, gen.MarkAlertRuleFiredParams{
-		ID: id, FiredAt: firedAt, EvaluatedAt: evaluatedAt, Value: &value, Detail: detail,
+		ID: id, FiredAt: firedAt, EvaluatedAt: evaluatedAt, Value: &value,
 	})
 }
 

@@ -47,24 +47,23 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 		require.Equal(t, 2, res.Windows)
 		require.Zero(t, res.ProviderErrors)
 		require.Len(t, successFetcher.calls, 2)
-		watermark, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
-		require.Equal(t, successFetcher.calls[1].Until.UTC(), watermark)
-		require.Nil(t, lastErr)
+		require.Equal(t, successFetcher.calls[1].Until.UTC(), loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID))
 		return nil
 	}))
 
 	failingFetcher := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe, err: errors.New("provider offline")}
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		before, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
+		before := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
 		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: failingFetcher,
 		})
 		require.Zero(t, res.Windows)
 		require.Equal(t, 1, res.ProviderErrors)
-		after, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
-		require.Equal(t, before, after)
-		require.NotNil(t, lastErr)
-		require.Contains(t, *lastErr, "provider offline")
+		// or#823: a failed window leaves the watermark exactly where it was — that
+		// unadvanced cursor IS the durable record that the window still needs
+		// reading. The failure itself surfaces through the job's error, not through
+		// a last_error column nothing read.
+		require.Equal(t, before, loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID))
 		return nil
 	}))
 }
@@ -214,20 +213,19 @@ func (f *providerRefreshRecordingFetcher) Fetch(_ context.Context, params reconc
 	}, nil
 }
 
-func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi *db.DB, merchantID, pspID uuid.UUID) (time.Time, *string) {
+func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi *db.DB, merchantID, pspID uuid.UUID) time.Time {
 	t.Helper()
 	var watermark time.Time
-	var lastErr *string
 	err := dbi.Qx(ctx).QueryRow(ctx, `
-SELECT watermark_at, last_error
+SELECT watermark_at
   FROM openrails.rail_refresh_watermarks
  WHERE merchant_id = $1::uuid
    AND rail = 'stripe'
    AND event_domain = 'events'
    AND psp_id = $2::uuid
-`, merchantID, pspID).Scan(&watermark, &lastErr)
+`, merchantID, pspID).Scan(&watermark)
 	require.NoError(t, err)
-	return watermark.UTC(), lastErr
+	return watermark.UTC()
 }
 
 // seedRefreshPSPForTest declares one PSP on a rail — or#893 makes a pull refuse
@@ -288,8 +286,8 @@ func TestProviderRefreshWatermarksAreScopedPerPSP(t *testing.T) {
 		require.Equal(t, fetcherA.calls[0].Since.UTC(), fetcherB.calls[0].Since.UTC(),
 			"PSP B's first window must start at the initial lookback, not where PSP A's pull left off")
 
-		wmA, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspA)
-		wmB, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspB)
+		wmA := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspA)
+		wmB := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspB)
 		require.Equal(t, fetcherA.calls[1].Until.UTC(), wmA)
 		require.Equal(t, fetcherB.calls[1].Until.UTC(), wmB)
 
