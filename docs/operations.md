@@ -753,14 +753,14 @@ engine-wide policy**, not a per-merchant setting.
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
   it — the host does.
-- **Webhook surfaces**: three shapes, all verifying with the resolved
-  merchant/account's own signing secret. Canonical provider-only:
-  `/v1/webhooks/:provider` (NMI/CCBill — payloads carry account identity) and
-  `/v1/webhooks/:provider/:account_id` (Stripe / multi-account rails).
-  Merchant-scoped alias:
-  `/v1/merchants/:merchant/webhooks/:provider[/:account_id]`. Host-routed
+- **Webhook surfaces**: all verify with the resolved merchant/account's own
+  signing secret, and `:rail` is always the gateway kind, never a PSP key.
+  Standalone: `/v1/webhooks/:rail` (NMI/CCBill — payloads carry account
+  identity) and `/v1/webhooks/:rail/:account_id` (Stripe / multi-account
+  rails). Embedded: `/billing/v1/merchants/:merchant/webhooks/:rail[/:account_id]`,
+  the host's pinned merchant named by slug. Host-routed
   (`RegisterHostWebhookRoutes`, mounted when a host resolver is attached):
-  `/webhooks/:provider[/:account_id]`, merchant resolved from the Host header.
+  `/webhooks/:rail[/:account_id]`, merchant resolved from the Host header.
 - **Consistency with token issuers**: a JWT minted for merchant A's issuer is
   rejected when presented against merchant B's Host, even though the token
   verifies — Host-merchant must equal issuer-merchant on every

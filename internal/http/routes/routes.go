@@ -858,11 +858,12 @@ func (opts Options) merchantAdminOperationMW(perm string, operation middleware.A
 	return append(mw, trailing...)
 }
 
-// RegisterWebhookRoutes mounts the CANONICAL standalone webhook surface (#650):
-// POST /webhooks/:provider (NMI/CCBill; the merchant is derived from the
-// payload's account identity, not the path) and /webhooks/:provider/:account_id
-// (direct Stripe). This is the live production entry point for inbound
-// NMI/CCBill webhooks — standalone mounts it. Embedded hosts use
+// RegisterWebhookRoutes mounts the ONE standalone webhook surface (#650,
+// or#893): POST /webhooks/:provider (NMI/CCBill; the merchant is derived from
+// the payload's account identity, not the path) and
+// /webhooks/:provider/:account_id (direct Stripe). :provider is a RAIL —
+// nmi/ccbill/stripe/solana/basistheory — never a PSP key. This is the live
+// production entry point for inbound NMI/CCBill webhooks. Embedded hosts use
 // RegisterMerchantWebhookRoutes instead, since they pin one merchant in context
 // and have no payload-derived merchant to resolve.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
@@ -873,12 +874,11 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // RegisterMerchantWebhookRoutes mounts the merchant-scoped webhook surface
 // (POST /merchants/:merchant/webhooks/:provider, issue #529): the merchant is
 // resolved from the URL slug, then THAT merchant's signing secret verifies the
-// payload. Embedded hosts mount this as their only webhook surface (a pinned
-// merchant needs no payload-derived resolution); standalone also mounts it
-// alongside RegisterWebhookRoutes as a transition alias for integrations
-// already using this URL shape. One handler (httphandlers.MerchantWebhook,
-// Stripe + NMI-backed rails + CCBill) is shared by both the standalone gin
-// server and the embedded mux, so the two cannot drift.
+// payload. This is the EMBEDDED surface only — a host that pins one merchant
+// has no payload-derived identity to resolve. or#893 removed the standalone
+// mount: there the canonical RegisterWebhookRoutes surface derives the merchant
+// from provider account identity, and a URL slug was a second way to say the
+// same thing.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
 	// #641: per-account endpoint — account_id in the path selects which account the

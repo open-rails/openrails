@@ -169,8 +169,6 @@ POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
 POST /v1/merchant/wasted-spend
 POST /v1/merchant/webhooks
-POST /v1/merchants/{merchant}/webhooks/{provider}
-POST /v1/merchants/{merchant}/webhooks/{provider}/{account_id}
 POST /v1/platform/merchants/{id}/restore
 POST /v1/solana/recurring/enroll
 POST /v1/webhooks/{provider}

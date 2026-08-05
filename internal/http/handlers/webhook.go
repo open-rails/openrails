@@ -67,7 +67,10 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 }
 
 func Webhook(r *httprequest.Request) {
-	provider := webhookutil.CanonicalRail(r.Param("provider"))
+	provider, ok := canonicalWebhookRail(r)
+	if !ok {
+		return
+	}
 	clientIP := r.ClientIP()
 	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
 	if r.State == nil || r.State.Config == nil {
@@ -104,7 +107,10 @@ func MerchantWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
 		return
 	}
-	provider := webhookutil.CanonicalRail(r.Param("provider"))
+	provider, ok := canonicalWebhookRail(r)
+	if !ok {
+		return
+	}
 	route, err := r.State.Merchants.ResolveBySlug(r.Request.Context(), r.Param("merchant"))
 	if err != nil {
 		if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
@@ -136,7 +142,10 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Host-routed webhook resolution is not configured")
 			return
 		}
-		provider := webhookutil.CanonicalRail(r.Param("provider"))
+		provider, ok := canonicalWebhookRail(r)
+		if !ok {
+			return
+		}
 		mid, err := resolve(r.Request.Context(), r.Request.Host)
 		if err != nil || mid.IsZero() {
 			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
@@ -536,7 +545,13 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
 		return false
 	}
-	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, firstPresentHeader(r.Request.Header, "Webhook-Signature", "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"))
+	// or#893: ONE signature header. NMI sends `Webhook-Signature: t=<ts>,s=<hex>`
+	// (docs/rails/nmi.md, live-verified in tests/nmi_webhook_signature_http_test.go),
+	// and the embedded service seam has only ever read that name. The three
+	// X-… spellings were speculative aliases: accepting them widened the set of
+	// headers an attacker could aim a forged signature at for no gateway that
+	// ever sends them.
+	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, strings.TrimSpace(r.Request.Header.Get("Webhook-Signature")))
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
@@ -842,13 +857,16 @@ func ccbillWebhookAccountID(body []byte) string {
 	return clientAccnum + "-" + clientSubacc
 }
 
-func firstPresentHeader(header http.Header, names ...string) string {
-	for _, name := range names {
-		if value := strings.TrimSpace(header.Get(name)); value != "" {
-			return value
-		}
+// canonicalWebhookRail resolves the URL's rail segment, writing a 400 with the
+// rename when the segment is a retired alias (or#893). The rail segment is the
+// gateway kind; a PSP is named by :account_id or the payload's account identity.
+func canonicalWebhookRail(r *httprequest.Request) (string, bool) {
+	provider, err := webhookutil.CanonicalRail(r.Param("provider"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return "", false
 	}
-	return ""
+	return provider, true
 }
 
 func readRequestBody(body io.ReadCloser) ([]byte, error) {

@@ -253,16 +253,19 @@ never mint a key with authority beyond its own credential's.
 
 ## Webhook routing
 
-Inbound rail webhooks resolve the merchant first, then verify. Three surfaces
-share one handler:
+Inbound rail webhooks resolve the merchant first, then verify. Each deployment
+shape mounts ONE surface, all sharing one handler:
 
 ```text
-POST /v1/webhooks/:provider                                  # standalone: merchant derived from the
-POST /v1/webhooks/:provider/:account_id                      #   payload's account identity (NMI/CCBill; Stripe with account)
-POST /v1/merchants/:merchant/webhooks/:provider              # merchant-scoped: slug in the path
-POST /v1/merchants/:merchant/webhooks/:provider/:account_id  #   (+ account for multi-account rails)
-POST /billing/v1/merchants/:merchant/webhooks/:provider      # embedded mount of the same handler
+POST /v1/webhooks/:rail                                      # standalone: merchant derived from the
+POST /v1/webhooks/:rail/:account_id                          #   payload's account identity (NMI/CCBill; Stripe with account)
+POST /billing/v1/merchants/:merchant/webhooks/:rail          # embedded: the host pins one merchant,
+POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  #   so the slug is the identity
 ```
+
+`:rail` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
+`basistheory` — never a PSP key. A PSP is named by `:account_id`, not by the
+rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi`.
 
 Deployments with per-merchant API hosts additionally resolve the merchant from
 the `Host` header at `/webhooks/:provider[/:account_id]` (see

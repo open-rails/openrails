@@ -231,10 +231,11 @@ two-token model is in [auth.md](auth.md). CORS requires zero configuration
 Point each rail's webhook directly at OpenRails — not through your app:
 
 ```
-POST https://openrails.example/v1/merchants/{merchant}/webhooks/{provider}
+POST https://openrails.example/v1/webhooks/{rail}[/{account_id}]
 ```
 
-OpenRails resolves the merchant from the path, verifies the rail's signature
+OpenRails resolves the merchant from the payload's (or the path's) PSP account
+identity, verifies the rail's signature
 with that merchant's own signing secret, and updates
 subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
@@ -242,7 +243,7 @@ sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 **Per-merchant API hosts (#734).** A multi-merchant deployment can give each
 merchant a canonical hostname (`merchants.api_host` — a plain row update via
 `merchants.Service.SetHostConfig`, resolved live on the next request, no
-restart). Host resolution then routes `/v1/webhooks/{provider}`
+restart). Host resolution then routes `/v1/webhooks/{rail}`
 without the path slug, and enforces Host-merchant == issuer-merchant on every
 merchant-scoped route: a token minted for merchant A is rejected on merchant
 B's host even though it verifies.
