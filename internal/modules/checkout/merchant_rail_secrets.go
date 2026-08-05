@@ -42,6 +42,14 @@ func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchant
 }
 
 func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (string, bool, error) {
+	return s.merchantSecretRef(ctx, merchants.SecretRef{Name: name})
+}
+
+// merchantSecretRef is the single credential read for checkout money paths. It
+// carries the or#812 rotation version floor, so a credential rotated on ANOTHER
+// node is picked up on the next charge instead of after a cache TTL of
+// presenting a retired key to the gateway.
+func (s *CheckoutService) merchantSecretRef(ctx context.Context, ref merchants.SecretRef) (string, bool, error) {
 	if s == nil || s.MerchantSecrets == nil {
 		return "", false, nil
 	}
@@ -49,7 +57,7 @@ func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (stri
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := s.MerchantSecrets.Get(ctx, tid, name)
+	sec, err := merchants.ReadSecretRef(ctx, s.MerchantSecrets, tid, ref)
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretNotFound) {
 			return "", false, nil
@@ -70,6 +78,13 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, envi
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", false, err
+	}
+	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
+		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, environment, key)
+		if err != nil || !found {
+			return "", found, err
+		}
+		return s.merchantSecretRef(ctx, ref)
 	}
 	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, environment, key)
 	if err != nil || !ok {
@@ -264,12 +279,13 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	}
 	var value string
 	if target.Scope != nil {
-		// Pinned to the resolved account's own secret.
-		name, err := merchants.PSPSecretName(target.Scope.Rail, target.Scope.Environment, target.Scope.AccountID, "security_key")
+		// Pinned to the resolved account's own secret, at or above the rotation
+		// version floor that account's PSP row records (or#812).
+		ref, err := target.Scope.SecretRef("security_key")
 		if err != nil {
 			return nil, err
 		}
-		v, ok, err := s.merchantSecret(ctx, name)
+		v, ok, err := s.merchantSecretRef(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}

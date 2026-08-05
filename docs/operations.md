@@ -177,7 +177,23 @@ Rules:
 
 - **Rotating a credential within the SAME provider account**: replace the
   secret under the same PSP row — intents arm with the new value
-  transparently.
+  transparently. `PUT /v1/merchant/payment-providers/{rail}` (and the console's
+  **Rotate** action) is atomic in the way that matters:
+  - the **new** credential is live-probed against the provider *before*
+    anything is written (NMI and CCBill today). A probe failure fails the whole
+    request — no secret is stored, no watermark moves, and the **old credential
+    keeps serving**, unchanged, everywhere.
+  - a committed rotation is **deployment-wide at the next read**, not
+    per-node. Each node fronts the secret backend with an in-process TTL cache,
+    so the rotation records the credential's new secret version on the shared
+    PSP row (`evidence.credential_versions`, surfaced as
+    `credentials.<key>.rotation_version`). Every credential resolution already
+    re-reads that row, and no node may answer from a cache entry below the
+    recorded version — so a retired credential cannot be presented after the
+    rotation commits, on any node, without waiting out a TTL. Restarts and
+    manual cache flushes are not part of the procedure.
+  - omit a credential from the request to leave it (and its watermark) alone;
+    re-submitting an identical value is a no-op, not a rotation.
 - **Moving to a DIFFERENT provider account**: never repoint an existing PSP
   row's credentials (OpenRails cannot detect the swap — the declared
   `account_id` would silently lie). Declare a NEW `psps` entry and archive

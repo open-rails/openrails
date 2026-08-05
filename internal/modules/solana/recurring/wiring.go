@@ -45,11 +45,13 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 		if !ok {
 			return "", fmt.Errorf("solana: no active provider account for signing key")
 		}
-		secretName, err := merchants.PSPSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
+		// or#812: read at or above the rotation version floor the PSP row
+		// records, so a key rotated on another node is never served stale here.
+		ref, err := merchants.PSPSecretRef(account.Rail, account.Environment, account.AccountID, account.Evidence, "private_key")
 		if err != nil {
 			return "", err
 		}
-		sec, err := g.store.Get(ctx, merchantID, secretName)
+		sec, err := merchants.ReadSecretRef(ctx, g.store, merchantID, ref)
 		if err != nil {
 			return "", err
 		}

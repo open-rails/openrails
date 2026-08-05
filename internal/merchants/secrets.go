@@ -10,6 +10,7 @@ package merchants
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -174,10 +175,53 @@ type MerchantSecretReader interface {
 	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
 }
 
+// VersionedSecretReader is the cross-node ROTATION CUTOVER contract (or#812).
+//
+// A read-through secret cache is per-process, so a credential rotated on node A
+// stays cached on node B until B's entry expires — up to DefaultSecretCacheTTL
+// of a retired credential still being presented to a gateway. The fix is a
+// versioned read: the PSP row (shared DB, re-read live on every credential
+// resolution) records the Secret.Version each credential reached at its last
+// rotation, and a reader that holds an OLDER version must go back to the
+// backend instead of answering from cache.
+//
+// Only the caching wrapper needs to implement this; ReadSecretRef degrades to
+// a plain Get for uncached stores, which are already never stale.
+type VersionedSecretReader interface {
+	GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error)
+}
+
+// SecretRef names a credential AND the version floor a reader must satisfy for
+// it. MinVersion 0 means "no floor recorded" — the pre-rotation state, and the
+// state of every secret written outside the provider-config API.
+type SecretRef struct {
+	Name       string
+	MinVersion int
+}
+
+// ReadSecretRef reads ref through reader, honouring the version floor when the
+// reader can. Every provider-credential read goes through here so the cutover
+// rule lives in exactly one place.
+func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant.ID, ref SecretRef) (Secret, error) {
+	if reader == nil {
+		return Secret{}, errors.New("merchants: no secret store configured")
+	}
+	if versioned, ok := reader.(VersionedSecretReader); ok && ref.MinVersion > 0 {
+		return versioned.GetAtLeastVersion(ctx, id, ref.Name, ref.MinVersion)
+	}
+	return reader.Get(ctx, id, ref.Name)
+}
+
 // PSPSecretResolver resolves the canonical secret name for the
 // active provider account a merchant should use.
 type PSPSecretResolver interface {
 	ActivePSPSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
+}
+
+// PSPSecretRefResolver is PSPSecretResolver plus the rotation version floor —
+// the form every credential read should use (or#812).
+type PSPSecretRefResolver interface {
+	ActivePSPSecretRef(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (SecretRef, bool, error)
 }
 
 // PSPScope is the configured provider account selected for a
@@ -191,6 +235,54 @@ type PSPScope struct {
 	// payment-provider vocabulary catalog links and checkout use.
 	Key      string
 	Settings map[string]any
+	// CredentialVersions is the rotation watermark per credential key
+	// (or#812): the Secret.Version each credential reached the last time it
+	// was rotated through the provider-config API. Absent/zero = no floor.
+	CredentialVersions map[string]int
+}
+
+// SecretRef returns the scoped secret name for key together with the rotation
+// version floor recorded on this PSP row.
+func (s PSPScope) SecretRef(key string) (SecretRef, error) {
+	name, err := PSPSecretName(s.Rail, s.Environment, s.AccountID, key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	return SecretRef{Name: name, MinVersion: s.CredentialVersions[NormalizeCredentialVersionKey(key)]}, nil
+}
+
+// PSPSecretRef builds a scoped SecretRef straight from a PSP row's identity and
+// its evidence document — for the paths that hold the raw row rather than a
+// resolved PSPScope.
+func PSPSecretRef(rail, environment, accountID string, evidence []byte, key string) (SecretRef, error) {
+	name, err := PSPSecretName(rail, environment, accountID, key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	return SecretRef{Name: name, MinVersion: CredentialVersions(evidence)[NormalizeCredentialVersionKey(key)]}, nil
+}
+
+// CredentialVersions reads the or#812 rotation watermarks out of a PSP row's
+// evidence document.
+func CredentialVersions(evidence []byte) map[string]int {
+	if len(evidence) == 0 {
+		return nil
+	}
+	var doc struct {
+		CredentialVersions map[string]int `json:"credential_versions"`
+	}
+	if json.Unmarshal(evidence, &doc) != nil {
+		return nil
+	}
+	return doc.CredentialVersions
+}
+
+// NormalizeCredentialVersionKey is the canonical form credential-version keys
+// are recorded under: lowercase, trimmed. It deliberately does NOT go through
+// NormalizePSPSecretKey (which rejects unknown keys) — a version floor for a
+// key this build does not recognise is still worth honouring.
+func NormalizeCredentialVersionKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }
 
 // PSPScopeResolver resolves the selected provider account without

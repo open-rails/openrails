@@ -26,6 +26,12 @@ import (
 type PaymentProviderCredentialStatus struct {
 	Configured      bool       `json:"configured"`
 	LastValidatedAt *time.Time `json:"last_validated_at,omitempty"`
+	// RotationVersion is the or#812 cross-node cutover watermark: the secret
+	// version this credential reached at its last rotation through this API.
+	// Every node refuses to serve an OLDER version from cache, so a rotation is
+	// deployment-wide the moment this number moves. 0 = the credential was
+	// never rotated through this API (manifest-armed or pre-or#812).
+	RotationVersion int `json:"rotation_version,omitempty"`
 }
 
 // PaymentProviderConfig is one merchant-owned payment-provider account.
@@ -70,6 +76,12 @@ type UpsertPaymentProviderConfigRequest struct {
 type railMerchantAccountEvidence struct {
 	PublicConfig         map[string]string `json:"public_config,omitempty"`
 	CredentialsValidated bool              `json:"credentials_validated,omitempty"`
+	// CredentialVersions is the or#812 cross-node rotation watermark: the
+	// Secret.Version each credential key reached at its last rotation. It rides
+	// the PSP row because every credential resolution already re-reads that row
+	// live from the shared DB, so the floor costs no extra query and reaches
+	// every node the instant the rotation commits.
+	CredentialVersions map[string]int `json:"credential_versions,omitempty"`
 }
 
 // PaymentProviderDefinitions returns every merchant-configurable provider in
@@ -194,7 +206,11 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		enabled = *req.Enabled
 	}
 
+	// secretNames maps the scoped secret NAME to its value; secretKeys maps the
+	// same name back to the normalized credential KEY, which is what the
+	// version floor on the PSP row is recorded under.
 	secretNames := make(map[string]string, len(req.Credentials))
+	secretKeys := make(map[string]string, len(req.Credentials))
 	probeCredentials := make(map[string]string, len(req.Credentials))
 	credentialsValidated := false
 	for key, value := range req.Credentials {
@@ -213,8 +229,13 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 			credentialsValidated = true
 		}
 		secretNames[name] = value
+		secretKeys[name] = normalizedKey
 		probeCredentials[normalizedKey] = value
 	}
+	// ROTATION ORDER (or#812). The live probe runs FIRST and on the credentials
+	// SUPPLIED IN THIS REQUEST, so a bad new credential fails here — before any
+	// secret is written and before any version floor moves. The old credential
+	// stays exactly as it was and keeps serving on every node.
 	probed, err := s.probePaymentProviderCredentials(ctx, id, rail, environment, accountID, probeCredentials)
 	if err != nil {
 		return PaymentProviderConfig{}, err
@@ -226,14 +247,21 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		lastVerifiedAt = &now
 	}
 
-	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt)
-	if err != nil {
-		return PaymentProviderConfig{}, err
-	}
+	// Secrets are written BEFORE the PSP row so the version floor never becomes
+	// visible to another node ahead of the value it demands.
+	credentialVersions := make(map[string]int, len(secretNames))
 	for name, value := range secretNames {
-		if _, err := s.PutCredential(ctx, id, name, value); err != nil {
+		sec, err := s.PutCredential(ctx, id, name, value)
+		if err != nil {
 			return PaymentProviderConfig{}, err
 		}
+		if key := secretKeys[name]; key != "" && sec.Version > 0 {
+			credentialVersions[NormalizeCredentialVersionKey(key)] = sec.Version
+		}
+	}
+	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt, credentialVersions)
+	if err != nil {
+		return PaymentProviderConfig{}, err
 	}
 	statuses, err := s.ListSecretStatuses(ctx, id)
 	if err != nil {
@@ -275,7 +303,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return cfg, nil
 }
 
-func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time) (gen.OpenrailsPsp, error) {
+func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.OpenrailsPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation under RLS).
 	queries := gen.New(s.pool)
@@ -287,27 +315,33 @@ func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID,
 	// normalized (rail, environment, account_id) the id is hashed from, so the
 	// id corresponds 1:1 to the unique index.
 	railAcctID, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, accountID)
-	if len(publicConfig) == 0 || !credentialsValidated {
-		existing, err := queries.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
-			Rail:        nRail,
-			Environment: &nEnv,
-			AccountID:   nAccount,
-		})
-		switch {
-		case err == nil:
-			existingEvidence := unmarshalProviderEvidence(existing.Evidence)
-			if len(publicConfig) == 0 {
-				publicConfig = existingEvidence.PublicConfig
-			}
-			if !credentialsValidated && existingEvidence.CredentialsValidated {
-				credentialsValidated = true
-				lastVerifiedAt = existing.LastVerifiedAt
-			}
-		case !errors.Is(err, pgx.ErrNoRows):
-			return gen.OpenrailsPsp{}, fmt.Errorf("merchants: load existing provider config: %w", err)
+	// Always read the existing row: fields this request omits are carried
+	// forward, and the or#812 credential-version floors of credentials it did
+	// not rotate must survive.
+	var existingEvidenceRaw []byte
+	existing, err := queries.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+		Rail:        nRail,
+		Environment: &nEnv,
+		AccountID:   nAccount,
+	})
+	switch {
+	case err == nil:
+		existingEvidenceRaw = existing.Evidence
+		existingEvidence := unmarshalProviderEvidence(existing.Evidence)
+		if len(publicConfig) == 0 {
+			publicConfig = existingEvidence.PublicConfig
 		}
+		if !credentialsValidated && existingEvidence.CredentialsValidated {
+			credentialsValidated = true
+			lastVerifiedAt = existing.LastVerifiedAt
+		}
+		credentialVersions = mergeCredentialVersions(existingEvidence.CredentialVersions, credentialVersions)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return gen.OpenrailsPsp{}, fmt.Errorf("merchants: load existing provider config: %w", err)
+	default:
+		credentialVersions = mergeCredentialVersions(nil, credentialVersions)
 	}
-	evidence, err := marshalProviderEvidence(publicConfig, credentialsValidated)
+	evidence, err := marshalProviderEvidence(existingEvidenceRaw, publicConfig, credentialsValidated, credentialVersions)
 	if err != nil {
 		return gen.OpenrailsPsp{}, err
 	}
@@ -437,6 +471,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 		credentials[key] = PaymentProviderCredentialStatus{
 			Configured:      ok,
 			LastValidatedAt: validatedAt,
+			RotationVersion: evidence.CredentialVersions[NormalizeCredentialVersionKey(key)],
 		}
 	}
 	return PaymentProviderConfig{
@@ -524,18 +559,72 @@ func credentialValidatedAt(rail, key string, validatedAt *time.Time) *time.Time 
 	return nil
 }
 
-func marshalProviderEvidence(publicConfig map[string]string, credentialsValidated bool) ([]byte, error) {
-	if len(publicConfig) == 0 && !credentialsValidated {
+// marshalProviderEvidence overlays the fields this API owns onto the evidence
+// document already on the row. Evidence is a shared, free-form JSONB — the
+// manifest path also writes `source`, `signer` and `settings` there — so an API
+// arm must merge, not replace, or a manifest-armed PSP loses its settings the
+// first time an operator rotates a credential.
+func marshalProviderEvidence(existing []byte, publicConfig map[string]string, credentialsValidated bool, credentialVersions map[string]int) ([]byte, error) {
+	doc := map[string]json.RawMessage{}
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &doc); err != nil {
+			doc = map[string]json.RawMessage{}
+		}
+	}
+	set := func(key string, value any, keep bool) error {
+		if !keep {
+			delete(doc, key)
+			return nil
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("marshal provider config evidence %s: %w", key, err)
+		}
+		doc[key] = raw
+		return nil
+	}
+	if err := set("public_config", publicConfig, len(publicConfig) > 0); err != nil {
+		return nil, err
+	}
+	if err := set("credentials_validated", credentialsValidated, credentialsValidated); err != nil {
+		return nil, err
+	}
+	if err := set("credential_versions", credentialVersions, len(credentialVersions) > 0); err != nil {
+		return nil, err
+	}
+	if len(doc) == 0 {
 		return nil, nil
 	}
-	b, err := json.Marshal(railMerchantAccountEvidence{
-		PublicConfig:         publicConfig,
-		CredentialsValidated: credentialsValidated,
-	})
+	b, err := json.Marshal(doc)
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider config evidence: %w", err)
 	}
 	return b, nil
+}
+
+// mergeCredentialVersions carries forward the version floors of credentials
+// this request did not touch and raises the floors it did. A floor NEVER goes
+// backwards: a lower observed version means an out-of-order write, and the
+// higher floor is the safe one (it only ever forces a re-read).
+func mergeCredentialVersions(existing, rotated map[string]int) map[string]int {
+	if len(existing) == 0 && len(rotated) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(existing)+len(rotated))
+	for k, v := range existing {
+		if k = NormalizeCredentialVersionKey(k); k != "" && v > 0 {
+			out[k] = v
+		}
+	}
+	for k, v := range rotated {
+		if k = NormalizeCredentialVersionKey(k); k != "" && v > out[k] {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func unmarshalProviderEvidence(raw []byte) railMerchantAccountEvidence {

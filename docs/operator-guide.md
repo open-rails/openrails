@@ -152,7 +152,13 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   fronts all backends — out-of-band Vault writes converge within one TTL, no
   restart needed.
 - **Rotation within the same provider account** is a non-event: the account
-  identity re-resolves under the new key and matches.
+  identity re-resolves under the new key and matches. Rotate through
+  `PUT /v1/merchant/payment-providers/{rail}` or the console's **Rotate**
+  action — the new credential is live-probed first (a failed probe writes
+  nothing and leaves the old credential serving), and the committed rotation
+  records a version watermark on the shared PSP row that no node may serve a
+  cached credential below. Cutover is deployment-wide at the next credential
+  read; the 15-minute TTL is only the backstop for writes made out of band.
 - **Pointing credentials at a different account** trips the account guard:
   every provider intent is stamped with the provider-account row it was
   enqueued against, and the executor parks intents whose account no longer

@@ -318,11 +318,12 @@ func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merc
 	if svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	// or#812: honour the PSP row's rotation version floor.
+	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := svc.Secrets().Get(ctx, mid, name)
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
 	if errors.Is(err, merchants.ErrSecretNotFound) {
 		return "", false, nil
 	}
