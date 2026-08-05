@@ -82,6 +82,19 @@ func NewSharedRedisClient(t testing.TB) *redis.Client {
 	return rdb
 }
 
+// SharedRedisAddr returns the host:port of the shared integration Redis,
+// provisioning it on first use exactly like NewSharedRedisClient
+// (OPENRAILS_TEST_REDIS_ADDR, else a testcontainer). For tests that must hand an
+// ADDRESS to the code under test — a written config file, a spawned server —
+// instead of a client. Never let such a test fall back to a config default port:
+// that makes it pass only where the compose stack happens to be up.
+func SharedRedisAddr(t testing.TB) string {
+	t.Helper()
+	rdb := NewSharedRedisClient(t)
+	defer func() { _ = rdb.Close() }()
+	return rdb.Options().Addr
+}
+
 func TerminateSharedRedis() {
 	if redisContainer == nil {
 		return

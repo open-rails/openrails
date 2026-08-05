@@ -76,6 +76,11 @@ func testSigningKeyPEM(t *testing.T) string {
 
 func writeMode1Config(t *testing.T, dir, dsn string, port int, merchantSource, keyPEM string) string {
 	t.Helper()
+	// or#899: config's Redis default is the compose-published localhost:6380, and
+	// /readyz FAILS on a configured-but-unreachable Redis — so leaving it default
+	// makes this package pass only where the repo stack is up. Point it at the
+	// suite's own Redis (testcontainer or OPENRAILS_TEST_REDIS_ADDR).
+	redisAddr := dbtest.SharedRedisAddr(t)
 	// or#893: merchant_source=api must declare where secrets live. MODE 1 never
 	// consults it, so declaring db is inert there and honest here.
 	cfgYAML := fmt.Sprintf(`env: development
@@ -87,12 +92,14 @@ host: 127.0.0.1
 port: %d
 db:
   url: %s
+redis:
+  addr: %s
 auth:
   issuer: https://controlplane.openrails.test
   active_key_id: mode1-test-key
   active_private_key_pem: |
 %s
-`, merchantSource, port, dsn, indentPEM(keyPEM))
+`, merchantSource, port, dsn, redisAddr, indentPEM(keyPEM))
 	path := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(cfgYAML), 0o600))
 	return path
