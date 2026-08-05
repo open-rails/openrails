@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,6 +69,19 @@ type CleanupConfig struct {
 // DefaultCleanupConfig is the ONE defaults path (#711): worker registration
 // passes it (or a test passes an explicit config); Work never re-defaults —
 // a zero retention is a wiring bug and fails loudly instead of mass-deleting.
+// clampInt32 narrows a row/batch budget for sqlc's int32 params; budgets are
+// small positive constants, so the clamp exists for the checker and the
+// impossible case, not for expected values.
+func clampInt32(v int) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v)
+}
+
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
 		NotificationSeenRetention:   90 * 24 * time.Hour,
@@ -205,7 +219,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	// the ring costs a whole empty tick to notice. Ids at or below the cursor
 	// are exactly the ones the first query could not have returned.
 	if cursor != nil && len(merchantIDs) < batch {
-		head, herr := dueWork(nil, int32(batch-len(merchantIDs)))
+		head, herr := dueWork(nil, clampInt32(batch-len(merchantIDs)))
 		if herr != nil {
 			return nil, result, fmt.Errorf("cleanup expired data: list merchants with retention work (ring wrap): %w", herr)
 		}
@@ -296,7 +310,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			var n int64
 			if err := w.DB.MerchantTx(ctx, func(tctx context.Context, tx pgx.Tx) error {
 				var err error
-				n, err = fn(tctx, gen.New(tx), int32(limit))
+				n, err = fn(tctx, gen.New(tx), clampInt32(limit))
 				return err
 			}); err != nil {
 				logger.WithError(err).Error("Cleanup: " + name + " failed")
