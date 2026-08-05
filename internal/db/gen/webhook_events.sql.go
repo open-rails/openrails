@@ -14,17 +14,23 @@ import (
 
 const deleteCompletedWebhookEventsBefore = `-- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM openrails.webhook_events
-WHERE merchant_id = $1::uuid
-  AND completed_at < $2::timestamptz
+WHERE ctid IN (
+    SELECT we.ctid FROM openrails.webhook_events we
+    WHERE we.merchant_id = $1::uuid
+      AND we.completed_at < $2::timestamptz
+    LIMIT $3::int
+)
 `
 
 type DeleteCompletedWebhookEventsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
+// or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, arg DeleteCompletedWebhookEventsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteCompletedWebhookEventsBefore, arg.MerchantID, arg.Cutoff)
+	result, err := q.db.Exec(ctx, deleteCompletedWebhookEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

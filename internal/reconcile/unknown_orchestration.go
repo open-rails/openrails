@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -156,7 +157,13 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		}
 		if snap != nil {
 			remoteLive := len(snap.Subscriptions)
-			if tripped, reason := opts.Breaker.Implausible(provider, remoteLive, int(localLive)); tripped {
+			tripped, reason := opts.Breaker.Implausible(provider, remoteLive, int(localLive))
+			opsmetric.Emit(ctx, opsmetric.MetricRosterRatio, log.Fields{
+				"provider": string(provider), "merchant_id": merchantID.String(), "rail": rail,
+				"remote_live": remoteLive, "local_live": localLive,
+				"ratio": ratioOf(remoteLive, int(localLive)), "tripped": tripped,
+			})
+			if tripped {
 				// The roster is not believable, so it proves nothing about absence.
 				// Strip the proof rather than abort: the rows stay `unknown`,
 				// entitlements stay intact, and a per-sub probe can still resolve
@@ -211,7 +218,14 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		}
 
 		// #837 all-or-nothing cap on the LOCAL cancel + entitlement revoke.
-		if exceeded, reason := opts.CancelBudget.Exceeded(cancels, int(localLive)); exceeded {
+		exceeded, reason := opts.CancelBudget.Exceeded(cancels, int(localLive))
+		opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
+			"provider": string(provider), "merchant_id": merchantID.String(), "rail": rail,
+			"planned_cancellations": cancels, "local_live": localLive,
+			"allowed": opts.CancelBudget.Limit(int(localLive)), "capped": exceeded,
+			"path": "unknown_cohort",
+		})
+		if exceeded {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"merchant_id": merchantID.String(), "rail": rail,
 				"planned_cancellations": cancels, "local_live": localLive,

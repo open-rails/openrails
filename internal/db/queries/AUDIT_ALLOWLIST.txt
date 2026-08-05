@@ -45,7 +45,6 @@ unbounded-many ListLedgerCounterDrifts         # operator audit: every drifted a
 
 # or#837. These ARE unbounded; allowlisted only so the gate could be switched on
 # today. Fixing one means deleting its line.
-unbounded-many ListDueDunningSubscriptions                 # or#837 flagship: deployment-wide, every 4h
 unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge scan
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
 unbounded-many ListActionableReconciliationFindingsByProvider # or#837 converge scan
@@ -65,9 +64,6 @@ unbounded-many ListSubscriptionsByPaymentMethodIDs       # or#837 fan-out per pa
 unbounded-many ListLatestChargeByPaymentMethodIDs        # or#837 fan-out per payment method
 unbounded-many ListActiveEntitlementRecordsByCustomerIDs # or#837 fan-out per customer
 unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail
-
-# Unbatched sweeps: a large backlog makes each one a single long transaction.
-unscoped-write AutoResolveVanishedReconciliationFindings # or#837 unbatched cross-merchant UPDATE
 
 # The whole "missing indexes" group is gone: or#846 added them (0012) and every
 # entry here went STALE. Leave the heading out — a new missing index is a

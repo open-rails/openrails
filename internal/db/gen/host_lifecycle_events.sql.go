@@ -35,18 +35,24 @@ func (q *Queries) AcknowledgeHostLifecycleEvent(ctx context.Context, arg Acknowl
 
 const deleteDeliveredHostLifecycleEventsBefore = `-- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
 DELETE FROM openrails.host_lifecycle_events
-WHERE merchant_id = $1::uuid
-  AND delivered_at IS NOT NULL
-  AND delivered_at < $2::timestamptz
+WHERE ctid IN (
+    SELECT hle.ctid FROM openrails.host_lifecycle_events hle
+    WHERE hle.merchant_id = $1::uuid
+      AND hle.delivered_at IS NOT NULL
+      AND hle.delivered_at < $2::timestamptz
+    LIMIT $3::int
+)
 `
 
 type DeleteDeliveredHostLifecycleEventsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
+// or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, arg DeleteDeliveredHostLifecycleEventsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDeliveredHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff)
+	result, err := q.db.Exec(ctx, deleteDeliveredHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

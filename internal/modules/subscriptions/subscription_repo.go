@@ -611,13 +611,21 @@ func derefSubs(subs []*models.Subscription) []models.Subscription {
 	return out
 }
 
+// DueDunningBatch bounds ONE merchant's dunning pass (or#837). Each returned
+// row can charge a card and terminate a subscription, so an uncapped list was
+// an unbounded burst of provider calls in a single job. Most-overdue first (the
+// query's order), and the claim lease means the remainder is simply the next
+// pass's head — nothing is skipped, only paced.
+const DueDunningBatch = 500
+
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
 // rails whose next retry is due (Price + PaymentMethod relations
-// attached) — the dunning worker's work list.
+// attached) — the dunning worker's work list, capped at DueDunningBatch.
 func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time) ([]models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
-		Rails: rails,
-		Now:   now,
+		Rails:    rails,
+		Now:      now,
+		RowLimit: DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err

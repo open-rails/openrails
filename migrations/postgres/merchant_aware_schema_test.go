@@ -27,6 +27,10 @@ var rlsExemptTables = []string{
 	// per-merchant half lives in the RLS-protected
 	// merchant_destructive_policy.
 	"destructive_action_switch",
+	// or#837 resume point for capped fan-out sweeps — a worker kind and the
+	// merchant id it stopped at. Written from the no-GUC background pass that
+	// reads the SECURITY DEFINER work queue; holds no tenant data.
+	"worker_sweep_cursors",
 }
 
 // minMerchantScopedTables guards against a vacuous pass: if the SQL parsing

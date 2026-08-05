@@ -13,7 +13,12 @@ INSERT INTO openrails.webhook_events (merchant_id, op, event_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, op, event_id) DO NOTHING;
 
+-- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM openrails.webhook_events
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND completed_at < sqlc.arg(cutoff)::timestamptz;
+WHERE ctid IN (
+    SELECT we.ctid FROM openrails.webhook_events we
+    WHERE we.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND we.completed_at < sqlc.arg(cutoff)::timestamptz
+    LIMIT sqlc.arg(row_limit)::int
+);

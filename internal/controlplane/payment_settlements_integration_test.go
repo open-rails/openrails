@@ -153,6 +153,7 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 		n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
 			MerchantID: mB,
 			Cutoff:     time.Now().Add(-30 * 24 * time.Hour),
+			RowLimit:   100,
 		})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)

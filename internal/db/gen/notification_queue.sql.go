@@ -137,17 +137,22 @@ func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, 
 
 const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE merchant_id = $1::uuid
-  AND created_at < $2::timestamptz
+WHERE ctid IN (
+    SELECT nq.ctid FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = $1::uuid
+      AND nq.created_at < $2::timestamptz
+    LIMIT $3::int
+)
 `
 
 type DeleteNotificationsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
 func (q *Queries) DeleteNotificationsBefore(ctx context.Context, arg DeleteNotificationsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteNotificationsBefore, arg.MerchantID, arg.Cutoff)
+	result, err := q.db.Exec(ctx, deleteNotificationsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -156,21 +161,31 @@ func (q *Queries) DeleteNotificationsBefore(ctx context.Context, arg DeleteNotif
 
 const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE merchant_id = $1::uuid
-  AND seen = true AND created_at < $2::timestamptz
+WHERE ctid IN (
+    SELECT nq.ctid FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = $1::uuid
+      AND nq.seen = true AND nq.created_at < $2::timestamptz
+    LIMIT $3::int
+)
 `
 
 type DeleteSeenNotificationsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
 // Retention sweeps (or#877 B4). The merchant predicate is explicit, not
 // implied: the sweep walks the merchant directory and runs one pass per
 // merchant, and an unqualified DELETE would be a cross-merchant delete the
 // moment it ran on a BYPASSRLS connection (a superuser self-host, a test).
+//
+// or#837: BATCHED. row_limit bounds one statement (and so one transaction);
+// the caller loops until a short batch comes back. A merchant with a year of
+// unswept notifications used to be one DELETE holding a transaction — and the
+// table's dead tuples — open for as long as it took.
 func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteSeenNotificationsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, arg.MerchantID, arg.Cutoff)
+	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

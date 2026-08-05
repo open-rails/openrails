@@ -1075,17 +1075,26 @@ WHERE sub.rail = ANY($1::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $2::timestamptz
   AND sub.deleted_at IS NULL
+ORDER BY sub.next_retry_at, sub.id
+LIMIT $3::int
 `
 
 type ListDueDunningSubscriptionsParams struct {
-	Rails []string
-	Now   time.Time
+	Rails    []string
+	Now      time.Time
+	RowLimit int32
 }
 
 // Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
 // inside one merchant's scope (see ListDueDunningMerchants above).
+//
+// or#837: URGENCY ORDER + LIMIT. This was the flagship unbounded scan — no cap
+// at all, and each returned row can charge a card and terminate a subscription.
+// Most-overdue first, so a merchant whose backlog exceeds one pass retries the
+// subscriptions that have waited longest instead of an arbitrary slice; the
+// claim lease means the next pass picks up where this one stopped.
 func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]OpenrailsSubscription, error) {
-	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Rails, arg.Now)
+	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Rails, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
