@@ -34,7 +34,10 @@ Postgres specifics worth knowing:
   migrations (`migrations/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on
-  `:3053`), `task docker-down` to tear down.
+  `:3053`), `task docker-down` to tear down, `task docker-reset` to recreate the
+  database from empty (the baseline was re-squashed prelaunch, so a database
+  created before that must be dropped rather than migrated forward — see the
+  [contributor guide](dev/README.md#migrations)).
 
 ### The safety levers
 

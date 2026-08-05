@@ -70,6 +70,16 @@ tasks:
       # --profile all: without it, profiled services (openrails) are left running.
       - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down
 
+  docker-reset:
+    desc: "Recreate the local stack from EMPTY: down + delete volumes (Postgres data) + up + migrate"
+    prompt: This DELETES the local Postgres and Garnet volumes. Continue?
+    cmds:
+      # -v drops the named volumes (postgres_data, redis_data, spool, runtime keys);
+      # the external go_mod_cache is left alone. `docker-down` deliberately does NOT
+      # do this — a schema reset has to be asked for.
+      - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down -v
+      - task: docker-up
+
   docker-logs:
     desc: Tail openrails logs from docker compose stack
     cmds:
