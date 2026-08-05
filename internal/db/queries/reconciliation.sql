@@ -359,9 +359,10 @@ WHERE rail::text = ANY (sqlc.arg(rails)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentMethodsByRails :many
--- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
--- here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
-SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
+-- rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
+-- the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
+-- for HashiCorp Vault, and the column already carries the right name.
+SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])
@@ -514,17 +515,16 @@ WHERE id = sqlc.arg(id)
 -- manual/bulk-import decision. The flag is a ratchet: never auto-unset.
 
 -- name: UpsertReconciliationState :one
--- Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
--- last_full_pull_at after a completed authoritative pull/import for that domain.
+-- Mark a source domain's reconciliation watermark: pass fully_reconciled=true
+-- after a completed authoritative pull/import for that domain.
 INSERT INTO openrails.reconciliation_state (
-    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+    merchant_id, source_domain, fully_reconciled, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(source_domain)::text,
-    sqlc.arg(fully_reconciled)::boolean, sqlc.narg(last_full_pull_at)::timestamptz, now()
+    sqlc.arg(fully_reconciled)::boolean, now()
 )
 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     fully_reconciled = EXCLUDED.fully_reconciled,
-    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
     updated_at = now()
 RETURNING *;
 
@@ -551,7 +551,7 @@ SELECT COALESCE((
 --                              and saw no renewal (ownership)
 -- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail,
-       (s.payment_method_id IS NOT NULL)::bool AS vaulted,
+       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
        (s.current_period_starts_at IS NOT NULL AND EXISTS (

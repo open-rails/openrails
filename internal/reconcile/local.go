@@ -236,7 +236,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ID:              row.ID,
 			CustomerID:      row.CustomerID,
 			Rail:            row.Rail,
-			RailCustomerRef: row.VaultID,
+			RailCustomerRef: row.RailCustomerRef,
 		}
 		if row.LastFour != nil {
 			pm.LastFour = *row.LastFour
