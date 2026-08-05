@@ -9,7 +9,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Loading02Icon, SparklesIcon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -31,12 +31,12 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/client"
 import {
-  generateWidget,
   WIDGET_VIZ,
   type MetricsQuery,
   type Widget,
   type WidgetViz,
 } from "@/lib/api/metrics"
+import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 
 import { WidgetVizView } from "./widget-viz"
@@ -67,8 +67,15 @@ export function WidgetEditor({
     source?.query ?? null
   )
   const [prompt, setPrompt] = React.useState("")
-  const [generating, setGenerating] = React.useState(false)
-  const [genError, setGenError] = React.useState<string | null>(null)
+  const generateDashboardWidget = useMutation(
+    adminMutations.generateDashboardWidget()
+  )
+  const generating = generateDashboardWidget.isPending
+  const genError = generateDashboardWidget.error
+    ? generateDashboardWidget.error instanceof ApiError
+      ? generateDashboardWidget.error.message
+      : "generation failed"
+    : null
   const {
     data: preview,
     error: previewQueryError,
@@ -81,23 +88,21 @@ export function WidgetEditor({
       : "query failed"
     : null
 
-  const generate = async () => {
+  const generate = () => {
     if (!prompt.trim()) return
-    setGenerating(true)
-    setGenError(null)
-    try {
-      // The current query (saved or freshly generated) rides as base_query so
-      // the prompt refines it; absent, the LLM starts fresh.
-      const res = await generateWidget(prompt.trim(), query ?? undefined)
-      setTitle(res.title)
-      setViz(res.viz)
-      setQuery(res.query)
-      setPrompt("")
-    } catch (err) {
-      setGenError(err instanceof ApiError ? err.message : "generation failed")
-    } finally {
-      setGenerating(false)
-    }
+    // The current query (saved or freshly generated) rides as base_query so
+    // the prompt refines it; absent, the LLM starts fresh.
+    generateDashboardWidget.mutate(
+      { prompt: prompt.trim(), baseQuery: query ?? undefined },
+      {
+        onSuccess: (res) => {
+          setTitle(res.title)
+          setViz(res.viz)
+          setQuery(res.query)
+          setPrompt("")
+        },
+      }
+    )
   }
 
   const canSave = query !== null && title.trim().length > 0

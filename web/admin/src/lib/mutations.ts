@@ -60,6 +60,11 @@ import {
   type UpsertProviderRequest,
   type WebhookRequest,
 } from "@/lib/api/endpoints"
+import {
+  askMetrics,
+  generateWidget,
+  type MetricsQuery,
+} from "@/lib/api/metrics"
 import type {
   CustomerSummary,
   MerchantSettings,
@@ -104,6 +109,26 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  askMetrics: () => {
+    const dashboardKey = queryKeys.dashboard()
+    return mutationOptions({
+      mutationKey: [...dashboardKey, "metrics", "ask"],
+      mutationFn: (question: string) => askMetrics(question),
+    })
+  },
+  generateDashboardWidget: () => {
+    const dashboardKey = queryKeys.dashboard()
+    return mutationOptions({
+      mutationKey: [...dashboardKey, "widgets", "generate"],
+      mutationFn: ({
+        prompt,
+        baseQuery,
+      }: {
+        prompt: string
+        baseQuery?: MetricsQuery
+      }) => generateWidget(prompt, baseQuery),
+    })
+  },
   findCustomer: () => {
     const customersKey = queryKeys.customers()
     return mutationOptions({

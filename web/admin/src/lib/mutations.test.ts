@@ -29,6 +29,7 @@ import {
   revokeEntitlement,
   revokeProductAccess,
 } from "@/lib/api/endpoints"
+import { askMetrics, generateWidget } from "@/lib/api/metrics"
 import { adminMutations } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
 
@@ -83,6 +84,12 @@ vi.mock("@/lib/api/endpoints", () => ({
   testAlertRule: vi.fn(),
   updateAlertRule: vi.fn(),
   updateProduct: vi.fn(),
+}))
+
+vi.mock("@/lib/api/metrics", () => ({
+  askMetrics: vi.fn(),
+  generateWidget: vi.fn(),
+  putDashboard: vi.fn(),
 }))
 
 const storage = (): Storage => {
@@ -152,6 +159,45 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("dashboard AI mutations", () => {
+  it("routes metrics questions through the ask endpoint", async () => {
+    const queryClient = new QueryClient()
+    vi.mocked(askMetrics).mockResolvedValueOnce({
+      answer: "Revenue increased.",
+      evidence: [],
+    })
+
+    const result = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.askMetrics())
+      .execute("How did revenue change?")
+
+    expect(result.answer).toBe("Revenue increased.")
+    expect(askMetrics).toHaveBeenCalledWith("How did revenue change?")
+  })
+
+  it("generates a widget from a prompt and optional base query", async () => {
+    const queryClient = new QueryClient()
+    const baseQuery = {
+      measures: ["revenue"],
+      range: { last: "30d" },
+    }
+    vi.mocked(generateWidget).mockResolvedValueOnce({
+      title: "Weekly revenue",
+      viz: "line",
+      query: baseQuery,
+    })
+
+    const result = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.generateDashboardWidget())
+      .execute({ prompt: "Make it weekly", baseQuery })
+
+    expect(result.title).toBe("Weekly revenue")
+    expect(generateWidget).toHaveBeenCalledWith("Make it weekly", baseQuery)
+  })
+})
 
 describe("customer lookup mutation", () => {
   it("returns the first customer matching the submitted term", async () => {

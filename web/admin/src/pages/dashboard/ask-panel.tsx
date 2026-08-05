@@ -12,17 +12,17 @@ import {
   Loading02Icon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
+import { useMutation } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ApiError } from "@/lib/api/client"
 import {
-  askMetrics,
   type AskEvidence,
-  type AskResponse,
   type MetricsQuery,
   type WidgetViz,
 } from "@/lib/api/metrics"
+import { adminMutations } from "@/lib/mutations"
 
 import { WidgetVizView } from "./widget-viz"
 
@@ -46,25 +46,20 @@ export function AskPanel({
   }) => void
 }) {
   const [question, setQuestion] = React.useState("")
-  const [asking, setAsking] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const [result, setResult] = React.useState<AskResponse | null>(null)
-  const [asked, setAsked] = React.useState("")
+  const askQuestion = useMutation(adminMutations.askMetrics())
+  const asking = askQuestion.isPending
+  const result = askQuestion.data
+  const asked = askQuestion.variables ?? ""
+  const error = askQuestion.error
+    ? askQuestion.error instanceof ApiError
+      ? askQuestion.error.message
+      : "ask failed"
+    : null
 
-  const ask = async () => {
+  const ask = () => {
     const q = question.trim()
     if (!q || asking) return
-    setAsking(true)
-    setError(null)
-    setResult(null) // one-shot: a new question replaces the previous answer
-    setAsked(q)
-    try {
-      setResult(await askMetrics(q))
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "ask failed")
-    } finally {
-      setAsking(false)
-    }
+    askQuestion.mutate(q)
   }
 
   const addAsWidget = (ev: AskEvidence) => {
@@ -89,7 +84,7 @@ export function AskPanel({
           className="flex items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            void ask()
+            ask()
           }}
         >
           <HugeiconsIcon
@@ -133,10 +128,7 @@ export function AskPanel({
                 size="icon"
                 className="size-6 shrink-0"
                 aria-label="Dismiss answer"
-                onClick={() => {
-                  setResult(null)
-                  setError(null)
-                }}
+                onClick={() => askQuestion.reset()}
               >
                 <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
               </Button>
