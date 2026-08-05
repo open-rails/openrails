@@ -15,6 +15,22 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
+// serviceIdempotencyConflict answers a reused-idempotency-key refusal with 409
+// and the money layer's own detail message ("idempotency_key_reused: <op>
+// replayed key (…) with amount=… but that key already committed amount=…").
+// That is the ONE wire shape both SDK transports map back to
+// openrails.ErrIdempotencyKeyReused (errors.go), and pkg/service re-exports the
+// engine-side twin. It is a CALLER bug — the retry changed the charging terms —
+// so it must never be answered 500, which is indistinguishable from an engine
+// fault and invites a retry that will refuse again.
+func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
+	if !errors.Is(err, billingservice.ErrIdempotencyKeyReused) {
+		return false
+	}
+	r.ErrorJSON(http.StatusConflict, err.Error())
+	return true
+}
+
 type serviceDepositRequest struct {
 	CustomerID  string     `json:"customer_id"`
 	Invoker     string     `json:"invoker"`
@@ -275,6 +291,9 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		Key:        usageKey,
 		OccurredAt: occurredAt,
 	}); err != nil {
+		if serviceIdempotencyConflict(r, err) {
+			return
+		}
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -423,6 +442,9 @@ func ServiceDepositCredits(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
+		if serviceIdempotencyConflict(r, err) {
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "deposit failed")
 		return
 	}
@@ -471,6 +493,9 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		return
 	}
 	if err != nil {
+		if serviceIdempotencyConflict(r, err) {
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "capture failed")
 		return
 	}
