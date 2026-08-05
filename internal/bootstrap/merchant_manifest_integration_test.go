@@ -135,6 +135,48 @@ CREATE TABLE IF NOT EXISTS openrails.customers (
     subject text
 );
 
+-- or#897: the billing-policy registry the manifest loader now installs.
+CREATE TABLE IF NOT EXISTS openrails.billing_policies (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    merchant_id uuid NOT NULL,
+    name text NOT NULL,
+    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT billing_policies_name_key UNIQUE (merchant_id, name),
+    CONSTRAINT billing_policies_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT
+);
+ALTER TABLE ONLY openrails.billing_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.billing_policies ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policies;
+CREATE POLICY merchant_isolation ON openrails.billing_policies
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+CREATE TABLE IF NOT EXISTS openrails.billing_policy_bindings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    merchant_id uuid NOT NULL,
+    customer_id uuid,
+    tier text,
+    policy_name text NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT billing_policy_bindings_rung_ck CHECK ((customer_id IS NULL) OR (tier IS NULL)),
+    CONSTRAINT billing_policy_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+    CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT billing_policy_bindings_policy_fk FOREIGN KEY (merchant_id, policy_name) REFERENCES openrails.billing_policies(merchant_id, name) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_billing_policy_bindings_merchant_id ON openrails.billing_policy_bindings (merchant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_default ON openrails.billing_policy_bindings (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_tier ON openrails.billing_policy_bindings (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_customer ON openrails.billing_policy_bindings (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
+ALTER TABLE ONLY openrails.billing_policy_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.billing_policy_bindings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policy_bindings;
+CREATE POLICY merchant_isolation ON openrails.billing_policy_bindings
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
 CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
     rail text NOT NULL,
     key_hash text NOT NULL,

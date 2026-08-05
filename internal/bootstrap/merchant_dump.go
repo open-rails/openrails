@@ -16,8 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -160,6 +162,35 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			entry.Secrets = values
 		}
 		mt.Custodians[key] = CustodianConfig{c.Kind: entry}
+	}
+
+	// or#897 billing policies + bindings. Dumped so a merchant configured through
+	// the mode-2 API round-trips back into a mode-1 manifest unchanged.
+	policyStore := admission.NewBillingPolicyStore(database)
+	storedPolicies, err := policyStore.ListPolicies(mctx)
+	if err != nil {
+		return nil, fmt.Errorf("load billing policies: %w", err)
+	}
+	for name, body := range storedPolicies {
+		if mt.BillingPolicies == nil {
+			mt.BillingPolicies = map[string]BillingPolicyConfig{}
+		}
+		mt.BillingPolicies[name] = BillingPolicyConfig{
+			Kind:            string(body.Kind),
+			OutstandingCap:  body.OutstandingCapAmount,
+			SpendWindows:    dumpBudgetWindows(body.SpendWindows),
+			BadSpendWindows: dumpBudgetWindows(body.BadSpendWindows),
+			PolicyCurrency:  body.PolicyCurrency,
+		}
+	}
+	storedBindings, err := policyStore.ListDeclarativeBindings(mctx)
+	if err != nil {
+		return nil, fmt.Errorf("load billing policy bindings: %w", err)
+	}
+	for _, b := range storedBindings {
+		mt.BillingPolicyBindings = append(mt.BillingPolicyBindings, BillingPolicyBindingConfig{
+			Policy: b.PolicyName, Tier: b.Tier,
+		})
 	}
 
 	// provider accounts (identity + lifecycle + secret references).
@@ -342,4 +373,25 @@ func formatWindowSeconds(seconds int64) string {
 	default:
 		return fmt.Sprintf("%ds", seconds)
 	}
+}
+
+// dumpBudgetWindows projects stored windows (seconds) back onto the manifest
+// shape (Go duration strings).
+func dumpBudgetWindows(in []models.BudgetWindowPolicy) []BudgetWindowConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]BudgetWindowConfig, 0, len(in))
+	for _, w := range in {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out = append(out, BudgetWindowConfig{
+			Key:      w.Key,
+			Window:   formatWindowSeconds(w.WindowSeconds),
+			Limit:    w.Limit,
+			Currency: w.Currency,
+		})
+	}
+	return out
 }

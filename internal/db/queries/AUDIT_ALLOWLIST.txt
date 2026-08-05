@@ -24,6 +24,8 @@ unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same s
 unbounded-many ListAlertRules                   # alert_rules: operator-configured
 unbounded-many ListEnabledAlertRules            # alert_rules: operator-configured
 unbounded-many ListMerchantWebhooks             # merchant_webhooks: operator-configured
+unbounded-many ListBillingPolicies              # billing_policies: operator-declared named policies (or#897)
+unbounded-many ListDeclarativeBillingPolicyBindings # billing_policy_bindings: default+tier rungs only; per-customer rows excluded by the query
 
 # Optional admin filters (`$n IS NULL OR col = $n`) on a paged listing: absent on
 # most calls so no index serves them generically; merchant index bounds the scan,

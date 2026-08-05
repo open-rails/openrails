@@ -143,6 +143,29 @@ type OpenrailsAlertRule struct {
 	UpdatedAt       time.Time
 }
 
+// or#897: the merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
+type OpenrailsBillingPolicy struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
+	// JSONB policy body: kind, the kind's limit (outstanding_cap_amount micros / spend_windows), bad_spend_windows (#497 wasted-spend grace) and policy_currency. Validated by ONE normalizer shared by the manifest loader and the config API.
+	Policy    []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// or#897: which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant's runtime lever and moves no money.
+type OpenrailsBillingPolicyBinding struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	// Trust tier this binding applies to (the surviving rung of the retired payer_spend_limits.tier). NULL on the customer and default rungs.
+	Tier       *string
+	PolicyName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type OpenrailsCatalogCreditBalance struct {
 	MerchantID   uuid.UUID
 	Key          string
@@ -806,20 +829,6 @@ type OpenrailsOrphanedEpisode struct {
 	EndedAt    interface{}
 	Open       bool
 	Days       float64
-}
-
-// Per-tier payer spend limit (#477/#517): the platform caps the payer's spend, keyed by trust-tier. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override.
-type OpenrailsPayerSpendLimit struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// NULL = merchant-wide default tier limit (#477); non-NULL = per-customer override taking precedence for that customer.
-	CustomerID *uuid.UUID
-	Tier       string
-	// JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
 }
 
 // Records of all payment transactions (formerly purchases table)

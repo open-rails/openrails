@@ -259,7 +259,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 		money.NewMoneyService(suite.App.Runtime.DB),
 		spendgate.New(suite.RedisClient),
 		admission.NewSpendgatePolicyLoader(
-			admission.NewPayerSpendLimitStore(suite.App.Runtime.DB),
+			admission.NewBillingPolicyStore(suite.App.Runtime.DB),
 			admission.NewInvokerSpendLimitStore(suite.App.Runtime.DB),
 			nil,
 		),

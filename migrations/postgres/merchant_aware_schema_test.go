@@ -311,11 +311,6 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 	for _, m := range reAddMerchantID.FindAllStringSubmatch(schema, -1) {
 		s.merchantScoped[m[1]] = true
 	}
-	for _, m := range reDropTable.FindAllStringSubmatch(schema, -1) {
-		delete(s.blocks, m[1])
-		delete(s.merchantScoped, m[1])
-		delete(s.indexes, m[1])
-	}
 	for _, m := range reEnableRLS.FindAllStringSubmatch(schema, -1) {
 		s.enable[m[1]] = true
 	}
@@ -332,6 +327,20 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 		if strings.Contains(m[2], rlsExemptMarker) {
 			s.rlsExemptMarked[m[1]] = true
 		}
+	}
+	// Drops last: this derivation is set-based, not sequential, so a table's RLS
+	// state must be cleared AFTER every ENABLE/FORCE/POLICY/COMMENT statement has
+	// been collected. Otherwise a retired merchant-scoped table leaves a phantom
+	// policy behind and the RLS guards fail on a table that no longer exists
+	// (or#897 dropping payer_spend_limits found this).
+	for _, m := range reDropTable.FindAllStringSubmatch(schema, -1) {
+		delete(s.blocks, m[1])
+		delete(s.merchantScoped, m[1])
+		delete(s.indexes, m[1])
+		delete(s.enable, m[1])
+		delete(s.force, m[1])
+		delete(s.policy, m[1])
+		delete(s.rlsExemptMarked, m[1])
 	}
 	for _, m := range reRenameTable.FindAllStringSubmatch(schema, -1) {
 		s.rename(m[1], m[2])

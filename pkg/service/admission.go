@@ -85,7 +85,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	gate := spendgate.New(s.rt.RedisClient)
 	loader := admission.NewSpendgatePolicyLoader(
-		admission.NewPayerSpendLimitStore(s.rt.DB),
+		admission.NewBillingPolicyStore(s.rt.DB),
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
 	).WithCache(s.rt.AdmissionPolicyCache)
@@ -152,8 +152,10 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 	return accountCapacity - activeHeld
 }
 
-// SpendLimitWindowInput is one fixed money-budget window for a budget-scope
-// policy (#473): same shape as TrustLevelBudgetWindowInput.
+// SpendLimitWindowInput is one fixed money-budget window: at most Limit of
+// spend per WindowSeconds. The single window shape in this package — used by
+// budget-scope policies (#473) and by billing-policy spend/bad-spend windows
+// (or#897).
 type SpendLimitWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
@@ -318,23 +320,33 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 	return admission.NewInvokerSpendLimitStore(s.rt.DB).Replace(ctx, payer, rows)
 }
 
-// TrustLevelBudgetWindowInput / PayerSpendLimitInput configure a trust level's
-// money policy via the admin endpoint (#298: trust-level admin API).
-type TrustLevelBudgetWindowInput struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit"`
-	Currency      string `json:"currency,omitempty"`
+// BillingPolicyInput declares one named billing policy (or#897). Window entries
+// carry the same {key, window_seconds, limit, currency} shape everywhere in this
+// package — SpendLimitWindowInput.
+type BillingPolicyInput struct {
+	Name string `json:"name"`
+	// Kind: outstanding_cap (cap unpaid arrears) or window_spend_cap (cap new
+	// spend per window). accrual_rate_cap is refused until or#897 PR 3.
+	Kind string `json:"kind"`
+	// OutstandingCapAmount (micros, kind=outstanding_cap) is the credit line on
+	// unpaid arrears. Zero defers to the payer's own arrears credit limit.
+	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
+	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
+	SpendWindows []SpendLimitWindowInput `json:"spend_windows,omitempty"`
+	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// windows: at most Limit of host-reported wasted spend is forgiven per window;
+	// direct-payer overage is charged. Allowed on either kind.
+	BadSpendWindows []SpendLimitWindowInput `json:"bad_spend_windows,omitempty"`
+	PolicyCurrency  string                  `json:"policy_currency,omitempty"`
 }
 
-type PayerSpendLimitInput struct {
-	TrustLevel     string                        `json:"trust_level,omitempty"`
-	BudgetWindows  []TrustLevelBudgetWindowInput `json:"budget_windows"`
-	PolicyCurrency string                        `json:"policy_currency,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this trust level: at most Limit of host-reported wasted spend is
-	// forgiven per window; direct-payer overage is charged.
-	BadSpendWindows []TrustLevelBudgetWindowInput `json:"bad_spend_windows,omitempty"`
+// BillingPolicyBindingInput points one rung at a policy name (or#897). Set
+// CustomerID for the per-customer rung, Tier for the per-tier rung, neither for
+// the merchant default — never both.
+type BillingPolicyBindingInput struct {
+	PolicyName string `json:"policy"`
+	CustomerID string `json:"customer_id,omitempty"`
+	Tier       string `json:"tier,omitempty"`
 }
 
 // DefaultInvokerWastedWindows is the flat delegated-invoker wasted-spend default:
@@ -523,7 +535,7 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 }
 
 // payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
-// trust-level policy's bad_spend windows (#488) at the payer's current trust level.
+// bound billing policy's bad_spend windows (#488) at the payer's current tier.
 func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, trustLevel string) ([]abuse.WastedWindow, error) {
 	if trustLevel == "" {
 		if t, err := s.GetTrustLevel(ctx, payer, currency); err == nil && t != "" {
@@ -532,7 +544,7 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 			trustLevel = admission.DefaultTrustLevel
 		}
 	}
-	pol, err := admission.NewPayerSpendLimitStore(s.rt.DB).GetPayerSpendLimits(ctx, payer, trustLevel)
+	pol, err := admission.NewBillingPolicyStore(s.rt.DB).Resolve(ctx, payer, trustLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -770,26 +782,136 @@ func serviceWastedCurrency(requestCurrency string, windows []abuse.WastedWindow)
 	return cur, nil
 }
 
-// SetPayerSpendLimits upserts a per-payer trust-level money policy.
-func (s *Service) SetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, in PayerSpendLimitInput) error {
+// ErrInvalidBillingPolicy identifies caller-owned billing-policy input errors so
+// HTTP and embedded transports map them to the same 400/ErrInvalid contract.
+var ErrInvalidBillingPolicy = errors.New("invalid billing policy")
+
+// ValidateBillingPolicy runs the ONE shared normalizer (or#288 pattern) over a
+// declared policy. Both the manifest loader and this API call it, so a policy
+// that boots cannot be one the API would have refused.
+func ValidateBillingPolicy(in BillingPolicyInput) (string, models.BillingPolicy, error) {
+	name, err := merchantconfig.NormalizeBillingPolicyName(in.Name)
+	if err != nil {
+		return "", models.BillingPolicy{}, fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
+	}
+	body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
+		Kind:                 models.BillingPolicyKind(in.Kind),
+		OutstandingCapAmount: in.OutstandingCapAmount,
+		SpendWindows:         budgetScopeWindowModels(in.SpendWindows),
+		BadSpendWindows:      budgetScopeWindowModels(in.BadSpendWindows),
+		PolicyCurrency:       in.PolicyCurrency,
+	})
+	if err != nil {
+		return "", models.BillingPolicy{}, fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
+	}
+	return name, body, nil
+}
+
+// SetBillingPolicy declares (or redeclares) one named billing policy (or#897).
+// Declaring a policy binds nothing — BindBillingPolicy decides who gets it.
+func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	// A ZERO payer writes the TENANT-WIDE DEFAULT trust-level policy (#477): the
-	// platform capacity ladder declared once, applied to every payer at the trust level. A non-zero
-	// payer writes a per-subject override.
-	trustLevel := strings.TrimSpace(in.TrustLevel)
-	if trustLevel == "" {
-		return fmt.Errorf("trust_level required")
+	name, body, err := ValidateBillingPolicy(in)
+	if err != nil {
+		return err
 	}
-	pol := models.TrustLevelMoneyPolicy{PolicyCurrency: in.PolicyCurrency}
-	for _, b := range in.BudgetWindows {
-		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency})
+	if err := admission.NewBillingPolicyStore(s.rt.DB).UpsertPolicy(ctx, name, body); err != nil {
+		return err
 	}
-	for _, b := range in.BadSpendWindows {
-		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency})
+	s.invalidateAdmissionPolicyCache(ctx)
+	return nil
+}
+
+// BindBillingPolicy points one rung (customer / tier / merchant default) at a
+// declared policy name. This is the merchant's runtime lever: rebinding changes
+// which cap applies to a payer and moves no money.
+func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBindingInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
 	}
-	return admission.NewPayerSpendLimitStore(s.rt.DB).UpsertPayerSpendLimitsFull(ctx, payer, trustLevel, pol)
+	customerRaw := strings.TrimSpace(in.CustomerID)
+	name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(in.PolicyName, in.Tier, customerRaw != "")
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
+	}
+	var payer identity.CustomerID
+	if customerRaw != "" {
+		id, perr := uuid.Parse(customerRaw)
+		if perr != nil {
+			return fmt.Errorf("%w: customer_id must be a uuid", ErrInvalidBillingPolicy)
+		}
+		payer = identity.CustomerID(id)
+	}
+	if err := admission.NewBillingPolicyStore(s.rt.DB).BindPolicy(ctx, payer, tier, name); err != nil {
+		return err
+	}
+	s.invalidateAdmissionPolicyCache(ctx)
+	return nil
+}
+
+// ListBillingPolicies returns every declared policy for the config-sync document.
+func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	stored, err := admission.NewBillingPolicyStore(s.rt.DB).ListPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(stored))
+	for name := range stored {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]BillingPolicyInput, 0, len(names))
+	for _, name := range names {
+		body := stored[name]
+		out = append(out, BillingPolicyInput{
+			Name:                 name,
+			Kind:                 string(body.Kind),
+			OutstandingCapAmount: body.OutstandingCapAmount,
+			SpendWindows:         spendLimitWindowInputs(body.SpendWindows),
+			BadSpendWindows:      spendLimitWindowInputs(body.BadSpendWindows),
+			PolicyCurrency:       body.PolicyCurrency,
+		})
+	}
+	return out, nil
+}
+
+// ListBillingPolicyBindings returns the DECLARATIVE bindings — the merchant
+// default and the per-tier rungs. Per-customer bindings are runtime segmentation
+// state and are never enumerated (that read would scale with customers).
+func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolicyBindingInput, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	rows, err := admission.NewBillingPolicyStore(s.rt.DB).ListDeclarativeBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BillingPolicyBindingInput, 0, len(rows))
+	for _, r := range rows {
+		b := BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
+		if r.CustomerID != nil {
+			b.CustomerID = r.CustomerID.String()
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+// invalidateAdmissionPolicyCache retires this process's cached resolutions for
+// the merchant after a policy or binding write, so a tightened cap takes effect
+// on the next admit instead of at the end of the TTL.
+func (s *Service) invalidateAdmissionPolicyCache(ctx context.Context) {
+	if s.rt.AdmissionPolicyCache == nil {
+		return
+	}
+	if tid, err := merchant.Require(ctx); err == nil {
+		s.rt.AdmissionPolicyCache.InvalidateMerchant(tid.UUID().String())
+	}
 }
 
 // TrustLevelScheduleRung is one rung of a persisted same-currency trust-level

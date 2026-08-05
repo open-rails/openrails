@@ -389,7 +389,9 @@ signatures and updates subscriptions/entitlements; your app just reads the resul
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,
-dunning, the intents ledger), [arrears-delinquency.md](arrears-delinquency.md),
+dunning, the intents ledger), [billing-policies.md](billing-policies.md)
+(named spend/credit-line policies and how you bind them),
+[arrears-delinquency.md](arrears-delinquency.md),
 [rate-limiting.md](rate-limiting.md),
 [auth.md](auth.md) (the full one-credential-per-trust-domain rationale),
 [self-hosting-mode1.md](self-hosting-mode1.md).

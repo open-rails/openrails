@@ -31,7 +31,8 @@ func TestSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 	for _, tbl := range []string{
 		"usage_events",
 		"invoices",
-		"payer_spend_limits",
+		"billing_policies",
+		"billing_policy_bindings",
 		"payments",
 		"customers",
 		"merchant_secrets",

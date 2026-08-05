@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -355,10 +357,19 @@ type serviceMerchantSettingsRequest struct {
 	// CheckoutRouting (or#288): the processor-routing policy. Omitted preserves
 	// the stored policy; present replaces it whole (an empty array clears it
 	// back to the built-in default order).
-	CheckoutRouting                   *[]models.CheckoutRoutingRule         `json:"checkout_routing,omitempty"`
-	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
-	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
-	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	CheckoutRouting     *[]models.CheckoutRoutingRule       `json:"checkout_routing,omitempty"`
+	TrustLevelSchedules []serviceMerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
+	// policies, then the rungs that decide who gets which. Declared policies are
+	// applied before bindings so a binding can name one from the same document.
+	BillingPolicies                   []billingservice.BillingPolicyInput        `json:"billing_policies,omitempty"`
+	BillingPolicyBindings             []billingservice.BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
+	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow              `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+
+	// RetiredTrustLevelSpendLimits keeps the retired `trust_level_spend_limits`
+	// key BOUND ONLY so a caller that still sends it is told what replaced it
+	// (or#897 hard cut). A silently-ignored spend cap is a cap nobody enforced.
+	RetiredTrustLevelSpendLimits []json.RawMessage `json:"trust_level_spend_limits,omitempty"`
 }
 
 type serviceMerchantTrustLevelSchedule struct {
@@ -386,6 +397,16 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
 		return
 	}
+	policies, err := svc.ListBillingPolicies(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		return
+	}
+	bindings, err := svc.ListBillingPolicyBindings(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		return
+	}
 	r.SuccessJSON(serviceMerchantSettingsRequest{
 		Profile:                           merchantProfileResponsePtr(cfg.Profile),
 		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
@@ -396,16 +417,22 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		ArrearsGraceDays:                  cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:           cfg.ArrearsDelinquencyFloor,
 		CheckoutRouting:                   cfg.CheckoutRouting,
+		BillingPolicies:                   policies,
+		BillingPolicyBindings:             bindings,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
 
 // ServiceSetMerchantSettings installs the merchant-owned admission policy in
-// one document: profile, trust-level schedules, trust-level spend policies, and
-// delegated-invoker wasted-spend limits.
+// one document: profile, trust-level schedules, billing policies + bindings,
+// and delegated-invoker wasted-spend limits.
 func ServiceSetMerchantSettings(r *httprequest.Request) {
 	var req serviceMerchantSettingsRequest
 	if !r.BindJSON(&req) {
+		return
+	}
+	if len(req.RetiredTrustLevelSpendLimits) > 0 {
+		r.ErrorJSON(http.StatusBadRequest, "trust_level_spend_limits was replaced by billing_policies + billing_policy_bindings (or#897): declare a named policy with kind outstanding_cap or window_spend_cap, then bind it to a tier or customer")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -419,6 +446,15 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	// exact reason instead of a bare 500.
 	if req.CheckoutRouting != nil {
 		if _, err := merchantconfig.NormalizeCheckoutRouting(*req.CheckoutRouting); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	// Same contract for billing policies: validate the WHOLE document through the
+	// shared normalizer before writing any of it, so a bad third policy cannot
+	// leave the first two installed.
+	for _, policy := range req.BillingPolicies {
+		if _, _, err := billingservice.ValidateBillingPolicy(policy); err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -463,9 +499,21 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 			return
 		}
 	}
-	for _, policy := range req.TrustLevelSpendLimits {
-		if err := svc.SetPayerSpendLimits(r.Request.Context(), billingidentity.CustomerID{}, policy); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set trust-level policy failed")
+	// Policies first: a binding in the same document may name one of them, and
+	// the bindings FK refuses a name that does not exist yet.
+	for _, policy := range req.BillingPolicies {
+		if err := svc.SetBillingPolicy(r.Request.Context(), policy); err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "set billing policy failed")
+			return
+		}
+	}
+	for _, binding := range req.BillingPolicyBindings {
+		if err := svc.BindBillingPolicy(r.Request.Context(), binding); err != nil {
+			if errors.Is(err, billingservice.ErrInvalidBillingPolicy) {
+				r.ErrorJSON(http.StatusBadRequest, err.Error())
+				return
+			}
+			r.ErrorJSON(http.StatusInternalServerError, "bind billing policy failed")
 			return
 		}
 	}

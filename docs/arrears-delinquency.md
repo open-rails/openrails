@@ -19,7 +19,9 @@ revocation is exactly how a billing system costs a paying customer their access.
 ## Two axes, and why they are not one
 
 A charge failing and a debt ageing are different questions with different
-answers, and conflating them is the classic arrears bug.
+answers, and conflating them is the classic arrears bug. (A third question —
+*how much may this payer owe, or spend, at all* — is the billing policy:
+[billing-policies.md](billing-policies.md).)
 
 - **Decline bucket** — *why did this charge fail* ⇒ what to do about the **card**.
   Time-independent. Retry, ask them to fix the card, or stop. See

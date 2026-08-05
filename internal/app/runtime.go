@@ -132,8 +132,9 @@ type Runtime struct {
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
-	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
-	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
+	// AdmissionPolicyCache is the process-local long-TTL cache of the or#897
+	// billing-policy RESOLUTION (which named policy binds to a payer at a tier).
+	// nil = resolve the binding from Postgres on every admit.
 	AdmissionPolicyCache *admission.PolicyCache
 	MoneyCharger         money.Charger
 	RailCustomerService  *payments.RailCustomerService
