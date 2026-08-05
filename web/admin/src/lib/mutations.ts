@@ -35,6 +35,7 @@ import {
   previewRepriceAllPriorVersions,
   publishCatalog,
   refreshCatalogDrift,
+  refundPayment,
   removeTeamMember,
   repriceAllPriorVersions,
   resumeSubscription,
@@ -70,6 +71,40 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  refundPayment: (
+    queryClient: QueryClient,
+    paymentId: string,
+    customerId?: string,
+    subscriptionId?: string
+  ) => {
+    const paymentsKey = queryKeys.payments()
+    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const subscriptionKey = subscriptionId
+      ? queryKeys.subscription(subscriptionId)
+      : undefined
+    return mutationOptions({
+      mutationKey: [...paymentsKey, paymentId, "refund"],
+      mutationFn: ({
+        amount,
+        reason,
+        revokeAccess,
+      }: {
+        amount: number
+        reason: string
+        revokeAccess: boolean
+      }) => refundPayment(paymentId, amount, reason, revokeAccess),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: paymentsKey }),
+          ...(customerKey
+            ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+            : []),
+          ...(subscriptionKey
+            ? [queryClient.invalidateQueries({ queryKey: subscriptionKey })]
+            : []),
+        ]),
+    })
+  },
   cancelSubscription: (
     queryClient: QueryClient,
     subscriptionId: string,
