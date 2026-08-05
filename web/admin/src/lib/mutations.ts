@@ -1,6 +1,11 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import {
+  askCatalogCopilot,
+  confirmCopilotDraft,
+  type CreatePriceDraft,
+} from "@/lib/api/copilot"
+import {
   activatePrice,
   activateProduct,
   cancelReprice,
@@ -16,11 +21,15 @@ import {
   deletePaymentProvider,
   deleteWebhook,
   getCreditLimit,
+  getPriceByKey,
+  getProduct,
   getTrustLevel,
   inviteTeamMember,
   putMerchantSettings,
   putPaymentProvider,
   previewRepriceAllPriorVersions,
+  publishCatalog,
+  refreshCatalogDrift,
   removeTeamMember,
   repriceAllPriorVersions,
   revokeApiKey,
@@ -52,6 +61,68 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  askCatalogCopilot: () =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "copilot", "ask"],
+      mutationFn: (question: string) => askCatalogCopilot(question),
+    }),
+  loadCatalogPriceDraft: () =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "copilot", "load-price-draft"],
+      mutationFn: async (priceKey: string) => {
+        const price = await getPriceByKey(priceKey)
+        const product = await getProduct(price.product_id)
+        return { price, productName: product.display_name }
+      },
+    }),
+  createCatalogDraftPrice: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "copilot", "create-price"],
+      mutationFn: async ({
+        draftId,
+        price,
+      }: {
+        draftId: string
+        price: CreatePriceDraft
+      }) => {
+        const created = await createPrice(price)
+        void confirmCopilotDraft(draftId, "catalog_diff", price.key).catch(
+          () => {}
+        )
+        return created
+      },
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  publishCatalog: (queryClient: QueryClient) => {
+    const catalogKey = queryKeys.catalog()
+    return mutationOptions({
+      mutationKey: [...catalogKey, "publish"],
+      mutationFn: ({
+        manifest,
+        planOnly,
+      }: {
+        manifest: unknown
+        planOnly: boolean
+      }) =>
+        publishCatalog(
+          manifest,
+          planOnly ? { plan_only: true } : { insert: true, overwrite: true }
+        ),
+      onSuccess: (_result, { planOnly }) => {
+        if (!planOnly) {
+          return queryClient.invalidateQueries({
+            queryKey: catalogKey,
+          })
+        }
+      },
+    })
+  },
+  refreshCatalogDrift: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalogDrift(), "refresh"],
+      mutationFn: () => refreshCatalogDrift(),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalogDrift()),
+    }),
   createProduct: (queryClient: QueryClient) =>
     mutationOptions({
       mutationKey: [...queryKeys.catalog(), "products", "create"],

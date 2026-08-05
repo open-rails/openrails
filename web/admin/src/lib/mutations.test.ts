@@ -1,18 +1,28 @@
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
 import {
   cancelReprice,
   createPrice,
   createProduct,
   deactivatePrice,
+  getPriceByKey,
+  getProduct,
   previewRepriceAllPriorVersions,
+  publishCatalog,
   putMerchantSettings,
   putPaymentProvider,
+  refreshCatalogDrift,
   repriceAllPriorVersions,
 } from "@/lib/api/endpoints"
 import { adminMutations } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
+
+vi.mock("@/lib/api/copilot", () => ({
+  askCatalogCopilot: vi.fn(),
+  confirmCopilotDraft: vi.fn(),
+}))
 
 vi.mock("@/lib/api/endpoints", () => ({
   activatePrice: vi.fn(),
@@ -30,12 +40,16 @@ vi.mock("@/lib/api/endpoints", () => ({
   deletePaymentProvider: vi.fn(),
   deleteWebhook: vi.fn(),
   getCreditLimit: vi.fn(),
+  getPriceByKey: vi.fn(),
+  getProduct: vi.fn(),
   getTrustLevel: vi.fn(),
   inviteTeamMember: vi.fn(),
   putMerchantSettings: vi.fn(),
   putPaymentProvider: vi.fn(),
   previewRepriceAllPriorVersions: vi.fn(),
+  publishCatalog: vi.fn(),
   removeTeamMember: vi.fn(),
+  refreshCatalogDrift: vi.fn(),
   repriceAllPriorVersions: vi.fn(),
   revokeApiKey: vi.fn(),
   revokeTeamInvite: vi.fn(),
@@ -75,6 +89,24 @@ beforeEach(() => {
   } as never)
   vi.mocked(repriceAllPriorVersions).mockResolvedValue({} as never)
   vi.mocked(cancelReprice).mockResolvedValue({ message: "ok" })
+  vi.mocked(askCatalogCopilot).mockResolvedValue({
+    answer: "The catalog has one product.",
+    evidence: [],
+  })
+  vi.mocked(confirmCopilotDraft).mockResolvedValue({ message: "ok" })
+  vi.mocked(getPriceByKey).mockResolvedValue({
+    id: "price-1",
+    product_id: "product-1",
+  } as never)
+  vi.mocked(getProduct).mockResolvedValue({
+    id: "product-1",
+    display_name: "Pro",
+  } as never)
+  vi.mocked(publishCatalog).mockResolvedValue({ plan: {} })
+  vi.mocked(refreshCatalogDrift).mockResolvedValue({
+    new_events: 2,
+    resolved_events: 1,
+  } as never)
 })
 
 afterEach(() => vi.unstubAllGlobals())
@@ -144,6 +176,136 @@ describe("settings mutations", () => {
 })
 
 describe("catalog mutations", () => {
+  it("asks the catalog copilot without invalidating catalog data", async () => {
+    const queryClient = new QueryClient()
+    const catalogKey = queryKeys.catalog()
+    queryClient.setQueryData(catalogKey, { items: [] })
+
+    const result = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.askCatalogCopilot())
+      .execute("what do we sell?")
+
+    expect(askCatalogCopilot).toHaveBeenCalledWith("what do we sell?")
+    expect(result.answer).toBe("The catalog has one product.")
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(false)
+  })
+
+  it("loads the live price and product for a copilot draft", async () => {
+    const queryClient = new QueryClient()
+
+    const result = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.loadCatalogPriceDraft())
+      .execute("pro-monthly")
+
+    expect(getPriceByKey).toHaveBeenCalledWith("pro-monthly")
+    expect(getProduct).toHaveBeenCalledWith("product-1")
+    expect(result.productName).toBe("Pro")
+  })
+
+  it("publishes an applied manifest and invalidates the catalog", async () => {
+    const queryClient = new QueryClient()
+    const catalogKey = queryKeys.catalog()
+    queryClient.setQueryData(catalogKey, { items: [] })
+    const manifest = { products: [] }
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.publishCatalog(queryClient))
+      .execute({ manifest, planOnly: false })
+
+    expect(publishCatalog).toHaveBeenCalledWith(manifest, {
+      insert: true,
+      overwrite: true,
+    })
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
+  })
+
+  it("previews a manifest without invalidating the catalog", async () => {
+    const queryClient = new QueryClient()
+    const catalogKey = queryKeys.catalog()
+    queryClient.setQueryData(catalogKey, { items: [] })
+    const manifest = { products: [] }
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.publishCatalog(queryClient))
+      .execute({ manifest, planOnly: true })
+
+    expect(publishCatalog).toHaveBeenCalledWith(manifest, { plan_only: true })
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(false)
+  })
+
+  it("invalidates the merchant that started a catalog publish", async () => {
+    const queryClient = new QueryClient()
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    )
+    const merchantAKey = queryKeys.catalog()
+    const options = adminMutations.publishCatalog(queryClient)
+    queryClient.setQueryData(merchantAKey, { items: [] })
+
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
+    )
+    const merchantBKey = queryKeys.catalog()
+    queryClient.setQueryData(merchantBKey, { items: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, options)
+      .execute({ manifest: { products: [] }, planOnly: false })
+
+    expect(queryClient.getQueryState(merchantAKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(merchantBKey)?.isInvalidated).toBe(false)
+  })
+
+  it("refreshes only drift queries after a scan", async () => {
+    const queryClient = new QueryClient()
+    const driftKey = [...queryKeys.catalogDrift(), { limit: 200 }] as const
+    const productsKey = [...queryKeys.catalog(), "products"] as const
+    queryClient.setQueryData(driftKey, { items: [] })
+    queryClient.setQueryData(productsKey, { items: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.refreshCatalogDrift(queryClient))
+      .execute()
+
+    expect(refreshCatalogDrift).toHaveBeenCalledOnce()
+    expect(queryClient.getQueryState(driftKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(productsKey)?.isInvalidated).toBe(false)
+  })
+
+  it("creates a copilot-drafted price and records its provenance", async () => {
+    const queryClient = new QueryClient()
+    const catalogKey = queryKeys.catalog()
+    queryClient.setQueryData(catalogKey, { items: [] })
+    const price = {
+      product_id: "product-1",
+      key: "pro-monthly",
+      unit_amount: 12_000_000,
+      currency: "usd",
+      auto_renew: true,
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.createCatalogDraftPrice(queryClient))
+      .execute({ draftId: "draft-1", price })
+
+    expect(createPrice).toHaveBeenCalledWith(price)
+    expect(confirmCopilotDraft).toHaveBeenCalledWith(
+      "draft-1",
+      "catalog_diff",
+      "pro-monthly"
+    )
+    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
+  })
+
   it("creates a product and invalidates the catalog tree", async () => {
     const queryClient = new QueryClient()
     const productsKey = [

@@ -45,7 +45,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
-import { publishCatalog, refreshCatalogDrift } from "@/lib/api/endpoints"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
   formatDate,
@@ -58,7 +57,7 @@ import { adminMutations } from "@/lib/mutations"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminQueries } from "@/lib/queries"
 
 const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
@@ -80,7 +79,6 @@ function catalogDraftingEnabled(): boolean {
 }
 
 export function CatalogPage() {
-  const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const tab = params.get("tab") || "products"
 
@@ -90,9 +88,6 @@ export function CatalogPage() {
       <CatalogCopilotPanel
         enabled={catalogCopilotEnabled()}
         draftingEnabled={catalogDraftingEnabled()}
-        onCatalogChanged={() =>
-          void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
-        }
       />
       <Tabs
         value={tab}
@@ -133,17 +128,14 @@ export function CatalogPage() {
 }
 
 function ProductsTab() {
-  const queryClient = useQueryClient()
   const { data, isPending: loading } = useQuery(
     adminQueries.products({ errorAction: "Load products" })
   )
-  const reload = () =>
-    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end gap-2">
-        <PublishDialog onDone={reload} />
+        <PublishDialog />
         <ProductDialog />
       </div>
       {loading ? (
@@ -807,12 +799,11 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
 }
 
 function DriftTab() {
-  const {
-    data,
-    isPending: loading,
-    refetch: reload,
-  } = useQuery(adminQueries.catalogDrift())
-  const [refreshing, setRefreshing] = React.useState(false)
+  const queryClient = useQueryClient()
+  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift())
+  const refreshDrift = useMutation(
+    adminMutations.refreshCatalogDrift(queryClient)
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -820,25 +811,23 @@ function DriftTab() {
         <Button
           variant="outline"
           size="sm"
-          disabled={refreshing}
+          disabled={refreshDrift.isPending}
           onClick={async () => {
-            setRefreshing(true)
             try {
-              const report = await refreshCatalogDrift()
+              const report = await refreshDrift.mutateAsync()
               toast.success(
                 `Drift scan done: ${report.new_events} new, ${report.resolved_events} resolved`
               )
-              void reload()
             } catch (err) {
               toastApiError(err, "Refresh drift")
-            } finally {
-              setRefreshing(false)
             }
           }}
         >
           <HugeiconsIcon
             icon={Refresh01Icon}
-            className={refreshing ? "size-4 animate-spin" : "size-4"}
+            className={
+              refreshDrift.isPending ? "size-4 animate-spin" : "size-4"
+            }
           />{" "}
           Refresh scan
         </Button>
@@ -897,13 +886,13 @@ function DriftTab() {
   )
 }
 
-function PublishDialog({ onDone }: { onDone: () => void }) {
+function PublishDialog() {
   const [open, setOpen] = React.useState(false)
-  const [manifest, setManifest] = React.useState("")
   const [plan, setPlan] = React.useState<string>()
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const publish = useMutation(adminMutations.publishCatalog(queryClient))
 
-  const run = async (planOnly: boolean) => {
+  const run = async (manifest: string, planOnly: boolean) => {
     let parsed: unknown
     try {
       parsed = JSON.parse(manifest)
@@ -911,23 +900,20 @@ function PublishDialog({ onDone }: { onDone: () => void }) {
       toast.error("Manifest must be valid JSON")
       return
     }
-    setBusy(true)
     try {
-      const res = await publishCatalog(
-        parsed,
-        planOnly ? { plan_only: true } : { insert: true, overwrite: true }
-      )
+      const res = await publish.mutateAsync({ manifest: parsed, planOnly })
       setPlan(JSON.stringify(res, null, 2))
       if (!planOnly) {
         toast.success("Catalog published")
-        onDone()
       }
     } catch (err) {
       toastApiError(err, planOnly ? "Plan catalog publish" : "Publish catalog")
-    } finally {
-      setBusy(false)
     }
   }
+  const form = useForm({
+    defaultValues: { manifest: "" },
+    onSubmit: async ({ value }) => run(value.manifest, false),
+  })
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -939,39 +925,60 @@ function PublishDialog({ onDone }: { onDone: () => void }) {
         }
       />
       <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Publish catalog manifest</DialogTitle>
-          <DialogDescription>
-            Terraform-style: paste the catalog manifest JSON, preview the plan,
-            then apply (insert + overwrite).
-          </DialogDescription>
-        </DialogHeader>
-        <Textarea
-          className="min-h-40 text-xs"
-          placeholder='{"groups": ...}'
-          value={manifest}
-          onChange={(e) => setManifest(e.target.value)}
-        />
-        {plan && (
-          <pre className="max-h-60 overflow-auto rounded-md bg-muted p-3 text-xs">
-            {plan}
-          </pre>
-        )}
-        <DialogFooter>
-          <Button
-            variant="outline"
-            disabled={busy || !manifest.trim()}
-            onClick={() => run(true)}
-          >
-            Preview plan
-          </Button>
-          <Button
-            disabled={busy || !manifest.trim()}
-            onClick={() => run(false)}
-          >
-            {busy ? "Working…" : "Apply"}
-          </Button>
-        </DialogFooter>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Publish catalog manifest</DialogTitle>
+            <DialogDescription>
+              Terraform-style: paste the catalog manifest JSON, preview the
+              plan, then apply (insert + overwrite).
+            </DialogDescription>
+          </DialogHeader>
+          <form.Field name="manifest">
+            {(field) => (
+              <Textarea
+                className="min-h-40 text-xs"
+                placeholder='{"groups": ...}'
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+            )}
+          </form.Field>
+          {plan && (
+            <pre className="max-h-60 overflow-auto rounded-md bg-muted p-3 text-xs">
+              {plan}
+            </pre>
+          )}
+          <DialogFooter>
+            <form.Subscribe selector={(state) => state.values.manifest}>
+              {(manifest) => (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={publish.isPending || !manifest.trim()}
+                    onClick={() => void run(manifest, true)}
+                  >
+                    Preview plan
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={publish.isPending || !manifest.trim()}
+                  >
+                    {publish.isPending ? "Working…" : "Apply"}
+                  </Button>
+                </>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

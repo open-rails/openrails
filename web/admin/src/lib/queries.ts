@@ -57,6 +57,7 @@ export const queryKeys = {
   payments: () => [...merchantRoot(), "payments"] as const,
   payment: (id: string) => [...merchantRoot(), "payments", id] as const,
   catalog: () => [...merchantRoot(), "catalog"] as const,
+  catalogDrift: () => [...merchantRoot(), "catalog", "drift"] as const,
   settings: () => [...merchantRoot(), "settings"] as const,
   team: () => [...merchantRoot(), "team"] as const,
   alerts: () => [...merchantRoot(), "alerts"] as const,
@@ -205,7 +206,7 @@ export const adminQueries = {
     }),
   catalogDrift: (limit = 200, offset = 0) =>
     queryOptions({
-      queryKey: [...queryKeys.catalog(), "drift", { limit, offset }],
+      queryKey: [...queryKeys.catalogDrift(), { limit, offset }],
       queryFn: ({ signal }) => listCatalogDrift(limit, offset, signal),
       meta: { errorAction: "Load drift" },
     }),
