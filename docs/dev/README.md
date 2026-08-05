@@ -16,6 +16,7 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 | `task run` | Build + run the server |
 | `task dev` | Hot-reload dev server (Air, `.air.toml`) |
 | `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
+| `task docker-reset` | Recreate the stack from empty — deletes the Postgres volume, then re-migrates ([why you'd need this](#migrations)) |
 | `task docker-logs` | Tail the openrails container |
 | `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` is the CI staleness gate |
 | `task test` | Business-time guardrail + unit tests (`-race`) + core integration tier |
@@ -86,8 +87,20 @@ next to the migrations.
 The baseline was re-squashed (or#893). migratekit tracks applied migrations by
 FILENAME, so a database whose ledger holds the pre-squash names will skip the
 new baseline and sit on a schema nothing describes: **drop and recreate any
-database created before the re-squash.** Prelaunch, every database is
-disposable, which is the whole reason the squash is allowed.
+database created before the re-squash — do not try to migrate it forward.**
+Prelaunch, every database is disposable, which is the whole reason the squash
+is allowed.
+
+Recreating one:
+
+| Database | How |
+|---|---|
+| Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
+| A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
+| A long-lived hand-rolled test pool | Drop `public.migrations` along with the schema — migratekit reads its ledger there, and a surviving ledger makes it *skip* re-applying the baseline. (The integration suite is unaffected: it creates a fresh per-run database every time.) |
+
+The symptom if you skip this is not a migration error — it is a schema that
+silently lacks whatever the squash folded in.
 
 ## Repo layout
 
