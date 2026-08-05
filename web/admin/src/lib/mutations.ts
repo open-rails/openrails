@@ -38,6 +38,7 @@ import {
   refundPayment,
   removeTeamMember,
   repriceAllPriorVersions,
+  resolveFinding,
   resumeSubscription,
   revokeApiKey,
   revokeEntitlement,
@@ -71,6 +72,22 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  resolveFinding: (queryClient: QueryClient) => {
+    const opsKey = queryKeys.ops()
+    return mutationOptions({
+      mutationKey: [...opsKey, "findings", "resolve"],
+      mutationFn: ({
+        id,
+        outcome,
+        notes,
+      }: {
+        id: string
+        outcome: "approve" | "ignore"
+        notes: string
+      }) => resolveFinding(id, outcome, notes),
+      onSuccess: invalidateTreeOnSuccess(queryClient, opsKey),
+    })
+  },
   refundPayment: (
     queryClient: QueryClient,
     paymentId: string,

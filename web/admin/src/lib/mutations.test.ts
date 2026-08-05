@@ -21,6 +21,7 @@ import {
   refreshCatalogDrift,
   refundPayment,
   repriceAllPriorVersions,
+  resolveFinding,
   resumeSubscription,
   revokeEntitlement,
   revokeProductAccess,
@@ -66,6 +67,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   refreshCatalogDrift: vi.fn(),
   refundPayment: vi.fn(),
   repriceAllPriorVersions: vi.fn(),
+  resolveFinding: vi.fn(),
   resumeSubscription: vi.fn(),
   revokeApiKey: vi.fn(),
   revokeEntitlement: vi.fn(),
@@ -114,6 +116,7 @@ beforeEach(() => {
   })
   vi.mocked(resumeSubscription).mockResolvedValue({ status: "queued" })
   vi.mocked(refundPayment).mockResolvedValue({} as never)
+  vi.mocked(resolveFinding).mockResolvedValue({} as never)
   vi.mocked(createOffChannelPayment).mockResolvedValue({
     payment_id: "payment-1",
     status: "created",
@@ -143,6 +146,70 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("ops mutations", () => {
+  it("resolves a finding and refreshes the ops tree", async () => {
+    const queryClient = new QueryClient()
+    const findingsKey = [
+      ...queryKeys.ops(),
+      "findings",
+      { limit: 100, offset: 0 },
+    ] as const
+    const repairAlertsKey = [
+      ...queryKeys.ops(),
+      "repair-alerts",
+      { limit: 50, offset: 0 },
+    ] as const
+    const customerKey = queryKeys.customer("customer-1")
+    queryClient.setQueryData(findingsKey, { items: [] })
+    queryClient.setQueryData(repairAlertsKey, { data: [] })
+    queryClient.setQueryData(customerKey, {})
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.resolveFinding(queryClient))
+      .execute({
+        id: "finding-1",
+        outcome: "approve",
+        notes: "verified",
+      })
+
+    expect(resolveFinding).toHaveBeenCalledWith(
+      "finding-1",
+      "approve",
+      "verified"
+    )
+    expect(queryClient.getQueryState(findingsKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(repairAlertsKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(false)
+  })
+
+  it("keeps ops invalidation scoped to the initiating merchant", async () => {
+    const queryClient = new QueryClient()
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    )
+    const opsAKey = queryKeys.ops()
+    const options = adminMutations.resolveFinding(queryClient)
+    queryClient.setQueryData(opsAKey, {})
+
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
+    )
+    const opsBKey = queryKeys.ops()
+    queryClient.setQueryData(opsBKey, {})
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, options)
+      .execute({ id: "finding-1", outcome: "ignore", notes: "expected" })
+
+    expect(queryClient.getQueryState(opsAKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(opsBKey)?.isInvalidated).toBe(false)
+  })
+})
 
 describe("payment mutations", () => {
   it("refunds a payment and refreshes its related records", async () => {

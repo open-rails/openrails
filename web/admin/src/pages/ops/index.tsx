@@ -1,6 +1,7 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -25,10 +26,10 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { resolveFinding } from "@/lib/api/endpoints"
 import type { Finding } from "@/lib/api/types"
 import { formatDate } from "@/lib/format"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function OpsPage() {
@@ -60,7 +61,6 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
-  const queryClient = useQueryClient()
   const { data, isPending: loading } = useQuery(adminQueries.findings())
   const [resolving, setResolving] = React.useState<Finding | null>(null)
 
@@ -146,10 +146,6 @@ function FindingsTab() {
         <ResolveFindingDialog
           finding={resolving}
           onClose={() => setResolving(null)}
-          onDone={() => {
-            setResolving(null)
-            void queryClient.invalidateQueries({ queryKey: queryKeys.ops() })
-          }}
         />
       )}
     </div>
@@ -186,28 +182,28 @@ function Gauge({
 function ResolveFindingDialog({
   finding,
   onClose,
-  onDone,
 }: {
   finding: Finding
   onClose: () => void
-  onDone: () => void
 }) {
-  const [notes, setNotes] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const resolution = useMutation(adminMutations.resolveFinding(queryClient))
+  const form = useForm({ defaultValues: { notes: "" } })
   const canApprove = Boolean(finding.recommendation)
 
   const resolve = async (outcome: "approve" | "ignore") => {
-    setBusy(true)
     try {
-      await resolveFinding(finding.id, outcome, notes)
+      await resolution.mutateAsync({
+        id: finding.id,
+        outcome,
+        notes: form.state.values.notes,
+      })
       toast.success(
         outcome === "approve" ? "Recommendation executed" : "Finding ignored"
       )
-      onDone()
+      onClose()
     } catch (err) {
       toastApiError(err, "Resolve finding")
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -237,27 +233,39 @@ function ResolveFindingDialog({
             (with notes).
           </p>
         )}
-        <div className="grid gap-1.5">
-          <Label htmlFor="f-notes">
-            Notes {canApprove ? "(required to ignore)" : "(required)"}
-          </Label>
-          <Textarea
-            id="f-notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </div>
+        <form.Field name="notes">
+          {(field) => (
+            <div className="grid gap-1.5">
+              <Label htmlFor="f-notes">
+                Notes {canApprove ? "(required to ignore)" : "(required)"}
+              </Label>
+              <Textarea
+                id="f-notes"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+            </div>
+          )}
+        </form.Field>
         <DialogFooter>
-          <Button
-            variant="outline"
-            disabled={busy || !notes.trim()}
-            onClick={() => resolve("ignore")}
-          >
-            Ignore
-          </Button>
+          <form.Subscribe selector={(state) => state.values.notes}>
+            {(notes) => (
+              <Button
+                variant="outline"
+                disabled={resolution.isPending || !notes.trim()}
+                onClick={() => resolve("ignore")}
+              >
+                Ignore
+              </Button>
+            )}
+          </form.Subscribe>
           {canApprove && (
-            <Button disabled={busy} onClick={() => resolve("approve")}>
-              {busy ? "Working…" : "Approve recommendation"}
+            <Button
+              disabled={resolution.isPending}
+              onClick={() => resolve("approve")}
+            >
+              {resolution.isPending ? "Working…" : "Approve recommendation"}
             </Button>
           )}
         </DialogFooter>
