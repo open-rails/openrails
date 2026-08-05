@@ -37,9 +37,14 @@ type AdmitInput struct {
 	Roles           []uuid.UUID
 	Currency        string
 	EstimatedAmount int64
-	Source          string
-	SourceID        string
-	ExpiresAtUnix   int64
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it. Zero means the request adds no ongoing rate, which
+	// leaves an accrual_rate_cap payer gated on what is already running.
+	AccrualRateDeltaPerHour int64
+	Source                  string
+	SourceID                string
+	ExpiresAtUnix           int64
 }
 
 // AdmitResult is the unified admission decision returned to the host.
@@ -96,7 +101,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
 		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows).
 		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
-		WithDelinquency(s.delinquencyService())
+		WithDelinquency(s.delinquencyService()).
+		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
 
 	var exp time.Time
 	switch {
@@ -119,9 +125,11 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Roles:           in.Roles,
 		Currency:        currency,
 		EstimatedAmount: in.EstimatedAmount,
-		Source:          source,
-		SourceID:        in.SourceID,
-		ExpiresAt:       exp,
+
+		AccrualRateDeltaPerHour: in.AccrualRateDeltaPerHour,
+		Source:                  source,
+		SourceID:                in.SourceID,
+		ExpiresAt:               exp,
 	})
 	if err != nil {
 		return nil, err
@@ -333,6 +341,23 @@ type BillingPolicyInput struct {
 	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
 	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
 	SpendWindows []SpendLimitWindowInput `json:"spend_windows,omitempty"`
+	// AccrualRateCapPerHour (kind=accrual_rate_cap) is the ceiling on the payer's
+	// measured accrual rate, in micros PER HOUR. AccrualRateWindowSeconds is the
+	// lookback the measurement smooths over (default 3600); it changes the
+	// smoothing, never the unit.
+	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty"`
+	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
+	// CollectionThresholdAmount (micros) is when this payer's accrued arrears is
+	// invoiced; DelinquencyGraceDays / DelinquencyAmountFloor are its delinquency
+	// policy. Each overrides the merchant-wide invoice setting for payers bound
+	// here; nil defers to it. All three ride on any kind.
+	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
+	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
+	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty"`
+	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
+	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// stays merchant-wide. Declaring it here fails with that reason.
+	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
@@ -795,11 +820,17 @@ func ValidateBillingPolicy(in BillingPolicyInput) (string, models.BillingPolicy,
 		return "", models.BillingPolicy{}, fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
 	}
 	body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
-		Kind:                 models.BillingPolicyKind(in.Kind),
-		OutstandingCapAmount: in.OutstandingCapAmount,
-		SpendWindows:         budgetScopeWindowModels(in.SpendWindows),
-		BadSpendWindows:      budgetScopeWindowModels(in.BadSpendWindows),
-		PolicyCurrency:       in.PolicyCurrency,
+		Kind:                      models.BillingPolicyKind(in.Kind),
+		OutstandingCapAmount:      in.OutstandingCapAmount,
+		SpendWindows:              budgetScopeWindowModels(in.SpendWindows),
+		AccrualRateCapPerHour:     in.AccrualRateCapPerHour,
+		AccrualRateWindowSeconds:  in.AccrualRateWindowSeconds,
+		BadSpendWindows:           budgetScopeWindowModels(in.BadSpendWindows),
+		CollectionThresholdAmount: in.CollectionThresholdAmount,
+		CollectionCycleBoundary:   in.CollectionCycleBoundary,
+		DelinquencyGraceDays:      in.DelinquencyGraceDays,
+		DelinquencyAmountFloor:    in.DelinquencyAmountFloor,
+		PolicyCurrency:            in.PolicyCurrency,
 	})
 	if err != nil {
 		return "", models.BillingPolicy{}, fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
@@ -869,12 +900,17 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 	for _, name := range names {
 		body := stored[name]
 		out = append(out, BillingPolicyInput{
-			Name:                 name,
-			Kind:                 string(body.Kind),
-			OutstandingCapAmount: body.OutstandingCapAmount,
-			SpendWindows:         spendLimitWindowInputs(body.SpendWindows),
-			BadSpendWindows:      spendLimitWindowInputs(body.BadSpendWindows),
-			PolicyCurrency:       body.PolicyCurrency,
+			Name:                      name,
+			Kind:                      string(body.Kind),
+			OutstandingCapAmount:      body.OutstandingCapAmount,
+			SpendWindows:              spendLimitWindowInputs(body.SpendWindows),
+			AccrualRateCapPerHour:     body.AccrualRateCapPerHour,
+			AccrualRateWindowSeconds:  body.AccrualRateWindowSeconds,
+			BadSpendWindows:           spendLimitWindowInputs(body.BadSpendWindows),
+			CollectionThresholdAmount: body.CollectionThresholdAmount,
+			DelinquencyGraceDays:      body.DelinquencyGraceDays,
+			DelinquencyAmountFloor:    body.DelinquencyAmountFloor,
+			PolicyCurrency:            body.PolicyCurrency,
 		})
 	}
 	return out, nil

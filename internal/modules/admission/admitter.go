@@ -16,10 +16,12 @@ package admission
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -49,6 +51,14 @@ const DenyBudgetExceeded = "budget_exceeded"
 // delinquent (the TIME axis) — this is "your debt is at the cap".
 const DenyOutstandingCap = "outstanding_cap_reached"
 
+// DenyAccrualRateCap is the or#897 accrual_rate_cap refusal: the payer's
+// MEASURED accrual rate plus the deployment it is asking to start would exceed
+// its declared micros/hour quota. Distinct from budget_exceeded (a window of
+// past spend is full) and from outstanding_cap_reached (debt at the line) —
+// this one is about how fast money would be burning from now on, and the only
+// fix is to run less, not to pay or to wait for a window to roll.
+const DenyAccrualRateCap = "accrual_rate_cap_reached"
+
 // DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
 // outlived the merchant's grace window. Deliberately DISTINCT from
 // insufficient_credit — "you are over your limit" and "you have an unpaid
@@ -74,6 +84,17 @@ type Admitter struct {
 	// denials is the optional #733 denial counter (Redis hourly aggregates);
 	// nil disables recording.
 	denials *DenialRecorder
+
+	// rates is the optional or#897 accrual-rate meter; nil makes an
+	// accrual_rate_cap policy unenforceable, so Admit refuses rather than
+	// silently admitting past a quota nobody is measuring.
+	rates *AccrualRateMeter
+}
+
+// WithAccrualRateMeter enables the or#897 accrual_rate_cap quota.
+func (a *Admitter) WithAccrualRateMeter(m *AccrualRateMeter) *Admitter {
+	a.rates = m
+	return a
 }
 
 // NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
@@ -124,9 +145,16 @@ type AdmitRequest struct {
 
 	Currency        string
 	EstimatedAmount int64
-	Source          string    // idempotency namespace (e.g. "usage")
-	SourceID        string    // idempotency id (request id) — the hold key
-	ExpiresAt       time.Time // hold expiry
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it, because only the host knows what it is about to deploy.
+	// Zero means "this request adds no ongoing rate", which is the right answer
+	// for one-shot work and leaves an accrual_rate_cap payer gated on what is
+	// already running.
+	AccrualRateDeltaPerHour int64
+	Source                  string    // idempotency namespace (e.g. "usage")
+	SourceID                string    // idempotency id (request id) — the hold key
+	ExpiresAt               time.Time // hold expiry
 }
 
 // AdmitDecision is the unified outcome.
@@ -241,6 +269,28 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
+	}
+
+	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
+	// because it is a different question: not "can this payer pay for one more
+	// request" but "would what it is about to deploy push it past the rate it is
+	// allowed to burn at". Measured from reported usage over the policy's
+	// lookback; the host supplies what it is about to add.
+	if resolved.Kind == models.BillingPolicyAccrualRateCap {
+		if a.rates == nil {
+			// Fail CLOSED, loudly. A quota with no meter behind it is not a
+			// relaxed quota, it is a lie: the merchant declared a ceiling and
+			// would never learn it was not enforced.
+			return AdmitDecision{}, fmt.Errorf("admission: policy %q is accrual_rate_cap but no accrual-rate meter is wired", resolved.Name)
+		}
+		measured, rerr := a.rates.MeasuredRatePerHour(ctx, req.CustomerID, req.Currency, resolved.RateWindow())
+		if rerr != nil {
+			return AdmitDecision{}, rerr
+		}
+		if measured+req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour {
+			a.recordDenial(ctx, merchantID, req.CustomerID, DenyAccrualRateCap)
+			return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
+		}
 	}
 
 	// or#897 outstanding cap: unpaid arrears have consumed the whole credit line,

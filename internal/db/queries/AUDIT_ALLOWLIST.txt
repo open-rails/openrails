@@ -59,7 +59,6 @@ unbounded-many ListWebhookExpectedRails                    # or#837 aggregate ov
 unbounded-many ListMoneyAccountPairs                       # or#837 aggregate over all ledger transfers
 unbounded-many ListBelowThresholdMoneyAccounts             # or#837 scan of all ledger accounts
 unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
-unbounded-many ListInvoiceThresholdCandidates              # or#837 scan of all open invoices + items
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
 unbounded-many ListActiveSubscriptionsByPriceIDs         # or#837 fan-out per price

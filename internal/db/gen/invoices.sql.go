@@ -925,10 +925,21 @@ JOIN openrails.invoice_items ii
  AND ii.invoice_id IS NULL
  AND ii.status = 'pending'
  AND ii.invoice_at < $2::timestamptz
+LEFT JOIN LATERAL (
+    SELECT (p.policy ->> 'collection_threshold_amount')::bigint AS threshold
+    FROM openrails.billing_policy_bindings b
+    JOIN openrails.billing_policies p
+      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
+    WHERE b.merchant_id = s.merchant_id
+      AND (b.customer_id = s.customer_id OR b.customer_id IS NULL)
+      AND (b.tier = s.tier OR b.tier IS NULL)
+    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
+    LIMIT 1
+) pol ON true
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.credit_limit_amount > 0
-GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount
+GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount, pol.threshold
 HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
     SELECT COALESCE(SUM(i.amount_due), 0)::bigint
     FROM openrails.invoices i
@@ -937,7 +948,9 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
       AND i.currency = s.currency
       AND i.status IN ('open', 'past_due')
       AND i.amount_due > 0
-) >= CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END
+) >= COALESCE(
+    pol.threshold,
+    CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END)
 ORDER BY period_from ASC
 `
 
@@ -954,6 +967,11 @@ type ListInvoiceThresholdCandidatesRow struct {
 	PeriodAnchor time.Time
 }
 
+// or#897: the trigger amount is the BOUND billing policy's
+// collection_threshold_amount when the payer has one, else the merchant-wide
+// threshold, else the payer's own credit line. Resolved in SQL through the same
+// most-specific-wins rungs the admission path uses (money_settings.tier supplies
+// the tier rung), so a per-payer trigger costs no extra round trip.
 func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListInvoiceThresholdCandidatesParams) ([]ListInvoiceThresholdCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff, arg.MinThreshold)
 	if err != nil {

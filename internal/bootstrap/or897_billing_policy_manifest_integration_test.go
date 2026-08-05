@@ -18,8 +18,15 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	cp := newMerchantManifestControlPlane(t, pool)
 	manifest := cozyArtMerchantManifest()
 	mt := manifest.Merchants["cozy-art"]
+	threshold, grace := int64(50_000_000), 7
 	mt.BillingPolicies = map[string]BillingPolicyConfig{
-		"api_line": {Kind: "outstanding_cap", OutstandingCap: 200_000_000},
+		"api_line": {
+			Kind: "outstanding_cap", OutstandingCap: 200_000_000,
+			CollectionThreshold: &threshold, DelinquencyGraceDays: &grace,
+		},
+		"cloud_quota": {
+			Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000, AccrualRateWindow: "15m",
+		},
 		"cloud_monthly": {
 			Kind:         "window_spend_cap",
 			SpendWindows: []BudgetWindowConfig{{Key: "monthly", Window: "720h", Limit: 2_000_000_000}},
@@ -49,6 +56,27 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	require.EqualValues(t, 200_000_000, cap)
 
 	var windowSeconds, limit int64
+	// The rate cap and the collection/delinquency fields land in the body too.
+	var ratePerHour, rateWindow int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT (policy ->> 'accrual_rate_cap_per_hour')::bigint,
+		       (policy ->> 'accrual_rate_window_seconds')::bigint
+		FROM openrails.billing_policies
+		WHERE merchant_id = $1::uuid AND name = 'cloud_quota'
+	`, merchantID).Scan(&ratePerHour, &rateWindow))
+	require.EqualValues(t, 10_000_000, ratePerHour)
+	require.EqualValues(t, 900, rateWindow, "15m must reach the store as seconds")
+
+	var storedThreshold, storedGrace int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT (policy ->> 'collection_threshold_amount')::bigint,
+		       (policy ->> 'delinquency_grace_days')::bigint
+		FROM openrails.billing_policies
+		WHERE merchant_id = $1::uuid AND name = 'api_line'
+	`, merchantID).Scan(&storedThreshold, &storedGrace))
+	require.EqualValues(t, 50_000_000, storedThreshold)
+	require.EqualValues(t, 7, storedGrace)
+
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT (policy #>> '{spend_windows,0,window_seconds}')::bigint,
 		       (policy #>> '{spend_windows,0,limit}')::bigint
@@ -76,7 +104,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	var policies, bindings int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.billing_policies WHERE merchant_id = $1::uuid`, merchantID).Scan(&policies))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.billing_policy_bindings WHERE merchant_id = $1::uuid`, merchantID).Scan(&bindings))
-	require.Equal(t, 2, policies)
+	require.Equal(t, 3, policies)
 	require.Equal(t, 2, bindings)
 }
 
@@ -92,7 +120,13 @@ func TestReconcileMerchantManifestRefusesInvalidBillingPolicy(t *testing.T) {
 		policy BillingPolicyConfig
 		want   string
 	}{
-		{"pr3 kind", BillingPolicyConfig{Kind: "accrual_rate_cap"}, "not implemented yet"},
+		{"rate cap with no rate", BillingPolicyConfig{Kind: "accrual_rate_cap"}, "requires a positive accrual_rate_cap_per_hour"},
+		{"per-policy cycle boundary", BillingPolicyConfig{
+			Kind: "outstanding_cap", CollectionCycleBoundary: "calendar_month",
+		}, "cannot be per-policy"},
+		{"unparseable rate window", BillingPolicyConfig{
+			Kind: "accrual_rate_cap", AccrualRateCapPerHour: 1, AccrualRateWindow: "one hour",
+		}, "accrual_rate_window"},
 		{"unknown kind", BillingPolicyConfig{Kind: "spend_cap"}, `unknown kind "spend_cap"`},
 		{"missing kind", BillingPolicyConfig{}, "kind is required"},
 		{"cross-kind limit", BillingPolicyConfig{

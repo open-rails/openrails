@@ -152,3 +152,23 @@ func Classify(p Policy, e Exposure, now time.Time) State {
 	}
 	return StateDelinquent
 }
+
+// withOverrides applies a bound billing policy's per-payer delinquency
+// overrides (or#897) on top of the merchant-wide policy.
+//
+// -1 is the query's explicit NO-OVERRIDE sentinel, not a value: both fields are
+// validated non-negative wherever they are declared, so it cannot collide with
+// a real one, and 0 stays what it has always been — a deliberate "delinquent as
+// soon as it is overdue", which is exactly why absence cannot be spelled 0.
+func (p Policy) withOverrides(graceDays int, amountFloor int64) (Policy, error) {
+	if graceDays >= 0 {
+		p.GraceDays = graceDays
+	}
+	if amountFloor >= 0 {
+		p.AmountFloor = amountFloor
+	}
+	if err := p.Validate(); err != nil {
+		return Policy{}, err
+	}
+	return p, nil
+}

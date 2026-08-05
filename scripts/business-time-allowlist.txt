@@ -61,3 +61,4 @@ internal/modules/solana/pay.go|return time.Now()|business_time_boundary|service 
 internal/modules/solana/pay.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
 internal/modules/solana/poller.go|time.Now()|infrastructure_time|poller retry/backoff state
 internal/modules/admission/policy.go|now := time.Now().UTC()|db_audit_timestamp|billing-policy / spend-limit row created_at+updated_at audit timestamps
+internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|accrual-rate meter fallback when no runtime clock was supplied

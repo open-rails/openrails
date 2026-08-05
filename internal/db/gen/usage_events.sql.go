@@ -388,3 +388,33 @@ func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollup
 	}
 	return items, nil
 }
+
+const sumUsageAmountSince = `-- name: SumUsageAmountSince :one
+SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
+FROM openrails.usage_events
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND occurred_at >= $4::timestamptz
+`
+
+type SumUsageAmountSinceParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Since      time.Time
+}
+
+// or#897 accrual_rate_cap: the payer's rated usage over a LOOKBACK WINDOW, for
+// the measured accrual rate. Window-bounded by construction — it reads what the
+// payer did in the last N seconds, never its history — and served by
+// ix_usage_events_payer_time (merchant_id, customer_id, occurred_at).
+func (q *Queries) SumUsageAmountSince(ctx context.Context, arg SumUsageAmountSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumUsageAmountSince,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Since,
+	)
+	var total_amount int64
+	err := row.Scan(&total_amount)
+	return total_amount, err
+}

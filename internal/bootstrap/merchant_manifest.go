@@ -466,17 +466,31 @@ type MerchantConfig struct {
 // BillingPolicyConfig is one manifest billing policy (or#897). Amounts are in
 // the currency's micros; window durations are Go durations ("720h").
 type BillingPolicyConfig struct {
-	// Kind: outstanding_cap | window_spend_cap. accrual_rate_cap is declarable
-	// and refused with a real answer until or#897 PR 3.
+	// Kind: outstanding_cap | window_spend_cap | accrual_rate_cap.
 	Kind string `yaml:"kind" koanf:"kind"`
 	// OutstandingCap (micros, kind=outstanding_cap) is the credit line on unpaid
 	// arrears. Omitted defers to the payer's own arrears credit limit.
 	OutstandingCap int64 `yaml:"outstanding_cap,omitempty" koanf:"outstanding_cap"`
 	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
 	SpendWindows []BudgetWindowConfig `yaml:"spend_windows,omitempty" koanf:"spend_windows"`
+	// AccrualRateCapPerHour (micros per HOUR, kind=accrual_rate_cap) is the cloud
+	// quota. AccrualRateWindow is the measurement lookback as a Go duration
+	// ("1h"); omitted means one hour. It changes the smoothing, never the unit.
+	AccrualRateCapPerHour int64  `yaml:"accrual_rate_cap_per_hour,omitempty" koanf:"accrual_rate_cap_per_hour"`
+	AccrualRateWindow     string `yaml:"accrual_rate_window,omitempty" koanf:"accrual_rate_window"`
 	// BadSpendWindows are the #497 per-PAYER wasted-spend grace windows.
 	BadSpendWindows []BudgetWindowConfig `yaml:"bad_spend_windows,omitempty" koanf:"bad_spend_windows"`
-	PolicyCurrency  string               `yaml:"policy_currency,omitempty" koanf:"policy_currency"`
+	// CollectionThreshold (micros) is when payers bound here are invoiced;
+	// DelinquencyGraceDays / DelinquencyAmountFloor are their delinquency policy.
+	// Each overrides the merchant-wide `invoice:` block for those payers only.
+	CollectionThreshold *int64 `yaml:"collection_threshold,omitempty" koanf:"collection_threshold"`
+	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
+	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// stays merchant-wide. Declaring it here fails with that reason.
+	CollectionCycleBoundary string `yaml:"collection_cycle_boundary,omitempty" koanf:"collection_cycle_boundary"`
+	DelinquencyGraceDays    *int   `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
+	DelinquencyAmountFloor  *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
+	PolicyCurrency          string `yaml:"policy_currency,omitempty" koanf:"policy_currency"`
 }
 
 // BillingPolicyBindingConfig binds one DECLARATIVE rung to a policy name: a
@@ -1314,7 +1328,6 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		return err
 	}
 
-
 	for _, entry := range pspEntries(mt.PSPs) {
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
@@ -1374,12 +1387,26 @@ func reconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt M
 		if err != nil {
 			return err
 		}
+		var rateWindowSeconds int64
+		if raw := strings.TrimSpace(src.AccrualRateWindow); raw != "" {
+			d, perr := time.ParseDuration(raw)
+			if perr != nil {
+				return fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
+			}
+			rateWindowSeconds = int64(d / time.Second)
+		}
 		body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
-			Kind:                 models.BillingPolicyKind(src.Kind),
-			OutstandingCapAmount: src.OutstandingCap,
-			SpendWindows:         spend,
-			BadSpendWindows:      badSpend,
-			PolicyCurrency:       src.PolicyCurrency,
+			Kind:                      models.BillingPolicyKind(src.Kind),
+			OutstandingCapAmount:      src.OutstandingCap,
+			SpendWindows:              spend,
+			AccrualRateCapPerHour:     src.AccrualRateCapPerHour,
+			AccrualRateWindowSeconds:  rateWindowSeconds,
+			BadSpendWindows:           badSpend,
+			CollectionThresholdAmount: src.CollectionThreshold,
+			CollectionCycleBoundary:   src.CollectionCycleBoundary,
+			DelinquencyGraceDays:      src.DelinquencyGraceDays,
+			DelinquencyAmountFloor:    src.DelinquencyAmountFloor,
+			PolicyCurrency:            src.PolicyCurrency,
 		})
 		if err != nil {
 			return err

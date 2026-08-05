@@ -189,29 +189,49 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		return out, fmt.Errorf("delinquency: %w", err)
 	}
 
+	var errs []error
 	type key struct {
 		customer uuid.UUID
 		currency string
 	}
-	candidates := make(map[key]Exposure, len(overdue)+len(parked))
+	type candidate struct {
+		exposure Exposure
+		// policy is the payer's EFFECTIVE policy: the merchant-wide one with the
+		// bound billing policy's overrides applied (or#897). Carried per candidate
+		// because two payers of the same merchant can now legitimately have
+		// different grace — an enterprise tenant and a self-serve one are not the
+		// same customer, and pretending otherwise was the only reason this was
+		// ever merchant-wide.
+		policy Policy
+	}
+	candidates := make(map[key]candidate, len(overdue)+len(parked))
 	for _, r := range overdue {
-		candidates[key{r.CustomerID, r.Currency}] = Exposure{
-			OverdueSince:    r.OverdueSince.UTC(),
-			OverdueAmount:   r.OverdueAmount,
-			OverdueInvoices: int(r.OverdueInvoices),
+		effective, perr := policy.withOverrides(int(r.GraceDays), r.AmountFloor)
+		if perr != nil {
+			errs = append(errs, fmt.Errorf("payer %s/%s: %w", r.CustomerID, r.Currency, perr))
+			continue
+		}
+		candidates[key{r.CustomerID, r.Currency}] = candidate{
+			exposure: Exposure{
+				OverdueSince:    r.OverdueSince.UTC(),
+				OverdueAmount:   r.OverdueAmount,
+				OverdueInvoices: int(r.OverdueInvoices),
+			},
+			policy: effective,
 		}
 	}
 	for _, r := range parked {
-		// A parked payer absent from the overdue scan owes nothing any more:
-		// zero exposure, which Classify reads as `current`.
+		// A parked payer absent from the overdue scan owes nothing any more: zero
+		// exposure, which Classify reads as `current` under ANY policy — so the
+		// merchant-wide one is not a fallback here, it is simply irrelevant.
 		if _, ok := candidates[key{r.CustomerID, r.Currency}]; !ok {
-			candidates[key{r.CustomerID, r.Currency}] = Exposure{}
+			candidates[key{r.CustomerID, r.Currency}] = candidate{policy: policy}
 		}
 	}
 
-	var errs []error
-	for k, exposure := range candidates {
-		transition, changed, err := s.apply(ctx, tid, policy, k.customer, k.currency, exposure, now)
+	for k, c := range candidates {
+		exposure := c.exposure
+		transition, changed, err := s.apply(ctx, tid, c.policy, k.customer, k.currency, exposure, now)
 		if err != nil {
 			// One payer's failure must not abort the merchant's pass.
 			errs = append(errs, fmt.Errorf("payer %s/%s: %w", k.customer, k.currency, err))

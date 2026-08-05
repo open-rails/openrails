@@ -75,7 +75,7 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 		"billing_policies": []map[string]any{{"name": "quota", "kind": "accrual_rate_cap"}},
 	})
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
-	require.Contains(t, res.Body.String(), "not implemented yet")
+	require.Contains(t, res.Body.String(), "requires a positive accrual_rate_cap_per_hour")
 
 	// Nothing from the refused document was written.
 	var count int
@@ -89,6 +89,9 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 			{"name": "cloud_monthly", "kind": "window_spend_cap", "spend_windows": []map[string]any{
 				{"key": "monthly", "window_seconds": 30 * 24 * 3600, "limit": 2_000_000_000},
 			}},
+			{"name": "cloud_quota", "kind": "accrual_rate_cap",
+				"accrual_rate_cap_per_hour": 10_000_000, "accrual_rate_window_seconds": 900,
+				"collection_threshold_amount": 50_000_000, "delinquency_grace_days": 7},
 		},
 		"billing_policy_bindings": []map[string]any{
 			{"policy": "api_line"},
@@ -108,6 +111,10 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 				Key   string `json:"key"`
 				Limit int64  `json:"limit"`
 			} `json:"spend_windows"`
+			AccrualRateCapPerHour     int64  `json:"accrual_rate_cap_per_hour"`
+			AccrualRateWindowSeconds  int64  `json:"accrual_rate_window_seconds"`
+			CollectionThresholdAmount *int64 `json:"collection_threshold_amount"`
+			DelinquencyGraceDays      *int   `json:"delinquency_grace_days"`
 		} `json:"billing_policies"`
 		BillingPolicyBindings []struct {
 			Policy string `json:"policy"`
@@ -115,13 +122,23 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 		} `json:"billing_policy_bindings"`
 	}
 	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &got))
-	require.Len(t, got.BillingPolicies, 2)
+	require.Len(t, got.BillingPolicies, 3)
 	require.Equal(t, "api_line", got.BillingPolicies[0].Name)
 	require.Equal(t, "outstanding_cap", got.BillingPolicies[0].Kind)
 	require.EqualValues(t, 200_000_000, got.BillingPolicies[0].OutstandingCapAmount)
 	require.Equal(t, "cloud_monthly", got.BillingPolicies[1].Name)
 	require.Len(t, got.BillingPolicies[1].SpendWindows, 1)
 	require.EqualValues(t, 2_000_000_000, got.BillingPolicies[1].SpendWindows[0].Limit)
+
+	// The or#897 PR 3 kind and the collection/delinquency fields round-trip too.
+	require.Equal(t, "cloud_quota", got.BillingPolicies[2].Name)
+	require.Equal(t, "accrual_rate_cap", got.BillingPolicies[2].Kind)
+	require.EqualValues(t, 10_000_000, got.BillingPolicies[2].AccrualRateCapPerHour)
+	require.EqualValues(t, 900, got.BillingPolicies[2].AccrualRateWindowSeconds)
+	require.NotNil(t, got.BillingPolicies[2].CollectionThresholdAmount)
+	require.EqualValues(t, 50_000_000, *got.BillingPolicies[2].CollectionThresholdAmount)
+	require.NotNil(t, got.BillingPolicies[2].DelinquencyGraceDays)
+	require.EqualValues(t, 7, *got.BillingPolicies[2].DelinquencyGraceDays)
 
 	require.Len(t, got.BillingPolicyBindings, 2)
 	require.Equal(t, "cloud", got.BillingPolicyBindings[0].Tier, "the tier rung sorts before the default")

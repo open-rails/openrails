@@ -30,9 +30,14 @@ type serviceAdmitRequest struct {
 	Resource        string `json:"resource"`
 	Currency        string `json:"currency"`
 	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id"`
-	Source          string `json:"source"`
-	ExpiresAt       *int64 `json:"expires_at"`
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it. Zero means the request adds no ongoing rate, which
+	// leaves an accrual_rate_cap payer gated on what is already running.
+	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
+	RequestID               string `json:"request_id"`
+	Source                  string `json:"source"`
+	ExpiresAt               *int64 `json:"expires_at"`
 	// Roles are the invoker's immutable role UUIDs (#473) — each (subject, role)
 	// budget-scope policy gates this request's spend.
 	Roles []uuid.UUID `json:"roles"`
@@ -48,9 +53,11 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
-		Source:          req.Source,
-		SourceID:        req.RequestID,
-		Roles:           req.Roles,
+
+		AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour,
+		Source:                  req.Source,
+		SourceID:                req.RequestID,
+		Roles:                   req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt

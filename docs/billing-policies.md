@@ -28,13 +28,37 @@ which cap applies and moves no money.
 |---|---|---|
 | `outstanding_cap` | LEDGER-measured unpaid arrears. Outstanding owed is subtracted from the line, so $155 unpaid against $200 leaves $45. | `outstanding_cap_reached` |
 | `window_spend_cap` | NEW spend per rolling window. Prior debt does **not** gate admission. | `budget_exceeded` |
+| `accrual_rate_cap` | The measured accrual RATE, in micros **per hour** — the cloud quota. Prior debt does not gate it either. | `accrual_rate_cap_reached` |
 
 `outstanding_cap_reached` is deliberately distinct from `insufficient_credit`
 ("this one request does not fit") and from `delinquent_unpaid_invoice` (the time
 axis — the debt may not even be due yet). A host that cannot tell them apart
 cannot say anything useful to the customer.
 
-`accrual_rate_cap` is reserved and currently **refused** with a clear error.
+### The rate cap, and why it takes an input
+
+`outstanding_cap` and `window_spend_cap` are questions about the past: what is
+owed, what has been spent. `accrual_rate_cap` is a question about the future —
+*how fast would money burn from now on* — and only you know what you are about
+to start. So admission takes your **prospective delta**:
+
+```json
+{ "customer_id": "…", "estimated_amount": 1000, "accrual_rate_delta_per_hour": 2000000 }
+```
+
+OpenRails measures what is **already** accruing (rated usage over the policy's
+lookback, scaled to an hour) and refuses when `measured + delta > cap`. A zero
+delta means the request adds no ongoing rate, so it is gated only on what is
+already running.
+
+`accrual_rate_window_seconds` (default 3600, minimum 60) is the measurement
+lookback. It changes the smoothing, never the unit: a short window reacts fast
+and reads bursty, a long one is stable and forgives a spike.
+
+**What it can see.** Only what has been reported. A deployment admitted seconds
+ago has not accrued yet, so your own inventory is always ahead of this reading —
+which is exactly why the delta is an input rather than something we try to
+infer.
 
 ## Declaring
 
@@ -51,6 +75,10 @@ billing_policies:
       - key: monthly
         window: 720h
         limit: 2_000_000_000            # micros — $2000
+  cloud_quota:
+    kind: accrual_rate_cap
+    accrual_rate_cap_per_hour: 10_000_000   # micros/hour — $10/hour deployed
+    accrual_rate_window: 15m                # measurement lookback (default 1h)
 billing_policy_bindings:
   - policy: api_line                    # merchant default (no tier)
   - policy: cloud_monthly
@@ -104,7 +132,18 @@ a TTL.
 
 | Field | Applies to | Meaning |
 |---|---|---|
-| `bad_spend_windows` | either kind | Per-payer wasted-spend grace: at most `limit` of host-reported failed spend forgiven per window; overage is charged at report time. |
-| `policy_currency` | either kind | Currency for checks whose window carries none. Blank means the request's currency. |
+| `bad_spend_windows` | any kind | Per-payer wasted-spend grace: at most `limit` of host-reported failed spend forgiven per window; overage is charged at report time. |
+| `collection_threshold_amount` | any kind | When this payer's accrued arrears is invoiced. Overrides `invoice.collection_threshold` for payers bound here. |
+| `delinquency_grace_days` / `delinquency_amount_floor` | any kind | This payer's [delinquency](arrears-delinquency.md) policy. Overrides the merchant-wide `invoice.delinquency_*` values. |
+| `policy_currency` | any kind | Currency for checks whose window carries none. Blank means the request's currency. |
+
+Collection and delinquency ride on every kind because *what a payer may owe or
+spend* and *when its debt is chased* are separate questions — a cloud tenant's
+debt still ages even though it never gates admission.
+
+**`collection_cycle_boundary` is refused per-policy**, deliberately. A payer's
+statement periods must tile its lifetime with no gap and no overlap, and
+rebinding is a live runtime lever, so a mid-cycle change would bill a stretch
+twice or never. It stays merchant-wide as `invoice.billing_period_boundary`.
 
 All amounts are micros.
