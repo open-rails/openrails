@@ -42,7 +42,7 @@ psps:
         recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
         rpc_provider: helius     # helius | public; empty defaults to helius
         rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-        # tokens is OPTIONAL — the built-in registry below is always accepted.
+        # tokens is OPTIONAL and IS the accepted set; omit it to accept USDC only.
         tokens:
           USDC: {}               # built-in symbol: SELECTED, mint from the registry.
                                  # Declaring `mint:` here is an ERROR.
@@ -71,9 +71,12 @@ well-known token's on-chain identity:
 | mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
 | devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD` |
 
-Every symbol in the registry is accepted without declaring anything. A `tokens`
-declaration is **additive** — it extends the registry per symbol, it never
-replaces it, so adding one custom token cannot drop the canonical set.
+The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
+accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
+two. Declare nothing and you accept **USDC only** — the one token present on
+every network that is also recurring-eligible, so a zero-configuration merchant
+can take one-off payments and rebill. `GET /v1/solana/tokens` advertises exactly
+this set, never more.
 
 - **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
   Declaring `mint:` is an error *even when the address is correct*: a mint you

@@ -158,10 +158,12 @@ merchants:
             # embedded boot plane also sets them, these settings win (#699).
             rpc_provider: helius # helius | public; empty defaults to helius
             rpc_api_key: replace-with-helius-api-key
-            # `tokens` is OPTIONAL and additive (or#881). The built-in registry
-            # (SOL, USDC, USDT, PYUSD, USD1, USDG on mainnet; SOL, USDC, PYUSD
-            # on devnet) is always available, so there is normally nothing to
-            # declare here at all.
+            # `tokens` is OPTIONAL and it is the ACCEPTED SET (or#881): what you
+            # declare is what buyers can pay in, nothing more. Omit it and you
+            # accept USDC only — the one token on every network that also
+            # rebills. The built-in registry (SOL, USDC, USDT, PYUSD, USD1, USDG
+            # on mainnet; SOL, USDC, PYUSD on devnet) is a mint lookup table,
+            # not an acceptance list.
             #   - built-in symbol: SELECT it (`USDC: {}`) — its mint comes from
             #     the registry. Declaring `mint:` for a built-in symbol is an
             #     ERROR, even when the address agrees: a mint you can type is a
@@ -176,6 +178,8 @@ merchants:
             # any other ad-hoc devnet token, with an explicit mint.
             #
             # tokens:
+            #   USDC: {}                    # built-in: mint from the registry
+            #   SOL:  {}
             #   MYTK: { name: My Token, mint: replace-with-spl-mint-address }
           secrets:
             private_key: replace-with-base58-ed25519-keypair

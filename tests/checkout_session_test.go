@@ -99,7 +99,11 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
 		"DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-		`{"source":"test","settings":{"recipient_wallet":"`+recipientWallet+`"}}`,
+		// or#881: these rewrite the SHARED suite's solana PSP row, so they must
+		// carry the same token declaration the fixture seeds — the declared set
+		// IS the accepted set, and dropping it would leave later tests with the
+		// USDC-only default.
+		`{"source":"test","settings":{"recipient_wallet":"`+recipientWallet+`","tokens":`+suiteSolanaTokensJSON+`}}`,
 	)
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID
@@ -146,7 +150,7 @@ func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *tes
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
 		accountID,
-		`{"source":"test"}`,
+		`{"source":"test","settings":{"tokens":`+suiteSolanaTokensJSON+`}}`,
 	)
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID

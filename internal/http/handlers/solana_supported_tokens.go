@@ -125,10 +125,10 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
+	// or#881: the advertised set IS the accepted set. There is no registry
+	// fallback — falling back would advertise tokens this merchant does not
+	// accept, and a buyer would pay in one of them.
 	tokenMap := normalizeTokenMap(solanaConf.Tokens)
-	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaConf.Network))
-	}
 
 	mintSet := make(map[string]struct{})
 	symbols := make([]string, 0, len(tokenMap))
@@ -248,10 +248,8 @@ func GetSolanaConfig(r *httprequest.Request) {
 	}
 
 	network := normalizeSolanaNetwork(solanaConf.Network)
+	// or#881: advertise exactly what the merchant accepts; no registry fallback.
 	tokenMap := normalizeTokenMap(solanaConf.Tokens)
-	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(network))
-	}
 
 	symbols := make([]string, 0, len(tokenMap))
 	for symbol := range tokenMap {

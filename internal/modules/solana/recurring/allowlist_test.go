@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 func TestIsRecurringStablecoinSymbol(t *testing.T) {
@@ -69,5 +70,15 @@ func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
 	}
 	if mint != configuredMint {
 		t.Fatalf("mint = %s, want configured mint %s", mint, configuredMint)
+	}
+}
+
+// or#881: a merchant who declares no tokens accepts tokens.DefaultAcceptedSymbol
+// alone. That default is only defensible if it can also REBILL — otherwise the
+// zero-configuration merchant silently loses subscriptions.
+func TestDefaultAcceptedSymbolIsRecurringEligible(t *testing.T) {
+	t.Parallel()
+	if !IsRecurringStablecoinSymbol(solanatokens.DefaultAcceptedSymbol) {
+		t.Fatalf("the zero-config accepted token %s must be recurring-eligible", solanatokens.DefaultAcceptedSymbol)
 	}
 }

@@ -292,6 +292,13 @@ func (suite *TestContainerSuite) MintUserToken(userID, email string) string {
 	return suite.minter.Mint(userID, email, "", nil)
 }
 
+// suiteSolanaTokensJSON is the suite's declared Solana token set. or#881 made
+// the declared set the ACCEPTED set (undeclared = refused, default = USDC
+// alone), so every fixture that writes this PSP's evidence must carry it —
+// otherwise the last writer silently narrows what later tests can pay in.
+// Built-in symbols carry no mint: it comes from the registry.
+const suiteSolanaTokensJSON = `{"SOL":{},"USDC":{},"PYUSD":{}}`
+
 func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
@@ -311,7 +318,8 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
 
-	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
+	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+		`{"source":"test_fixture","settings":{"tokens":`+suiteSolanaTokensJSON+`}}`)
 }
 
 func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
