@@ -101,26 +101,33 @@ merchants:
             security_key: replace-with-paykings-nmi-security-key
             webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
 
-      # or#879 CUSTODY: an ordinary NMI PSP whose cards are held by a
+      # or#879/or#880 CUSTODY: ordinary NMI PSPs whose cards are held by a
       # third-party custodian (Basis Theory) instead of in NMI's own vault.
       # Custody is a MODIFIER on the rail, never a rail of its own: NMI still
       # charges, the custodian just detokenizes the PAN into this gateway.
       #
-      # The browser tokenizes against the CUSTODIAN, so this PSP declares no
-      # NMI tokenization_key — custodian_public_api_key replaces it. The ONLY
-      # custodial secret is the custodian's PRIVATE application key.
+      # The custodian is declared ONCE under `custodians:` below and referenced
+      # by key here. Both of these PSPs charge cards out of the same vault —
+      # one tenant id, one application key, no copies to drift.
+      #
+      # The browser tokenizes against the CUSTODIAN, so a custodial PSP
+      # declares no NMI tokenization_key; the custodian's public_api_key
+      # replaces it.
       mobius-bt:
         nmi:
           account_id: "7654322"
-          settings:
-            custodian: basis_theory
-            custodian_account_id: replace-with-bt-tenant-id
-            custodian_public_api_key: replace-with-bt-public-application-key
-            custodian_network_tokens: false
+          custodian: bt
           secrets:
             security_key: replace-with-test-nmi-security-key
             webhook_signing_secret: replace-with-test-nmi-webhook-secret
-            custodian_api_key: replace-with-bt-private-application-key
+
+      mobius-bt-backup:
+        nmi:
+          account_id: "7654323"
+          custodian: bt
+          secrets:
+            security_key: replace-with-backup-nmi-security-key
+            webhook_signing_secret: replace-with-backup-nmi-webhook-secret
 
       ccbill:
         ccbill:
@@ -189,6 +196,33 @@ merchants:
         solana:
           archived: false
           signer: { mode: vault_transit, key: openrails-solana-local-stack }
+
+    # Operator-declared CUSTODIAN catalog (or#880): the same shape as `psps:`
+    # one axis over. A PSP says who CHARGES the card; a custodian says who
+    # HOLDS it. Most merchants declare none at all — a card stored inside
+    # Stripe or in NMI's own vault needs no configuration, because the PSP IS
+    # the custodian.
+    #
+    # Declared ONCE and referenced by key from every PSP whose gateway those
+    # cards are charged through (`custodian: bt` above). The ONLY custodial
+    # secret is the vendor's PRIVATE application key.
+    custodians:
+      bt:
+        basis_theory:
+          # The custodian-native tenant identity. Operator-declared: there is
+          # no runtime whoami (#592).
+          account_id: replace-with-bt-tenant-id
+          settings:
+            # The PUBLIC application key the checkout page tokenizes with. It
+            # replaces the rail's own tokenization_key: with custody, the
+            # browser sends the PAN to the CUSTODIAN, not to the gateway.
+            public_api_key: replace-with-bt-public-application-key
+            # Network-token provisioning at instrument creation (a paid
+            # add-on). Never load-bearing: a provisioning failure warns and
+            # the instrument stays a proxied PAN.
+            network_tokens: false
+          secrets:
+            api_key: replace-with-bt-private-application-key
 
   static-jwks-stack:
     display_name: Static JWKS Stack

@@ -54,7 +54,7 @@ func (q *Queries) CountPSPsForRailEnvironment(ctx context.Context, arg CountPSPs
 }
 
 const getActivePSPForNewWork = `-- name: GetActivePSPForNewWork :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -88,12 +88,13 @@ func (q *Queries) GetActivePSPForNewWork(ctx context.Context, arg GetActivePSPFo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Archived,
+		&i.CustodianID,
 	)
 	return i, err
 }
 
 const getPSP = `-- name: GetPSP :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE id = $1
 `
 
@@ -114,12 +115,13 @@ func (q *Queries) GetPSP(ctx context.Context, id uuid.UUID) (OpenrailsPsp, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Archived,
+		&i.CustodianID,
 	)
 	return i, err
 }
 
 const getPSPByIdentity = `-- name: GetPSPByIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -156,12 +158,13 @@ func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Archived,
+		&i.CustodianID,
 	)
 	return i, err
 }
 
 const getPSPByRailIdentity = `-- name: GetPSPByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE rail = lower($1::text)
   AND environment = COALESCE($2::text, 'live')
   AND account_id = $3::text
@@ -191,6 +194,7 @@ func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIden
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Archived,
+		&i.CustodianID,
 	)
 	return i, err
 }
@@ -247,8 +251,62 @@ func (q *Queries) ListLivePSPsForRail(ctx context.Context, arg ListLivePSPsForRa
 	return items, nil
 }
 
+const listPSPsForCustodian = `-- name: ListPSPsForCustodian :many
+
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+WHERE merchant_id = $1::uuid
+  AND custodian_id = $2::uuid
+ORDER BY rail, account_id
+`
+
+type ListPSPsForCustodianParams struct {
+	MerchantID  uuid.UUID
+	CustodianID uuid.UUID
+}
+
+// or#880: the custody sibling moved to internal/db/queries/custodians.sql
+// (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
+// a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
+// well-defined answer.
+// One merchant's PSPs that reference a custodian, read inside that merchant's
+// scope. Custody arrangements are rare, so this is the small side of the join.
+func (q *Queries) ListPSPsForCustodian(ctx context.Context, arg ListPSPsForCustodianParams) ([]OpenrailsPsp, error) {
+	rows, err := q.db.Query(ctx, listPSPsForCustodian, arg.MerchantID, arg.CustodianID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPsp
+	for rows.Next() {
+		var i OpenrailsPsp
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.Key,
+			&i.Evidence,
+			&i.FirstSeenAt,
+			&i.LastVerifiedAt,
+			&i.ReplacedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Archived,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = lower($2::text))
 ORDER BY rail, environment, archived, created_at, id
@@ -282,6 +340,7 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Archived,
+			&i.CustodianID,
 		); err != nil {
 			return nil, err
 		}
@@ -328,46 +387,6 @@ func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedM
 		return nil, err
 	}
 	return items, nil
-}
-
-const resolvePSPOwnerByCustodianIdentity = `-- name: ResolvePSPOwnerByCustodianIdentity :one
-SELECT id, merchant_id, rail, environment, account_id
-FROM openrails.psp_owner_by_custodian_identity(
-    lower($1::text),
-    COALESCE($2::text, 'live'),
-    $3::text
-)
-`
-
-type ResolvePSPOwnerByCustodianIdentityParams struct {
-	Custodian   string
-	Environment *string
-	AccountID   string
-}
-
-type ResolvePSPOwnerByCustodianIdentityRow struct {
-	ID          *uuid.UUID
-	MerchantID  *uuid.UUID
-	Rail        *string
-	Environment *string
-	AccountID   *string
-}
-
-// or#879: the custody sibling of ResolvePSPOwnerByRailIdentity. A custodian
-// (Basis Theory) sends its own instrument events carrying ITS tenant id, with
-// no merchant context — same problem, same SECURITY DEFINER answer. The
-// identity lives in the PSP's settings, indexed by uq_psps_custodian_identity.
-func (q *Queries) ResolvePSPOwnerByCustodianIdentity(ctx context.Context, arg ResolvePSPOwnerByCustodianIdentityParams) (ResolvePSPOwnerByCustodianIdentityRow, error) {
-	row := q.db.QueryRow(ctx, resolvePSPOwnerByCustodianIdentity, arg.Custodian, arg.Environment, arg.AccountID)
-	var i ResolvePSPOwnerByCustodianIdentityRow
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-	)
-	return i, err
 }
 
 const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
@@ -417,7 +436,7 @@ const upsertPSP = `-- name: UpsertPSP :one
 
 INSERT INTO openrails.psps (
     id, merchant_id, rail, environment, account_id, key,
-    archived, evidence, last_verified_at
+    archived, evidence, last_verified_at, custodian_id
 ) VALUES (
     -- #662: the id column keeps its uuidv7() default. The production write paths
     -- (merchant payment-provider config + manifest bootstrap) supply a
@@ -434,11 +453,16 @@ INSERT INTO openrails.psps (
     $6,
     COALESCE($7::boolean, false),
     $8,
-    $9::timestamptz
+    $9::timestamptz,
+    $10::uuid
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     key = COALESCE(EXCLUDED.key, openrails.psps.key),
     archived = EXCLUDED.archived,
+    -- or#880: custody is DECLARATIVE — a re-apply that no longer names a
+    -- custodian must un-arm the arrangement, not leave a stale pointer that
+    -- keeps routing charges through a vault the operator stopped declaring.
+    custodian_id = EXCLUDED.custodian_id,
     replaced_at = CASE
         WHEN EXCLUDED.archived THEN COALESCE(openrails.psps.replaced_at, now())
         ELSE NULL
@@ -447,7 +471,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     last_verified_at = COALESCE(EXCLUDED.last_verified_at, openrails.psps.last_verified_at),
     updated_at = now()
 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived
+RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id
 `
 
 type UpsertPSPParams struct {
@@ -460,6 +484,7 @@ type UpsertPSPParams struct {
 	Archived       *bool
 	Evidence       []byte
 	LastVerifiedAt *time.Time
+	CustodianID    *uuid.UUID
 }
 
 // openrails.psps: merchant-scoped PSP (payment-service-provider account) registry.
@@ -474,6 +499,7 @@ func (q *Queries) UpsertPSP(ctx context.Context, arg UpsertPSPParams) (Openrails
 		arg.Archived,
 		arg.Evidence,
 		arg.LastVerifiedAt,
+		arg.CustodianID,
 	)
 	var i OpenrailsPsp
 	err := row.Scan(
@@ -490,6 +516,7 @@ func (q *Queries) UpsertPSP(ctx context.Context, arg UpsertPSPParams) (Openrails
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Archived,
+		&i.CustodianID,
 	)
 	return i, err
 }

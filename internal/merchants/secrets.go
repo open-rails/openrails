@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -59,6 +60,59 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	return path.Join("psps", rail, environment, url.PathEscape(accountID), key), nil
 }
 
+// CustodianSecretName is the custody sibling of PSPSecretName (or#880):
+// `custodians/<kind>/<environment>/<account_id>/<key>`. It scopes by the
+// custodian's IDENTITY — not by the merchant's nickname for it — for the same
+// reason PSPSecretName does (#884): a stored name must survive a re-key of the
+// manifest, and one identity must address one credential set.
+func CustodianSecretName(kind, environment, accountID, key string) (string, error) {
+	d, err := custodians.Require(kind)
+	if err != nil {
+		return "", err
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	accountID = strings.TrimSpace(accountID)
+	slotName := strings.ToLower(strings.TrimSpace(key))
+	if _, ok := d.Secret(slotName); !ok {
+		return "", fmt.Errorf("unknown custodian secret %s.%s", d.Kind, key)
+	}
+	if environment == "" {
+		return "", fmt.Errorf("custodian secret environment must be live or test")
+	}
+	if accountID == "" {
+		return "", fmt.Errorf("custodian secret requires account id")
+	}
+	// Same durability contract as the psps/ prefix: this string is persisted
+	// in every secret backend, including Vault KV paths. Never float it.
+	return path.Join("custodians", d.Kind, environment, url.PathEscape(accountID), slotName), nil
+}
+
+// ParseCustodianSecretName parses a custodian-scoped secret name.
+func ParseCustodianSecretName(name string) (kind, environment, accountID, key string, ok bool, err error) {
+	name = cleanSecretName(name)
+	parts := strings.Split(name, "/")
+	if len(parts) != 5 || parts[0] != "custodians" {
+		return "", "", "", "", false, nil
+	}
+	d, derr := custodians.Require(parts[1])
+	if derr != nil {
+		return "", "", "", "", true, derr
+	}
+	environment = normalizeProviderSecretEnvironment(parts[2])
+	accountID, err = url.PathUnescape(parts[3])
+	if err != nil {
+		return "", "", "", "", true, fmt.Errorf("invalid custodian account id escape: %w", err)
+	}
+	key = strings.ToLower(strings.TrimSpace(parts[4]))
+	if _, known := d.Secret(key); !known {
+		return "", "", "", "", true, fmt.Errorf("unknown custodian secret %s.%s", d.Kind, parts[4])
+	}
+	if environment == "" || strings.TrimSpace(accountID) == "" {
+		return "", "", "", "", true, fmt.Errorf("invalid custodian secret name %q", name)
+	}
+	return d.Kind, environment, accountID, key, true, nil
+}
+
 // ParsePSPSecretName parses a provider-account-scoped secret name.
 func ParsePSPSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
 	name = cleanSecretName(name)
@@ -83,9 +137,20 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 }
 
 // SecretWritable reports whether a merchant operator may write the secret name.
-// Only PSP-scoped names qualify (#884): a retired flat name parses as
-// unscoped and is refused.
+// Only PSP-scoped and custodian-scoped names qualify (#884/or#880): a retired
+// flat name parses as unscoped and is refused.
 func SecretWritable(name string) bool {
+	if kind, _, _, key, ok, err := ParseCustodianSecretName(name); ok {
+		if err != nil {
+			return false
+		}
+		d, derr := custodians.Require(kind)
+		if derr != nil {
+			return false
+		}
+		slot, known := d.Secret(key)
+		return known && slot.MerchantWritable
+	}
 	rail, _, _, key, ok, err := ParsePSPSecretName(name)
 	if !ok || err != nil {
 		return false
@@ -129,8 +194,13 @@ func normalizeProviderSecretEnvironment(environment string) string {
 // secret slot. It never contains plaintext. The advertised slots come from the
 // rail credential registry (#884) — the same source the money path reads with.
 type MerchantSecretStatus struct {
-	Name             string `json:"name"`
-	Rail             string `json:"rail"`
+	Name string `json:"name"`
+	// Rail is the gateway kind for a PSP-scoped credential; "" for a
+	// custodian-scoped one (or#880 — custody is not a rail).
+	Rail string `json:"rail"`
+	// Custodian is the vendor kind for a custodian-scoped credential; "" for a
+	// PSP-scoped one. Exactly one of Rail/Custodian is set.
+	Custodian        string `json:"custodian,omitempty"`
 	Key              string `json:"key"`
 	DisplayLabel     string `json:"display_label"`
 	MerchantWritable bool   `json:"merchant_writable"`
@@ -235,6 +305,9 @@ type PSPScope struct {
 	// payment-provider vocabulary catalog links and checkout use.
 	Key      string
 	Settings map[string]any
+	// CustodianID references the custodian holding the instruments charged
+	// through this PSP (or#880). nil = the PSP holds its own.
+	CustodianID *uuid.UUID
 	// CredentialVersions is the rotation watermark per credential key
 	// (or#812): the Secret.Version each credential reached the last time it
 	// was rotated through the provider-config API. Absent/zero = no floor.

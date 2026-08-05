@@ -10,6 +10,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/stretchr/testify/require"
@@ -101,7 +102,7 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// account_id identity, lifecycle, and explicit signer/destination split for
 	// Solana.
 	accts := m.PSPs
-	require.Len(t, accts, 9)
+	require.Len(t, accts, 10)
 	byName := map[string]ProviderRailAccountConfig{}
 	byRail := map[string]string{}
 	for name, account := range accts {
@@ -120,18 +121,29 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName["mobius"].Settings["tokenization_key"])
 	require.Equal(t, "7654321", byName["mobius-sandbox"].AccountID)
 
-	// or#879 custody: an NMI PSP whose cards are held by Basis Theory. The rail
-	// is nmi (it always was); the custodian identity and its private
-	// application key hang off that same PSP.
+	// or#879/or#880 custody: NMI PSPs whose cards are held by Basis Theory. The
+	// rail is nmi (it always was); the custodian is declared ONCE and both
+	// gateways reference it by key.
 	require.Equal(t, "nmi", byRail["mobius-bt"])
 	require.Equal(t, "7654322", byName["mobius-bt"].AccountID)
-	btSettings := byName["mobius-bt"].Settings
-	custody, err := config.ParseCustodySettings(btSettings)
-	require.NoError(t, err)
-	require.True(t, custody.ThirdParty())
-	require.Equal(t, models.CustodianBasisTheory, custody.Custodian)
-	require.Equal(t, "replace-with-bt-tenant-id", custody.AccountID)
-	require.Equal(t, "replace-with-bt-private-application-key", byName["mobius-bt"].Secrets[config.CustodianSecretAPIKey])
+	require.Equal(t, "bt", byName["mobius-bt"].Custodian)
+	require.Equal(t, "bt", byName["mobius-bt-backup"].Custodian)
+	require.Empty(t, byName["mobius-bt"].Settings, "custody is a reference now — nothing custodial belongs in PSP settings")
+
+	// The custodian block itself: one entry, keyed by vendor kind, carrying the
+	// tenant identity, the public checkout key and the ONE custodial secret.
+	require.Len(t, m.Custodians, 1)
+	btKinds := m.Custodians["bt"]
+	require.Len(t, btKinds, 1)
+	bt, ok := btKinds[models.CustodianBasisTheory]
+	require.True(t, ok, "the custodian entry is keyed by its vendor kind")
+	require.Equal(t, "replace-with-bt-tenant-id", bt.AccountID)
+	require.Equal(t, "replace-with-bt-public-application-key", bt.Settings[custodians.SettingPublicAPIKey])
+	require.Equal(t, "replace-with-bt-private-application-key", bt.Secrets[custodians.SecretAPIKey])
+	require.NoError(t, config.ValidateCustodianEntry(config.CustodianEntry{
+		Key: "bt", Kind: models.CustodianBasisTheory, AccountID: bt.AccountID,
+		Settings: bt.Settings, SecretKeys: []string{custodians.SecretAPIKey},
+	}))
 	// A second NMI gateway (paykings) is archived/drain-only in the example.
 	require.True(t, byName["paykings"].Archived)
 	// Two Stripe accounts side by side.

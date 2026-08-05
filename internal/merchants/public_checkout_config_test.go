@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -74,10 +76,10 @@ var privateSettingKeys = []string{
 	config.SolanaSettingRecipientWallet,
 }
 
-// Custody keys are deliberately NOT in the list above: they are structurally
-// validated (or#879), so a sentinel string is not a value they can ever hold.
-// The custody case in the test below poisons custodian_account_id inside a
-// VALID custody block, which is the leak that actually needs proving.
+// Custody settings are deliberately NOT in the list above: since or#880 they
+// live on the CUSTODIAN's own row, not in the PSP settings blob. The custody
+// case in the test below poisons the custodian's tenant id inside a VALID
+// custodian declaration, which is the leak that actually needs proving.
 
 // TestPublicPSPConfigForServesOnlyWhitelistedSettings poisons a PSP's settings
 // blob with every credential-key name, every known private settings key, and a
@@ -90,9 +92,9 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 		name    string
 		rail    models.Rail
 		profile railPublicProfile
-		// custody is the valid custody block to declare, if any (or#879):
-		// custody OVERRIDES the rail profile, so it gets its own case.
-		custody map[string]any
+		// custodian is the valid custodian the PSP references, if any
+		// (or#880): custody OVERRIDES the rail profile, so it gets its own case.
+		custodian *CustodianScope
 	}
 	var cases []projectionCase
 	for _, d := range rails.All() {
@@ -102,14 +104,32 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 	}
 	// A custodian-held NMI PSP: the browser tokenizes against the CUSTODIAN, so
 	// the projection must serve the custodian's public key and nothing else.
+	// The custodian's tenant id is poisoned to prove it never ships.
+	btDescriptor, ok := custodians.Get(models.CustodianBasisTheory)
+	if !ok {
+		t.Fatal("basis_theory must be a declared custodian kind")
+	}
+	btProfile := railPublicProfile{Flow: btDescriptor.BrowserFlow}
+	for _, slot := range btDescriptor.Settings {
+		if slot.Public {
+			btProfile.Settings = append(btProfile.Settings, publicSetting{
+				Setting: slot.Name, Field: slot.PublicField, Required: slot.Required,
+			})
+		}
+	}
 	cases = append(cases, projectionCase{
 		name:    "nmi+basis_theory",
 		rail:    models.RailNMI,
-		profile: custodianPublicProfiles[models.CustodianBasisTheory],
-		custody: map[string]any{
-			config.PSPSettingCustodian:              models.CustodianBasisTheory,
-			config.PSPSettingCustodianAccountID:     poison,
-			config.PSPSettingCustodianNetworkTokens: true,
+		profile: btProfile,
+		custodian: &CustodianScope{
+			ID:          uuid.New(),
+			Key:         "bt",
+			Kind:        models.CustodianBasisTheory,
+			Environment: "test",
+			AccountID:   poison,
+			Settings: map[string]any{
+				custodians.SettingNetworkTokens: true,
+			},
 		},
 	})
 
@@ -127,28 +147,33 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 			settings[k] = poison
 		}
 		settings["a_key_invented_next_year"] = poison
-		for k, v := range tc.custody {
-			settings[k] = v
-		}
-		// The legitimately public ones get a recognizable value.
+		// The legitimately public ones get a recognizable value. A custodian's
+		// public settings live on ITS row, so they are poisoned/served there.
 		want := map[string]string{}
 		for _, s := range profile.Settings {
-			settings[s.Setting] = "public-" + s.Setting
+			if tc.custodian != nil {
+				tc.custodian.Settings[s.Setting] = "public-" + s.Setting
+			} else {
+				settings[s.Setting] = "public-" + s.Setting
+			}
 			want[s.Field] = "public-" + s.Setting
 		}
 		// A custodian displaces the rail's own tokenizer keys; declaring both
 		// is refused, so drop them from the poison set in that case.
-		if tc.custody != nil {
+		var custodianID *uuid.UUID
+		if tc.custodian != nil {
 			delete(settings, "tokenization_key")
 			delete(settings, "tokenization_url")
+			custodianID = &tc.custodian.ID
 		}
 
 		cfg, reason, ok := PublicPSPConfigFor(PSPScope{
-			Rail:      string(tc.rail),
-			Key:       "acct-key",
-			AccountID: "operator-declared-account-id",
-			Settings:  settings,
-		})
+			Rail:        string(tc.rail),
+			Key:         "acct-key",
+			AccountID:   "operator-declared-account-id",
+			Settings:    settings,
+			CustodianID: custodianID,
+		}, tc.custodian)
 		if !ok {
 			t.Errorf("%s: fully-configured PSP was withheld (%s)", d.name, reason)
 			continue
@@ -181,7 +206,7 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 // empty or invented key.
 func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 	// NMI without a tokenization key cannot be driven from a browser.
-	if _, reason, ok := PublicPSPConfigFor(PSPScope{Rail: string(models.RailNMI), Key: "mobius"}); ok {
+	if _, reason, ok := PublicPSPConfigFor(PSPScope{Rail: string(models.RailNMI), Key: "mobius"}, nil); ok {
 		t.Error("NMI without tokenization_key must be withheld")
 	} else if !strings.Contains(reason, "tokenization_key") {
 		t.Errorf("reason = %q, want it to name tokenization_key", reason)
@@ -192,7 +217,7 @@ func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 		Rail:     string(models.RailNMI),
 		Key:      "mobius",
 		Settings: map[string]any{"tokenization_key": "public-collect-key"},
-	})
+	}, nil)
 	if !ok {
 		t.Fatal("NMI with a tokenization key must be advertised")
 	}
@@ -204,13 +229,13 @@ func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 	}
 
 	// A rail with no browser profile at all is withheld, not guessed at.
-	if _, _, ok := PublicPSPConfigFor(PSPScope{Rail: "paypal"}); ok {
+	if _, _, ok := PublicPSPConfigFor(PSPScope{Rail: "paypal"}, nil); ok {
 		t.Error("a rail with no public profile must be withheld")
 	}
 
 	// A keyless account reports the rail kind — the same selector checkout
 	// accepts for a single-account rail. Nothing is invented.
-	cfg, _, ok = PublicPSPConfigFor(PSPScope{Rail: string(models.RailStripe)})
+	cfg, _, ok = PublicPSPConfigFor(PSPScope{Rail: string(models.RailStripe)}, nil)
 	if !ok || cfg.Key != string(models.RailStripe) || cfg.Flow != FlowRedirect || len(cfg.Config) != 0 {
 		t.Errorf("keyless stripe projection = %+v (ok=%v)", cfg, ok)
 	}

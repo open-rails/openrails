@@ -163,10 +163,11 @@ var descriptors = []Descriptor{
 		nmiAutoBilled,
 		nmiCancelMode,
 		"", // CancelPortalURL
-		// custodian_api_key (or#879): the PRIVATE application key of a
-		// third-party custodian (Basis Theory) whose proxy detokenizes into
-		// THIS gateway. Optional — unset means the NMI vault holds the cards.
-		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}, {"custodian_api_key", true}},
+		// or#880: a custodian's private application key is NOT an NMI
+		// credential. It belongs to the custodian account, not to whichever
+		// gateway its proxy detokenizes into, and lives under
+		// custodians/<kind>/<environment>/<account_id>/api_key.
+		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}},
 	},
 	{
 		models.RailCCBill,

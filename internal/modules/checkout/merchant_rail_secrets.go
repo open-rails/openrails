@@ -388,18 +388,12 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 }
 
 // custodianHeld reports whether the resolved PSP's instruments are held by a
-// third-party custodian (or#879) — the axis that decides which charge
-// transport a checkout takes, orthogonal to the rail that charges. A settings
-// map that will not parse is treated as NOT custodial: the strict parse runs
-// (and fails loudly) at manifest push and at credential resolution, and
-// silently switching a checkout onto the proxy on the strength of an
-// unparseable setting is the worse failure.
+// third-party custodian (or#879/or#880) — the axis that decides which charge
+// transport a checkout takes, orthogonal to the rail that charges. It is a
+// plain reference check now: the PSP row either points at a custodians row or
+// it does not, so there is no parse here to be ambiguous about.
 func custodianHeld(target railTarget) bool {
-	if target.Scope == nil {
-		return false
-	}
-	custody, err := config.ParseCustodySettings(target.Scope.Settings)
-	return err == nil && custody.ThirdParty()
+	return target.Scope != nil && target.Scope.CustodianID != nil
 }
 
 // pspKeyArchived reports whether selector names a declared-but-archived PSP

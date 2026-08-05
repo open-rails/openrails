@@ -260,6 +260,27 @@ type OpenrailsCheckoutSession struct {
 	RoutingReason []byte
 }
 
+// or#880: merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says WHO HOLDS the card, openrails.psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
+type OpenrailsCustodian struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// The custodian's manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.
+	Key string
+	// The custodian VENDOR: basis_theory today. Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
+	Kind        string
+	Environment string
+	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami (#592).
+	AccountID string
+	// Declared NON-secret knobs, validated against the kind's registry (internal/custodians): public_api_key, network_tokens. Credentials are merchant secrets under custodians/<kind>/<environment>/<account_id>/<key>.
+	Settings []byte
+	// or#812 rotation watermarks, per credential key: the Secret.Version each credential reached at its last rotation. A reader holding an older cached version must go back to the backend, so a rotation on one node is effective on every node the instant it commits. Absent/zero = no floor.
+	CredentialVersions []byte
+	// Drain-only lifecycle flag, matching psps.archived: true keeps the custodian addressable for instruments it already holds but excludes it from new arrangements.
+	Archived  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
 type OpenrailsCustomCreditType struct {
 	ID         uuid.UUID
@@ -1036,6 +1057,8 @@ type OpenrailsPsp struct {
 	UpdatedAt      time.Time
 	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
 	Archived bool
+	// or#880: the custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant's custodian.
+	CustodianID *uuid.UUID
 }
 
 // customer <-> rail customer-id mapping. Keyed per (merchant, customer, rail); rail_merchant_account_id provenance was dropped (#704) — no writer ever set it.

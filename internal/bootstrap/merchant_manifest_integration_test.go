@@ -829,6 +829,16 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, string(directoryDDL))
 	require.NoError(t, err)
+
+	// or#880: same reasoning — the custodian registry, its composite FK onto
+	// psps and its SECURITY DEFINER directory function are replayed from the
+	// REAL migration text rather than hand-copied here.
+	for _, name := range []string{"0053_custodian_registry.up.sql", "0054_validate_psps_custodian_fk.up.sql"} {
+		ddl, rerr := postgresmigrations.FS.ReadFile(name)
+		require.NoError(t, rerr)
+		_, eerr := pool.Exec(ctx, string(ddl))
+		require.NoErrorf(t, eerr, "apply %s", name)
+	}
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723

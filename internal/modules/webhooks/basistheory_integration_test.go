@@ -21,9 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -95,23 +95,22 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'basis_theory'")
 	})
 
+	btCustodian := &config.CustodianConfig{
+		Key:        "bt",
+		Custodian:  models.CustodianBasisTheory,
+		AccountID:  "tnt_test",
+		APIKey:     "key_private_test",
+		APIBaseURL: fx.btAPI.URL,
+	}
 	fx.dispatcher = &WebhookDispatcher{
 		DB:                   dbi,
 		DeduplicationService: NewDeduplicationService(replaycache.NewStore(nil), dbi),
-		// or#879: the custodian's client is armed off the NMI PSP its proxy
-		// charges land on — the webhook routes to that PSP by tenant id.
+		// or#880: the custodian's client is armed off the CUSTODIAN the event's
+		// tenant id resolves to — not off a PSP. Two PSPs share one custodian
+		// here, which is exactly the case that had no answer before.
 		RailConfigs: railresolve.FixedSet{
-			"mobius-bt": {
-				Rail:      models.RailNMI,
-				AccountID: "579145",
-				NMI:       &config.NMIRailConfig{SecurityKey: "sk_gateway_test"},
-				Custody: &config.CustodyConfig{
-					Custodian:  models.CustodianBasisTheory,
-					AccountID:  "tnt_test",
-					APIKey:     "key_private_test",
-					APIBaseURL: fx.btAPI.URL,
-				},
-			},
+			"mobius-bt":        {Rail: models.RailNMI, AccountID: "579145", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_test"}, Custody: btCustodian},
+			"mobius-bt-backup": {Rail: models.RailNMI, AccountID: "579146", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_backup"}, Custody: btCustodian},
 		},
 	}
 	return fx
@@ -136,6 +135,8 @@ func (fx *btWebhookFixture) deliver(t *testing.T, eventID, eventType string, dat
 		Payload:        payload,
 		SignatureValid: &verified,
 		ReceivedAt:     time.Now(),
+		// or#880: a custody event routes by the CUSTODIAN's own tenant id.
+		CustodianAccountID: "tnt_test",
 	})
 }
 

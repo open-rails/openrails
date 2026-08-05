@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/custodians"
 )
 
 const MerchantBillingEnvPrefix = "BILLING_"
@@ -15,6 +17,8 @@ const MerchantBillingEnvPrefix = "BILLING_"
 //	-> merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username
 //	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
 //	-> merchants.doujins.psps.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY
+//	-> merchants.doujins.custodians.bt.basis_theory.secrets.api_key
 //	BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS
 //	-> merchants.doujins.delegated_invoker_wasted_spend_windows (JSON list value)
 //
@@ -52,6 +56,8 @@ func MerchantBillingEnvKey(envName string) string {
 		}
 	case "psps":
 		return providerAccountEnvKey(base, rest)
+	case "custodians":
+		return custodianEnvKey(base, rest)
 	}
 	return ""
 }
@@ -66,6 +72,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
 		{"PSPS", "psps"},
+		{"CUSTODIANS", "custodians"},
 		{"DELEGATED_INVOKER_WASTED_SPEND_WINDOWS", "delegated_invoker_wasted_spend_windows"},
 	}
 	for i := range tokens {
@@ -112,6 +119,42 @@ func providerAccountEnvKey(base string, tokens []string) string {
 		}
 	default:
 		return accountBase + "." + strings.ToLower(strings.Join(rest, "_"))
+	}
+	return ""
+}
+
+// custodianEnvKey is providerAccountEnvKey's custody sibling (or#880). The
+// kind tokens come from the custodian registry, so a new vendor is routable
+// through env overlays the moment its descriptor exists — no second list.
+func custodianEnvKey(base string, tokens []string) string {
+	kindIdx, kindWidth, kind := -1, 0, ""
+	for _, declared := range custodians.Kinds() {
+		parts := strings.Split(strings.ToUpper(declared), "_")
+		for i := range tokens {
+			if hasPrefixTokens(tokens[i:], parts) {
+				kindIdx, kindWidth, kind = i, len(parts), declared
+			}
+		}
+	}
+	if kindIdx <= 0 || kindIdx+kindWidth >= len(tokens) {
+		return ""
+	}
+	custodianBase := base + "." + envKeySpan(tokens[:kindIdx]) + "." + kind
+	rest := tokens[kindIdx+kindWidth:]
+	if len(rest) == 1 {
+		return custodianBase + "." + strings.ToLower(rest[0])
+	}
+	switch rest[0] {
+	case "SECRETS":
+		if len(rest) > 1 {
+			return custodianBase + ".secrets." + strings.ToLower(strings.Join(rest[1:], "_"))
+		}
+	case "SETTINGS":
+		if len(rest) > 1 {
+			return custodianBase + ".settings." + strings.ToLower(strings.Join(rest[1:], "_"))
+		}
+	default:
+		return custodianBase + "." + strings.ToLower(strings.Join(rest, "_"))
 	}
 	return ""
 }

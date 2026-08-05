@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -79,20 +81,12 @@ var publicRailProfiles = map[string]railPublicProfile{
 	string(models.RailSolana): {Flow: FlowWallet},
 }
 
-// custodianPublicProfiles OVERRIDE the rail profile when a third-party
-// custodian holds the instruments (or#879). Custody changes the browser
-// contract, not the gateway: the PAN goes browser -> custodian, so the page
-// needs the CUSTODIAN's public key and never the rail's tokenizer key.
-var custodianPublicProfiles = map[string]railPublicProfile{
-	models.CustodianBasisTheory: {
-		Flow: FlowTokenize,
-		Settings: []publicSetting{
-			// The Basis Theory PUBLIC application key (#795). The private
-			// application key is the custodian_api_key secret.
-			{Setting: config.PSPSettingCustodianPublicAPIKey, Field: "public_api_key", Required: true},
-		},
-	},
-}
+// A third-party custodian OVERRIDES the rail profile (or#879/or#880). Custody
+// changes the browser contract, not the gateway: the PAN goes browser ->
+// custodian, so the page needs the CUSTODIAN's public key and never the rail's
+// tokenizer key. Which values those are is registry data on the custodian kind
+// (internal/custodians), not a second whitelist here — the Public flag on a
+// setting slot is the whitelist.
 
 // PublicPSPConfig is the browser-facing description of one ARMED PSP: the
 // value checkout's payment.rail selector takes, the rail it runs on, how a
@@ -128,21 +122,17 @@ type PublicCheckoutConfig struct {
 // required public value the operator never declared. The reason is returned so
 // the caller can log a misconfiguration loudly instead of serving a PSP a
 // frontend cannot drive.
-func PublicPSPConfigFor(scope PSPScope) (PublicPSPConfig, string, bool) {
+func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPConfig, string, bool) {
 	rail := strings.ToLower(strings.TrimSpace(scope.Rail))
 	profile, known := publicRailProfiles[rail]
 	if !known {
 		return PublicPSPConfig{}, "rail has no browser checkout profile", false
 	}
-	custody, err := config.ParseCustodySettings(scope.Settings)
-	if err != nil {
-		return PublicPSPConfig{}, "custody settings are invalid: " + err.Error(), false
-	}
-	if custody.ThirdParty() {
-		profile, known = custodianPublicProfiles[custody.Custodian]
-		if !known {
-			return PublicPSPConfig{}, "custodian " + custody.Custodian + " has no browser checkout profile", false
-		}
+	// A PSP that still carries an inline custody block is misconfigured, not
+	// custodial: refuse it rather than advertise a tokenizer key the browser
+	// must not use (or#880 moved custody into its own declaration).
+	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
+		return PublicPSPConfig{}, err.Error(), false
 	}
 
 	key := strings.ToLower(strings.TrimSpace(scope.Key))
@@ -153,9 +143,38 @@ func PublicPSPConfigFor(scope PSPScope) (PublicPSPConfig, string, bool) {
 	out := PublicPSPConfig{
 		Key:         key,
 		Rail:        rail,
-		Custodian:   custody.Custodian,
+		Custodian:   models.CustodianPSP,
 		DisplayName: rails.DisplayName(models.Rail(rail)),
 		Flow:        profile.Flow,
+	}
+
+	if scope.CustodianID != nil {
+		if custodian == nil {
+			return PublicPSPConfig{}, "psp references a custodian that could not be resolved", false
+		}
+		if custodian.Archived {
+			// Drain-only (or#655/or#870): the cards it already holds stay
+			// chargeable, but a browser must not vault a NEW one into a
+			// custodian the operator is draining.
+			return PublicPSPConfig{}, "custodian " + custodian.Key + " is archived (drain-only)", false
+		}
+		d, err := custodians.Require(custodian.Kind)
+		if err != nil {
+			return PublicPSPConfig{}, err.Error(), false
+		}
+		if d.BrowserFlow == "" {
+			return PublicPSPConfig{}, "custodian " + d.Kind + " has no browser checkout profile", false
+		}
+		public, reason, ok := d.PublicSettings(custodian.Settings)
+		if !ok {
+			return PublicPSPConfig{}, reason, false
+		}
+		out.Custodian = d.Kind
+		out.Flow = d.BrowserFlow
+		if len(public) > 0 {
+			out.Config = public
+		}
+		return out, "", true
 	}
 
 	for _, want := range profile.Settings {
@@ -203,9 +222,26 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 	if err != nil {
 		return nil, err
 	}
+	// One extra round trip for the whole catalog, not one per custodial PSP:
+	// several PSPs may reference the SAME custodian (that is the point of
+	// or#880's registry).
+	declared, err := s.ListCustodians(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[uuid.UUID]CustodianScope, len(declared))
+	for _, c := range declared {
+		byID[c.ID] = c
+	}
 	out := make([]PublicPSPConfig, 0, len(scopes))
 	for _, scope := range scopes {
-		cfg, reason, ok := PublicPSPConfigFor(scope)
+		var custodian *CustodianScope
+		if scope.CustodianID != nil {
+			if c, ok := byID[*scope.CustodianID]; ok {
+				custodian = &c
+			}
+		}
+		cfg, reason, ok := PublicPSPConfigFor(scope, custodian)
 		if !ok {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"merchant_id": id.String(),

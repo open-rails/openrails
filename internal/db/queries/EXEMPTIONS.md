@@ -77,7 +77,7 @@ portable. `unindexed-filter` is openrails-only: tensorhub has no RLS.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`alert_rules`, `merchant_webhooks`. Row counts follow the merchant's own
+`custodians`, `alert_rules`, `merchant_webhooks`. Row counts follow the merchant's own
 configuration, not customer activity, so listing them whole does not scale with
 records on file.
 

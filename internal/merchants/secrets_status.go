@@ -10,9 +10,10 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ListSecretStatuses returns one status per PSP-scoped secret the merchant
-// actually holds, described from the rail credential registry (#884). It never
-// returns plaintext values.
+// ListSecretStatuses returns one status per PSP-scoped or custodian-scoped
+// secret the merchant actually holds, described from the rail credential
+// registry (#884) and the custodian registry (or#880). It never returns
+// plaintext values.
 //
 // It advertises what is READ, not a static catalogue: a merchant's credential
 // slots are a function of the PSPs it declared, and those per-PSP slots are
@@ -44,20 +45,32 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 			continue
 		}
 		seen[name] = struct{}{}
-		rail, _, _, key, ok, err := ParsePSPSecretName(name)
-		if !ok || err != nil {
-			// A stored name that is not a PSP-scoped credential slot is not a
-			// credential OpenRails reads — never advertise it as one.
-			continue
+		var st MerchantSecretStatus
+		switch kind, _, _, key, custodial, cerr := ParseCustodianSecretName(name); {
+		case custodial && cerr == nil:
+			st = MerchantSecretStatus{
+				Name:         name,
+				Custodian:    kind,
+				Key:          key,
+				DisplayLabel: kind + " " + key,
+			}
+		default:
+			rail, _, _, key, ok, err := ParsePSPSecretName(name)
+			if !ok || err != nil {
+				// A stored name that is neither a PSP-scoped nor a
+				// custodian-scoped credential slot is not a credential
+				// OpenRails reads — never advertise it as one.
+				continue
+			}
+			st = MerchantSecretStatus{
+				Name:         name,
+				Rail:         rail,
+				Key:          key,
+				DisplayLabel: rail + " " + key,
+			}
 		}
-		st := MerchantSecretStatus{
-			Name:             name,
-			Rail:             rail,
-			Key:              key,
-			DisplayLabel:     rail + " " + key,
-			MerchantWritable: SecretWritable(name),
-			Configured:       true,
-		}
+		st.MerchantWritable = SecretWritable(name)
+		st.Configured = true
 		if sec, err := s.secrets.Get(ctx, id, name); err == nil {
 			st.Version = sec.Version
 		} else if !errors.Is(err, ErrSecretNotFound) {
@@ -128,6 +141,17 @@ func isStripeSecretKeyName(name string) bool {
 // the parsed rail/key rather than a second flat spelling.
 func validateSecretValueLocal(name, value string) error {
 	value = strings.TrimSpace(value)
+	// or#880: a custodian credential is an opaque vendor application key —
+	// there is no rail format rule to apply, only non-emptiness.
+	if _, _, _, _, custodial, cerr := ParseCustodianSecretName(name); custodial {
+		if cerr != nil {
+			return cerr
+		}
+		if value == "" {
+			return errors.New("empty")
+		}
+		return nil
+	}
 	rail, _, _, key, scoped, err := ParsePSPSecretName(name)
 	if err != nil {
 		return err

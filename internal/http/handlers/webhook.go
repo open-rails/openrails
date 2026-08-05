@@ -368,15 +368,15 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "Basis Theory webhook payload is missing tenant identity")
 			return true, false
 		}
-		// or#879: a custodian event routes by the CUSTODIAN's tenant identity,
-		// not by a rail account id — the PSP it lands on is the NMI account
-		// whose gateway the proxy charges.
-		account, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
+		// or#880: a custodian event routes by the CUSTODIAN's tenant identity.
+		// It resolves a CUSTODIAN, not a PSP — one custodian may back several
+		// PSPs, and the event is about the instrument, not about a gateway.
+		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
 		if !ok {
 			return true, false
 		}
 		defer release()
-		return true, processMerchantBasisTheoryWebhookBody(r, account.MerchantID, account.AccountID, body)
+		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
 		account, release, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {
@@ -429,12 +429,28 @@ func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment
 		r.State.Merchants.ResolveRailMerchantAccountByIdentity)
 }
 
-// resolveWebhookCustodianAccount is the custody sibling: it resolves the PSP a
-// CUSTODIAN's tenant identity belongs to (or#879), then pins it exactly like a
-// rail-routed webhook.
-func resolveWebhookCustodianAccount(r *httprequest.Request, custodian, environment, tenantID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
-	return pinWebhookAccount(r, custodian, environment, tenantID,
-		r.State.Merchants.ResolvePSPByCustodianIdentity)
+// resolveWebhookCustodianAccount is the custody sibling: it resolves the
+// CUSTODIAN a tenant identity belongs to (or#880) and pins its merchant.
+// Unlike a rail-routed webhook it pins NO psp id — a custodian may back
+// several PSPs, and a custodian event is about the instrument, not a gateway.
+func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, tenantID string) (merchants.CustodianIdentity, func(), bool) {
+	noop := func() {}
+	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, environment, tenantID)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"custodian": kind, "environment": environment, "account_id": tenantID}).Error("webhook custodian resolution failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Custodian resolution failed")
+		return merchants.CustodianIdentity{}, noop, false
+	}
+	if !ok {
+		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
+		return merchants.CustodianIdentity{}, noop, false
+	}
+	r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), custodian.MerchantID))
+	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
+	if !ok {
+		return merchants.CustodianIdentity{}, noop, false
+	}
+	return custodian, release, true
 }
 
 func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
