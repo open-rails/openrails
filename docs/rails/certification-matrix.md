@@ -50,7 +50,11 @@ Each live-gated test `t.Skip`s when its credential secret is absent, so a green
 run is not by itself proof the lane executed. Several provider-reaching tests
 exist outside these lanes (the Stripe catalog `TestLive*` pair, the Solana
 devnet tier-change and failure-path tests, `TestSolanaDevnetMoneyMovementProof`)
-— no workflow runs them, so they back no cell.
+— no workflow runs them, so they back no cell. The Stripe pair is at least no
+longer invisible: or#896 put both behind the `stripelive` build tag (the
+convention `internal/modules/catalog`'s live Stripe tests already used), so they
+are compiled only when a lane asks for them instead of riding a default
+`go test ./...` held back by an env check.
 
 **CCBill has no automated lane.** Every CCBill cell below is either hermetic or
 rests on a single dated manual probe.
@@ -61,8 +65,8 @@ rests on a single dated manual probe.
 |---|---|---|---|---|
 | One-off purchase | `sandbox-verified` | `unsupported` (guarded) — rail is subscription-only | `modeled` | `modeled` |
 | Subscription enrollment | `sandbox-verified` | `modeled` | `modeled` | `sandbox-verified` (devnet) |
-| Free trial (zero-amount first phase) | `unsupported` (silent) | `limited` — validated inbound, never originated | `modeled` | `unsupported` (silent) |
-| Paid introductory first phase | `unsupported` (silent) | `limited` — validated inbound, never originated | `unsupported` (guarded) | `unsupported` (silent) |
+| Free trial (zero-amount first phase) | `unsupported` (guarded) | `limited` — validated inbound, never originated | `modeled` | `unsupported` (guarded) |
+| Paid introductory first phase | `unsupported` (guarded) | `limited` — validated inbound, never originated | `unsupported` (guarded) | `unsupported` (guarded) |
 
 - **One-off, NMI** — `internal/integrations/nmi/payments.go:59` (v5 `payments/sale`). last-verified: weekly / env: sandbox / how: `TestNMILiveLifecycleE2E` step 5.
 - **One-off, CCBill** — refused at `internal/modules/checkout/service.go:485`. Subscription-only rail.
@@ -72,7 +76,7 @@ rests on a single dated manual probe.
 - **Enrollment, CCBill** — FlexForm redirect; the subscription exists only once `NewSaleSuccess` arrives. No CCBill lane exists, so the outbound URL and the inbound payload are both pinned against hand-authored fixtures.
 - **Enrollment, Stripe** — hosted Checkout `mode=subscription`; membership is created by fetch-and-converge, not from the webhook payload.
 - **Enrollment, Solana** — `init_subscription_authority` + `subscribe`, period 1 pulled atomically. last-verified: daily / env: devnet / how: `TestDevnetLifecycle/FastPlan`.
-- **Trials** — the catalog's first-phase (`Price.GetTrial`) has exactly two readers: Stripe checkout and CCBill webhook amount validation. NMI and Solana enrollment never read it, and nothing rejects the combination, so **a trial declared on an NMI or Solana price is silently dropped and the subscriber is charged the full amount immediately**. Stripe refuses a *paid* intro explicitly (`service.go:1211`); a zero-amount trial becomes `subscription_data[trial_end]`. CCBill trial terms live in the FlexForm — OpenRails only validates the billed amount against the catalog trial.
+- **Trials** — the catalog's first-phase (`Price.GetTrial`) has exactly two readers: Stripe checkout and CCBill webhook amount validation. NMI and Solana enrolment never read it, so a trial declared against either is now **refused at catalog push** (or#896): `resolveProviders` consults the rail registry's `SupportsCatalogTrial` and fails the price create with an error naming the limitation, so the price never reaches the DB (`pkg/service/catalog_providers.go`; `TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase`). It used to be accepted and dropped, and the subscriber was charged the full amount immediately. Stripe refuses a *paid* intro explicitly (`service.go:1211`); a zero-amount trial becomes `subscription_data[trial_end]`. CCBill trial terms live in the FlexForm — OpenRails only validates the billed amount against the catalog trial.
 
 ## Billing lifecycle
 
@@ -80,8 +84,8 @@ rests on a single dated manual probe.
 |---|---|---|---|---|
 | Rebill / recurring charge | `modeled` | `modeled` | `limited` — provider-driven, ingest only | `modeled` |
 | Dunning / retry | `modeled` | `limited` — provider owns cadence | `unsupported` (by design) | `modeled` |
-| Cancel — user | `sandbox-verified` | `live-verified` | `modeled` | `limited` — dedicated endpoints only |
-| Cancel — merchant/admin | `limited` — see caveat | `limited` — split-brain | `modeled` | `unsupported` (guarded) |
+| Cancel — user | `sandbox-verified` | `live-verified` | `modeled` | `limited` — dedicated endpoints only (guarded elsewhere) |
+| Cancel — merchant/admin | `modeled` — durable intent, verify-not-decline | `live-verified` (wire, 2026-07-03) — same intent as the user cancel | `modeled` | `unsupported` (guarded) |
 | Cancel — provider-initiated | `modeled` | `modeled` | `modeled` | `modeled` |
 | Tier change — upgrade | `modeled` | `modeled` | `modeled` | `modeled` |
 | Tier change — downgrade | `modeled` | `unsupported` (guarded) | `modeled` | `modeled` |
@@ -93,9 +97,9 @@ rests on a single dated manual probe.
 - **Rebill, Solana** — `transfer_subscription` pull, driven by an hourly cranker. The daily devnet lane exercises the instruction only as part of the atomic subscribe bundle (period 1), so it proves the on-chain instruction lands — **not** that the cranker bills a second period. Recurrence across a real period rollover is covered only by `TestDevnetSustainedRebill` and `TestDevnetFailurePaths`, and **no scheduled lane runs either** (see findings). Missed periods are never back-billed by design; a delegate revocation is terminal and skips dunning.
 - **Cancel (user), NMI** — deferred delete with an undo window, else immediate `DELETE /v5/subscriptions/{id}`. last-verified: weekly / env: sandbox / how: `TestNMILiveLifecycleE2E` step 9.
 - **Cancel (user), CCBill** — DataLink `cancelSubscription`. last-verified: 2026-07-03 / env: **live production account** / how: manual probe, success envelope `<results>1</results>` confirmed on a long-dead subscription; pinned by `TestCancelSubscription_SuccessShapes`.
-- **Cancel (user), Solana** — `limited`: the on-chain `cancel_subscription` path works and is covered by the daily devnet lane (`TestDevnetLifecycle/FastPlan`), but it is reachable **only** through the dedicated `solana-cancel-tx` / `solana-cancel` endpoints. The rail-agnostic `POST /subscriptions/:id/cancel` falls through the cancel worker's default branch into a facade with no Solana case and errors permanently (`user_service.go:538`).
-- **Cancel (merchant), NMI** — `limited`: `internal/modules/subscriptions/admin_service.go:176` calls the gateway **synchronously with no durable intent and no verify leg**, unlike the user path. An unresolvable PSP logs a warning and returns nil, so the local row flips to cancelled while NMI keeps rebilling.
-- **Cancel (merchant), CCBill** — `limited`: the admin subscriptions API refuses CCBill (`admin_service.go:215`), while the findings-queue `cancel_and_refund` action supports it (`admin_findings_actions.go:319`). Same operation, two answers depending on entry point.
+- **Cancel (user), Solana** — `limited`: the on-chain `cancel_subscription` path works and is covered by the daily devnet lane (`TestDevnetLifecycle/FastPlan`), but it is reachable **only** through the dedicated `solana-cancel-tx` / `solana-cancel` endpoints — a cancel is a transaction the subscriber's wallet signs. The rail-agnostic `POST /subscriptions/:id/cancel` used to queue a job that fell through the worker's default branch and failed permanently; since or#896 it is **refused synchronously (400) naming those two endpoints**, the service refuses it for any other producer, and an already-queued job is cancelled rather than retried forever (`TestCancelSubscriptionSolanaNamesDedicatedEndpoints`).
+- **Cancel (merchant), NMI** — the admin path now rides the SAME `nmi_delete_subscription` intent as the user path (or#896, admin-origin): the local cancellation and the intent commit in one transaction, the `deletion_scheduled_at` marker holds while the rail side is unconfirmed, and an ambiguous provider outcome parks as `unknown_needs_verify` for the verifier instead of reporting a delete that may not have happened. It used to call the gateway synchronously with no intent and no verify leg, and an unresolvable PSP logged a warning and returned nil — the local row went terminal while NMI kept rebilling. `modeled`: hermetic fake gateway (`TestMerchantCancelNMIRidesDurableIntent`, `TestMerchantCancelNMIAmbiguousOutcomeParksForVerification`); the delete WIRE itself is the sandbox-verified one from the user path.
+- **Cancel (merchant), CCBill** — the split-brain is closed (or#896): the admin subscriptions API used to refuse CCBill while the findings-queue `cancel_and_refund` action cancelled it. Both surfaces now queue the same admin-origin `ccbill_cancel_subscription` intent, drained through the DataLink SMS choke point. The cancel wire is the one confirmed live on 2026-07-03 (see *Cancel (user), CCBill*); the admin ENTRY POINT is pinned hermetically by `TestMerchantCancelCCBillDrivesTheLiveVerifiedCancel` alongside `TestFindingsQueueApproveCCBillCancelAndRefund`.
 - **Cancel (merchant), Solana** — refused; a cancel is a transaction the subscriber's wallet must sign.
 - **Cancel (provider-initiated)** — all rails converge from *fetched* provider truth rather than trusting the payload. NMI and Stripe treat a 404 as provider-confirmed-gone; CCBill consumes `Cancellation`/`Expiration`; Solana reads the chain.
 - **Tier change** — NMI: immediate proration charge + new subscription, downgrade deferred to period end. CCBill: upgrade is an `originalSubscriptionId` FlexForm redirect, downgrade refused (`service.go:2229`). Stripe: Model-B anchor reset with `always_invoice`; **carries an explicit `TODO(#268)` saying the live invoice amount must be verified on a real Stripe test upgrade** — the `stripe-model-b` lane exists for exactly this. Solana: a single atomic on-chain transaction via the dedicated `solana-tier-change` endpoints.
@@ -119,19 +123,19 @@ rests on a single dated manual probe.
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
-| Add / vault a payment method | `sandbox-verified` | `unsupported` — provider owns the vault | `limited` — portal-delegated | `unsupported` — wallet, not an instrument |
-| Update / delete a payment method | `modeled` | `unsupported` (guarded) | `limited` — portal-delegated | n/a |
+| Add / vault a payment method | `sandbox-verified` | `unsupported` (guarded) — provider owns the vault | `unsupported` (guarded) — portal-delegated | `unsupported` (guarded) — wallet, not an instrument |
+| Update / delete a payment method | `modeled` | `unsupported` (guarded) | `unsupported` (guarded) — portal-delegated | n/a |
 | Swap a subscription's payment source | `modeled` | `unsupported` (guarded) | `unsupported` | n/a |
 | Account Updater | `unsupported` — events logged, no action | `unsupported` — invisible to us | `unsupported` — nothing consumed | n/a |
 | Charge a saved method (arrears settlement, auto top-up) | `sandbox-verified` | `unsupported` — no adapter | `sandbox-verified` | `unsupported` — no adapter |
 | Credits bundled with a purchase or renewal | `modeled` | `modeled` | `modeled` | `modeled` |
-| Standalone credit-purchase price | `unsupported` — not wired on any rail | `unsupported` | `unsupported` | `unsupported` |
+| Standalone credit-purchase price | `unsupported` — priced, never checkout-able | `unsupported` | `unsupported` | `unsupported` |
 
 - **Vaulting, NMI** — Collect.js tokenization → customer vault. last-verified: weekly / env: sandbox / how: `TestLiveCollectJSTokenVaultCreate`, `TestLiveSandboxStoredCredentialCITThenMIT`. Note the lifecycle E2E vaults **directly at NMI**, so the OpenRails payment-method API surface is not itself live-exercised.
-- **Payment methods, Stripe** — `limited`: there is no first-party CRUD. `RailPaymentMethodService` is NMI-only, so a Stripe request fails with **`PSP 'stripe' is not configured`** — which reads as a misconfiguration rather than an unsupported rail. Mutation is delegated to Stripe's Billing Portal (`stripe_portal.go:23`), and `payment_method.attached` is recorded passively.
+- **Payment methods, Stripe** — `unsupported` (guarded): there is no first-party CRUD, and since or#896 the refusal is honest. `RailPaymentMethodService` is NMI-only (`rails.SupportsPaymentMethodCRUD`), and a Stripe/CCBill/Solana request now fails with *"payment methods are not managed by OpenRails on this rail"* plus where the instrument actually lives, instead of the old **`PSP 'stripe' is not configured`** — which read as a misconfiguration. Mutation is delegated to Stripe's Billing Portal (`stripe_portal.go:23`), and `payment_method.attached` is recorded passively. Pinned by `TestCreatePaymentMethodUnsupportedRailIsHonest`.
 - **Account Updater** — no rail consumes it. NMI receives `acu.summary.*` and logs them without touching the vault or the local card record (`internal/modules/webhooks/nmi.go:383`). Stripe's card updater is not subscribed to at all. The only working Account Updater in the repo belongs to the Basis Theory custodian, which is a different rail — do not read it as coverage here.
 - **Charge saved method** — gated by `SupportsChargeSavedMethod` in the rail registry: NMI and Stripe only. last-verified: weekly / env: sandbox + Stripe test mode / how: `TestChargeOutstanding_NMISandbox_CollectsRealCharge`, `TestLiveNMIInvoiceCollectionAgainstSandbox`, `TestLiveStripeInvoiceCollectionAgainstTestAccount`. CCBill and Solana have no collection adapter, so arrears settlement and auto top-up do not exist on those rails.
-- **Credits** — three different things, often conflated. (1) Credits declared on a product's `credits_spec` are granted rail-agnostically when a purchase or renewal registers, so they follow whatever checkout works on the rail. (2) Auto top-up charges a saved method and is therefore NMI/Stripe only. (3) A standalone **catalog credit-purchase price** can be declared and quoted, but `DepositCatalogCreditPurchase` has **no production caller** — the surface is defined and tested, never wired. That is a gap on every rail, not a per-rail limitation.
+- **Credits** — three different things, often conflated. (1) Credits declared on a product's `credits_spec` are granted rail-agnostically when a purchase or renewal registers, so they follow whatever checkout works on the rail. (2) Auto top-up charges a saved method and is therefore NMI/Stripe only. (3) A standalone **catalog credit-purchase price** can be declared and quoted, but nothing can BUY one: a top-up product's offers are rate-priced rows in `catalog_credit_purchase_prices`, never `prices` rows, so no checkout session can name one. or#896 deleted the unreachable `DepositCatalogCreditPurchase` wrapper (a second money-writer duplicating `MoneyService.Deposit`, which `POST /v1/service/credits/deposit` already drives live); the quote remains and a host delivers the quoted lot through that live deposit path. That is a gap on every rail, not a per-rail limitation.
 
 ## Catalog and reconciliation
 
@@ -146,7 +150,7 @@ rests on a single dated manual probe.
 | Settlement / payout ingestion | `unsupported` | `unsupported` | `unsupported` | n/a |
 
 - **Price push, NMI** — recurring plans only; a non-recurring price returns `errPendingManualLink`. The lifecycle E2E creates its plan **out of band** via raw `recurring=add_plan`, so the adapter's own push path has never run against the sandbox.
-- **Price push, Stripe** — find-or-create by content-addressed `lookup_key`. Two tests do reach Stripe test mode (`TestLiveStripeCatalogAutoCreateReusesContentKeys`, `TestLiveStripeExtrasListing`) but **no workflow runs either**, so they are not standing evidence. Both also carry **no build tag** — they compile into a default `go test ./...` and are held back only by an env check.
+- **Price push, Stripe** — find-or-create by content-addressed `lookup_key`. Two tests do reach Stripe test mode (`TestLiveStripeCatalogAutoCreateReusesContentKeys`, `TestLiveStripeExtrasListing`) but **no workflow runs either**, so they are still not standing evidence. Since or#896 they carry the `stripelive` build tag (`go test -tags=stripelive ./pkg/service/ -run TestLiveStripe`), so they are absent from the default build rather than silently skipped in it.
 - **Price push, CCBill** — `AutoCreate` always returns `errPendingManualLink`; the operator creates the FlexForm in CCBill's admin and links `flex_id` + `form_name`. This surfaces as `pending_manual_actions` on the price rather than an error, which is the intended behavior.
 - **Catalog update, NMI** — `Update` is a deliberate no-op: amount and frequency are immutable post-create and `is_active` is not representable.
 - **Drift detection, CCBill** — impossible, not missing: FlexForms are write-only redirect URLs and DataLink exports members, not catalog objects. There is no catalog-list endpoint to diff against, so CCBill is excluded from the reconciliation job by design.
