@@ -50,6 +50,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 		if lerr != nil {
 			return fmt.Errorf("lock instrument %s: %w", existing.ID, lerr)
 		}
+		fromPSP := locked.PspID
 		// Re-decide under the lock. A concurrent run may have moved it; a
 		// dunning attempt may have gone in flight since the plan read.
 		if locked.Custodian == p.custodianKind() {
@@ -107,7 +108,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 			FromCustodianID:     nil,
 			FromRailCustomerRef: locked.RailCustomerRef,
 			FromRailMethodRef:   locked.RailMethodRef,
-			FromPspID:           locked.PspID,
+			FromPspID:           &fromPSP,
 			ToCustodian:         p.custodianKind(),
 			ToCustodianID:       p.custodian.ID,
 			ToRailMethodRef:     token,
@@ -162,7 +163,7 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 			// card, and it is the only link back to charges made before.
 			RailCustomerRef:    strings.TrimSpace(tk.SourceRailCustomerRef),
 			RailMethodRef:      token,
-			PspID:              p.targetPSPID(),
+			PspID:              p.targetPSP.ID,
 			RebillDriver:       models.RebillDriverOpenRails,
 			Custodian:          p.custodianKind(),
 			Fingerprint:        strings.TrimSpace(tk.Fingerprint),

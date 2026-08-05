@@ -198,6 +198,10 @@ const (
 	// ReasonCustodyConflict: the instrument is already custodian-held under a
 	// DIFFERENT token. A second flip needs an operator decision, not a guess.
 	ReasonCustodyConflict = "custody_conflict"
+	// ReasonMissingTargetPSP: a card with no local row can only be CREATED
+	// against the export's declared target PSP — provenance is total, so an
+	// instrument cannot exist unattributed (or#893).
+	ReasonMissingTargetPSP = "missing_target_psp"
 	// ReasonMissingToken: the manifest line carries no custodian token.
 	ReasonMissingToken = "missing_token"
 	// ReasonMissingSourceRef: the line names no source vault handle and no
@@ -479,6 +483,10 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 		}
 		if *tk.Customer == uuid.Nil {
 			out.Outcome, out.Reason = OutcomeBlocked, ReasonMissingCustomer
+			return out, nil
+		}
+		if p.targetPSP == nil {
+			out.Outcome, out.Reason = OutcomeBlocked, ReasonMissingTargetPSP
 			return out, nil
 		}
 		return p.create(ctx, tk, out)

@@ -41,15 +41,15 @@ import (
 // ---------------------------------------------------------------- fixture
 
 type custodyFixture struct {
-	ctx        context.Context
-	db         *db.DB
-	merchants  *merchants.Service
-	custodian  merchants.CustodianScope
-	oldPSP     gen.OpenrailsPsp // the de-platforming gateway; holds its own vault
-	newPSP     gen.OpenrailsPsp // the survivor gateway; charges through the custodian
-	productID  uuid.UUID
-	priceID    uuid.UUID
-	env        string
+	ctx       context.Context
+	db        *db.DB
+	merchants *merchants.Service
+	custodian merchants.CustodianScope
+	oldPSP    gen.OpenrailsPsp // the de-platforming gateway; holds its own vault
+	newPSP    gen.OpenrailsPsp // the survivor gateway; charges through the custodian
+	productID uuid.UUID
+	priceID   uuid.UUID
+	env       string
 }
 
 const (
@@ -166,7 +166,7 @@ func (fx *custodyFixture) seedPSPVaultedCard(t *testing.T, vaultID string) (uuid
 			CustomerID:      customerID,
 			Rail:            string(models.RailNMI),
 			RailCustomerRef: vaultID,
-			PspID:           &fx.oldPSP.ID,
+			PspID:           fx.oldPSP.ID,
 			Custodian:       models.CustodianPSP,
 			LastFour:        strPtr("4242"),
 			CardType:        strPtr("visa"),
@@ -283,8 +283,7 @@ func TestCustodyMigration_PlanThenApply(t *testing.T) {
 	require.Equal(t, vaultID, after.RailCustomerRef, "the dead PSP vault handle is retained — it is the only link to charges made before the flip")
 	require.Equal(t, exp.Tokens[0].Fingerprint, after.Fingerprint)
 	require.Equal(t, nmiproxy.ViaPANProxy, after.ChargeVia)
-	require.NotNil(t, after.PspID)
-	require.Equal(t, fx.newPSP.ID, *after.PspID, "the survivor gateway now settles this card")
+	require.Equal(t, fx.newPSP.ID, after.PspID, "the survivor gateway now settles this card")
 	require.Equal(t, before.StoredCredentialUnscheduledRef, after.StoredCredentialUnscheduledRef,
 		"credential-on-file anchors are gateway-scoped, not custody-scoped")
 	require.Equal(t, before.StoredCredentialRecurringRef, after.StoredCredentialRecurringRef)
@@ -544,9 +543,9 @@ func seedChargeIntent(t *testing.T, fx *custodyFixture, subID uuid.UUID, status 
 	t.Helper()
 	id := uuid.New()
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, subscription_id, idempotency_key, status, origin, origin_reason)
-		 VALUES ($1, $2, 'nmi', 'manual_rebill', $3, $4, $5, 'system', 'or297 test')`,
-		id, dbtest.TestMerchantID.UUID(), subID, "or297-"+uuid.NewString(), status)
+		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, subscription_id, idempotency_key, status, origin, origin_reason, psp_id)
+		 VALUES ($1, $2, 'nmi', 'manual_rebill', $3, $4, $5, 'system', 'or297 test', $6)`,
+		id, dbtest.TestMerchantID.UUID(), subID, "or297-"+uuid.NewString(), status, fx.oldPSP.ID)
 	require.NoError(t, err)
 	return id
 }

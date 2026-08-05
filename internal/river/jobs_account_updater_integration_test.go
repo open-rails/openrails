@@ -165,6 +165,7 @@ func (f *fakeBT) publishResults(jobID, csv string) {
 // --- fixture ----------------------------------------------------------------
 
 type auMerchant struct {
+	pspID    uuid.UUID
 	id       uuid.UUID
 	tenantID string
 	pool     *pgxpool.Pool
@@ -261,6 +262,11 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 		      VALUES ($1, $2, $3, 'basis_theory', 'live', $4, $5)`,
 			m.custID, m.id, "bt-"+m.id.String()[:8], m.tenantID, raw)
 
+		m.pspID = uuid.New()
+		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, custodian_id)
+		      VALUES ($1, $2, 'nmi', 'live', $3, $4)`,
+			m.pspID, m.id, "gw-"+m.id.String()[:6], m.custID)
+
 		days := lookaheadDays
 		if days <= 0 {
 			days = custodians.DefaultAccountUpdaterLookaheadDays
@@ -288,6 +294,7 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 			"DELETE FROM openrails.account_updater_batches WHERE merchant_id = $1",
 			"DELETE FROM openrails.subscriptions WHERE merchant_id = $1",
 			"DELETE FROM openrails.payment_methods WHERE merchant_id = $1",
+			"DELETE FROM openrails.psps WHERE merchant_id = $1",
 			"DELETE FROM openrails.custodians WHERE merchant_id = $1",
 			"DELETE FROM openrails.products WHERE merchant_id = $1",
 			"DELETE FROM openrails.customers WHERE merchant_id = $1",
@@ -349,9 +356,9 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 		INSERT INTO openrails.payment_methods
 		  (id, rail, initial_transaction_id, merchant_id, customer_id, custodian,
 		   rail_method_ref, expiry_date, last_four, card_type, fingerprint,
-		   account_updater_checked_at, park_reason, parked_at)
-		VALUES ($1, 'nmi', '', $2, $3, 'basis_theory', $4, $5, '1111', 'visa', $6, $7, $8, $9)`,
-		pmID, m.id, customer, token, expiry, "fp_"+uuid.NewString()[:8], checked, opts.parkReason, parkedAt)
+		   account_updater_checked_at, park_reason, parked_at, psp_id)
+		VALUES ($1, 'nmi', '', $2, $3, 'basis_theory', $4, $5, '1111', 'visa', $6, $7, $8, $9, $10)`,
+		pmID, m.id, customer, token, expiry, "fp_"+uuid.NewString()[:8], checked, opts.parkReason, parkedAt, m.pspID)
 	require.NoError(t, err)
 
 	if opts.renewsIn != 0 {
@@ -371,10 +378,10 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 		_, err := fx.super.Exec(fx.ctx, `
 			INSERT INTO openrails.subscriptions
 			  (id, product_id, status, rail, current_period_starts_at, current_period_ends_at,
-			   started_at, payment_method_id, customer_id, merchant_id, cancelled_at, cancel_type)
-			VALUES ($1, $2, $3, 'nmi', $4, $5, $4, $6, $7, $8, $9, $10)`,
+			   started_at, payment_method_id, customer_id, merchant_id, cancelled_at, cancel_type, psp_id)
+			VALUES ($1, $2, $3, 'nmi', $4, $5, $4, $6, $7, $8, $9, $10, $11)`,
 			subID, product, status, now.Add(-24*time.Hour), now.Add(opts.renewsIn),
-			pmID, customer, m.id, cancelledAt, cancelType)
+			pmID, customer, m.id, cancelledAt, cancelType, m.pspID)
 		require.NoError(t, err)
 	}
 	return pmID, token
