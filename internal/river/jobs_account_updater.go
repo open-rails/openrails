@@ -445,7 +445,11 @@ func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.
 		intent, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
 			MerchantID: mid,
 			Provider:   models.CustodianBasisTheory,
-			IntentType: intents.TypeAccountUpdaterBatchSubmit,
+			// or#893/or#795: this write is addressed to the CUSTODIAN, not to a
+			// gateway account — one custodian backs many PSPs, so no single
+			// psp_id names it. rail_intents_addressed accepts either.
+			CustodianID: row.ID,
+			IntentType:  intents.TypeAccountUpdaterBatchSubmit,
 			Payload: intents.AccountUpdaterBatchPayload{
 				BatchID:            batch.ID,
 				CustodianKind:      row.Kind,

@@ -159,7 +159,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	// addressed to, so every mirror row the handler creates — the charge, the
 	// subscription, the vaulted method — inherits that provenance instead of
 	// having to re-resolve (or fail to).
-	ctx = db.WithPSPID(ctx, intent.PspID)
+	ctx = pinIntentAddress(ctx, intent)
 
 	handler := r.Registry.Lookup(intent.IntentType)
 	if handler == nil {
@@ -286,7 +286,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
 		// writes the same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
-		ctx = db.WithPSPID(ctx, intent.PspID)
+		ctx = pinIntentAddress(ctx, intent)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,
@@ -421,7 +421,8 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 	return logger.LogExternalMutation(ctx, MutationLogParams{
 		MerchantID:       intent.MerchantID,
 		Provider:         intent.Rail,
-		PspID:            intent.PspID,
+		PspID:            derefUUID(intent.PspID),
+		CustodianID:      derefUUID(intent.CustodianID),
 		ProviderIntentID: &intentID,
 		IntentType:       intent.IntentType,
 		IdempotencyKey:   intent.IdempotencyKey,
@@ -469,4 +470,21 @@ type DestructiveGate interface {
 	// AllowDestructive reports whether destructive provider writes may execute
 	// for a merchant. It must FAIL CLOSED: an unreadable policy denies.
 	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
+}
+
+// pinIntentAddress puts the account the intent is addressed to on the context,
+// so every mirror row a handler or verifier writes inherits the provenance the
+// intent row already recorded instead of re-resolving it (or#893). An intent
+// names a PSP, a custodian, or — for a custodian-proxy write — both;
+// rail_intents_addressed guarantees at least one.
+func pinIntentAddress(ctx context.Context, intent gen.OpenrailsRailIntent) context.Context {
+	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
+	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))
+}
+
+func derefUUID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
 }

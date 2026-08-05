@@ -42,3 +42,24 @@ func RequirePSPID(ctx context.Context) (uuid.UUID, error) {
 	}
 	return id, nil
 }
+
+type custodianIDCtxKey struct{}
+
+// WithCustodianID pins the custodian a write is addressed to. or#893/or#795:
+// the batch account updater uploads one token batch to a custodian that backs
+// MANY PSPs, so its provenance is the custodian, not a gateway account.
+func WithCustodianID(ctx context.Context, id uuid.UUID) context.Context {
+	if id == uuid.Nil {
+		return ctx
+	}
+	return context.WithValue(ctx, custodianIDCtxKey{}, id)
+}
+
+// CustodianIDFromContext returns the pinned custodian, or uuid.Nil.
+func CustodianIDFromContext(ctx context.Context) uuid.UUID {
+	v, ok := ctx.Value(custodianIDCtxKey{}).(uuid.UUID)
+	if !ok {
+		return uuid.Nil
+	}
+	return v
+}

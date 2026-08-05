@@ -329,7 +329,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		IdempotencyKey: "intent-" + subscriptionID.String(),
 		NextAttemptAt:  now,
 		Origin:         "system",
-		PspID:          account.ID,
+		PspID:          &account.ID,
 	})
 	require.NoError(t, err)
 	claimed, err := q.ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{

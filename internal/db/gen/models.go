@@ -1155,10 +1155,12 @@ type OpenrailsRailIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP the outbound intent was enqueued against. Required (or#893).
-	PspID uuid.UUID
+	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed) — or#893/or#795.
+	PspID *uuid.UUID
 	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID *uuid.UUID
+	// or#893/or#795: the custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant's custodian.
+	CustodianID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
@@ -1166,8 +1168,8 @@ type OpenrailsRailMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// PSP the logged mutation was addressed to. Required (or#893).
-	PspID          uuid.UUID
+	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (rail_mutation_logs_addressed) — or#893/or#795.
+	PspID          *uuid.UUID
 	RailIntentID   *uuid.UUID
 	IntentType     *string
 	IdempotencyKey *string
@@ -1178,6 +1180,8 @@ type OpenrailsRailMutationLog struct {
 	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
 	Evidence  []byte
 	CreatedAt time.Time
+	// or#893/or#795: the custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
+	CustodianID *uuid.UUID
 }
 
 // Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.

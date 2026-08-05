@@ -247,6 +247,16 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		m.id, "or795-"+m.id.String()[:8])
 
+	// Every merchant charges through a PSP whether or not it declares a
+	// custodian — "NULL custodian = this PSP holds its own instruments" is the
+	// common case (0053), not the absence of an account. The instruments seeded
+	// below carry psp_id, so the row has to exist for all four fixtures, and
+	// only custodian_id is conditional.
+	m.pspID = uuid.New()
+	exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id)
+	      VALUES ($1, $2, 'nmi', 'live', $3)`,
+		m.pspID, m.id, "gw-"+m.id.String()[:6])
+
 	if declareCustodian {
 		m.custID = uuid.New()
 		settings := map[string]any{"public_api_key": "key_pub_test"}
@@ -262,10 +272,7 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 		      VALUES ($1, $2, $3, 'basis_theory', 'live', $4, $5)`,
 			m.custID, m.id, "bt-"+m.id.String()[:8], m.tenantID, raw)
 
-		m.pspID = uuid.New()
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, custodian_id)
-		      VALUES ($1, $2, 'nmi', 'live', $3, $4)`,
-			m.pspID, m.id, "gw-"+m.id.String()[:6], m.custID)
+		exec(`UPDATE openrails.psps SET custodian_id = $2 WHERE id = $1`, m.pspID, m.custID)
 
 		days := lookaheadDays
 		if days <= 0 {
@@ -738,4 +745,39 @@ func auResultCSV(rows ...auResult) string {
 			r.token, r.newToken, r.expYear, r.expMonth, r.code, r.fingerprint, r.brand, r.last4)
 	}
 	return b.String()
+}
+
+// or#893 × or#795: the submit intent is CUSTODIAN-addressed. or#893 made
+// rail_intents.psp_id NOT NULL and taught the runner to refuse a provider write
+// it cannot attribute — correct for every intent aimed at a gateway account,
+// and wrong for this one: a custodian backs many PSPs, so there is no single
+// psp_id to name. This pins the row the submit actually writes (custodian named,
+// psp NULL) and the mutation log that records the attempt, so a future
+// tightening cannot quietly re-break the class.
+func TestAccountUpdaterSubmitIsCustodianAddressedNotPSPAddressed(t *testing.T) {
+	fx := newAUFixture(t)
+	m := fx.seedMerchant(true, true, 14)
+	fx.build()
+	fx.seedInstrument(m, instrumentOpts{renewsIn: 5 * 24 * time.Hour})
+
+	_, err := fx.worker.RunPass(fx.ctx)
+	require.NoError(t, err)
+
+	var pspID, custodianID *uuid.UUID
+	require.NoError(t, fx.super.QueryRow(fx.ctx,
+		`SELECT psp_id, custodian_id FROM openrails.rail_intents
+		  WHERE merchant_id = $1 AND intent_type = $2`,
+		m.id, intents.TypeAccountUpdaterBatchSubmit).Scan(&pspID, &custodianID))
+	require.Nil(t, pspID, "the batch is not sent to a gateway account, so it must not claim one")
+	require.NotNil(t, custodianID, "rail_intents_addressed: the write names the custodian it goes to")
+	require.Equal(t, m.custID, *custodianID)
+
+	var logPSP, logCustodian *uuid.UUID
+	require.NoError(t, fx.super.QueryRow(fx.ctx,
+		`SELECT psp_id, custodian_id FROM openrails.rail_mutation_logs
+		  WHERE merchant_id = $1 AND intent_type = $2 ORDER BY created_at LIMIT 1`,
+		m.id, intents.TypeAccountUpdaterBatchSubmit).Scan(&logPSP, &logCustodian))
+	require.Nil(t, logPSP)
+	require.NotNil(t, logCustodian, "the attempt is recorded against the custodian it was sent to")
+	require.Equal(t, m.custID, *logCustodian)
 }
