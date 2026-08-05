@@ -19,19 +19,19 @@ Where secrets live follows the two-mode doctrine (`merchant_source`, see
   in memory, **no persistent secret store is constructed**, `secret_backend` is not consulted.
   Vault, if enabled, serves Transit signing only.
 - **`merchant_source: api` (MODE 2)** — a persistent backend selected by `secret_backend`
-  (env `SECRET_BACKEND`):
+  (env `SECRET_BACKEND`), which is **required**:
 
 ```yaml
-secret_backend: db      # DEK-encrypted Postgres store (default) — or `vault`
+secret_backend: db      # DEK-encrypted Postgres store — or `vault`
 vault:
   enabled: true
 ```
 
 `secret_backend` is **declared intent** — never auto-detected, never auto-fallback (the data lives
-in exactly one place; a store that lacks it would run silently empty). Empty derives from
-`vault.enabled` for back-compat; `secret_backend: vault` requires `vault.enabled`. Outside
-development, `merchant_source: api` refuses to boot without a real backend: Vault, or the DB
-store with `ENCRYPTION_MASTER_KEY` set (#667/#723).
+in exactly one place; a store that lacks it would run silently empty). `merchant_source: api`
+refuses to boot without it; `vault.enabled` is a Vault *connection* (Transit signing counts) and
+never stands in for the declaration. `secret_backend: vault` requires `vault.enabled`;
+`secret_backend: db` outside development requires `ENCRYPTION_MASTER_KEY` (#667/#723).
 
 ### The DB fallback: envelope encryption
 

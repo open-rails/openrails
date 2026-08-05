@@ -184,10 +184,10 @@ type Config struct {
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
 	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
 	// It is declared intent, never auto-detected and never auto-fallback — the data
-	// lives in exactly one place (#661). Empty derives from vault.enabled for
-	// backward-compat (historically vault.enabled=true implied Vault KV). Env:
-	// SECRET_BACKEND. Only consulted in merchant_source=api mode — MODE 1 (#723)
-	// holds secrets in memory and never constructs a persistent secret store.
+	// lives in exactly one place (#661). REQUIRED in merchant_source=api mode
+	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
+	// consulted in merchant_source=api mode — MODE 1 (#723) holds secrets in
+	// memory and never constructs a persistent secret store.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
 	// MerchantSource is the two-mode doctrine switch (#723/#724): where merchant
@@ -283,20 +283,16 @@ func (cfg *Config) IsManifestMerchantSource() bool {
 }
 
 // SecretStoreBackend returns where merchant secrets live: "vault" or "db".
-// Explicit secret_backend wins; empty derives from vault.enabled (back-compat).
-// Vault Transit signing is orthogonal to this — it can be used with either backend
-// (#661); this only selects the KV secret store.
+// ONLY the declared secret_backend is consulted — or#893 deleted the
+// vault.enabled inference, so enabling Vault for Transit signing can no longer
+// silently move the secret store. merchant_source=api requires the declaration
+// (validateMerchantSource); MODE 1 never constructs a store, so the "db" here is
+// an inert default, not a fallback.
 func (cfg *Config) SecretStoreBackend() string {
 	if cfg == nil {
 		return SecretBackendDB
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
-	case SecretBackendVault:
-		return SecretBackendVault
-	case SecretBackendDB:
-		return SecretBackendDB
-	}
-	if cfg.Vault != nil && cfg.Vault.Enabled {
+	if strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) == SecretBackendVault {
 		return SecretBackendVault
 	}
 	return SecretBackendDB
@@ -1333,12 +1329,18 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 			return fmt.Errorf("merchant_source=api refuses mounted %s* secret files (%s): merchant truth lives in the API/store, not a manifest (two truths, #723)", merchantManifestEnvPrefix, name)
 		}
 	}
-	if !isDev {
-		vaultEnabled := cfg.Vault != nil && cfg.Vault.Enabled
-		hasMasterKey := cfg.Encryption != nil && strings.TrimSpace(cfg.Encryption.MasterKey) != ""
-		if !vaultEnabled && !hasMasterKey {
-			return fmt.Errorf("merchant_source=api requires a merchant-secret backend outside development: enable Vault (vault.enabled / secret_backend=vault) or set ENCRYPTION_MASTER_KEY for the DB store (#723/#667)")
+	// or#893: WHERE merchant secrets live is declared intent, never inferred.
+	// vault.enabled means "a Vault connection exists" (Transit signing counts);
+	// it does not mean the secret store moved there.
+	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
+	case SecretBackendDB:
+		if !isDev && (cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "") {
+			return fmt.Errorf("merchant_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723): the DB store would hold merchant credentials in plaintext")
 		}
+	case SecretBackendVault:
+		// validateSecretBackend already requires vault.enabled for this backend.
+	default:
+		return fmt.Errorf("merchant_source=api requires an explicit secret_backend (%q or %q): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)", SecretBackendDB, SecretBackendVault)
 	}
 	return nil
 }
@@ -2100,15 +2102,19 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
-	ignoredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
-	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
-	ignoredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
-	ignoredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
-	ignoredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
-	ignoredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
+	// or#893 phase 3: the retired families below used to warn-and-boot. An
+	// operator who believed ignored security or tenant config was active had no
+	// way to find out. Every one of them now REFUSES boot with the error that
+	// names its replacement — no aliases, no dual reads.
+	retiredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
+	retiredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
+	retiredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
+	retiredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
+	retiredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
+	retiredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
 		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
-	ignoredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
-	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
+	retiredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
+	retiredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
 		k.Exists("auth.control_plane.issued_audiences") ||
 		k.Exists("auth.control_plane.expected_audiences") ||
 		k.Exists("auth.control_plane.public_user_registration") ||
@@ -2125,29 +2131,29 @@ func Load(configPath string) (*Config, error) {
 		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
-	if ignoredStoreConfig {
-		log.Warn("ignoring retired store config (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile")
+	if retiredStoreConfig {
+		return nil, fmt.Errorf("store config was removed (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
 	}
-	if ignoredMerchantConfig {
-		log.Warn("ignoring retired merchant config (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant")
+	if retiredMerchantConfig {
+		return nil, fmt.Errorf("merchant config was removed (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant — delete the merchant yaml key and MERCHANT env var")
 	}
-	if ignoredCORSConfig {
-		log.Warn("ignoring retired cors_origins config (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist")
+	if retiredCORSConfig {
+		return nil, fmt.Errorf("cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
 	}
-	if ignoredDBRequireRLS {
-		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")
+	if retiredDBRequireRLS {
+		return nil, fmt.Errorf("db.require_rls config was removed: RLS enforcement is derived from env — development may bypass RLS, every other env requires an RLS-enforcing DB role; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
-	if ignoredAuthIssuers {
-		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest")
+	if retiredAuthIssuers {
+		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
 	}
-	if ignoredRails {
-		log.Warn("ignoring retired rails config (#521): seed merchant rail accounts and secrets with openrails push-merchant-config under merchants[].accounts")
+	if retiredRails {
+		return nil, fmt.Errorf("rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
 	}
-	if ignoredControlPlaneLegacy {
-		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")
+	if retiredControlPlaneLegacy {
+		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
-	if ignoredPrivatePort {
-		log.Warn("ignoring private_port: OpenRails serves a single HTTP listener; there is no separate internal port")
+	if retiredPrivatePort {
+		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
