@@ -37,6 +37,10 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	// Map known business errors to stable status codes + machine-readable codes.
 	msg := strings.ToLower(err.Error())
 	switch {
+	// or#896: a trial declared on a rail that cannot execute one is a bad
+	// DECLARATION — 400 with the limitation named, never a generic 500.
+	case errors.Is(err, billingservice.ErrTrialUnsupportedOnRail):
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	// or#782: product_not_found/price_not_found (the stable codes the lookup
 	// helpers rewrite "sql: no rows" into) match on the UNDERSCORE form — without
 	// it every missing-or-foreign id fell through to a 500, so a cross-merchant

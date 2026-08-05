@@ -377,3 +377,57 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 		t.Fatal("adapter performed a direct-post write while writes were disabled")
 	}
 }
+
+// or#896: a `trial:` first phase declared against a rail with no first-phase
+// concept is REFUSED at push. It used to be accepted and dropped — the
+// subscriber was charged the full amount immediately on enrolment.
+func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
+	trialAmount := int64(0)
+	trialHours := 7 * 24
+	newReq := func(psp string) CreatePriceRequest {
+		hours := 30 * 24
+		return CreatePriceRequest{
+			ProductID:           uuid.New(),
+			UnitAmount:          23_000_000,
+			Currency:            "usd",
+			AccessDurationHours: &hours,
+			AutoRenew:           true,
+			TrialUnitAmount:     &trialAmount,
+			TrialDurationHours:  &trialHours,
+			PSPs:                []string{psp},
+		}
+	}
+
+	for _, psp := range []string{"nmi", "solana"} {
+		s := newUnconfiguredService()
+		req := newReq(psp)
+		_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New())
+		if err == nil {
+			t.Fatalf("%s: a trial on this rail must be refused, not silently dropped", psp)
+		}
+		for _, want := range []string{"trial", psp, "silently dropped"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q does not name %q", psp, err, want)
+			}
+		}
+	}
+
+	// The rails that can execute a first phase keep working.
+	for _, psp := range []string{"stripe", "ccbill"} {
+		s := newUnconfiguredService()
+		req := newReq(psp)
+		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New()); err != nil {
+			t.Errorf("%s: trials are supported here, got %v", psp, err)
+		}
+	}
+
+	// A trial-free price on NMI/Solana is untouched.
+	for _, psp := range []string{"nmi", "solana"} {
+		s := newUnconfiguredService()
+		req := newReq(psp)
+		req.TrialUnitAmount, req.TrialDurationHours = nil, nil
+		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New()); err != nil {
+			t.Errorf("%s: a price with no trial must still resolve, got %v", psp, err)
+		}
+	}
+}
