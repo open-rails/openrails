@@ -26,8 +26,12 @@ func EnsureTestPSP(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID uu
 	t.Helper()
 	id := TestPSPID(merchantID, rail)
 	_, err := qx.Exec(ctx,
+		// environment='test': integration runs boot in test mode, so 'test' is the
+		// environment every resolver expects — and a fixture PSP claiming to be a
+		// LIVE account also trips real gates that ask "is a live account armed?"
+		// (the CCBill source-IP allowlist is one).
 		`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key, archived)
-		 VALUES ($1, $2, $3, 'live', $4, $5, false)
+		 VALUES ($1, $2, $3, 'test', $4, $5, false)
 		 ON CONFLICT (id) DO NOTHING`,
 		id, merchantID, rail, testPSPAccountID(merchantID, rail), rail)
 	require.NoError(t, err, "ensure test psp %s/%s", merchantID, rail)

@@ -2021,8 +2021,12 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	newSubscription := &models.Subscription{
-		ID:                       newSubscriptionID,
-		CustomerID:               customerID,
+		ID:         newSubscriptionID,
+		CustomerID: customerID,
+		// or#893: an upgrade stays on the account that holds the original — the
+		// successor is the same customer on the same gateway, so its provenance
+		// is the predecessor's, not a fresh resolution.
+		PspID:                    existingSub.PspID,
 		ProductID:                newPrice.ProductID,
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),

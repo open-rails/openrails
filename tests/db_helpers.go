@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -69,18 +70,56 @@ func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Pric
 	require.NoError(suite.t, catalog.NewPriceService(suite.FixtureDB()).Create(ctx, p), "Failed to insert price")
 }
 
+// PinPSP puts the suite in the shape every production caller of these repos
+// arrives in (or#893): the routed PSP pinned on ctx, and its psps row present.
+// Checkout's stampPSP, the intent runner and the webhook plane all do this
+// before any provider-bound row is written; off-rail channels are exempt and
+// pass through untouched.
+func (suite *TestContainerSuite) PinPSP(ctx context.Context, rail string) context.Context {
+	suite.t.Helper()
+	if rail == "" || models.IsOffRailChannel(rail) {
+		return ctx
+	}
+	if db.PSPIDFromContext(ctx) != uuid.Nil {
+		return ctx
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+		tid, err = merchant.Require(ctx)
+		require.NoError(suite.t, err, "Failed to resolve merchant for PSP")
+	}
+	// Use the suite's OWN armed account for the rail (seedRailMerchantAccount*
+	// wires real credentials against it) — routing to a second, credential-less
+	// PSP would make the merchant multi-account and change which one new work
+	// resolves to. Only seed one if the rail has none.
+	var psp uuid.UUID
+	err = suite.FixtureDB().Pool().QueryRow(ctx,
+		`SELECT id FROM openrails.psps
+		  WHERE merchant_id = $1 AND rail = lower($2) AND archived = false
+		  ORDER BY created_at DESC, id DESC LIMIT 1`,
+		tid.UUID(), rail).Scan(&psp)
+	if err != nil {
+		psp = dbtest.EnsureTestPSP(ctx, suite.t, suite.FixtureDB().Pool(), tid.UUID(), rail)
+	}
+	return db.WithPSPID(ctx, psp)
+}
+
 func (suite *TestContainerSuite) InsertSubscription(ctx context.Context, s *models.Subscription) {
 	suite.t.Helper()
+	ctx = suite.PinPSP(ctx, string(s.Rail))
 	require.NoError(suite.t, subscriptions.NewSubscriptionRepo(suite.FixtureDB()).Create(ctx, s), "Failed to insert subscription")
 }
 
 func (suite *TestContainerSuite) InsertPaymentMethod(ctx context.Context, pm *models.PaymentMethod) {
 	suite.t.Helper()
+	ctx = suite.PinPSP(ctx, string(pm.Rail))
 	require.NoError(suite.t, paymentmethods.NewPaymentMethodRepo(suite.FixtureDB()).Create(ctx, pm), "Failed to insert payment method")
 }
 
 func (suite *TestContainerSuite) InsertPayment(ctx context.Context, p *models.Payment) {
 	suite.t.Helper()
+	ctx = suite.PinPSP(ctx, string(p.Rail))
 	require.NoError(suite.t, payments.NewPaymentRepo(suite.FixtureDB()).Create(ctx, p), "Failed to insert payment")
 }
 

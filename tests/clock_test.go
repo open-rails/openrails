@@ -209,6 +209,8 @@ func TestSubscriptionExpiryWithMockClock(t *testing.T) {
 func TestLifecycleServiceUsesMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := suite.MerchantCtx()
+	// or#893: this test drives the service directly; arrive routed, like production.
+	ctx = suite.PinPSP(ctx, string(models.RailNMI))
 
 	// Seed products
 	products := suite.SeedProducts()
