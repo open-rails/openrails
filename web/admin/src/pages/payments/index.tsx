@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 
@@ -21,11 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useApiData } from "@/hooks/use-api-data"
 import { listCustomers, listPayments } from "@/lib/api/endpoints"
 import type { PaymentObject } from "@/lib/api/types"
 import { formatMicros, formatUnix, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
 const EXPORT_PAGE = 200
@@ -58,7 +59,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Refunded",
     cell: ({ row }) =>
       row.original.amount_refunded ? (
-        <span className="tabular-nums text-muted-foreground">
+        <span className="text-muted-foreground tabular-nums">
           {formatMicros(row.original.amount_refunded, row.original.currency)}
         </span>
       ) : (
@@ -96,15 +97,9 @@ export function PaymentsPage() {
     refunds_only: view === "refunds" ? true : undefined,
     user_id: userId || undefined,
   }
-  const filterKey = JSON.stringify(filters)
-
-  const { data, loading, error } = useApiData(
-    () => listPayments(filters, PAGE, offset),
-    [filterKey, offset]
+  const { data, isPending: loading } = useQuery(
+    adminQueries.payments(filters, PAGE, offset)
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load payments")
-  }, [error])
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)

@@ -27,6 +27,7 @@ import type {
   MerchantMembership,
   MerchantMembershipList,
 } from "@/lib/api/types"
+import { queryClient } from "@/lib/query-client"
 
 interface AuthState {
   ready: boolean
@@ -118,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     setUnauthorizedHandler(() => {
+      queryClient.clear()
       setMe(null)
       setMerchants([])
       setActiveMerchant(undefined)
@@ -201,6 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Your session changed while sign-in was completing")
       }
       const identity = await loadIdentity(session)
+      queryClient.clear()
       setMe(identity.who)
       setMerchants(identity.merchants)
       setActiveMerchant(identity.activeMerchant)
@@ -229,6 +232,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ) {
         return
       }
+      queryClient.clear()
       window.location.reload()
     },
     [merchants]
@@ -243,6 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = React.useCallback(async () => {
     const session = getTokens()
     setTokens(null)
+    queryClient.clear()
     setMe(null)
     setMerchants([])
     setActiveMerchant(undefined)

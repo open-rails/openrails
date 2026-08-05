@@ -3,6 +3,7 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
 import { StatusBadge } from "@/components/status-badge"
@@ -37,44 +38,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
 import {
   cancelReprice,
   cancelSubscription,
   changeSubscriptionPaymentMethod,
-  getCustomerPaymentMethods,
-  getPrice,
-  getSubscription,
-  listReprices,
   resumeSubscription,
 } from "@/lib/api/endpoints"
 import type { SubscriptionReprice } from "@/lib/api/types"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const {
-    data: sub,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getSubscription(id), [id])
+  const queryClient = useQueryClient()
+  const { data: sub, isPending: loading } = useQuery(
+    adminQueries.subscription(id)
+  )
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions() })
   // #777: pending-reprice badge — at most one scheduled reprice can exist per
   // subscription at a time.
-  const { data: scheduledReprices, reload: reloadReprices } = useApiData(
-    () =>
-      id
-        ? listReprices({ subscription_id: id, status: "scheduled" })
-        : Promise.resolve(null),
-    [id]
+  const { data: scheduledReprices, refetch: reloadReprices } = useQuery(
+    adminQueries.subscriptionReprices(id)
   )
   const pendingReprice = scheduledReprices?.items?.[0]
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load subscription")
-  }, [error])
-
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!sub)
     return (
@@ -329,12 +318,8 @@ function ChangePaymentMethodDialog({
   const [open, setOpen] = React.useState(false)
   const [paymentMethodId, setPaymentMethodId] = React.useState("")
   const [busy, setBusy] = React.useState(false)
-  const { data: pms } = useApiData(
-    () =>
-      open && customerId
-        ? getCustomerPaymentMethods(customerId)
-        : Promise.resolve(null),
-    [open, customerId]
+  const { data: pms } = useQuery(
+    adminQueries.customerPaymentMethods(open ? customerId : undefined)
   )
   // Payment-method swap is an NMI-only operation today (see
   // update_subscription_payment_method.go); other rails 400.
@@ -426,10 +411,7 @@ function PendingRepriceBadge({
   reprice: SubscriptionReprice
   onCancelled: () => void
 }) {
-  const { data: toPrice } = useApiData(
-    () => getPrice(reprice.to_price_id),
-    [reprice.to_price_id]
-  )
+  const { data: toPrice } = useQuery(adminQueries.price(reprice.to_price_id))
   const [busy, setBusy] = React.useState(false)
   return (
     <span className="flex items-center gap-1.5">

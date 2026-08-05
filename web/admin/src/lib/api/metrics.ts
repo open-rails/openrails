@@ -88,10 +88,15 @@ export interface GeneratedWidget {
 
 // --- endpoints -----------------------------------------------------------------
 
-export const metricsQuery = (query: MetricsQuery) =>
-  api<MetricsResult>("/merchant/metrics/query", { method: "POST", body: query })
+export const metricsQuery = (query: MetricsQuery, signal?: AbortSignal) =>
+  api<MetricsResult>("/merchant/metrics/query", {
+    method: "POST",
+    body: query,
+    signal,
+  })
 
-export const getDashboard = () => api<Dashboard>("/merchant/dashboard")
+export const getDashboard = (signal?: AbortSignal) =>
+  api<Dashboard>("/merchant/dashboard", { signal })
 
 export const putDashboard = (widgets: Widget[]) =>
   api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })

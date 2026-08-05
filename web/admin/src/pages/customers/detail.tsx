@@ -7,6 +7,7 @@ import {
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -38,14 +39,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
 import {
   createOffChannelPayment,
-  getCustomerProfile,
   grantEntitlement,
   grantProductAccess,
-  listPrices,
-  listProducts,
   revokeEntitlement,
   revokeProductAccess,
 } from "@/lib/api/endpoints"
@@ -56,19 +53,17 @@ import {
   shortId,
 } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
-  const {
-    data: profile,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getCustomerProfile(customerId), [customerId])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load customer")
-  }, [error])
+  const queryClient = useQueryClient()
+  const { data: profile, isPending: loading } = useQuery(
+    adminQueries.customer(customerId)
+  )
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.customers() })
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!profile)
@@ -469,10 +464,10 @@ function GrantProductAccessDialog({
   const [productId, setProductId] = React.useState("")
   const [endsAt, setEndsAt] = React.useState("")
   const [busy, setBusy] = React.useState(false)
-  const { data: products } = useApiData(
-    () => (open ? listProducts(1000, 0) : Promise.resolve(null)),
-    [open]
-  )
+  const { data: products } = useQuery({
+    ...adminQueries.products(),
+    enabled: open,
+  })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
@@ -559,10 +554,10 @@ function OffChannelPaymentDialog({
   const [transactionId, setTransactionId] = React.useState("")
   const [amount, setAmount] = React.useState("")
   const [busy, setBusy] = React.useState(false)
-  const { data: prices } = useApiData(
-    () => (open ? listPrices() : Promise.resolve(null)),
-    [open]
-  )
+  const { data: prices } = useQuery({
+    ...adminQueries.prices(),
+    enabled: open,
+  })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger

@@ -1,5 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -24,15 +25,10 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  listFindings,
-  listRepairAlerts,
-  listWorkerHealth,
-  resolveFinding,
-} from "@/lib/api/endpoints"
+import { resolveFinding } from "@/lib/api/endpoints"
 import type { Finding } from "@/lib/api/types"
 import { formatDate } from "@/lib/format"
+import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function OpsPage() {
@@ -64,14 +60,9 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
-  const { data, loading, error, reload } = useApiData(
-    () => listFindings({}, 100, 0),
-    []
-  )
+  const queryClient = useQueryClient()
+  const { data, isPending: loading } = useQuery(adminQueries.findings())
   const [resolving, setResolving] = React.useState<Finding | null>(null)
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load findings")
-  }, [error])
 
   const gauges = data?.gauges
   return (
@@ -157,7 +148,7 @@ function FindingsTab() {
           onClose={() => setResolving(null)}
           onDone={() => {
             setResolving(null)
-            reload()
+            void queryClient.invalidateQueries({ queryKey: queryKeys.ops() })
           }}
         />
       )}
@@ -276,10 +267,7 @@ function ResolveFindingDialog({
 }
 
 function RepairAlertsTab() {
-  const { data, loading, error } = useApiData(() => listRepairAlerts(50, 0), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load repair alerts")
-  }, [error])
+  const { data, isPending: loading } = useQuery(adminQueries.repairAlerts())
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!data?.data?.length)
     return <p className="text-sm text-muted-foreground">No repair alerts.</p>
@@ -314,10 +302,7 @@ function RepairAlertsTab() {
 }
 
 function WorkerHealthTab() {
-  const { data, loading, error } = useApiData(() => listWorkerHealth(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load worker health")
-  }, [error])
+  const { data, isPending: loading } = useQuery(adminQueries.workerHealth())
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!data?.length)
     return (

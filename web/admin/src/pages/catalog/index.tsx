@@ -7,6 +7,7 @@ import {
 import * as React from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -41,7 +42,6 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { useApiData } from "@/hooks/use-api-data"
 import { getBootstrap } from "@/lib/api/client"
 import {
   activatePrice,
@@ -50,9 +50,6 @@ import {
   createProduct,
   deactivatePrice,
   deactivateProduct,
-  listCatalogDrift,
-  listPrices,
-  listProducts,
   publishCatalog,
   refreshCatalogDrift,
   updateProduct,
@@ -68,6 +65,7 @@ import { toastApiError } from "@/lib/toast"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
@@ -89,10 +87,7 @@ function catalogDraftingEnabled(): boolean {
 }
 
 export function CatalogPage() {
-  // Bumped whenever a copilot draft is confirmed, so the Products/Prices
-  // tabs refetch and reflect the change — the SAME reload path a hand-typed
-  // edit already triggers via each tab's own onDone.
-  const [refreshKey, setRefreshKey] = React.useState(0)
+  const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const tab = params.get("tab") || "products"
 
@@ -102,7 +97,9 @@ export function CatalogPage() {
       <CatalogCopilotPanel
         enabled={catalogCopilotEnabled()}
         draftingEnabled={catalogDraftingEnabled()}
-        onCatalogChanged={() => setRefreshKey((k) => k + 1)}
+        onCatalogChanged={() =>
+          void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
+        }
       />
       <Tabs
         value={tab}
@@ -129,10 +126,10 @@ export function CatalogPage() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="products">
-          <ProductsTab key={refreshKey} />
+          <ProductsTab />
         </TabsContent>
         <TabsContent value="prices">
-          <PricesTab key={refreshKey} />
+          <PricesTab />
         </TabsContent>
         <TabsContent value="drift">
           <DriftTab />
@@ -143,13 +140,12 @@ export function CatalogPage() {
 }
 
 function ProductsTab() {
-  const { data, loading, error, reload } = useApiData(
-    () => listProducts(1000, 0),
-    []
+  const queryClient = useQueryClient()
+  const { data, isPending: loading } = useQuery(
+    adminQueries.products({ errorAction: "Load products" })
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load products")
-  }, [error])
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
 
   return (
     <div className="flex flex-col gap-3">
@@ -224,7 +220,9 @@ function ProductRow({
   return (
     <TableRow className={product.archived ? "opacity-60" : undefined}>
       <TableCell className="font-medium">{product.display_name}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{product.key}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {product.key}
+      </TableCell>
       <TableCell>
         {product.tier_group
           ? `${product.tier_group} #${product.tier_rank}`
@@ -403,11 +401,13 @@ function ProductDialog({
 }
 
 function PricesTab() {
-  const { data: products } = useApiData(() => listProducts(1000, 0), [])
-  const { data, loading, error, reload } = useApiData(() => listPrices(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load prices")
-  }, [error])
+  const queryClient = useQueryClient()
+  const { data: products } = useQuery(adminQueries.products())
+  const { data, isPending: loading } = useQuery(
+    adminQueries.prices({ errorAction: "Load prices" })
+  )
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
   const productName = (id: string) =>
     products?.items.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
 
@@ -670,14 +670,12 @@ function PriceDialog({
 }
 
 function DriftTab() {
-  const { data, loading, error, reload } = useApiData(
-    () => listCatalogDrift(200, 0),
-    []
-  )
+  const {
+    data,
+    isPending: loading,
+    refetch: reload,
+  } = useQuery(adminQueries.catalogDrift())
   const [refreshing, setRefreshing] = React.useState(false)
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load drift")
-  }, [error])
 
   return (
     <div className="flex flex-col gap-3">
@@ -693,7 +691,7 @@ function DriftTab() {
               toast.success(
                 `Drift scan done: ${report.new_events} new, ${report.resolved_events} resolved`
               )
-              reload()
+              void reload()
             } catch (err) {
               toastApiError(err, "Refresh drift")
             } finally {

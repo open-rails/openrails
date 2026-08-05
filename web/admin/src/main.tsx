@@ -1,12 +1,14 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { createBrowserRouter, RouterProvider } from "react-router-dom"
+import { QueryClientProvider } from "@tanstack/react-query"
 
 import "./index.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { AppLayout } from "@/layouts/app-layout"
 import { AuthProvider } from "@/lib/auth"
+import { queryClient } from "@/lib/query-client"
 import { CatalogPage } from "@/pages/catalog"
 import { PriceDetailPage } from "@/pages/catalog/price-detail"
 import { CustomersPage } from "@/pages/customers"
@@ -47,10 +49,12 @@ const router = createBrowserRouter(
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
-      <AuthProvider>
-        <RouterProvider router={router} />
-        <Toaster />
-      </AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={router} />
+          <Toaster />
+        </AuthProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>
 )

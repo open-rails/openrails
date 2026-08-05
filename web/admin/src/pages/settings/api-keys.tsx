@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -30,12 +31,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import { createApiKey, listApiKeys, revokeApiKey } from "@/lib/api/endpoints"
+import { createApiKey, revokeApiKey } from "@/lib/api/endpoints"
 import type { MerchantAPIKey, MintedAPIKey } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 // Fixed merchant catalog roles (#567) a key can hold, least privilege first.
 // The API validates against the same catalog; these descriptions are the
@@ -67,10 +68,10 @@ const ROLES: { value: string; label: string; description: string }[] = [
 ]
 
 export function ApiKeysTab() {
-  const { data, loading, error, reload } = useApiData(() => listApiKeys(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load API keys")
-  }, [error])
+  const queryClient = useQueryClient()
+  const { data, isPending: loading } = useQuery(adminQueries.apiKeys())
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.settings() })
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
 

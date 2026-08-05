@@ -1,5 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -23,13 +24,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useApiData } from "@/hooks/use-api-data"
 import {
   deletePaymentProvider,
   getCreditLimit,
-  getMerchantSettings,
   getTrustLevel,
-  listPaymentProviders,
   putMerchantSettings,
   putPaymentProvider,
   setCreditLimit,
@@ -40,6 +38,7 @@ import type {
 } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 import { AlertsTab } from "./alerts"
 import { ApiKeysTab } from "./api-keys"
 import { TeamTab } from "./team"
@@ -98,21 +97,29 @@ export function SettingsPage() {
 }
 
 function MerchantSettingsTab() {
-  const { data, loading, error } = useApiData(() => getMerchantSettings(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load settings")
-  }, [error])
+  const {
+    data,
+    isPending: loading,
+    refetch,
+  } = useQuery(adminQueries.merchantSettings("Load settings"))
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
     <div className="grid gap-10">
-      <MerchantProfileForm initial={data?.profile} />
-      <RepriceNoticeWindowForm initial={data?.reprice_notice_window_days} />
+      <MerchantProfileForm
+        initial={data?.profile}
+        onSaved={() => void refetch()}
+      />
+      <RepriceNoticeWindowForm
+        initial={data?.reprice_notice_window_days}
+        onSaved={() => void refetch()}
+      />
     </div>
   )
 }
 
 function MerchantProfileForm({
   initial,
+  onSaved,
 }: {
   initial?: {
     display_name?: string
@@ -120,6 +127,7 @@ function MerchantProfileForm({
     support_url?: string
     logo_url?: string
   }
+  onSaved: () => void
 }) {
   const [displayName, setDisplayName] = React.useState(
     initial?.display_name ?? ""
@@ -156,6 +164,7 @@ function MerchantProfileForm({
         },
       })
       setSavedProfile({ displayName, fromEmail, supportURL, logoURL })
+      onSaved()
       toast.success("Profile saved")
       setEditing(false)
     } catch (err) {
@@ -267,7 +276,13 @@ function MerchantProfileForm({
 // subscribers. The catalog price-change wizard reads this same value
 // (GET /v1/merchant/settings) for its own date-picker gate; the API enforces
 // it regardless of what the console shows.
-function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
+function RepriceNoticeWindowForm({
+  initial,
+  onSaved,
+}: {
+  initial?: number
+  onSaved: () => void
+}) {
   const [days, setDays] = React.useState(String(initial ?? 30))
   const [savedDays, setSavedDays] = React.useState(String(initial ?? 30))
   const [busy, setBusy] = React.useState(false)
@@ -283,6 +298,7 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
         reprice_notice_window_days: parsed,
       })
       setSavedDays(days)
+      onSaved()
       toast.success("Notice window saved")
       setEditing(false)
     } catch (err) {
@@ -359,14 +375,10 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
 }
 
 function ProvidersTab() {
-  const { data, loading, error, reload } = useApiData(
-    () => listPaymentProviders(),
-    []
-  )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load payment providers")
-  }, [error])
-
+  const queryClient = useQueryClient()
+  const { data, isPending: loading } = useQuery(adminQueries.paymentProviders())
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.settings() })
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const providerDefinitions = data?.provider_definitions ?? []
@@ -519,8 +531,8 @@ function ProviderRow({
             <RotateCredentialsDialog
               provider={provider}
               credentialKeys={
-                providerDefinitions.find((d) => d.rail === provider.rail)?.credential_keys ??
-                Object.keys(provider.credentials)
+                providerDefinitions.find((d) => d.rail === provider.rail)
+                  ?.credential_keys ?? Object.keys(provider.credentials)
               }
               onDone={onDone}
             />
@@ -531,7 +543,10 @@ function ProviderRow({
               onClick={async () => {
                 setBusy(true)
                 try {
-                  await deletePaymentProvider(provider.rail, provider.environment)
+                  await deletePaymentProvider(
+                    provider.rail,
+                    provider.environment
+                  )
                   toast.success("Provider archived")
                   onDone()
                 } catch (err) {
@@ -570,9 +585,13 @@ function RotateCredentialsDialog({
   onDone: () => void
 }) {
   const [open, setOpen] = React.useState(false)
-  const [credentials, setCredentials] = React.useState<Record<string, string>>({})
+  const [credentials, setCredentials] = React.useState<Record<string, string>>(
+    {}
+  )
   const [busy, setBusy] = React.useState(false)
-  const supplied = Object.entries(credentials).filter(([, v]) => v.trim() !== "")
+  const supplied = Object.entries(credentials).filter(
+    ([, v]) => v.trim() !== ""
+  )
 
   const close = (next: boolean) => {
     // Never leave plaintext in state behind a closed dialog.
@@ -595,9 +614,10 @@ function RotateCredentialsDialog({
             Rotate {provider.rail} credentials · {provider.account_id}
           </DialogTitle>
           <DialogDescription>
-            The new credential is validated against the live provider before it is stored. If
-            that check fails, nothing is written and the current credential keeps serving. Leave
-            a field blank to keep the credential it holds now.
+            The new credential is validated against the live provider before it
+            is stored. If that check fails, nothing is written and the current
+            credential keeps serving. Leave a field blank to keep the credential
+            it holds now.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -609,7 +629,9 @@ function RotateCredentialsDialog({
                   id={`rot-${provider.id}-${name}`}
                   type="password"
                   autoComplete="new-password"
-                  placeholder={current?.configured ? "unchanged" : "not configured"}
+                  placeholder={
+                    current?.configured ? "unchanged" : "not configured"
+                  }
                   value={credentials[name] ?? ""}
                   onChange={(e) =>
                     setCredentials((c) => ({ ...c, [name]: e.target.value }))
@@ -626,9 +648,10 @@ function RotateCredentialsDialog({
             )
           })}
           <p className="text-xs text-muted-foreground">
-            On success every OpenRails node cuts over to the new credential at its next charge
-            or pull — the rotation raises a version floor that no node's credential cache may
-            serve below. No restart, no waiting out a cache TTL.
+            On success every OpenRails node cuts over to the new credential at
+            its next charge or pull — the rotation raises a version floor that
+            no node's credential cache may serve below. No restart, no waiting
+            out a cache TTL.
           </p>
         </div>
         <DialogFooter>
@@ -644,7 +667,7 @@ function RotateCredentialsDialog({
                 // Clear plaintext before anything else can await.
                 setCredentials({})
                 toast.success(
-                  `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`,
+                  `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`
                 )
                 setOpen(false)
                 onDone()
@@ -652,7 +675,7 @@ function RotateCredentialsDialog({
                 setCredentials({})
                 toastApiError(
                   err,
-                  "Rotation refused — the current credential is unchanged and still serving",
+                  "Rotation refused — the current credential is unchanged and still serving"
                 )
               } finally {
                 setBusy(false)

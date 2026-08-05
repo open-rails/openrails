@@ -1,5 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery } from "@tanstack/react-query"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,13 +18,13 @@ import { Label } from "@/components/ui/label"
 import { confirmCopilotDraft, type PriceChangeDraft } from "@/lib/api/copilot"
 import {
   createPrice,
-  getMerchantSettings,
   previewRepriceAllPriorVersions,
   repriceAllPriorVersions,
 } from "@/lib/api/endpoints"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import {
   buildReviewText,
@@ -77,14 +78,12 @@ export function PriceChangeWizard({
     draft?.affected_count ?? null
   )
   const [busy, setBusy] = React.useState(false)
-  // #781: the merchant-configurable notice window, read from the API (the
-  // console used to hard-code 30 days here; the server is now the actual
-  // boundary — GET /v1/merchant/settings — this is only the fail-fast UX
-  // gate). DEFAULT_NOTICE_WINDOW_DAYS covers the brief window before the
-  // fetch resolves.
-  const [noticeWindowDays, setNoticeWindowDays] = React.useState(
-    DEFAULT_NOTICE_WINDOW_DAYS
-  )
+  const { data: merchantSettings } = useQuery({
+    ...adminQueries.merchantSettings(),
+    enabled: open,
+  })
+  const noticeWindowDays =
+    merchantSettings?.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
 
   const [now] = React.useState(() => new Date())
   const newAmount = microsFromInput(amountInput) ?? price.unit_amount
@@ -101,16 +100,6 @@ export function PriceChangeWizard({
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       reset()
-    } else {
-      getMerchantSettings()
-        .then((settings) =>
-          setNoticeWindowDays(
-            settings.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
-          )
-        )
-        .catch(() => {
-          /* fail-soft: keep the default fallback — the server enforces the real window regardless. */
-        })
     }
     setOpen(next)
   }

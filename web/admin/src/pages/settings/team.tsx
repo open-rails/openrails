@@ -1,5 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -31,12 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
 import {
   changeTeamRole,
   inviteTeamMember,
-  listTeam,
-  listTeamInvites,
   removeTeamMember,
   revokeTeamInvite,
 } from "@/lib/api/endpoints"
@@ -44,6 +42,7 @@ import type { TeamInvite, TeamInviteResult, TeamMember } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 // Fixed merchant catalog roles (#567) a teammate can hold, least privilege
 // first. The API validates against the same catalog; these descriptions are the
@@ -77,21 +76,15 @@ function roleLabel(role: string): string {
 }
 
 export function TeamTab() {
-  const members = useApiData(() => listTeam(), [])
-  const invites = useApiData(() => listTeamInvites(), [])
-  React.useEffect(() => {
-    if (members.error) toastApiError(members.error, "Load team")
-  }, [members.error])
-  React.useEffect(() => {
-    if (invites.error) toastApiError(invites.error, "Load invites")
-  }, [invites.error])
+  const queryClient = useQueryClient()
+  const members = useQuery(adminQueries.team())
+  const invites = useQuery(adminQueries.teamInvites())
 
   const reload = () => {
-    members.reload()
-    invites.reload()
+    void queryClient.invalidateQueries({ queryKey: queryKeys.team() })
   }
 
-  if (members.loading)
+  if (members.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const team = members.data?.data ?? []

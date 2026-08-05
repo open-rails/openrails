@@ -9,6 +9,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -40,16 +41,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
 import {
   createAlertRule,
   createWebhook,
   deleteAlertRule,
   deleteWebhook,
-  getMerchantSettings,
-  listAlertRules,
-  listAlertTemplates,
-  listWebhooks,
   putMerchantSettings,
   testAlertRule,
   updateAlertRule,
@@ -68,6 +64,7 @@ import type {
 } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 // --- Template copy (v1 set) -------------------------------------------------
 // The param SCHEMA is fetched from GET /merchant/alerts/templates (the create/
@@ -180,49 +177,43 @@ function summarizeDeliveryResults(results: AlertDeliveryResult[]): string {
 // --- Page ------------------------------------------------------------------
 
 export function AlertsTab() {
-  const settings = useApiData(() => getMerchantSettings(), [])
-  const templates = useApiData(() => listAlertTemplates(), [])
-  const rules = useApiData(() => listAlertRules(), [])
-  const webhooks = useApiData(() => listWebhooks(), [])
+  const queryClient = useQueryClient()
+  const settingsQuery = useQuery(adminQueries.merchantSettings("Load settings"))
+  const templatesQuery = useQuery(adminQueries.alertTemplates())
+  const rulesQuery = useQuery(adminQueries.alertRules())
+  const webhooksQuery = useQuery(adminQueries.webhooks())
 
-  React.useEffect(() => {
-    if (settings.error) toastApiError(settings.error, "Load settings")
-  }, [settings.error])
-  React.useEffect(() => {
-    if (templates.error) toastApiError(templates.error, "Load alert templates")
-  }, [templates.error])
-  React.useEffect(() => {
-    if (rules.error) toastApiError(rules.error, "Load alert rules")
-  }, [rules.error])
-  React.useEffect(() => {
-    if (webhooks.error) toastApiError(webhooks.error, "Load webhooks")
-  }, [webhooks.error])
-
-  const alertEmail = settings.data?.alert_email ?? ""
-  const hooks = webhooks.data?.data ?? []
-  const templateList = templates.data?.data ?? []
+  const alertEmail = settingsQuery.data?.alert_email ?? ""
+  const hooks = webhooksQuery.data?.data ?? []
+  const templateList = templatesQuery.data?.data ?? []
 
   return (
     <div className="flex flex-col gap-10">
       <AlertEmailSection
-        key={settings.data?.alert_email ?? "∅"}
-        settings={settings.data ?? undefined}
-        loading={settings.loading}
-        onSaved={settings.reload}
+        key={settingsQuery.data?.alert_email ?? "∅"}
+        settings={settingsQuery.data ?? undefined}
+        loading={settingsQuery.isPending}
+        onSaved={() =>
+          void queryClient.invalidateQueries({ queryKey: queryKeys.settings() })
+        }
       />
       <RulesSection
-        rules={rules.data?.data ?? []}
-        loading={rules.loading}
+        rules={rulesQuery.data?.data ?? []}
+        loading={rulesQuery.isPending}
         templates={templateList}
-        templatesLoading={templates.loading}
+        templatesLoading={templatesQuery.isPending}
         webhooks={hooks}
         alertEmail={alertEmail}
-        onChanged={rules.reload}
+        onChanged={() =>
+          void queryClient.invalidateQueries({ queryKey: queryKeys.alerts() })
+        }
       />
       <WebhooksSection
         webhooks={hooks}
-        loading={webhooks.loading}
-        onChanged={webhooks.reload}
+        loading={webhooksQuery.isPending}
+        onChanged={() =>
+          void queryClient.invalidateQueries({ queryKey: queryKeys.alerts() })
+        }
       />
     </div>
   )

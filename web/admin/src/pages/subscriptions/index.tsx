@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
 import { DataTable } from "@/components/data-table"
@@ -20,13 +21,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useApiData } from "@/hooks/use-api-data"
 import { listCustomers, listSubscriptions } from "@/lib/api/endpoints"
 import type { AdminSubscription } from "@/lib/api/types"
 import { formatDate, shortId } from "@/lib/format"
 import { toast } from "sonner"
 
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
 const EXPORT_PAGE = 200
@@ -113,15 +114,9 @@ export function SubscriptionsPage() {
     ...(rail ? { rail } : {}),
     ...(userId ? { user_id: userId } : {}),
   }
-  const filterKey = JSON.stringify(filters)
-
-  const { data, loading, error } = useApiData(
-    () => listSubscriptions(filters, PAGE, offset),
-    [filterKey, offset]
+  const { data, isPending: loading } = useQuery(
+    adminQueries.subscriptions(filters, PAGE, offset)
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load subscriptions")
-  }, [error])
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
@@ -215,9 +210,7 @@ export function SubscriptionsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Subscriptions
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Subscriptions</h1>
         <div className="flex flex-wrap items-center gap-3">
           <form
             className="relative"

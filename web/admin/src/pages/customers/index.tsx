@@ -2,16 +2,17 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon, Search01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
 import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useApiData } from "@/hooks/use-api-data"
 import { listCustomers } from "@/lib/api/endpoints"
 import type { CustomerSummary } from "@/lib/api/types"
 import { formatDate, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
 const EXPORT_PAGE = 200
@@ -30,10 +31,7 @@ const columns: ColumnDef<CustomerSummary, unknown>[] = [
     header: "External ref",
     cell: ({ row }) =>
       row.original.subject ? (
-        <span
-          className="block max-w-64 truncate"
-          title={row.original.subject}
-        >
+        <span className="block max-w-64 truncate" title={row.original.subject}>
           {row.original.subject}
         </span>
       ) : (
@@ -79,13 +77,9 @@ export function CustomersPage() {
   const [exporting, setExporting] = React.useState(false)
   const navigate = useNavigate()
 
-  const { data, loading, error } = useApiData(
-    () => listCustomers(q, PAGE, offset),
-    [q, offset]
+  const { data, isPending: loading } = useQuery(
+    adminQueries.customers(q, PAGE, offset)
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load customers")
-  }, [error])
 
   // Export walks every page of the current filter, not just the visible one.
   const exportCsv = async () => {

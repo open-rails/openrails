@@ -3,6 +3,7 @@ import { ArrowLeft01Icon, Undo02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
 import { StatusBadge } from "@/components/status-badge"
@@ -27,12 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  getPayment,
-  REFUNDABLE_RAILS,
-  refundPayment,
-} from "@/lib/api/endpoints"
+import { REFUNDABLE_RAILS, refundPayment } from "@/lib/api/endpoints"
 import {
   formatMicros,
   formatUnix,
@@ -40,19 +36,17 @@ import {
   shortId,
 } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries, queryKeys } from "@/lib/queries"
 
 export function PaymentDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const {
-    data: payment,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getPayment(id), [id])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load payment")
-  }, [error])
+  const queryClient = useQueryClient()
+  const { data: payment, isPending: loading } = useQuery(
+    adminQueries.payment(id)
+  )
+  const reload = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.payments() })
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!payment)
