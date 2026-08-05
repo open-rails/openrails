@@ -246,6 +246,12 @@ type CreditTransaction struct {
 	Description     *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// Replayed reports that this write's idempotency key had ALREADY committed,
+	// so nothing moved in THIS call — the row described here is the movement
+	// that landed earlier (or#892). Serialized by the engine on both transports;
+	// a consumer that needs applied-vs-replayed reads it here instead of keeping
+	// its own claim table.
+	Replayed bool
 }
 
 // AdmitRequest is one item in POST /v1/merchant/admissions. It checks payer money
