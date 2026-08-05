@@ -404,6 +404,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		Env:               "dev",
 		TestMode:          config.CredentialPostureLive,
 		MerchantSource:    config.MerchantSourceAPI,
+		SecretBackend:     config.SecretBackendDB,
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
 	}
@@ -458,6 +459,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 		Env:            "dev",
 		TestMode:       config.CredentialPostureLive,
 		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
 		DB:             &config.DBConfig{URL: dsn},
 	}
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})

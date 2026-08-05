@@ -74,6 +74,7 @@ func TestAdminConsoleServing(t *testing.T) {
 			Env:               "dev",
 			TestMode:          config.CredentialPostureSandbox,
 			MerchantSource:    config.MerchantSourceAPI,
+			SecretBackend:     config.SecretBackendDB,
 			ProviderWriteMode: config.ProviderWriteModeFull,
 			Host:              "127.0.0.1",
 			Port:              0,

@@ -78,6 +78,7 @@ func hostedTestConfig(dsn, issuer string) *config.Config {
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.
 		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
 		DB:             &config.DBConfig{URL: dsn},
 		Auth:           &config.AuthConfig{Issuer: issuer},
 	}

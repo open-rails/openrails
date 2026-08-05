@@ -362,7 +362,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := cozyArtMerchantManifest()
@@ -597,7 +597,10 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	vault := newMerchantManifestVault(t)
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureSandbox, Vault: &config.VaultConfig{
+	// or#893: the backend is DECLARED. vault.enabled alone no longer implies the
+	// KV store, so this test — whose whole subject is the Vault backend — has to
+	// say so, and would silently exercise the DB store if it did not.
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendVault, TestMode: config.CredentialPostureSandbox, Vault: &config.VaultConfig{
 		Enabled:    true,
 		Address:    vault.Address,
 		AuthMethod: "token",
@@ -652,7 +655,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureSandbox, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureSandbox, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 

@@ -44,6 +44,7 @@ func TestEmbedded_RunInMerchantConn(t *testing.T) {
 		TestMode:          config.CredentialPostureSandbox,
 		ProviderWriteMode: config.ProviderWriteModeReadOnly,
 		MerchantSource:    config.MerchantSourceAPI,
+		SecretBackend:     config.SecretBackendDB,
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth:              &config.AuthConfig{Issuer: "https://merchant-conn-" + sfx + ".openrails.test"},
 	}
