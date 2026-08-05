@@ -163,7 +163,10 @@ export function WidgetEditor({
                   </span>
                 </div>
                 {genError ? (
-                  <p className="text-xs whitespace-pre-wrap text-destructive">
+                  <p
+                    className="text-xs whitespace-pre-wrap text-destructive"
+                    role="alert"
+                  >
                     {genError}
                   </p>
                 ) : null}
@@ -228,7 +231,10 @@ export function WidgetEditor({
                   </div>
                   <div className="min-h-0 flex-1">
                     {previewError ? (
-                      <p className="text-xs whitespace-pre-wrap text-destructive">
+                      <p
+                        className="text-xs whitespace-pre-wrap text-destructive"
+                        role="alert"
+                      >
                         {previewError}
                       </p>
                     ) : preview ? (

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { confirmCopilotDraft, type PriceChangeDraft } from "@/lib/api/copilot"
+import type { PriceChangeDraft } from "@/lib/api/copilot"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -74,11 +74,10 @@ export function PriceChangeWizard({
   const queryClient = useQueryClient()
   const [open, setOpen] = React.useState(() => !!draft)
   const [step, setStep] = React.useState<1 | 2 | 3>(() => (draft ? 3 : 1))
-  const [affectedCount, setAffectedCount] = React.useState<number | null>(
-    draft?.affected_count ?? null
-  )
   const previewPriceChange = useMutation(adminMutations.previewPriceChange())
   const changePrice = useMutation(adminMutations.changePrice(queryClient))
+  const affectedCount =
+    previewPriceChange.data?.matched ?? draft?.affected_count ?? null
   const { data: merchantSettings } = useQuery({
     ...adminQueries.merchantSettings(),
     enabled: open,
@@ -113,6 +112,7 @@ export function PriceChangeWizard({
                   effectiveAt: new Date(value.effectiveAt).toISOString(),
                 }
               : undefined,
+          copilotDraftId: draft?.draft_id,
         })
         if (created.pending_manual_actions?.length) {
           toast.warning(
@@ -123,11 +123,6 @@ export function PriceChangeWizard({
             value.mode === "migrate"
               ? "Price updated and migration scheduled"
               : "Price updated"
-          )
-        }
-        if (draft) {
-          confirmCopilotDraft(draft.draft_id, "price_change", price.key).catch(
-            () => {}
           )
         }
         handleOpenChange(false)
@@ -141,7 +136,7 @@ export function PriceChangeWizard({
   const reset = () => {
     setStep(1)
     form.reset(priceChangeFormValues(price))
-    setAffectedCount(null)
+    previewPriceChange.reset()
   }
 
   const handleOpenChange = (next: boolean) => {
@@ -163,11 +158,10 @@ export function PriceChangeWizard({
       toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays))
     )
     setStep(2)
-    setAffectedCount(null)
-    previewPriceChange
-      .mutateAsync(price.key)
-      .then((res) => setAffectedCount(res.matched))
-      .catch((err) => toastApiError(err, "Preview affected subscribers"))
+    previewPriceChange.reset()
+    previewPriceChange.mutate(price.key, {
+      onError: (err) => toastApiError(err, "Preview affected subscribers"),
+    })
   }
 
   // Archived (prior-version) rows are history, not the editable current
@@ -398,7 +392,10 @@ export function PriceChangeWizard({
                                 </p>
                               )}
                               {!dateValid && (
-                                <p className="text-xs text-destructive">
+                                <p
+                                  className="text-xs text-destructive"
+                                  role="alert"
+                                >
                                   Pick a later date.
                                 </p>
                               )}

@@ -67,7 +67,7 @@ export function LoginPage() {
         </CardHeader>
         <CardContent className="grid gap-4">
           {bootError && (
-            <p className="text-sm text-destructive">
+            <p className="text-sm text-destructive" role="alert">
               Console bootstrap failed: {bootError}
             </p>
           )}

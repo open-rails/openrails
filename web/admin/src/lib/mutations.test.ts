@@ -1093,6 +1093,7 @@ describe("catalog mutations", () => {
       .build(queryClient, adminMutations.changePrice(queryClient))
       .execute({
         price,
+        copilotDraftId: "draft-1",
         migration: {
           priceKey: "pro-monthly",
           effectiveAt: "2026-09-05T00:00:00.000Z",
@@ -1106,6 +1107,11 @@ describe("catalog mutations", () => {
     )
     expect(vi.mocked(createPrice).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(repriceAllPriorVersions).mock.invocationCallOrder[0]
+    )
+    expect(confirmCopilotDraft).toHaveBeenCalledWith(
+      "draft-1",
+      "price_change",
+      "pro-monthly"
     )
     expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
   })
@@ -1131,6 +1137,7 @@ describe("catalog mutations", () => {
             auto_renew: true,
             key: "pro-monthly",
           },
+          copilotDraftId: "draft-1",
           migration: {
             priceKey: "pro-monthly",
             effectiveAt: "2026-09-05T00:00:00.000Z",
@@ -1138,6 +1145,7 @@ describe("catalog mutations", () => {
         })
     ).rejects.toThrow("schedule failed")
 
+    expect(confirmCopilotDraft).not.toHaveBeenCalled()
     expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
   })
 

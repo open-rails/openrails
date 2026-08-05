@@ -123,7 +123,10 @@ export function CatalogCopilotPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="text-xs whitespace-pre-wrap text-destructive">
+          <p
+            className="text-xs whitespace-pre-wrap text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}

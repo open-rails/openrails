@@ -163,7 +163,10 @@ function TileBody({
           : error.message
         : "query failed"
     return (
-      <div className="flex h-full items-center justify-center text-center text-xs text-destructive">
+      <div
+        className="flex h-full items-center justify-center text-center text-xs text-destructive"
+        role="alert"
+      >
         {msg}
       </div>
     )

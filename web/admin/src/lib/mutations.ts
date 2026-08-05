@@ -553,9 +553,11 @@ export const adminMutations = {
       mutationFn: async ({
         price,
         migration,
+        copilotDraftId,
       }: {
         price: PriceRequest
         migration?: { priceKey: string; effectiveAt: string }
+        copilotDraftId?: string
       }) => {
         const created = await createPrice(price)
         if (migration) {
@@ -563,6 +565,13 @@ export const adminMutations = {
             migration.priceKey,
             migration.effectiveAt
           )
+        }
+        if (copilotDraftId) {
+          void confirmCopilotDraft(
+            copilotDraftId,
+            "price_change",
+            price.key
+          ).catch(() => {})
         }
         return created
       },
