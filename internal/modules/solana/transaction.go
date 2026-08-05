@@ -175,8 +175,10 @@ func isNativeTokenSymbol(symbol string) bool {
 
 // VerifyTransactionWithContent verifies a transaction against expected
 // recipient, amount, and reference. expectedMemoLocalID (uuid.Nil = skip)
-// additionally checks any #713 purchase memo: mismatch fails, absence passes.
-func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
+// additionally checks the #713 purchase memo under memoPolicy: a present memo
+// must always match; absence fails only when OpenRails built the transaction
+// (or#893 — see solana.PurchaseMemoPolicy).
+func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanarpc.PurchaseMemoPolicy, processedNotAfter *time.Time) error {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
@@ -204,6 +206,7 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		ExpectedPayer:       strings.TrimSpace(expectedPayer),
 		ExpectedReference:   reference,
 		ExpectedMemoLocalID: expectedMemoLocalID,
+		ExpectedMemoPolicy:  memoPolicy,
 		ProcessedNotAfter:   processedNotAfter,
 	})
 }

@@ -164,18 +164,27 @@ func TestPurchaseMemoLocalIDsAndVerify(t *testing.T) {
 	require.Empty(t, PurchaseMemoLocalIDs(foreign))
 	require.Empty(t, PurchaseMemoLocalIDs(nil))
 
-	// present-and-matching passes
-	require.NoError(t, VerifyPurchaseMemo(stamped, memoTestLocalID))
-	// present-and-wrong fails
-	err := VerifyPurchaseMemo(stamped, memoTestOtherID)
+	// present-and-matching passes under either policy
+	require.NoError(t, VerifyPurchaseMemo(stamped, memoTestLocalID, MemoPresenceOptional))
+	require.NoError(t, VerifyPurchaseMemo(stamped, memoTestLocalID, MemoRequired))
+	// present-and-wrong fails under either policy
+	for _, policy := range []PurchaseMemoPolicy{MemoPresenceOptional, MemoRequired} {
+		err := VerifyPurchaseMemo(stamped, memoTestOtherID, policy)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "purchase memo mismatch")
+	}
+	// or#893: absence is a POLICY question, not a compatibility one. A wallet
+	// built the transfer-request tx and may drop the memo; a transaction we
+	// built ourselves always carries it, so absence means it is not ours.
+	require.NoError(t, VerifyPurchaseMemo(unstamped, memoTestLocalID, MemoPresenceOptional))
+	err := VerifyPurchaseMemo(unstamped, memoTestLocalID, MemoRequired)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "purchase memo mismatch")
-	// absent passes (backward compatible)
-	require.NoError(t, VerifyPurchaseMemo(unstamped, memoTestLocalID))
-	// foreign memos are not ours: ignored
-	require.NoError(t, VerifyPurchaseMemo(foreign, memoTestLocalID))
+	require.Contains(t, err.Error(), "purchase memo missing")
+	// foreign memos are not ours: ignored, and they do not satisfy MemoRequired
+	require.NoError(t, VerifyPurchaseMemo(foreign, memoTestLocalID, MemoPresenceOptional))
+	require.Error(t, VerifyPurchaseMemo(foreign, memoTestLocalID, MemoRequired))
 	// Nil want skips
-	require.NoError(t, VerifyPurchaseMemo(stamped, uuid.Nil))
+	require.NoError(t, VerifyPurchaseMemo(stamped, uuid.Nil, MemoRequired))
 }
 
 // memoTestTxResult wraps a tx into a GetTransactionResult whose envelope
@@ -204,7 +213,8 @@ func memoTestTxResult(t *testing.T, tx *solanago.Transaction, amount uint64) *rp
 
 // TestValidateTransactionContentMemoVerifyLeg exercises the verify leg
 // end-to-end at validateTransactionContent altitude: present-and-matching
-// passes, present-and-wrong fails, absent passes.
+// passes, present-and-wrong fails, and absence is decided by the policy
+// (or#893) rather than being unconditionally tolerated.
 func TestValidateTransactionContentMemoVerifyLeg(t *testing.T) {
 	t.Parallel()
 
@@ -216,13 +226,20 @@ func TestValidateTransactionContentMemoVerifyLeg(t *testing.T) {
 	unstamped := memoTestTx(t, payer, recipient, amount)
 
 	require.NoError(t, validateTransactionContent(
-		memoTestTxResult(t, stamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestLocalID))
+		memoTestTxResult(t, stamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestLocalID, MemoRequired))
 
 	err := validateTransactionContent(
-		memoTestTxResult(t, stamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestOtherID)
+		memoTestTxResult(t, stamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestOtherID, MemoPresenceOptional)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "purchase memo mismatch")
 
+	// Wallet-built (transfer request): a dropped memo must not cost the buyer a
+	// settled payment.
 	require.NoError(t, validateTransactionContent(
-		memoTestTxResult(t, unstamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestLocalID))
+		memoTestTxResult(t, unstamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestLocalID, MemoPresenceOptional))
+	// OpenRails-built: we stamped it, so an unstamped tx is not ours.
+	err = validateTransactionContent(
+		memoTestTxResult(t, unstamped, amount), amount, recipient.String(), "", payer.String(), nil, memoTestLocalID, MemoRequired)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "purchase memo missing")
 }

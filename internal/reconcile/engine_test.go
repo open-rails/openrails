@@ -486,7 +486,7 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 		CustomerID:            a.CustomerID,
 		PriceID:               &priceID,
 		ProductID:             a.ProductID,
-		Status:                a.Status,
+		Status:                string(a.Status),
 		Rail:                  a.Rail,
 		RailSubscriptionID:    a.RailSubscriptionID,
 		UserEmail:             a.UserEmail,

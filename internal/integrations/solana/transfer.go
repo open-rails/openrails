@@ -43,9 +43,11 @@ type VerifyTransferRequest struct {
 	ExpectedTokenMint string
 	ExpectedPayer     string
 	ExpectedReference string
-	// ExpectedMemoLocalID, when non-nil, is checked against any #713 purchase
-	// memo on the transaction: mismatch fails, ABSENCE PASSES (pre-memo txs).
+	// ExpectedMemoLocalID, when non-nil, is checked against the #713 purchase
+	// memo on the transaction under ExpectedMemoPolicy: mismatch always fails;
+	// absence fails only when we built the transaction ourselves.
 	ExpectedMemoLocalID uuid.UUID
+	ExpectedMemoPolicy  PurchaseMemoPolicy
 	ProcessedNotAfter   *time.Time
 }
 
@@ -176,7 +178,7 @@ func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferReques
 	}
 
 	reference := expectedReference
-	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference, req.ExpectedMemoLocalID); err != nil {
+	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference, req.ExpectedMemoLocalID, req.ExpectedMemoPolicy); err != nil {
 		return fmt.Errorf("transaction content validation failed: %w", err)
 	}
 
@@ -248,7 +250,7 @@ func validateTransferProcessedNotAfter(txResult *rpc.GetTransactionResult, notAf
 	return nil
 }
 
-func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID) error {
+func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy PurchaseMemoPolicy) error {
 	if txResult.Transaction == nil {
 		return fmt.Errorf("transaction data not available")
 	}
@@ -258,8 +260,9 @@ func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmou
 		return fmt.Errorf("failed to decode transaction: %w", err)
 	}
 
-	// #713: a present purchase memo must name our record; absence passes.
-	if err := VerifyPurchaseMemo(tx, expectedMemoLocalID); err != nil {
+	// #713: a present purchase memo must name our record. Whether ABSENCE is
+	// allowed depends on who built the transaction (or#893, PurchaseMemoPolicy).
+	if err := VerifyPurchaseMemo(tx, expectedMemoLocalID, memoPolicy); err != nil {
 		return err
 	}
 

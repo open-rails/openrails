@@ -20,10 +20,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -345,14 +341,14 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	})
 }
 
+// pullProviderRuntime is the one-off pull process's world. The live fetchers
+// arm per merchant from Merchants (#699), so there are no process-wide rail
+// clients here — the empty PSPSet and the nil NMI/CCBill/Solana clients this
+// struct used to carry were read by nothing (or#893).
 type pullProviderRuntime struct {
-	DB             *db.DB
-	Config         *config.Config
-	Rails          config.PSPSet
-	Merchants      *merchants.Service
-	NMIClients     map[string]*nmi.NMIClient
-	CCBillDataLink *ccbill.DataLinkClient
-	SolanaRPC      *solanaint.RPCClient
+	DB        *db.DB
+	Config    *config.Config
+	Merchants *merchants.Service
 }
 
 func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pullProviderRuntime, func(), error) {
@@ -365,24 +361,18 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
-	rails := config.PSPSet{}
-	nmiClients := map[string]*nmi.NMIClient{}
-	ccbillDataLink, err := pullProviderCCBillDataLink(cfg, rails)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	solanaRPC, err := pullProviderSolanaRPC(cfg, rails)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	// #699: pulls arm from the per-merchant secrets store with the same
-	// semantics as the server's River pulls (store wins; a declared account
-	// with a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the
-	// manifest is on disk for a one-off process too — an ephemeral in-memory
-	// plane seeded from it IS the store. Mode-2 store build failure degrades
-	// loudly to the boot-config plane instead of aborting the operator command.
+	// #699/#788: pulls arm from the per-merchant secrets store, with the same
+	// semantics as the server's River pulls (store wins; a declared account with
+	// a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the manifest
+	// is on disk for a one-off process too — an ephemeral in-memory plane seeded
+	// from it IS the store.
+	//
+	// or#893: a MODE-2 store/service build failure is a hard error. It used to
+	// warn and continue "arming from boot-config rails only" — but that plane
+	// was an empty config.PSPSet this function itself constructed and never
+	// filled, so the degradation armed NOTHING: the operator got a pull that
+	// read zero providers and reported success-shaped output over a snapshot it
+	// never fetched. There is no credential plane to fall back to; say so.
 	var merchantsSvc *merchants.Service
 	if cfg.IsManifestMerchantSource() {
 		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
@@ -391,30 +381,34 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 			return nil, nil, err
 		}
 		merchantsSvc = svc
-	} else if backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool()); err != nil {
-		log.WithError(err).Warn("pull-provider: merchant secret store unavailable; pulls arm from boot-config rails only (#699)")
-	} else if svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode())); err != nil {
-		log.WithError(err).Warn("pull-provider: merchants service unavailable; pulls arm from boot-config rails only (#699)")
 	} else {
+		backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool())
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("pull-provider: merchant secret store unavailable, so no rail can be armed: %w", err)
+		}
+		svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("pull-provider: merchants service unavailable, so no rail can be armed: %w", err)
+		}
 		merchantsSvc = svc
 	}
 	return &pullProviderRuntime{
-		DB:             database,
-		Config:         cfg,
-		Rails:          rails,
-		Merchants:      merchantsSvc,
-		NMIClients:     nmiClients,
-		CCBillDataLink: ccbillDataLink,
-		SolanaRPC:      solanaRPC,
+		DB:        database,
+		Config:    cfg,
+		Merchants: merchantsSvc,
 	}, cleanup, nil
 }
 
 // pullProviderManifestPlane builds the MODE-1 pull plane for a one-off process
 // (#723): the on-disk manifest seeds an EPHEMERAL in-memory secret store — the
 // same plane the server seeds at boot; nothing persists — and the merchants
-// service arms #699 pulls over it. No manifest passed and none at the
-// conventional path → nil service (boot-config rails only, e.g. a read-side
-// bind host); a manifest that fails to load or seed aborts the command.
+// service arms #699 pulls over it. A manifest that fails to load or seed aborts
+// the command. No manifest passed and none at the conventional path → nil
+// service: nothing can arm, and the caller's "no armed rail accounts for this
+// merchant" refusal names that plainly (or#893 — there is no second credential
+// plane to fall back to).
 func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database *db.DB, opts PullProviderOptions) (*merchants.Service, error) {
 	manifest := opts.MerchantManifest
 	if manifest == nil {
@@ -425,7 +419,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		}
 		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
 		if os.IsNotExist(err) && !explicit {
-			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; pulls arm from boot-config rails only (#723)")
+			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; no rail can be armed (#723)")
 			return nil, nil
 		}
 		if err != nil {
@@ -467,48 +461,6 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
 	}
 	return svc, nil
-}
-
-func pullProviderCCBillDataLink(cfg *config.Config, rails config.PSPSet) (*ccbill.DataLinkClient, error) {
-	_, proc, err := rails.ActiveRailByType(models.RailCCBill)
-	if err != nil {
-		return nil, err
-	}
-	if proc == nil || proc.CCBill == nil || proc.CCBill.DataLinkUsername == "" || proc.CCBill.DataLinkPassword == "" {
-		return nil, nil
-	}
-	ccbillConfig := proc.ToCCBillConfig()
-	if ccbillConfig.ClientAccNum == "" {
-		return nil, nil
-	}
-	ccbillConfig.TestMode = cfg.IsTestMode()
-	return ccbill.NewDataLinkClient(ccbillConfig), nil
-}
-
-func pullProviderSolanaRPC(cfg *config.Config, rails config.PSPSet) (*solanaint.RPCClient, error) {
-	_, proc, err := rails.ActiveRailByType(models.RailSolana)
-	if err != nil {
-		return nil, err
-	}
-	if proc == nil {
-		return nil, nil
-	}
-	rpcProvider := ""
-	rpcAPIKey := ""
-	if proc.Solana != nil {
-		rpcProvider = proc.Solana.RPCProvider
-		rpcAPIKey = proc.Solana.RPCAPIKey
-	}
-	network := "mainnet"
-	if cfg.IsTestMode() {
-		network = "devnet"
-	}
-	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-		RPCProvider: rpcProvider,
-		RPCAPIKey:   rpcAPIKey,
-		Network:     network,
-		ReadOnly:    true,
-	}), nil
 }
 
 func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug string) (merchant.ID, error) {

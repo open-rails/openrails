@@ -115,8 +115,8 @@ var ErrNoRoutableProcessor = errors.New("no payment provider is available for th
 // Route picks the PSP for a checkout. The returned decision always carries the
 // full candidate trace, including on the no-winner error path.
 func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*RoutingDecision, error) {
-	checkoutService, ok := s.checkoutService.(*CheckoutService)
-	if !ok || checkoutService == nil || checkoutService.Rails == nil {
+	targets := s.checkoutService
+	if targets == nil || targets.railSource() == nil {
 		return nil, fmt.Errorf("checkout routing unavailable")
 	}
 	if in.Price == nil {
@@ -126,7 +126,7 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 	// An explicitly named PSP is resolved and used as named — no eligibility
 	// sweep, no fallback. The caller asked for this processor.
 	if selector := strings.ToLower(strings.TrimSpace(in.Selector)); selector != "" {
-		target, err := checkoutService.resolveRailTarget(ctx, selector)
+		target, err := targets.resolveRailTarget(ctx, selector)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +143,7 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 	}
 	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(order))}
 	for _, selector := range order {
-		target, skip := s.evaluateCandidate(ctx, checkoutService, in, selector)
+		target, skip := s.evaluateCandidate(ctx, targets, in, selector)
 		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, Skip: skip}
 		if skip == "" {
 			// The resolved PSP key is the answer, not the requested selector: a
@@ -226,8 +226,8 @@ func routingRuleMatches(m models.CheckoutRoutingMatch, in RoutingInput) bool {
 
 // evaluateCandidate resolves one selector and reports whether it can serve this
 // price now. The empty skip class means eligible.
-func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, checkoutService *CheckoutService, in RoutingInput, selector string) (railTarget, string) {
-	target, err := checkoutService.resolveRailTarget(ctx, selector)
+func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets checkoutRailTargets, in RoutingInput, selector string) (railTarget, string) {
+	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError
 		var unknown *UnknownRailError
@@ -237,7 +237,7 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, checkout
 		case errors.As(err, &unknown):
 			// A key that resolves to nothing may still be DECLARED and archived.
 			// Say "retired", not "never heard of it" — support reads this.
-			if checkoutService.pspKeyArchived(ctx, selector) {
+			if targets.pspKeyArchived(ctx, selector) {
 				return railTarget{}, models.CheckoutRoutingSkipNotArmed
 			}
 			return railTarget{}, models.CheckoutRoutingSkipUnknownSelector
@@ -249,7 +249,7 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, checkout
 	if target.Scope != nil {
 		accountID = target.Scope.AccountID
 	}
-	providerConfig, err := checkoutService.Rails.RailConfig(ctx, target.Rail, accountID)
+	providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, accountID)
 	if err != nil {
 		if errors.Is(err, railresolve.ErrRailNotArmed) {
 			return target, models.CheckoutRoutingSkipNotArmed

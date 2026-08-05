@@ -464,7 +464,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 					return err
 				}
 			}
-			return AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
+			return nil
 		}
 
 		tailEnd, err := GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
@@ -501,7 +501,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 					return cerr
 				}
 				created = covered
-				return AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
+				return nil
 			}
 			endAt = &e
 		}

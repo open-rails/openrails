@@ -106,7 +106,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	}
 	fx.dispatcher = &WebhookDispatcher{
 		DB:                   dbi,
-		DeduplicationService: NewDeduplicationService(replaycache.NewStore(nil), dbi),
+		DeduplicationService: mustDedupService(t, replaycache.NewStore(nil), dbi),
 		// or#880: the custodian's client is armed off the CUSTODIAN the event's
 		// tenant id resolves to — not off a PSP. Two PSPs share one custodian
 		// here, which is exactly the case that had no answer before.

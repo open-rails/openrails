@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -247,6 +248,14 @@ func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) uuid.UU
 		return uuid.Nil
 	}
 	return target.Scope.ID
+}
+
+// railSource exposes the merchant rail plane for routing (checkoutRailTargets).
+func (s *CheckoutService) railSource() railresolve.Source {
+	if s == nil {
+		return nil
+	}
+	return s.Rails
 }
 
 // stampPSP pins resolved account provenance into ctx so the

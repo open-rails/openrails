@@ -45,7 +45,8 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 
 	idem := replaycache.NewStoreWithTTL(rdb, time.Hour)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_flush_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
@@ -82,8 +83,10 @@ func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
 	defer idemA.Close()
 	idemB := replaycache.NewStore(nil)
 	defer idemB.Close()
-	replicaA := NewDeduplicationService(idemA, dbi)
-	replicaB := NewDeduplicationService(idemB, dbi)
+	replicaA, errreplicaA := NewDeduplicationService(idemA, dbi)
+	require.NoError(t, errreplicaA)
+	replicaB, errreplicaB := NewDeduplicationService(idemB, dbi)
+	require.NoError(t, errreplicaB)
 
 	eventID := "evt_replicas_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
@@ -105,7 +108,8 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 
 	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_crash_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
@@ -145,7 +149,8 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 
 	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_intx_" + uuid.NewString()
 	op := "webhook.ccbill.TestEvent"
@@ -192,7 +197,8 @@ func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
 
 	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_nomerchant_" + uuid.NewString()
 	applies := 0
@@ -214,7 +220,8 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 
 	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_nonretry_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
@@ -230,7 +237,8 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	// Fresh replica (empty memStore = post-flush): still skipped via Postgres.
 	idem2 := replaycache.NewStore(nil)
 	defer idem2.Close()
-	svc2 := NewDeduplicationService(idem2, dbi)
+	svc2, errsvc2 := NewDeduplicationService(idem2, dbi)
+	require.NoError(t, errsvc2)
 	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error { attempts++; return nil }))
 	require.Equal(t, 1, attempts)

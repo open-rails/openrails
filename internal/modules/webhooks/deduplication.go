@@ -73,10 +73,19 @@ func IsWebhookErrorNonRetryable(err error) bool {
 	return errors.As(err, &nonRetryable)
 }
 
-// NewDeduplicationService creates a webhook deduplication service. database
-// carries the Postgres truth table; nil degrades to Redis/memory-only dedup.
-func NewDeduplicationService(idem *replaycache.Store, database *db.DB) *DeduplicationService {
-	return &DeduplicationService{idem: idem, db: database}
+// NewDeduplicationService creates a webhook deduplication service.
+//
+// or#893: database is REQUIRED. Since #678 the dedup TRUTH is the Postgres
+// webhook_events table and Redis is only a cache plus lease coordination — so a
+// nil DB is not a degraded mode, it is no dedup at all: a redelivery after a
+// cache flush would re-run the effects. Nothing in production ever built one;
+// only unit tests did, and a construction the production graph cannot produce
+// is not worth the branches it costs everywhere downstream.
+func NewDeduplicationService(idem *replaycache.Store, database *db.DB) (*DeduplicationService, error) {
+	if database == nil {
+		return nil, fmt.Errorf("webhook dedup: a database is required — Postgres webhook_events is the dedup truth (#678)")
+	}
+	return &DeduplicationService{idem: idem, db: database}, nil
 }
 
 // dedupMarkCtxKey carries the in-flight event's truth-row identity so handlers
@@ -98,8 +107,9 @@ func (m *dedupMark) params() gen.MarkWebhookEventCompletedParams {
 	}
 }
 
-// newDedupMark resolves the truth-row identity, or nil when Postgres truth is
-// unavailable (no DB wired, or no merchant on ctx — then Redis is the only net).
+// newDedupMark resolves the truth-row identity, or nil when no merchant is on
+// ctx — the truth row is merchant-scoped (RLS), so an unattributed event has no
+// row to claim and Redis is the only net left.
 func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID string) *dedupMark {
 	if s == nil || s.db == nil {
 		return nil

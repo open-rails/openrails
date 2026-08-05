@@ -255,3 +255,47 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 		"store-only merchant's pass polls with the STORE-armed client")
 	assert.Zero(t, storeFake.count(""), "no unparsed RPC bodies")
 }
+
+// or#893 phase 10. The pending set's member shape is `<merchant_id>|<reference>`
+// and every writer (storePendingPayment, RegisterPendingReference) requires a
+// merchant, so a member that does not parse was not written by this code. The
+// pre-#728 compatibility lane SREM'd it with a warning — which, on a live set,
+// deletes a buyer's pending payment reference and with it the poller's only
+// chance to credit a payment that may already be on chain. Corruption of a live
+// input is reported, not tidied away.
+//
+// Failing before this change: PendingReferencesByMerchant returned (map, nil)
+// and the bare member was gone from Redis.
+func TestPendingSetRefusesAMalformedMemberInsteadOfDeletingIt(t *testing.T) {
+	rdb, _ := dbtest.SharedRedisClient(t)
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+
+	bare := "or893-bare-" + uuid.NewString()
+	require.NoError(t, rdb.SAdd(context.Background(), pendingSolanaPaymentsKey, bare).Err())
+	t.Cleanup(func() { _ = rdb.SRem(context.Background(), pendingSolanaPaymentsKey, bare).Err() })
+
+	_, err := paySvc.PendingReferencesByMerchant(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pending set is corrupt")
+
+	still, err := rdb.SIsMember(context.Background(), pendingSolanaPaymentsKey, bare).Result()
+	require.NoError(t, err)
+	require.True(t, still, "the poller must not delete a reference it could not attribute")
+}
+
+// A removal that cannot name the member it is removing is refused rather than
+// issuing an SREM that can only ever be a no-op.
+func TestRemovePendingPaymentRequiresAMerchant(t *testing.T) {
+	rdb, _ := dbtest.SharedRedisClient(t)
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+
+	err := paySvc.RemovePendingPayment(context.Background(), "some-reference")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires a merchant")
+}

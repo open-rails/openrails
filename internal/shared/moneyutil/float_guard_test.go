@@ -43,11 +43,11 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/admission/",
 		"internal/modules/solana/",
 		"internal/modules/webhooks/",
-		"internal/modules/reconcile/",
-		// or#863: the guard listed internal/modules/reconcile/ and stopped —
-		// but the reconcile ENGINE is internal/reconcile/, a different package,
-		// and it held a live violation (a float64 on-chain token amount). The
-		// packages below were the guard's holes; each one reaches an amount.
+		// or#863: the guard listed internal/modules/reconcile/ (deleted in
+		// or#893 phase 9) and stopped — but the reconcile ENGINE is
+		// internal/reconcile/, a different package, and it held a live
+		// violation (a float64 on-chain token amount). The packages below were
+		// the guard's holes; each one reaches an amount.
 		"internal/reconcile/",
 		"internal/http/handlers/",
 		"internal/river/",

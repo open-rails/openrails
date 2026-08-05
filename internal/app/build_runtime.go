@@ -225,7 +225,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		MerchantsFn: merchantsFn,
 	}
 
-	serviceInstances := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	if err != nil {
+		return nil, err
+	}
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -633,7 +636,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return base
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -796,7 +799,10 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), paymentMethodService)
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
-	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
+	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
+	if err != nil {
+		return nil, err
+	}
 	webhookDispatcher := &webhooks.WebhookDispatcher{
 		Config:                       cfg,
 		DB:                           database,
@@ -901,7 +907,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		DashboardService:             dashboardService,
 		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
-	}
+	}, nil
 }
 
 func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {

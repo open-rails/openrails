@@ -121,7 +121,7 @@ var Dimensions = []Dimension{
 	{Name: "price_id", Description: "price UUID"},
 	{Name: "billing_cycle", Description: "price cadence: daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
-	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "expired", "failed", "unknown"}},
+	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "unknown"}},
 	{Name: "payer", Description: "paying customer UUID (usage/admission measures)"},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
@@ -390,10 +390,14 @@ var Measures = []Measure{
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "attempt_kind", "discount_code"}},
 	// --- subscriptions: flow ----------------------------------------------------
 	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count",
-		Description: "subscriptions started in the bucket (excludes never-activated pending/failed)",
-		Formula:     "COUNT(subs with started_at in bucket, status not in pending/failed)",
-		Expr:        `COUNT(*) FILTER (WHERE s.status NOT IN ('pending','failed'))`,
-		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
+		Description: "subscriptions started in the bucket (excludes never-activated pending)",
+		Formula:     "COUNT(subs with started_at in bucket, status <> pending)",
+		// or#893: `failed` left the lifecycle enum, and naming a label the type
+		// no longer has is a runtime cast error, not a no-op predicate. A
+		// subscription whose first charge failed is past_due or cancelled; only
+		// `pending` still means never-activated.
+		Expr: `COUNT(*) FILTER (WHERE s.status <> 'pending')`,
+		Dims: []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
 	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCancelled, Unit: "count",
 		Description: "subscriptions cancelled in the bucket, by cancel_type",
 		Formula:     "COUNT(subs with cancelled_at in bucket)",
