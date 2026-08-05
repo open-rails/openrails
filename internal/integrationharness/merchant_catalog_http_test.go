@@ -652,12 +652,15 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 	}
 }
 
-// TestNativeCatalogMeteredUsageHTTP proves the #707 unification: a legacy
-// metered: price declaration published over HTTP is translated into a rate-card
-// row (no price row, no catalog_price_metered — the table is gone), and
-// reported usage is rated through it onto a finalized invoice with exact #599
-// semantics (counter = sum of per-event quantities, defaulting to 1).
-func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
+// TestNativeCatalogRateCardUsageHTTP proves the or#893 pricing input: a rate
+// card published over HTTP is the ONE way usage is priced (no price row, no
+// metered: sugar, no catalog_price_metered), and reported usage is rated
+// through it onto a finalized invoice.
+//
+// It also pins the removal of the #599 counter bridge: the event that carries
+// no quantity contributes 0, not 1. "Count the event itself" is now declared,
+// not inferred — it is aggregation: count.
+func TestNativeCatalogRateCardUsageHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	standalone := h.StartStandalone("usd")
@@ -672,20 +675,19 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Meters: []catalog.Meter{{
-			Key:  meterKey,
-			Kind: "counter",
+			Key:         meterKey,
+			Aggregation: "sum",
 		}},
 		Products: []catalog.Product{{
 			Key:         productKey,
 			DisplayName: "Metered Usage Product",
-			Prices: []catalog.Price{{
-				UnitAmount: 0,
-				Currency:   "USD",
-				PSPs:       []string{},
-				Metered: &catalog.MeteredPrice{
-					Meter:    meterKey,
-					Rate:     250_000,
-					PerUnits: 100,
+			RateCards: []catalog.RateCard{{
+				Meter:       meterKey,
+				PaymentTerm: catalog.PaymentInArrears,
+				Price: catalog.RatePrice{
+					Model:    "per_unit",
+					Currency: "USD",
+					PerUnit:  &catalog.PerUnitPrice{UnitAmount: 250_000, DivideBy: 100},
 				},
 			}},
 		}},
@@ -702,8 +704,8 @@ func TestNativeCatalogMeteredUsageHTTP(t *testing.T) {
 	var product billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &product))
 
-	// Translated: no price row (pure usage), one rate card carrying the rate as
-	// per_unit unit_amount/divide_by, one meter.
+	// Pure usage: no price row, one rate card carrying unit_amount/divide_by,
+	// one meter.
 	prices, err := (httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}).ListPricesByProduct(ctx, product.ID, true)
 	require.NoError(t, err)
 	require.Empty(t, prices)
@@ -719,9 +721,10 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	require.Equal(t, int64(250_000), unitAmount)
 	require.Equal(t, int64(100), divideBy)
 
-	// Rate reported usage through the translated card: three quantity-bearing
-	// events (100+200+120) plus one without the dimension (counts as 1) —
-	// aggregate 421 -> round_half_up(421 * 250_000 / 100) = 1_052_500.
+	// Rate reported usage through the card: three quantity-bearing events
+	// (100+200+120) plus one without the dimension, which contributes 0 now that
+	// the counter bridge is gone — aggregate 420 ->
+	// round_half_up(420 * 250_000 / 100) = 1_050_000.
 	mctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
@@ -760,7 +763,7 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	inv, err := moneySvc.FinalizeInvoice(mctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, "open", inv.Status)
-	require.Equal(t, int64(1_052_500), inv.AmountDue)
+	require.Equal(t, int64(1_050_000), inv.AmountDue)
 }
 
 func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
@@ -1619,8 +1622,10 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 		for j := range entry.Products[i].Prices {
 			entry.Products[i].Prices[j].PSPs = nil
 			entry.Products[i].Prices[j].PSPLinks = nil
-			if mp := entry.Products[i].Prices[j].Metered; mp != nil {
-				mp.Meter = meterKeys[mp.Meter]
+		}
+		for j := range entry.Products[i].RateCards {
+			if mapped, ok := meterKeys[entry.Products[i].RateCards[j].Meter]; ok {
+				entry.Products[i].RateCards[j].Meter = mapped
 			}
 		}
 	}
@@ -1786,19 +1791,14 @@ func exampleProductUsageLimitCount(m catalog.Manifest) int {
 	return n
 }
 
-// exampleUsageRateCardCount counts metered rate cards in the published
-// manifest — declared rate_cards plus legacy metered: prices (translated into
-// rate cards at push time, #707).
+// exampleUsageRateCardCount counts the usage rate cards in the published
+// manifest. or#893: declared rate_cards are the only source — the metered:
+// price sugar that used to translate into one is gone.
 func exampleUsageRateCardCount(m catalog.Manifest) int {
 	var n int
 	for _, p := range m.Products {
 		for _, rc := range p.RateCards {
 			if rc.Meter != "" {
-				n++
-			}
-		}
-		for _, price := range p.Prices {
-			if price.Metered != nil {
 				n++
 			}
 		}

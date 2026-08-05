@@ -37,13 +37,13 @@ type Manifest struct {
 	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
 
-// Meter is a billed usage stream. Two shapes are accepted (additive, #638):
-//   - legacy: {key, kind: counter|gauge}.
-//   - rate-card: {key, event_type, value_property, aggregation, group_by, unit}
-//     (OpenMeter-style). aggregation in sum/count/max/min/unique_count/latest.
+// Meter is a billed usage stream: {key, event_type, value_property,
+// aggregation, group_by, unit} (OpenMeter-style, #638). aggregation is required
+// and is one of sum/count/max/min/unique_count/latest. The #599 `kind:
+// counter|gauge` shape was retired by or#893 — a rate card is the only pricing
+// input.
 type Meter struct {
-	Key  string `json:"key" yaml:"key"`
-	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Key string `json:"key" yaml:"key"`
 
 	EventType     string            `json:"event_type,omitempty" yaml:"event_type,omitempty"`
 	ValueProperty string            `json:"value_property,omitempty" yaml:"value_property,omitempty"`
@@ -196,19 +196,12 @@ type Price struct {
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
 
-	// Retired manifest keys (renamed to psps / psp_links). Kept only so a
-	// stale manifest fails loudly instead of silently dropping its links.
-	LegacyProviders     []string                     `json:"providers,omitempty" yaml:"providers,omitempty"`
-	LegacyProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
-
 	// Trial is an optional FIRST phase that differs from the recurring terms above
 	// (#622). unit_amount=0 is a free trial. Requires auto_renew. Omit for a flat
 	// price.
 	//   trial: {unit_amount: 19950000, duration: 30d}  # $19.95 (micros) first 30d, then UnitAmount recurring
 	//   trial: {unit_amount: 0, duration: 7d}           # free 7-day trial, then UnitAmount recurring
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
-
-	Metered *MeteredPrice `json:"metered,omitempty" yaml:"metered,omitempty"`
 
 	// Variable credit top-up offer fields. Fixed catalog prices keep using the
 	// UnitAmount/Duration shape above.
@@ -220,13 +213,6 @@ type Price struct {
 	PerUnit  *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
 	Tiered   *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
 	Package  *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
-}
-
-type MeteredPrice struct {
-	Meter    string `json:"meter" yaml:"meter"`
-	Rate     int64  `json:"rate" yaml:"rate"`
-	PerUnits int64  `json:"per_units,omitempty" yaml:"per_units,omitempty"`
-	Per      string `json:"per,omitempty" yaml:"per,omitempty"`
 }
 
 // PriceTrial is the trial first phase for a Price (#622): a first phase at its
