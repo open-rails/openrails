@@ -538,7 +538,6 @@ type SpendLimitWindow struct {
 type SpendDelegationInput struct {
 	Scope    string             `json:"scope"`
 	ScopeKey string             `json:"scope_key,omitempty"`
-	RoleID   string             `json:"role_id,omitempty"`
 	Windows  []SpendLimitWindow `json:"windows"`
 }
 

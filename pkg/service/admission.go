@@ -177,7 +177,6 @@ type SpendLimitWindowInput struct {
 type InvokerSpendLimitInput struct {
 	Scope    string                  `json:"scope"`
 	ScopeKey string                  `json:"scope_key,omitempty"`
-	RoleID   string                  `json:"role_id,omitempty"`
 	Windows  []SpendLimitWindowInput `json:"windows"`
 }
 
@@ -219,24 +218,15 @@ func invokerSpendLimitKey(scope, scopeKey string) string {
 
 // ValidateInvokerSpendLimitInputs validates and canonicalizes a complete
 // payer-owned spend-delegation document. Duplicate detection happens after
-// scope, scope_key, and role_id aliases are normalized, so every transport has
-// identical replacement semantics.
+// scope and scope_key are normalized, so every transport has identical
+// replacement semantics. or#893 deleted the role_id alias: a role delegation is
+// {scope:"role", scope_key:"<role uuid>"} and nothing else.
 func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpendLimitInput, error) {
 	out := make([]InvokerSpendLimitInput, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
 	for i, item := range in {
 		scope := budgets.NormalizeScope(item.Scope)
 		scopeKey := strings.TrimSpace(item.ScopeKey)
-		roleID := strings.TrimSpace(item.RoleID)
-		if roleID != "" && scope != budgets.ScopeRole {
-			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].role_id is only allowed for scope %q", i, budgets.ScopeRole))
-		}
-		if scopeKey != "" && roleID != "" && scopeKey != roleID {
-			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].role_id must match scope_key", i))
-		}
-		if scopeKey == "" {
-			scopeKey = roleID
-		}
 		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
 		})
@@ -248,13 +238,9 @@ func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpen
 			return nil, invalidInvokerSpendLimit(fmt.Sprintf("duplicate delegation for %s", key))
 		}
 		seen[key] = struct{}{}
-		normalized := InvokerSpendLimitInput{
+		out = append(out, InvokerSpendLimitInput{
 			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
-		}
-		if row.Scope == budgets.ScopeRole {
-			normalized.RoleID = row.ScopeKey
-		}
-		out = append(out, normalized)
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return invokerSpendLimitKey(out[i].Scope, out[i].ScopeKey) < invokerSpendLimitKey(out[j].Scope, out[j].ScopeKey)

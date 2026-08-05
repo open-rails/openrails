@@ -85,7 +85,7 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 
 	err = client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{
 		{
-			Scope: " role ", RoleID: " " + second.ScopeKey + " ", Windows: second.Windows,
+			Scope: " role ", ScopeKey: " " + second.ScopeKey + " ", Windows: second.Windows,
 		},
 		second,
 	})

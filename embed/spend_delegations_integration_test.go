@@ -43,8 +43,8 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 			Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 		},
 		{
-			Scope:  "role",
-			RoleID: "test-role",
+			Scope:    "role",
+			ScopeKey: "test-role",
 			Windows: []openrails.SpendLimitWindow{{
 				Key: "month", WindowSeconds: 2592000, Limit: 9_000_000, Currency: "USD",
 			}},
@@ -71,7 +71,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 
 	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
 		{
-			Scope: " role ", RoleID: " test-role ",
+			Scope: " role ", ScopeKey: " test-role ",
 			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
 		},
 		{

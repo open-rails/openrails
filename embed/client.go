@@ -294,7 +294,7 @@ func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID
 
 func spendDelegationInput(d openrails.SpendDelegationInput) billingservice.InvokerSpendLimitInput {
 	out := billingservice.InvokerSpendLimitInput{
-		Scope: d.Scope, ScopeKey: d.ScopeKey, RoleID: d.RoleID,
+		Scope: d.Scope, ScopeKey: d.ScopeKey,
 		Windows: make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows)),
 	}
 	for _, w := range d.Windows {
