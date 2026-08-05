@@ -1,1 +1,0 @@
-ALTER TABLE openrails.ledger_transfers DROP CONSTRAINT ledger_transfers_type_check;

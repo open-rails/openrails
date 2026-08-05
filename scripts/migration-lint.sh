@@ -23,6 +23,32 @@ if [ ! -x "$BIN" ]; then
     chmod +x "$BIN"
 fi
 
+# The squashed baseline (or#893) is the one path .squawk.toml excludes, so
+# immediately after a squash there is NOTHING for squawk to check and it exits
+# non-zero on an empty glob. That is the expected steady state, not a broken
+# gate — but "nothing to check" may only be believed when it is DERIVED: count
+# the up-migrations, subtract the excluded paths, and pass early only when the
+# remainder is genuinely zero. If a file exists that squawk should have seen,
+# the run happens and the guards below apply unchanged.
+mapfile -t all_migrations < <(ls migrations/postgres/*.up.sql 2>/dev/null || true)
+if [ "${#all_migrations[@]}" -eq 0 ]; then
+    echo "migration-lint: no migrations found at all — the layout moved. Fix that before trusting this gate." 1>&2
+    exit 1
+fi
+mapfile -t excluded < <(sed -n '/^excluded_paths *= *\[/,/^\]/p' .squawk.toml | grep -oE '"[^"]+"' | tr -d '"')
+lintable=0
+for f in "${all_migrations[@]}"; do
+    skip=0
+    for e in "${excluded[@]}"; do
+        [ "$f" = "$e" ] && skip=1 && break
+    done
+    [ "$skip" -eq 0 ] && lintable=$((lintable + 1))
+done
+if [ "$lintable" -eq 0 ]; then
+    echo "migration-lint: nothing to lint (${#all_migrations[@]} migration(s), all excluded by path — the squashed baseline)"
+    exit 0
+fi
+
 # Run once and keep BOTH the output and the exit status. The earlier version
 # piped a JSON run straight into `grep -c … || true`, which turned every way
 # squawk can fail — missing binary, unparseable SQL, a glob matching nothing —

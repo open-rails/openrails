@@ -83,6 +83,12 @@ if generated code is stale.
 the app migrations. Schema-shape invariants are enforced by Go tests that live
 next to the migrations.
 
+The baseline was re-squashed (or#893). migratekit tracks applied migrations by
+FILENAME, so a database whose ledger holds the pre-squash names will skip the
+new baseline and sit on a schema nothing describes: **drop and recreate any
+database created before the re-squash.** Prelaunch, every database is
+disposable, which is the whole reason the squash is allowed.
+
 ## Repo layout
 
 - `client.go`, `remote.go`, `errors.go` — root package `openrails`: the SDK surface, one `Client` interface with remote (HTTP) and embedded constructors
