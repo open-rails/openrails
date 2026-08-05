@@ -163,7 +163,7 @@ INSERT INTO openrails.payment_methods (
     $11,
     COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $14,
+    $14::uuid,
     COALESCE(NULLIF($15::text, ''), 'provider'),
     COALESCE(NULLIF($16::text, ''), 'psp'), $17, $18,
     $19, $20,
@@ -185,7 +185,7 @@ type CreatePaymentMethodParams struct {
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	PspID                *uuid.UUID
+	PspID                uuid.UUID
 	RebillDriver         string
 	Custodian            string
 	Fingerprint          string

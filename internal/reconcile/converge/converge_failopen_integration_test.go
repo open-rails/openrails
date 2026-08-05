@@ -44,9 +44,10 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 			prod, "fo-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// ccbill: provider-auto-billed, no local vault — the pure silence shape.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$7,$8)`, sub, merchantID, cust, prod, price, "fo-sub-"+sfx, start, elapsed)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, "fo-sub-"+sfx, start, elapsed, pspID)
 		// The #691 shape: bounded per-period grant + ONE standing window.
 		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,

@@ -37,8 +37,10 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		return err
 	}
 	pspID := m.PspID
-	if pspID == nil {
-		pspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	if pspID == uuid.Nil {
+		if pspID, err = db.RequirePSPID(ctx); err != nil {
+			return fmt.Errorf("create payment method %s/%s: %w", m.Rail, m.RailCustomerRef, err)
+		}
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,

@@ -163,6 +163,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 	periodStart := now.Add(-30 * 24 * time.Hour)
 	periodEnd := now.Add(5 * 24 * time.Hour)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	createParams := gen.CreateSubscriptionParams{
 		MerchantID:               dbtest.TestMerchantID.UUID(),
 		ID:                       f.subscriptionID,
@@ -172,6 +173,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 		EntitlementsSpecSnapshot: entitlementsSpecJSON,
 		Status:                   string(subStatus),
 		Rail:                     string(models.RailNMI),
+		PspID:                    pspID,
 		RailSubscriptionID:       f.providerSubID,
 		StartedAt:                now,
 		CreatedAt:                now,

@@ -78,7 +78,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 
 	productID, priceID, subID, pmID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	description := "Certainty"
-	var customerID uuid.UUID
+	var customerID, pspID uuid.UUID
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		q := dbi.Gen(ctx)
 		_, err := q.CreateProduct(ctx, gen.CreateProductParams{
@@ -93,12 +93,14 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		require.NoError(t, err)
 
 		customerID = dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Qx(ctx), uuid.New().String())
+		pspID = dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, string(models.RailNMI))
 		customerRef, methodRef := "", ""
 		if vaultRefs {
 			customerRef, methodRef = "vault_"+uuid.New().String(), "card_"+uuid.New().String()
 		}
 		_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 			ID: pmID, MerchantID: merchantID, CustomerID: customerID, Rail: string(models.RailNMI),
+			PspID:           pspID,
 			RailCustomerRef: customerRef, RailMethodRef: methodRef,
 			// RebillDriver=openrails: WE drive the rebill, so this is emphatically
 			// not the #635 vault-less provider-auto-billed shape.
@@ -113,6 +115,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 			ID: subID, MerchantID: merchantID, CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 			Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+			PspID:              pspID,
 			RailSubscriptionID: "sub_certainty_" + uuid.New().String(), PaymentMethodID: &pmID,
 			CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 			NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,

@@ -39,10 +39,10 @@ func TestRedriverEnumeratesMerchantsUnderTheEnforcingRole(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.pool.Exec(ctx, `
 INSERT INTO openrails.subscriptions
-    (id, price_id, product_id, status, rail, rail_subscription_id,
+    (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
      current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8)`,
-		subID, f.lowPriceID, f.productID, "or861-"+subID.String()[:8],
+VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $7, $6, $8, $9)`,
+		subID, f.lowPriceID, f.productID, f.nmiPSPID, "or861-"+subID.String()[:8],
 		now.Add(-24*time.Hour), now.Add(24*time.Hour), custID, f.merchantID)
 	require.NoError(t, err)
 	_, err = f.pool.Exec(ctx, `

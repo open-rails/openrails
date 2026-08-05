@@ -198,11 +198,12 @@ func (m intentMerchant) statusOf(t *testing.T, id uuid.UUID) string {
 func seedDueIntent(t *testing.T, m intentMerchant, intentType string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
+	pspID := dbtest.EnsureTestPSP(context.Background(), t, m.pool, m.id, "nmi")
 	m.exec(t, `INSERT INTO openrails.rail_intents
-	             (id, merchant_id, rail, intent_type, idempotency_key, status,
+	             (id, merchant_id, rail, psp_id, intent_type, idempotency_key, status,
 	              next_attempt_at, origin, payload)
-	           VALUES ($1, $2, 'nmi', $3, $4, 'pending', now() - interval '1 minute', 'system', '{}'::jsonb)`,
-		id, m.id, intentType, "or862-"+uuid.NewString())
+	           VALUES ($1, $2, 'nmi', $3, $4, $5, 'pending', now() - interval '1 minute', 'system', '{}'::jsonb)`,
+		id, m.id, pspID, intentType, "or862-"+uuid.NewString())
 	return id
 }
 

@@ -13,7 +13,7 @@ INSERT INTO openrails.payment_methods (
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(psp_id),
+    sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(rebill_driver)::text, ''), 'provider'),
     COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp'), sqlc.arg(fingerprint), sqlc.arg(network_token_id),
     sqlc.arg(network_token_status), sqlc.arg(network_token_par),

@@ -106,7 +106,10 @@ type AutoTopupCandidate struct {
 	AmountNative    int64
 	PaymentMethodID uuid.UUID
 	Rail            string
-	EpisodeAnchor   string
+	// PspID is the account that vaulted the instrument, and therefore the one
+	// that will take the charge (or#893).
+	PspID         uuid.UUID
+	EpisodeAnchor string
 }
 
 // ListDueAutoTopups scans for accounts due an auto-top-up episode. The charge
@@ -150,6 +153,7 @@ func (s *MoneyService) ListDueAutoTopups(ctx context.Context, cooldown time.Dura
 			AmountNative:    *r.TopupAmount,
 			PaymentMethodID: *r.PaymentMethodID,
 			Rail:            normalizeRail(method.Rail),
+			PspID:           method.PspID,
 			EpisodeAnchor:   anchor,
 		})
 	}
@@ -214,4 +218,3 @@ func (s *MoneyService) StampAutoTopupAttempt(ctx context.Context, customerID uui
 		MerchantID: tid.UUID(), CustomerID: customerID, Currency: normalizeCurrency(currency), Now: &now,
 	})
 }
-

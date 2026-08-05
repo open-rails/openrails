@@ -82,8 +82,8 @@ func TestSeedRailMerchantAccountsStampsPSPKeyForWireSelection(t *testing.T) {
 	for key, account := range map[string]string{keyA: accountA, keyB: accountB} {
 		require.NoError(t, rt.CheckoutService.CheckoutRailUsable(mctx, key), "PSP key %q must be usable", key)
 		got := rt.CheckoutService.ResolvePSPID(mctx, key)
-		require.NotNil(t, got, "PSP key %q must resolve to an armed account", key)
-		require.Equal(t, merchants.PspID(string(models.RailNMI), env, account), *got)
+		require.NotEqual(t, uuid.Nil, got, "PSP key %q must resolve to an armed account", key)
+		require.Equal(t, merchants.PspID(string(models.RailNMI), env, account), got)
 	}
 
 	// 3. The bare rail kind stays ambiguous — and names both keys, which is only

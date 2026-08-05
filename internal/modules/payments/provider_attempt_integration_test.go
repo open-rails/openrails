@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -23,6 +24,9 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
+	// or#893: a provider attempt is a provider-bound row; arrive in the shape
+	// every production caller does — the routed PSP pinned on ctx.
+	ctx = db.WithPSPID(ctx, dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI)))
 	svc := NewPaymentService(dbi)
 
 	now := time.Now().UTC().Truncate(time.Second)

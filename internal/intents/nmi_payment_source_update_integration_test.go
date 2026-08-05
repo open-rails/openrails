@@ -96,6 +96,7 @@ type paymentSourceSwapFixture struct {
 	sub     *models.Subscription
 	oldPM   *models.PaymentMethod
 	newPM   *models.PaymentMethod
+	pspID   uuid.UUID
 	ctx     context.Context
 }
 
@@ -105,6 +106,7 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 
 	userID := uuid.New().String()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
@@ -115,6 +117,7 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
+			PspID:                pspID,
 			RailCustomerRef:      railCustomerRef,
 			RailMethodRef:        "bill-" + uuid.NewString()[:8],
 			RebillDriver:         models.RebillDriverProvider,
@@ -143,10 +146,10 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         payment_method_id, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9)`,
+	         payment_method_id, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9, $10)`,
 		subID, priceID, productID, railSubID,
-		now.Add(-time.Hour), now.Add(720*time.Hour), oldPM.ID, customerID, dbtest.TestMerchantID.UUID())
+		now.Add(-time.Hour), now.Add(720*time.Hour), oldPM.ID, customerID, dbtest.TestMerchantID.UUID(), pspID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2", TypeNMIPaymentSourceUpdate, subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
@@ -174,6 +177,7 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 		sub:     sub,
 		oldPM:   oldPM,
 		newPM:   newPM,
+		pspID:   pspID,
 		ctx:     ctx,
 	}
 }
@@ -326,6 +330,7 @@ func TestNMIPaymentSourceUpdateIntent_CrashBeforeExecute(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     TypeNMIPaymentSourceUpdate,
 		SubscriptionID: &subID,
 		Payload: NMIPaymentSourceUpdatePayload{

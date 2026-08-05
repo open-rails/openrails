@@ -244,7 +244,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Metadata:             req.Metadata,
 	}
 	if pspID != nil {
-		pm.PspID = pspID
+		pm.PspID = *pspID
 	}
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
@@ -266,7 +266,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		return nil, nil, errors.New("rail is required")
 	}
 
-	if len(pspID) > 0 && pspID[0] != nil {
+	if len(pspID) > 0 && pspID[0] != nil && *pspID[0] != uuid.Nil {
 		if s == nil || s.DB == nil {
 			return nil, nil, errors.New("provider account lookup unavailable")
 		}
@@ -493,7 +493,7 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 		return nil, RailPaymentMethodsUnsupported(rail)
 	}
 
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
+	client, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID)
 	if err != nil {
 		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -694,7 +694,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 		return shared, nil, fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
 	}
 
-	client, _, err = s.resolveNMIClient(ctx, rail, pm.PspID)
+	client, _, err = s.resolveNMIClient(ctx, rail, &pm.PspID)
 	if err != nil {
 		return shared, nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
 	}
@@ -734,7 +734,7 @@ func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Con
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
 	}
-	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
+	client, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID)
 	return client, err
 }
 

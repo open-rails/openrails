@@ -815,6 +815,8 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 func TestPaymentTimestampUsesMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := suite.MerchantCtx()
+	// or#893: this test drives the service directly; arrive routed, like production.
+	ctx = suite.PinPSP(ctx, string(models.RailNMI))
 
 	// Set clock to a specific time
 	fixedTime := time.Date(2024, time.June, 15, 14, 30, 0, 0, time.UTC)

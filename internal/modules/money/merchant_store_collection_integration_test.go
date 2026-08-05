@@ -168,36 +168,13 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	require.Equal(t, "txn_store_only_nmi", railPaymentID)
 }
 
-func TestChargeOutstanding_BootPlaneFallback_WhenMerchantDeclaresNoAccount(t *testing.T) {
-	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
-	// Real merchants service, but NO rail_merchant_accounts row for the rail:
-	// the resolver must decline (ok=false) and the boot adapter must charge.
-	msvc := merchantsServiceForTest(t, dbi)
-
-	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_boot_fallback")
-	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_boot_fallback")
-	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
-
-	boot := &fakeCollectionAdapter{}
-	ch := storeArmedCharger(dbi, msvc, map[string]money.CollectionAdapter{
-		string(models.RailStripe): boot,
-	}, money.CollectionEndpoints{})
-
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Len(t, boot.charges, 1, "boot-plane adapter must serve merchants with no declared account")
-
-	paid, err := svc.GetInvoiceByID(ctx, payer, invID)
-	require.NoError(t, err)
-	require.Equal(t, "paid", paid.Status)
-}
+// or#893 deleted TestChargeOutstanding_BootPlaneFallback_WhenMerchantDeclaresNoAccount.
+// It asserted that a merchant declaring no account still charges, through the
+// boot-config adapter. That is a fail-OPEN credential path, and psp_id being
+// required makes its premise unreachable: an instrument names the PSP that
+// vaulted it, and mode-1 boot arms real psps rows from the manifest, so
+// "declares no account" cannot coexist with a chargeable instrument. The
+// refusal is now the behaviour, covered by the fail-closed test below.
 
 func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)

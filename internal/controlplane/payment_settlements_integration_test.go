@@ -62,9 +62,12 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false), ($4, $5, 9000000, 'USD', $6, false)`,
 		priceA, prodA, mA, priceB, prodB, mB)
 
+	pspA := dbtest.EnsureTestPSP(ctx, t, super, mA, "nmi")
+	pspB := dbtest.EnsureTestPSP(ctx, t, super, mB, "nmi")
+
 	// Insert completed payments as openrails_app under each merchant's GUC: the
 	// enqueue trigger's INSERT must pass the new fail-closed WITH CHECK.
-	insertPayment := func(mid, payID, custID, priceID uuid.UUID, amount int64) {
+	insertPayment := func(mid, payID, custID, priceID, pspID uuid.UUID, amount int64) {
 		t.Helper()
 		tx, err := appPool.Begin(ctx)
 		require.NoError(t, err)
@@ -72,14 +75,14 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, mid.String())
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx, `INSERT INTO openrails.payments
-			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
-			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', 'completed', 'rail')`,
-			payID, mid, custID, priceID, "psiso-"+suffix+"-"+payID.String()[:8], amount)
+			(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement, psp_id)
+			VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', 'completed', 'rail', $7)`,
+			payID, mid, custID, priceID, "psiso-"+suffix+"-"+payID.String()[:8], amount, pspID)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
 	}
-	insertPayment(mA, payA, custA, priceA, 7_000_000)
-	insertPayment(mB, payB, custB, priceB, 9_000_000)
+	insertPayment(mA, payA, custA, priceA, pspA, 7_000_000)
+	insertPayment(mB, payB, custB, priceB, pspB, 9_000_000)
 
 	idA, idB := merchant.ID(mA), merchant.ID(mB)
 

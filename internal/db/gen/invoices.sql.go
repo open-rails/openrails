@@ -670,13 +670,13 @@ INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
     failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
-    payment_method_id, idempotency_key
+    payment_method_id, idempotency_key, psp_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17,
-    $18, $19
+    $18, $19, $20::uuid
 )
 `
 
@@ -700,6 +700,7 @@ type InsertInvoicePaymentParams struct {
 	UpdatedAt        time.Time
 	PaymentMethodID  *uuid.UUID
 	IdempotencyKey   *string
+	PspID            *uuid.UUID
 }
 
 func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePaymentParams) error {
@@ -723,6 +724,7 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.UpdatedAt,
 		arg.PaymentMethodID,
 		arg.IdempotencyKey,
+		arg.PspID,
 	)
 	return err
 }

@@ -51,8 +51,15 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		require.NoError(t, e)
+		// or#893: every declared provider row must attribute a PSP. The book is a
+		// mixed nmi/ccbill legacy account, so DefaultPSP covers the nmi majority
+		// and the one ccbill row below names its own PSP explicitly.
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		return nil
 	}))
+	defaultNMIPSP := PSPRef{Key: "nmi"}
+	ccbillPSPRef := PSPRef{Key: "ccbill"}
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range allCust {
@@ -79,7 +86,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	paidIncr := asOf.Add(10 * day)
 
 	book := DeclaredBilling{
-		AsOf: asOf,
+		AsOf:       asOf,
+		DefaultPSP: defaultNMIPSP,
 		Customers: []DeclaredCustomer{
 			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed}, {Customer: cUser},
 			{Customer: cUserNMI}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
@@ -108,6 +116,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			{
 				SourceID: "usercancel", Customer: cUser, Price: price, Rail: "ccbill",
 				RailSubscriptionID: "sub-user-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
+				PSP:    ccbillPSPRef,
 				Cancel: CancelEvidence{Kind: "user_cancelled", At: userCancelAt},
 			},
 			{
@@ -284,7 +293,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// product (different rail key) cannot adopt into the occupied lifecycle
 	// slot — it blocks loudly, stays parked unknown, and never fails the batch.
 	twin := DeclaredBilling{
-		AsOf: asOf,
+		AsOf:       asOf,
+		DefaultPSP: ccbillPSPRef,
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "twin", Customer: cRunway, Price: price, Rail: "ccbill",
 			RailSubscriptionID: "sub-twin-" + sfx, StartedAt: asOf.Add(-50 * day), PaidThrough: &paidRunway,
@@ -334,7 +344,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 	asOf2 := asOf.Add(40 * day) // 30d past paidIncr — beyond DefaultDunningWindow (14d)
 	restalled := DeclaredBilling{
-		AsOf: asOf2,
+		AsOf:       asOf2,
+		DefaultPSP: defaultNMIPSP,
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "incremental-restalled", Customer: cIncr, Price: price, Rail: "nmi",
 			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
@@ -374,7 +385,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// dead subscription.
 	asOf3 := asOf2.Add(day)
 	terminated := DeclaredBilling{
-		AsOf: asOf3,
+		AsOf:       asOf3,
+		DefaultPSP: defaultNMIPSP,
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "incremental-terminated", Customer: cIncr, Price: price, Rail: "nmi",
 			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),

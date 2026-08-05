@@ -233,31 +233,27 @@ func (s *CheckoutService) CheckoutRailUsable(ctx context.Context, selector strin
 	return nil
 }
 
-// ResolvePSPID resolves the provider account for new work on
-// the given provider/rail name for provenance stamping. Returns nil when no resolver
-// is wired or nothing is armed — provenance is only ever stamped with a REAL
-// resolved account, never invented. Resolution failures are logged and
-// swallowed: stamping is metadata and must not block a sale.
-func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) *uuid.UUID {
+// ResolvePSPID resolves the PSP for new work on the given provider/rail name
+// for provenance stamping. Returns uuid.Nil when no resolver is wired or
+// nothing is armed — provenance is only ever stamped with a REAL resolved
+// account, never invented. or#893: the CALLER decides what an unresolved PSP
+// means; every provider-bound write now refuses one.
+func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) uuid.UUID {
 	if s == nil || s.ProviderSecrets == nil {
-		return nil
+		return uuid.Nil
 	}
 	target, err := s.resolveRailTarget(ctx, name)
-	if err != nil || target.Scope == nil || target.Scope.ID == uuid.Nil {
-		return nil
+	if err != nil || target.Scope == nil {
+		return uuid.Nil
 	}
-	id := target.Scope.ID
-	return &id
+	return target.Scope.ID
 }
 
 // stampPSP pins resolved account provenance into ctx so the
 // payment / subscription / payment-method writes downstream of this checkout
 // flow stamp psp_id (#704).
 func (s *CheckoutService) stampPSP(ctx context.Context, name string) context.Context {
-	if id := s.ResolvePSPID(ctx, name); id != nil {
-		return db.WithPSPID(ctx, *id)
-	}
-	return ctx
+	return db.WithPSPID(ctx, s.ResolvePSPID(ctx, name))
 }
 
 // resolveNMIClient arms the ctx merchant's NMI client for the given provider

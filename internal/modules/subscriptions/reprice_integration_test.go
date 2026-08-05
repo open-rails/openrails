@@ -43,6 +43,7 @@ type repriceFixture struct {
 	otherProductPriceID     uuid.UUID
 	otherCurrencyPriceID    uuid.UUID
 	inactivePriceID         uuid.UUID
+	nmiPSPID                uuid.UUID
 }
 
 func newRepriceFixture(t *testing.T) *repriceFixture {
@@ -111,6 +112,7 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 		lowPriceID: lowPriceID, highPriceID: highPriceID,
 		otherProductPriceID: otherProductPriceID, otherCurrencyPriceID: otherCurrencyPriceID,
 		inactivePriceID: inactivePriceID,
+		nmiPSPID:         dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi"),
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscription_reprices WHERE merchant_id = $1", merchantID)
@@ -151,9 +153,9 @@ func (f *repriceFixture) createSubscription(t *testing.T, ctx context.Context, p
 	now := f.clock.Now()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at)
-		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7) RETURNING id`,
-		f.merchantID, customerID, productID, priceID, railSubID, now, periodEnd).Scan(&subID))
+		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, current_period_starts_at, current_period_ends_at)
+		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7,$8) RETURNING id`,
+		f.merchantID, customerID, productID, priceID, f.nmiPSPID, railSubID, now, periodEnd).Scan(&subID))
 	return subID, railSubID
 }
 

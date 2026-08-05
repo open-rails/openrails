@@ -429,7 +429,7 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id),
+    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid,
     -- or#827: the row mirrors a charge the rail actually settled.
     'rail'
 )
@@ -452,7 +452,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     -- or#827: a refund is real (negative) money movement at the rail; the
     -- settlement feed excludes it on amount/refunded_payment_id, not on this.
-    sqlc.arg(customer_id), sqlc.narg(psp_id), 'refund', 'rail'
+    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING;
 
@@ -480,7 +480,7 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(psp_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
@@ -489,10 +489,10 @@ WHERE pr.id = sqlc.arg(price_id)
       WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
-        -- narg here NARROWS nothing: a nil PSP (the declared legacy-book
-        -- import) dedupes against EVERY PSP, which is the conservative side.
-        -- The read queries above are where nil-wide matching was dangerous.
-        AND (sqlc.narg(psp_id)::uuid IS NULL OR s.psp_id = sqlc.narg(psp_id)::uuid)
+        -- or#893: every writer resolves a PSP now, including the declared
+        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
+        -- provider subscription id is only unique within a gateway account.
+        AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
 RETURNING id, entitlements_spec_snapshot;
 

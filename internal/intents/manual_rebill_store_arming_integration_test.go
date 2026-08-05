@@ -109,7 +109,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = &accountRowID // #704 provenance stamp (what dunning enqueues)
+	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = &accountRowID
+	params.PspID = accountRowID
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -146,8 +146,16 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 }
 
 // TestManualRebillNoStoreRow_ParksFailClosed (#788): a merchant with no
-// declared NMI account has no armed rail — the charge parks on the ledger,
-// never fires, never falls back to any other credential plane.
+// armed NMI secret has no usable rail — the charge parks on the ledger, never
+// fires, never falls back to any other credential plane.
+//
+// or#893 made this scenario's ORIGINAL shape unrepresentable: rail_intents.psp_id
+// is now NOT NULL, so an intent can no longer carry "no stamped account" (the
+// old nil PspID that made ResolveNMIClient fall back to the deployment-wide
+// pull scope — that fallback is now dead code, resolveScope's `stamped`
+// pointer is never nil). The equivalent unarmed shape is a declared PSP row
+// with no armed secret in the store — indistinguishable, at the credential
+// layer, from TestManualRebillDeclaredAccountMissingSecret_FailsClosed above.
 func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, bootClient := newFakeNMIRebillGateway(t)
@@ -162,11 +170,14 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	cfg := storeRebillConfig()
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)
 
-	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	params := fx.enqueueParams(1)
+	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi")
+
+	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPending, row.Status, "unarmed rail parks, never charges")
 	require.NotNil(t, row.LastFailureReason)
-	assert.Contains(t, *row.LastFailureReason, "not armed")
+	assert.Contains(t, *row.LastFailureReason, "missing")
 	assert.Zero(t, fake.saleCalls.Load(), "fail-closed must never charge through another plane")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 }

@@ -86,9 +86,9 @@ func (e *ErrPruneCountMismatch) Error() string {
 
 // PruneRailMerchantAccountExcess fetches the provider's current snapshot for the
 // bound account and prunes local mirror rows attributed to that provider account
-// that are ABSENT from the snapshot. It is account-bound (legacy NULL-binding
-// import rows are never touched — they fall outside the psp_id filter) and safe
-// by construction:
+// that are ABSENT from the snapshot. It is account-bound and FAILS CLOSED
+// (or#893: every provider row is attributed now, so a row whose PSP this pass
+// did not pull is out of scope, never "maybe ours") and safe by construction:
 //
 //   - or#858: nothing is DELETED. Eligible rows are SOFT-deleted (deleted_at)
 //     and stamped with a destructive_runs id, so the whole pass reverses with

@@ -89,13 +89,14 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
+		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "stripe")
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "burst-prod-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,'{}'::jsonb,$7,$8)`,
-			subID, priceID, productID, railSubID, now.Add(-25*24*time.Hour), oldEnd, customer, merchantID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,'{}'::jsonb,$7,$8,$9)`,
+			subID, priceID, productID, railSubID, now.Add(-25*24*time.Hour), oldEnd, customer, merchantID, pspID)
 		return nil
 	}))
 
@@ -281,13 +282,14 @@ func seedConvergeE2ESubscription(t *testing.T, dbi *db.DB, baseCtx context.Conte
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
+		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), f.merchantID, rail)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			f.productID, "e2e-prod-"+suffix, f.merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			f.priceID, f.productID, f.merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
-			f.subID, f.priceID, f.productID, rail, railSubID, f.oldEnd.Add(-30*24*time.Hour), f.oldEnd, f.customer, f.merchantID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9,$10)`,
+			f.subID, f.priceID, f.productID, rail, railSubID, f.oldEnd.Add(-30*24*time.Hour), f.oldEnd, f.customer, f.merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {

@@ -67,9 +67,10 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1,$2,$3)`,
 		customerID, merchantID, "or858-subject-"+suffix)
 	require.NoError(t, err)
+	pspID := dbtest.EnsureTestPSP(ctx, t, super, merchantID, "nmi")
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.payment_methods (merchant_id, customer_id, rail, initial_transaction_id, custodian)
-		 VALUES ($1,$2,'nmi',$3,'psp')`, merchantID, customerID, "txn-"+suffix)
+		`INSERT INTO openrails.payment_methods (merchant_id, customer_id, rail, initial_transaction_id, custodian, psp_id)
+		 VALUES ($1,$2,'nmi',$3,'psp',$4)`, merchantID, customerID, "txn-"+suffix, pspID)
 	require.NoError(t, err)
 
 	const seededRows = 3 // products + prices + payment_methods

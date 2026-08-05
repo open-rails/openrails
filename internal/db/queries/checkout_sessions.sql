@@ -12,7 +12,7 @@ INSERT INTO openrails.checkout_sessions (
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
     sqlc.narg(rail_fields), sqlc.narg(rail_state), sqlc.narg(routing_reason),
-    sqlc.narg(psp_id),
+    sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
@@ -38,7 +38,7 @@ UPDATE openrails.checkout_sessions SET
     metadata = sqlc.narg(metadata),
     rail_fields = sqlc.narg(rail_fields),
     rail_state = sqlc.narg(rail_state),
-    psp_id = sqlc.narg(psp_id),
+    psp_id = sqlc.arg(psp_id)::uuid,
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1
   AND deleted_at IS NULL;

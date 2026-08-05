@@ -30,6 +30,7 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
@@ -37,9 +38,9 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ps-prod-"+suffix, "ps-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'pending','nmi',$4,$5,$5,'{}'::jsonb,$6,$7)`,
-			subID, priceID, productID, "ps-sub-"+suffix, old, customer, merchantID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'pending','nmi',$4,$5,$5,'{}'::jsonb,$6,$7,$8)`,
+			subID, priceID, productID, "ps-sub-"+suffix, old, customer, merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -114,6 +115,7 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
@@ -121,11 +123,11 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "pi-prod-"+suffix, "pi-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6,$7)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID, pspID)
 		// a provider action that failed terminally and won't auto-retry
-		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, subscription_id)
-		      VALUES ($1,$2,'nmi','cancel_subscription',$3,'failed_terminal','system',$4)`, intentID, merchantID, "pi-key-"+suffix, subID)
+		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, subscription_id, psp_id)
+		      VALUES ($1,$2,'nmi','cancel_subscription',$3,'failed_terminal','system',$4,$5)`, intentID, merchantID, "pi-key-"+suffix, subID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -175,6 +177,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
@@ -185,13 +188,13 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		// #664: period_overdue needs vault + ownership evidence — seed a payment
 		// method and a completed payment that opened the current period.
 		pmID := uuid.New()
-		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx')`, pmID, merchantID, customer)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
-			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'USD','completed',$7)`,
-			uuid.New(), merchantID, customer, priceID, subID, "po-pay-"+suffix, periodEnd.Add(-30*24*time.Hour))
+		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, psp_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx',$4)`, pmID, merchantID, customer, pspID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9,$10)`,
+			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID, pspID)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'USD','completed',$7,$8)`,
+			uuid.New(), merchantID, customer, priceID, subID, "po-pay-"+suffix, periodEnd.Add(-30*24*time.Hour), pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -257,6 +260,7 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
@@ -265,9 +269,9 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 			productID, "do-prod-"+suffix, "do-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// past_due, grace still open, but next_retry_at NULL: schedule stalled.
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9)`,
-			subID, priceID, productID, "do-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, graceEnd, customer, merchantID)
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9,$10)`,
+			subID, priceID, productID, "do-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, graceEnd, customer, merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {

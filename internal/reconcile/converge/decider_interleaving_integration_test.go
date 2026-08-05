@@ -54,14 +54,15 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 		f := fixture{sub: uuid.New(), railSub: railSub}
 		f.cust = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		prod, price := uuid.New(), uuid.New()
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "il-"+key+"-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, f.sub, merchantID, f.cust, prod, price, railSub, start, periodEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, f.sub, merchantID, f.cust, prod, price, railSub, start, periodEnd, pspID)
 		if withEnt {
 			exec(`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
 			      VALUES ($1,'premium-il-'||$2, $3, $4, $5, 'subscription', $6, $7)`,

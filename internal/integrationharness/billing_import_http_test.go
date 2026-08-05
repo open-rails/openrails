@@ -60,9 +60,14 @@ func TestBillingImportHTTP(t *testing.T) {
 	cancelAt := asOf.Add(-10 * day)
 	subActive, subCancelled := "sub-a-"+sfx, "sub-c-"+sfx
 
+	// or#893: every declared provider row must attribute a PSP.
+	dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
+	dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "ccbill")
+
 	book := billingimport.DeclaredBilling{
-		AsOf:      asOf,
-		Customers: []billingimport.DeclaredCustomer{{Customer: cActive}, {Customer: cCancelled}},
+		AsOf:       asOf,
+		DefaultPSP: billingimport.PSPRef{Key: "nmi"},
+		Customers:  []billingimport.DeclaredCustomer{{Customer: cActive}, {Customer: cCancelled}},
 		Subscriptions: []billingimport.DeclaredSubscription{
 			{
 				SourceID: "runway-" + sfx, Customer: cActive, Price: price, Rail: "nmi",
@@ -71,6 +76,7 @@ func TestBillingImportHTTP(t *testing.T) {
 			{
 				SourceID: "usercancel-" + sfx, Customer: cCancelled, Price: price, Rail: "ccbill",
 				RailSubscriptionID: subCancelled, StartedAt: asOf.Add(-90 * day),
+				PSP:    billingimport.PSPRef{Key: "ccbill"},
 				Cancel: billingimport.CancelEvidence{Kind: "user_cancelled", At: cancelAt},
 			},
 		},

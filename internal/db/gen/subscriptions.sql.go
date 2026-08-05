@@ -118,7 +118,7 @@ INSERT INTO openrails.subscriptions (
     $25, $26,
     COALESCE(NULLIF($27::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($28::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $29
+    $29::uuid
 )
 `
 
@@ -151,7 +151,7 @@ type CreateSubscriptionParams struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	PspID                    *uuid.UUID
+	PspID                    uuid.UUID
 }
 
 // openrails.subscriptions. tier_group is set by the

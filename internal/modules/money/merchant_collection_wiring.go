@@ -113,7 +113,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
 	mid := merchant.ID(method.MerchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.PspID)
+	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, &method.PspID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -210,7 +210,7 @@ func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Co
 	if !rails.IsNMI(models.Rail(rail)) {
 		return CollectionVerifyResult{}, nil
 	}
-	client, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, method.PspID)
+	client, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
 	if err != nil {
 		return CollectionVerifyResult{}, err
 	}

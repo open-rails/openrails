@@ -684,6 +684,20 @@ func (s *Service) ResolvePSPID(ctx context.Context, id merchant.ID, rail, accoun
 	return pid, true, nil
 }
 
+// ResolveActivePSPIDForRail returns the PSP whose credentials the account-less
+// webhook routes verify with — the same scope LoadStripeCredentials /
+// LoadNMIWebhookSigningSecret select. or#893: rows an inbound event creates must
+// be attributed, and the account whose secret validated the signature IS the
+// attribution; this derives it from that one source rather than guessing.
+// ok=false when nothing is armed on the rail.
+func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id merchant.ID, rail string) (uuid.UUID, bool, error) {
+	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, s.providerEnvironment)
+	if err != nil || !ok {
+		return uuid.Nil, false, err
+	}
+	return scope.id, scope.id != uuid.Nil, nil
+}
+
 // RailMerchantAccountIdentity is the globally unique rail-native provider
 // account identity plus the merchant that owns it.
 type RailMerchantAccountIdentity struct {

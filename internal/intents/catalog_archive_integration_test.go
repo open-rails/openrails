@@ -53,6 +53,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
+		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
@@ -132,6 +133,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	params := EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
+		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),

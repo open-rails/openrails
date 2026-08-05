@@ -50,7 +50,10 @@ type DeclaredSubscriptionFact struct {
 	PriceID            uuid.UUID
 	Rail               string
 	RailSubscriptionID string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
-	PspID              *uuid.UUID
+	// PspID is the PSP that owns the declared row. Required (or#893): the
+	// import must state which of the merchant's accounts the legacy book came
+	// from — there is no unbound lane left to fall into.
+	PspID              uuid.UUID
 	UserEmail          *string
 	StartedAt          time.Time
 	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)
@@ -138,6 +141,16 @@ func ImportDeclaredSubscriptions(
 	}
 	if err := coverage.validate(len(facts)); err != nil {
 		return nil, err
+	}
+	// or#893: every declared row is a provider row and must name the account it
+	// came from. billingimport resolves this from the row's `psp` or the book's
+	// `default_psp` and refuses first; this is the seam's own guard, so a direct
+	// caller cannot slip an unattributed fact past the DB constraint with a
+	// bare FK error.
+	for i := range facts {
+		if facts[i].PspID == uuid.Nil {
+			return nil, fmt.Errorf("declared import: subscription %q names no PSP; a declared provider row must state the account it came from", facts[i].SourceID)
+		}
 	}
 	out := make(map[string]DeclaredOutcome, len(facts))
 	q := database.Gen(ctx)

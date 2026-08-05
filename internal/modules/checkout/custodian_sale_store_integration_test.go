@@ -58,13 +58,18 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 		ON CONFLICT (kind, environment, account_id) DO UPDATE SET settings = EXCLUDED.settings
 		RETURNING id
 	`, dbtest.TestMerchantID.String(), tenantID).Scan(&custodianID))
+	var primaryPSPID uuid.UUID
 	for _, gateway := range []string{primaryGateway, backupGateway} {
-		_, err := pool.Exec(ctx, `
+		var pspID uuid.UUID
+		require.NoError(t, pool.QueryRow(ctx, `
 			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
 			VALUES ($1::uuid, 'nmi', 'test', $2, false, '{"source":"test_880"}'::jsonb, $3::uuid)
 			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false, custodian_id = EXCLUDED.custodian_id
-		`, dbtest.TestMerchantID.String(), gateway, custodianID)
-		require.NoError(t, err)
+			RETURNING id
+		`, dbtest.TestMerchantID.String(), gateway, custodianID).Scan(&pspID))
+		if gateway == primaryGateway {
+			primaryPSPID = pspID
+		}
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.psps WHERE account_id = ANY($1)", []string{primaryGateway, backupGateway})
@@ -148,6 +153,7 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 		Provider:   string(models.RailNMI),
 		IntentType: TypeCustodianSale,
 		PriceID:    &priceID,
+		PspID:      primaryPSPID,
 		Payload: CustodianSalePayload{
 			TokenIntentID: bt.intentID,
 			AmountMicros:  1_990_000,

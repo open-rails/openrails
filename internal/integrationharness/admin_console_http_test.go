@@ -193,10 +193,11 @@ func TestAdminCustomersSearch(t *testing.T) {
 		productID, "cust-search-"+uuid.NewString(), uuid.UUID(dbtest.TestMerchantID))
 	require.NoError(t, err)
 	aliceEmail := fmt.Sprintf("alice-%s@example.test", uuid.NewString()[:8])
+	aliceMerchantPSP := dbtest.EnsureTestPSP(ctx, t, pool, uuid.UUID(dbtest.TestMerchantID), "nmi")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id)
-		 VALUES ($1, 'active', 'nmi', $2, $3, $4)`,
-		productID, aliceEmail, uuid.UUID(dbtest.TestMerchantID), alice)
+		`INSERT INTO openrails.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id, psp_id)
+		 VALUES ($1, 'active', 'nmi', $2, $3, $4, $5)`,
+		productID, aliceEmail, uuid.UUID(dbtest.TestMerchantID), alice, aliceMerchantPSP)
 	require.NoError(t, err)
 
 	type listResp struct {

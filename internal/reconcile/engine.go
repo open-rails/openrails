@@ -756,7 +756,7 @@ func bindApplyActions(findings []Finding, psp uuid.UUID) {
 			a.RecordRefund.PspID = pspID
 		}
 		if a.Materialize != nil {
-			a.Materialize.PspID = pspID
+			a.Materialize.PspID = psp
 			if a.Materialize.Backfill != nil {
 				a.Materialize.Backfill.PspID = pspID
 			}

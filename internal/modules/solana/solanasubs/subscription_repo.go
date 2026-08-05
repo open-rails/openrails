@@ -146,7 +146,9 @@ func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Tim
 	}
 	out := make([]*models.SolanaSubscription, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, solanaSubscriptionFromGen(row))
+		sub := solanaSubscriptionFromGen(row.OpenrailsSolanaSubscription)
+		sub.PspID = row.PspID
+		out = append(out, sub)
 	}
 	return out, nil
 }

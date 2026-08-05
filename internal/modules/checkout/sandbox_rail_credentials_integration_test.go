@@ -32,12 +32,15 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	msvc, err := merchants.NewService(dbp, store, config.ExpectedProviderEnvironment(true))
 	require.NoError(t, err)
 
-	seed := func(rail, accountID string) {
+	// The row carries its manifest key so the assertion below can name THIS
+	// account instead of relying on it being the newest one in a database other
+	// tests also seed accounts into.
+	seed := func(rail, key, accountID string) {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
-			VALUES ($1::uuid, $2, 'test', $3, false, '{"source":"test_681"}'::jsonb)
-			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
-		`, dbtest.TestMerchantID.String(), rail, accountID)
+			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key, archived, evidence)
+			VALUES ($1::uuid, $2, 'test', $3, $4, false, '{"source":"test_681"}'::jsonb)
+			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false, key = EXCLUDED.key
+		`, dbtest.TestMerchantID.String(), rail, accountID, key)
 		require.NoError(t, err)
 	}
 	putSecret := func(rail, accountID, key, value string) {
@@ -48,18 +51,19 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	}
 
 	const nmiAccount = "sandbox-gw-681"
-	seed("nmi", nmiAccount)
+	const nmiKey = "sandbox681"
+	seed("nmi", nmiKey, nmiAccount)
 	putSecret("nmi", nmiAccount, "security_key", "nmi-sandbox-key-681")
 
 	const ccbillAccount = "945284-0001"
-	seed("ccbill", ccbillAccount)
+	seed("ccbill", "ccbill", ccbillAccount)
 	putSecret("ccbill", ccbillAccount, "salt", "ccbill-sandbox-salt-681")
 
 	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}}
 	svc.SetMerchantSecretStore(store)
 	svc.SetRailMerchantAccountSecretResolver(msvc)
 
-	client, err := svc.resolveNMIClient(ctx, "nmi")
+	client, err := svc.resolveNMIClient(ctx, nmiKey)
 	require.NoError(t, err)
 	require.Equal(t, "nmi-sandbox-key-681", client.SecurityKey)
 

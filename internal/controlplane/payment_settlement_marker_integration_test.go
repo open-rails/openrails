@@ -49,6 +49,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custID, mID)
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'PS marker', $3)`, prodID, "psmark-p-"+suffix, mID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false)`, priceID, prodID, mID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, super, mID, "nmi")
 
 	// Everything runs as openrails_app under the merchant GUC — the same
 	// NOBYPASSRLS path production writes on.
@@ -66,9 +67,9 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 		t.Helper()
 		inMerchantTx(func(tx gen.DBTX) {
 			_, err := tx.Exec(ctx, `INSERT INTO openrails.payments
-				(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
-				VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', $7, $8)`,
-				payID, mID, custID, priceID, txnID, amount, status, movement)
+				(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement, psp_id)
+				VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', $7, $8, $9)`,
+				payID, mID, custID, priceID, txnID, amount, status, movement, pspID)
 			require.NoError(t, err)
 		})
 	}
@@ -133,8 +134,8 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	_, err = badTx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, mID.String())
 	require.NoError(t, err)
 	_, err = badTx.Exec(ctx, `INSERT INTO openrails.payments
-		(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
-		VALUES ($1, $2, $3, $4, 'nmi', $5, 100, 100, 'USD', 'completed', 'maybe')`,
-		uuid.New(), mID, custID, priceID, "bogus-"+suffix)
+		(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement, psp_id)
+		VALUES ($1, $2, $3, $4, 'nmi', $5, 100, 100, 'USD', 'completed', 'maybe', $6)`,
+		uuid.New(), mID, custID, priceID, "bogus-"+suffix, pspID)
 	require.Error(t, err, "money_movement is CHECK-constrained to rail|none")
 }

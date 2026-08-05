@@ -191,13 +191,14 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1,$2) RETURNING id`,
 		f.merchantID, subject).Scan(&customerID))
+	pspID := dbtest.EnsureTestPSP(ctx, t, f.pool, f.merchantID, rail)
 	var pmID *uuid.UUID
 	if withPM {
 		id := uuid.New()
 		_, err := f.pool.Exec(ctx, `
-			INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			id, customerID, rail, "cust-"+uuid.NewString()[:8], "init-"+uuid.NewString()[:8], "anchor-"+uuid.NewString()[:8], f.merchantID)
+			INSERT INTO openrails.payment_methods (id, customer_id, rail, psp_id, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			id, customerID, rail, pspID, "cust-"+uuid.NewString()[:8], "init-"+uuid.NewString()[:8], "anchor-"+uuid.NewString()[:8], f.merchantID)
 		require.NoError(t, err)
 		pmID = &id
 	}
@@ -205,9 +206,9 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	now := f.clock.Now()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
-		VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$8) RETURNING id`,
-		f.merchantID, customerID, productID, priceID, rail, railSubID, pmID, now, periodEnd).Scan(&subID))
+		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
+		VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$9) RETURNING id`,
+		f.merchantID, customerID, productID, priceID, rail, pspID, railSubID, pmID, now, periodEnd).Scan(&subID))
 	return subID, railSubID
 }
 

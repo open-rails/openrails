@@ -17,6 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const stripeRailName = "stripe"
@@ -176,6 +178,27 @@ func Run(
 	if rt == nil {
 		return nil, fmt.Errorf("reconcile: runtime unavailable")
 	}
+	// or#893: every row this backfill writes (payments, payment methods,
+	// subscriptions) is provider-bound and must name the account it came from.
+	// This pass reads ONE Stripe account — the merchant's armed one, the same
+	// scope the listers were built from — so that account is the attribution.
+	// Fail closed: without it there is nothing honest to stamp.
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rt.Merchants == nil {
+		return nil, fmt.Errorf("reconcile: merchant PSP registry unavailable; cannot attribute the rows this backfill writes")
+	}
+	pspID, ok, err := rt.Merchants.ResolveActivePSPIDForRail(ctx, mid, stripeRailName)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: resolve stripe PSP: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("reconcile: merchant %s has no armed stripe PSP; refusing to write unattributed provider rows", mid)
+	}
+	ctx = db.WithPSPID(ctx, pspID)
+
 	report := &Report{}
 
 	if err := reconcileSubscriptions(ctx, rt, subLister, opts, report); err != nil {

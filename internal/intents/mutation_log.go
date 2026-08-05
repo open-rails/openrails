@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -24,7 +25,7 @@ const (
 type MutationLogParams struct {
 	MerchantID       uuid.UUID
 	Provider         string
-	PspID            *uuid.UUID
+	PspID            uuid.UUID
 	ProviderIntentID *uuid.UUID
 	IntentType       string
 	IdempotencyKey   string
@@ -46,6 +47,9 @@ var (
 func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) error {
 	if p.MerchantID == uuid.Nil || p.Provider == "" || p.Phase == "" {
 		return fmt.Errorf("intents: mutation log requires merchant_id, provider, and phase")
+	}
+	if p.PspID == uuid.Nil {
+		return fmt.Errorf("intents: mutation log for %s: %w", p.Provider, db.ErrNoPSPInContext)
 	}
 	var reason *string
 	if p.Reason != "" {

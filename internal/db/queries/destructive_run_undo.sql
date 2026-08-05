@@ -59,18 +59,25 @@ SELECT
         AND b.restored_at IS NULL
         AND s.deleted_at IS NOT NULL)::bigint AS subscriptions_tombstoned;
 
--- name: CountNullPSPBlindSpot :one
--- or#859 §3.2, hole 1: `psp_id` is NULLABLE on all eight PSP-tagged tables, so a
--- PSP-scoped predicate silently SKIPS legacy rows. For a prune that nullability
--- is a safety property; for a rollback it is a coverage hole, and the rule is
--- that the undo reports it as an explicit count rather than excluding it in
--- silence. Live rows only — a tombstoned row is already accounted for by
--- whichever run took it.
+-- name: CountUnattributedProviderRows :one
+-- or#859 §3.2, hole 1, CLOSED by or#893: PSP provenance is required on every
+-- PROVIDER row, so a PSP-scoped predicate can no longer skip one. This is
+-- therefore no longer a blind-spot count to report — it is the INVARIANT,
+-- asserted where the rollback relies on it. Every count is structurally zero
+-- (NOT NULL, or payments' CHECK); a non-zero answer means the schema was
+-- reopened underneath this code and the undo refuses rather than silently
+-- under-covering.
+--
+-- `payments` excludes the OFF-RAIL channels (manual/admin). Those rows carry no
+-- PSP because no provider took the money, so no PSP-scoped operation was ever
+-- supposed to reach them — counting them here would report the exemption as a
+-- hole. Live rows only.
 SELECT
     (SELECT count(*) FROM openrails.subscriptions
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*) FROM openrails.payments
-      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS payments,
+      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL
+        AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
     (SELECT count(*) FROM openrails.checkout_sessions
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
     -- payment_methods carries no soft-delete column; every row is live.

@@ -27,9 +27,16 @@ SELECT * FROM openrails.solana_subscriptions WHERE subscription_pda = $1;
 SELECT * FROM openrails.solana_subscriptions WHERE subscription_id = $1;
 
 -- name: ListDueSolanaSubscriptions :many
-SELECT * FROM openrails.solana_subscriptions
-WHERE status = 'active' AND next_pull_at <= sqlc.arg(now)::timestamptz
-ORDER BY merchant_id ASC, next_pull_at ASC
+-- or#893: the crank's recurring-pull intent must name the PSP it executes
+-- against, and the local subscription is where that provenance lives.
+SELECT sqlc.embed(s), sub.psp_id
+FROM openrails.solana_subscriptions s
+JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
+-- A subscription a prune tombstoned is not due for anything: the join is a
+-- LIVE read, so it carries the or#858 predicate.
+WHERE s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
+  AND sub.deleted_at IS NULL
+ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: AdvanceSolanaSubscriptionAfterPull :exec

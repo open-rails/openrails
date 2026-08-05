@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -39,10 +40,12 @@ func TestEnsureChargePayment_NoCurrencyWritesNoRow(t *testing.T) {
 		productID, "cur-prod-"+suffix, merchantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, merchantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "stripe")
 	exec(`INSERT INTO openrails.subscriptions
-	        (id, price_id, product_id, status, rail, rail_subscription_id, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6)`,
-		subID, priceID, productID, "sub-"+suffix, customerID, merchantID)
+	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id, customer_id, merchant_id)
+	      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $7)`,
+		subID, priceID, productID, pspID, "sub-"+suffix, customerID, merchantID)
+	ctx = db.WithPSPID(ctx, pspID)
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, stmt := range []string{

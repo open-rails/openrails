@@ -105,10 +105,12 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailNMI,
+		PspID:                pspID,
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
@@ -121,6 +123,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           paymentMethod.CustomerID,
 		Rail:                 string(paymentMethod.Rail),
+		PspID:                pspID,
 		RailCustomerRef:      paymentMethod.RailCustomerRef,
 		RailMethodRef:        paymentMethod.RailMethodRef,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
@@ -141,6 +144,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		PriceID:               priceID,
 		Status:                models.StatusPastDue,
 		Rail:                  models.RailNMI,
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart,
@@ -160,6 +164,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(sub.Status),
 		Rail:                  string(sub.Rail),
+		PspID:                 pspID,
 		RailSubscriptionID:    sub.RailSubscriptionID,
 		PaymentMethodID:       sub.PaymentMethodID,
 		CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt,
@@ -287,8 +292,10 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -302,6 +309,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: "nmi",
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
@@ -319,9 +327,9 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.rail_intents
-		  (rail, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
-		VALUES ('nmi', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
-		intents.TypeManualRebill, subID, payloadJSON,
+		  (rail, psp_id, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
+		VALUES ('nmi', $1, $2, $3, $4, $5, 'succeeded', 'system', now(), $6, $7)`,
+		pspID, intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "nmi", orderRef, 0),
 		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)

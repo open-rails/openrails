@@ -112,19 +112,21 @@ func seedMerchantBillingRows(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	`, out.priceID, mid.UUID(), out.productID, "isoprice-"+suffix)
 	require.NoError(t, err, "seed price")
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid.UUID(), "nmi")
+
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.subscriptions
-			(id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6)
-	`, out.subscriptionID, mid.UUID(), out.customerID, out.productID, out.priceID, "isosub-"+suffix)
+			(id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, psp_id)
+		VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6, $7)
+	`, out.subscriptionID, mid.UUID(), out.customerID, out.productID, out.priceID, "isosub-"+suffix, pspID)
 	require.NoError(t, err, "seed subscription")
 
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.payments
 			(id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id,
-			 amount, list_amount, currency, status)
-		VALUES ($1, $2, $3, $4, $5, 'nmi', $6, 1000000, 1000000, 'USD', 'completed')
-	`, out.paymentID, mid.UUID(), out.customerID, out.priceID, out.subscriptionID, "isotxn-"+suffix)
+			 amount, list_amount, currency, status, psp_id)
+		VALUES ($1, $2, $3, $4, $5, 'nmi', $6, 1000000, 1000000, 'USD', 'completed', $7)
+	`, out.paymentID, mid.UUID(), out.customerID, out.priceID, out.subscriptionID, "isotxn-"+suffix, pspID)
 	require.NoError(t, err, "seed payment")
 
 	return out

@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 // (Removed) GrantSource: use EntitlementSourceType instead (admin, grace, one_off, subscription)
 
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
@@ -41,3 +43,16 @@ const (
 	ChannelAdmin  Channel = "admin"  // Admin-initiated payment (comp / manual entry by an admin)
 	ChannelManual Channel = "manual" // Off-channel payment recorded by an admin (cash, bank transfer, …)
 )
+
+// IsOffRailChannel reports whether a value in a `rail` column is a Channel
+// rather than a Rail. It is the one place that decides which rows may carry no
+// PSP: or#893 requires provider provenance on every real rail, and a channel
+// has no provider to name. Mirrors the DB CHECKs
+// payments_psp_required_on_rail / invoice_payments_psp_required_on_rail.
+func IsOffRailChannel(rail string) bool {
+	switch Channel(strings.ToLower(strings.TrimSpace(rail))) {
+	case ChannelAdmin, ChannelManual:
+		return true
+	}
+	return false
+}

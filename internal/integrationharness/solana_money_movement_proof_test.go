@@ -305,15 +305,16 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 
 	// Payment state: a Solana payment row whose only on-chain linkage is the
 	// reference id, while the benefit snapshot (entitlements) is held in Postgres.
+	solanaPSP := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "solana")
 	var paymentID uuid.UUID
 	var snapshot []byte
 	err = pool.QueryRow(ctx, `
 		INSERT INTO openrails.payments
-			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot)
-		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb)
+			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot, psp_id)
+		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb, $7)
 		RETURNING id, entitlements_spec_snapshot
 	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
-		`{"entitlements":["`+entitlement+`"]}`).Scan(&paymentID, &snapshot)
+		`{"entitlements":["`+entitlement+`"]}`, solanaPSP).Scan(&paymentID, &snapshot)
 	require.NoError(t, err, "Solana payment + benefit snapshot recorded in openrails.payments")
 	require.NotEqual(t, uuid.Nil, paymentID)
 	require.Contains(t, string(snapshot), entitlement,

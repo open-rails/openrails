@@ -8,6 +8,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -154,6 +155,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	// Pin the intent's merchant so handler execution (and any merchant-scoped DB
 	// write it triggers, e.g. membership renewal) resolves it (#336).
 	ctx = merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+	// or#893: and its PSP. The intent row records the account this write is
+	// addressed to, so every mirror row the handler creates — the charge, the
+	// subscription, the vaulted method — inherits that provenance instead of
+	// having to re-resolve (or fail to).
+	ctx = db.WithPSPID(ctx, intent.PspID)
 
 	handler := r.Registry.Lookup(intent.IntentType)
 	if handler == nil {
@@ -276,8 +282,11 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
-		// Pin the intent's merchant for merchant-scoped verify/repair writes (#336).
+		// Pin the intent's merchant for merchant-scoped verify/repair writes
+		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
+		// writes the same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+		ctx = db.WithPSPID(ctx, intent.PspID)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,

@@ -33,15 +33,17 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 
 	pmRepo := NewPaymentMethodRepo(dbi)
 	now := time.Now().UTC().Truncate(time.Second)
+	nmiPSP := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, string(models.RailNMI))
+	mobiusPSP := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "mobius")
 
 	// A method with charge history, and a second method with none.
 	charged := &models.PaymentMethod{
-		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
+		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI, PspID: nmiPSP,
 		RailCustomerRef: "vault-charged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, charged))
 	uncharged := &models.PaymentMethod{
-		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
+		ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI, PspID: nmiPSP,
 		RailCustomerRef: "vault-uncharged-" + uuid.NewString(), CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, pmRepo.Create(ctx, uncharged))
@@ -58,18 +60,18 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 		priceID, productID, merchantID, 1000, "USD")
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions (id, product_id, price_id, payment_method_id, rail, merchant_id, customer_id)
-		 VALUES ($1,$2,$3,$4,'mobius',$5,$6)`,
-		subID, productID, priceID, charged.ID, merchantID, customerID)
+		`INSERT INTO openrails.subscriptions (id, product_id, price_id, payment_method_id, rail, psp_id, merchant_id, customer_id)
+		 VALUES ($1,$2,$3,$4,'mobius',$5,$6,$7)`,
+		subID, productID, priceID, charged.ID, mobiusPSP, merchantID, customerID)
 	require.NoError(t, err)
 
 	// Older successful charge, then a newer failed charge: the newer one must win.
 	insertPayment := func(txID string, status string, purchasedAt time.Time) {
 		_, e := pool.Exec(ctx,
 			`INSERT INTO openrails.payments
-			   (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, merchant_id, customer_id, purchased_at)
-			 VALUES ($1,$2,'mobius',$3,$4,$4,'USD',$5,$6,$7,$8,$9)`,
-			uuid.New(), priceID, txID, 1000, status, subID, merchantID, customerID, purchasedAt)
+			   (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, subscription_id, merchant_id, customer_id, purchased_at)
+			 VALUES ($1,$2,'mobius',$3,$4,$5,$5,'USD',$6,$7,$8,$9,$10)`,
+			uuid.New(), priceID, mobiusPSP, txID, 1000, status, subID, merchantID, customerID, purchasedAt)
 		require.NoError(t, e)
 	}
 	insertPayment("tx-old-"+uuid.NewString()[:8], "completed", now.Add(-48*time.Hour))
@@ -107,11 +109,12 @@ func TestMultiInstrumentPerVaultUniqueness(t *testing.T) {
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
 	now := time.Now().UTC().Truncate(time.Second)
 	r := NewPaymentMethodRepo(dbi)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 
 	vault := "cv-" + uuid.NewString()
 	mk := func(methodRef string) *models.PaymentMethod {
 		return &models.PaymentMethod{
-			ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI,
+			ID: uuid.New(), CustomerID: customerID, Rail: models.RailNMI, PspID: pspID,
 			RailCustomerRef: vault, RailMethodRef: methodRef, CreatedAt: now, UpdatedAt: now,
 		}
 	}

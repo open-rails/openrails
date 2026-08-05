@@ -89,9 +89,9 @@ func (fx *findingsFixture) seedActiveCCBillSubscription(psid string) uuid.UUID {
 	now := time.Now().UTC()
 	fx.exec(`INSERT INTO openrails.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
-	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	        VALUES ($1, $2, $3, 'active', 'ccbill', $4, $5, $6, $5, $7, $8)`,
-		subID, fx.price, fx.product, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant)
+	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	        VALUES ($1, $2, $3, 'active', 'ccbill', $4, $5, $6, $5, $7, $8, $9)`,
+		subID, fx.price, fx.product, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant, fx.pspFor("ccbill"))
 	return subID
 }
 
@@ -157,9 +157,9 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	payID := uuid.New()
 	txnID := "cctxn-" + uuid.NewString()[:8]
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement)
-	        VALUES ($1, $2, 'ccbill', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
-		payID, fx.price, txnID, subID, fx.customer, fx.merchant)
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement, psp_id)
+	        VALUES ($1, $2, 'ccbill', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
+		payID, fx.price, txnID, subID, fx.customer, fx.merchant, fx.pspFor("ccbill"))
 	refundFinding := fx.seedFinding("consistency.duplicate.ownership", "cc-refund-"+uuid.NewString()[:8], "critical",
 		"refund the duplicate ccbill charge", &recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,

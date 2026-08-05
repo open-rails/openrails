@@ -47,6 +47,7 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 		require.NoError(t, err)
 	}
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, m.id, "breaker-"+sfx)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, m.id, "mobius")
 	productID, priceID := uuid.New(), uuid.New()
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "breaker-prod-"+sfx, m.id)
@@ -64,13 +65,14 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'expired', $7, $8, $9)`,
+		         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'expired', $7, $8, $9, $10)`,
 			subID, priceID, productID, psid,
-			now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), now, custID, m.id)
+			now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), now, custID, m.id, pspID)
 		row, err := store.Enqueue(ctx, EnqueueParams{
 			MerchantID:     m.id,
 			Provider:       "mobius",
+			PspID:          pspID,
 			IntentType:     TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
 			Payload:        NMIDeletePayload{UserID: custID.String(), RailSubscriptionID: psid},

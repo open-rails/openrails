@@ -207,7 +207,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $20, $21, $22,
-    $23,
+    $23::uuid,
     $24, $25, $26, $27,
     $28,
     $29::text
@@ -311,7 +311,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $20, $21, $22,
-    $23,
+    $23::uuid,
     $24, $25, $26, $27,
     $28,
     $29::text

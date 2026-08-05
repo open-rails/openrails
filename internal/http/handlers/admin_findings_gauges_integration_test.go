@@ -133,10 +133,10 @@ func TestFindingsGaugesVerificationPressure(t *testing.T) {
 		now := time.Now().UTC()
 		fx.exec(`INSERT INTO openrails.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
-		           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-		        VALUES ($1, $2, $3, 'unknown', 'nmi', $4, $5, $6, $5, $7, $8)`,
+		           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+		        VALUES ($1, $2, $3, 'unknown', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
 			subID, priceID, productID, "vp-"+uuid.NewString()[:8],
-			now.Add(-30*24*time.Hour), now.Add(-pastBy), fx.customer, fx.merchant)
+			now.Add(-30*24*time.Hour), now.Add(-pastBy), fx.customer, fx.merchant, fx.pspFor("nmi"))
 		return subID
 	}
 	oldest := seedUnknown(fx.product, fx.price, 3*time.Hour)
@@ -167,9 +167,9 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	now := time.Now().UTC()
 	seedPay := func(id uuid.UUID, txn string, at time.Time) {
 		fx.exec(`INSERT INTO openrails.payments
-		          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
-		        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
-			id, fx.price, txn, at, fx.customer, fx.merchant)
+		          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
+		        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
+			id, fx.price, txn, at, fx.customer, fx.merchant, fx.pspFor("nmi"))
 	}
 	// Two months apart: invisible to the month-scoped provider_charge check.
 	seedPay(pay1, "dup-1-"+uuid.NewString()[:8], now.Add(-65*24*time.Hour))
@@ -268,9 +268,9 @@ func TestFindingsGaugesOrphanedMembersDetectorEndToEnd(t *testing.T) {
 	_, priceID := fx.seedGrantableProduct("orph-feat-"+uuid.NewString()[:8], 720)
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail')`,
-		payID, priceID, "orphpay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail', $6)`,
+		payID, priceID, "orphpay-"+uuid.NewString()[:8], fx.customer, fx.merchant, fx.pspFor("nmi"))
 
 	fx.sweep()
 
@@ -324,11 +324,11 @@ func TestFindingsFreeloaderEpisodes(t *testing.T) {
 		fx.exec(`INSERT INTO openrails.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
-		           next_retry_at, cancelled_at, cancel_type, customer_id, merchant_id)
-		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12,$13)`,
+		           next_retry_at, cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
+		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12,$13,$14)`,
 			subID, priceID, productID, status, "fl-"+uuid.NewString()[:8],
 			now.Add(-40*24*time.Hour), periodEnd, endedAt, nextRetry, cancelledAt, cancelType,
-			fx.customer, fx.merchant)
+			fx.customer, fx.merchant, fx.pspFor("nmi"))
 		return subID
 	}
 	seedWindow := func(feature string, subID uuid.UUID, revokedAt *time.Time) {
@@ -423,10 +423,10 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 		fx.exec(`INSERT INTO openrails.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
-		           cancelled_at, cancel_type, customer_id, merchant_id)
-		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12)`,
+		           cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
+		        VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,$9,$10,$11,$12,$13)`,
 			subID, priceID, productID, status, "orph-"+uuid.NewString()[:8],
-			periodStart, periodEnd, endedAt, cancelledAt, cancelType, fx.customer, fx.merchant)
+			periodStart, periodEnd, endedAt, cancelledAt, cancelType, fx.customer, fx.merchant, fx.pspFor("nmi"))
 		return subID
 	}
 
@@ -444,9 +444,9 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 	// c: completed one-off purchase (30-day window promised), no window -> OPEN, ~3 days.
 	_, prC := fx.seedGrantableProduct("oe-c-"+sfx, 720)
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail')`,
-		uuid.New(), prC, "oe-pay-"+uuid.NewString()[:8], fx.customer, fx.merchant)
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail', $6)`,
+		uuid.New(), prC, "oe-pay-"+uuid.NewString()[:8], fx.customer, fx.merchant, fx.pspFor("nmi"))
 	// d (negative): active sub fully covered by a standing window.
 	pD, prD := fx.seedGrantableProduct("oe-d-"+sfx, 720)
 	subD := seedSub(pD, prD, "active", now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), nil)

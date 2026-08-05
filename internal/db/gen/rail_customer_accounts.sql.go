@@ -12,27 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const getRailCustomerAccountID = `-- name: GetRailCustomerAccountID :one
-SELECT account_id FROM openrails.rail_customer_accounts
-WHERE customer_id = $1 AND rail = $2
-LIMIT 1
-`
-
-type GetRailCustomerAccountIDParams struct {
-	CustomerID uuid.UUID
-	Rail       string
-}
-
-func (q *Queries) GetRailCustomerAccountID(ctx context.Context, arg GetRailCustomerAccountIDParams) (string, error) {
-	row := q.db.QueryRow(ctx, getRailCustomerAccountID, arg.CustomerID, arg.Rail)
-	var account_id string
-	err := row.Scan(&account_id)
-	return account_id, err
-}
-
 const getRailCustomerAccountIDForMerchant = `-- name: GetRailCustomerAccountIDForMerchant :one
 SELECT account_id FROM openrails.rail_customer_accounts
 WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3
+ORDER BY updated_at DESC, id DESC
 LIMIT 1
 `
 
@@ -42,6 +25,9 @@ type GetRailCustomerAccountIDForMerchantParams struct {
 	Rail       string
 }
 
+// Rail-scoped read for callers that legitimately hold no PSP (the customer
+// portal, invoice collection). Deterministic by recency: with two PSPs on a
+// rail this returns the most recently written mapping, never an arbitrary one.
 func (q *Queries) GetRailCustomerAccountIDForMerchant(ctx context.Context, arg GetRailCustomerAccountIDForMerchantParams) (string, error) {
 	row := q.db.QueryRow(ctx, getRailCustomerAccountIDForMerchant, arg.MerchantID, arg.CustomerID, arg.Rail)
 	var account_id string
@@ -49,20 +35,55 @@ func (q *Queries) GetRailCustomerAccountIDForMerchant(ctx context.Context, arg G
 	return account_id, err
 }
 
-const getRailCustomerAccountSubject = `-- name: GetRailCustomerAccountSubject :one
-SELECT customer_id::text FROM openrails.rail_customer_accounts
-WHERE account_id = $1 AND rail = $2
-ORDER BY updated_at DESC
-LIMIT 1
+const getRailCustomerAccountIDForPSP = `-- name: GetRailCustomerAccountIDForPSP :one
+SELECT account_id FROM openrails.rail_customer_accounts
+WHERE merchant_id = $1::uuid
+  AND customer_id = $2::uuid
+  AND rail = $3::text
+  AND psp_id = $4::uuid
 `
 
-type GetRailCustomerAccountSubjectParams struct {
-	AccountID string
-	Rail      string
+type GetRailCustomerAccountIDForPSPParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Rail       string
+	PspID      uuid.UUID
 }
 
-func (q *Queries) GetRailCustomerAccountSubject(ctx context.Context, arg GetRailCustomerAccountSubjectParams) (string, error) {
-	row := q.db.QueryRow(ctx, getRailCustomerAccountSubject, arg.AccountID, arg.Rail)
+func (q *Queries) GetRailCustomerAccountIDForPSP(ctx context.Context, arg GetRailCustomerAccountIDForPSPParams) (string, error) {
+	row := q.db.QueryRow(ctx, getRailCustomerAccountIDForPSP,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Rail,
+		arg.PspID,
+	)
+	var account_id string
+	err := row.Scan(&account_id)
+	return account_id, err
+}
+
+const getRailCustomerAccountSubjectForPSP = `-- name: GetRailCustomerAccountSubjectForPSP :one
+SELECT customer_id::text FROM openrails.rail_customer_accounts
+WHERE merchant_id = $1::uuid
+  AND psp_id = $2::uuid
+  AND account_id = $3::text
+  AND rail = $4::text
+`
+
+type GetRailCustomerAccountSubjectForPSPParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	AccountID  string
+	Rail       string
+}
+
+func (q *Queries) GetRailCustomerAccountSubjectForPSP(ctx context.Context, arg GetRailCustomerAccountSubjectForPSPParams) (string, error) {
+	row := q.db.QueryRow(ctx, getRailCustomerAccountSubjectForPSP,
+		arg.MerchantID,
+		arg.PspID,
+		arg.AccountID,
+		arg.Rail,
+	)
 	var customer_id string
 	err := row.Scan(&customer_id)
 	return customer_id, err
@@ -71,9 +92,9 @@ func (q *Queries) GetRailCustomerAccountSubject(ctx context.Context, arg GetRail
 const upsertRailCustomerAccount = `-- name: UpsertRailCustomerAccount :exec
 
 INSERT INTO openrails.rail_customer_accounts (
-    id, merchant_id, customer_id, rail, account_id, created_at, updated_at
-) VALUES ($1, $7::uuid, $2, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id, rail) DO UPDATE SET
+    id, merchant_id, customer_id, rail, psp_id, account_id, created_at, updated_at
+) VALUES ($1, $7::uuid, $2, $3, $8::uuid, $4, $5, $6)
+ON CONFLICT (merchant_id, customer_id, rail, psp_id) DO UPDATE SET
     account_id = EXCLUDED.account_id,
     updated_at = EXCLUDED.updated_at
 `
@@ -86,9 +107,13 @@ type UpsertRailCustomerAccountParams struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
+	PspID      uuid.UUID
 }
 
 // openrails.rail_customer_accounts: customer <-> rail customer mapping.
+// or#893: the mapping is PER-PSP. Two Stripe accounts on one merchant hold two
+// independent rows for the same person; before this, whichever account's
+// webhook landed last overwrote the other.
 func (q *Queries) UpsertRailCustomerAccount(ctx context.Context, arg UpsertRailCustomerAccountParams) error {
 	_, err := q.db.Exec(ctx, upsertRailCustomerAccount,
 		arg.ID,
@@ -98,6 +123,7 @@ func (q *Queries) UpsertRailCustomerAccount(ctx context.Context, arg UpsertRailC
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.MerchantID,
+		arg.PspID,
 	)
 	return err
 }

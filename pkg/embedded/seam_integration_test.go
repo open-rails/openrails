@@ -54,14 +54,16 @@ func TestEmbeddedSeam_ImportAdminGrantsThenConverge(t *testing.T) {
 			_, e := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, e)
 		}
+		mobiusPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
+		solanaPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "e2e-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7)`, sub, merchantID, custSub, prod, price, start, end)
-		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7)`,
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, sub, merchantID, custSub, prod, price, start, end, mobiusPSP)
+		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,metadata,psp_id)
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, custWallet, price, "e2e-w-"+sfx, purchased,
-			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
+			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, solanaPSP)
 		return nil
 	}))
 

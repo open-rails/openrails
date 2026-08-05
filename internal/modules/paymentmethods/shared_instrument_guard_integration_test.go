@@ -50,11 +50,21 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 
 	sharedRailCustomerRef := "vault-shared-" + uuid.NewString()[:8]
 	pmRepo := NewPaymentMethodRepo(database)
+	// account_id must match the "mobius-account" secret this test arms below —
+	// GetPSP resolves the NMI client off the psps row's OWN account_id, not off
+	// vaultStaticProviderSecretResolver, once a payment method carries a psp_id.
+	var pspID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key)
+		VALUES ($1, 'nmi', 'live', 'mobius-account', 'mobius-account')
+		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
+		RETURNING id`, dbtest.TestMerchantID.UUID()).Scan(&pspID))
 	mk := func(methodRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
+			PspID:                pspID,
 			RailCustomerRef:      sharedRailCustomerRef,
 			RailMethodRef:        methodRef,
 			RebillDriver:         models.RebillDriverProvider,

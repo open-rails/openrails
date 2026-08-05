@@ -150,11 +150,10 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantSlug string) {
 		fmt.Fprintf(w, "  this reversal will NOT be complete: %d provider write(s) already reached the rail.\n",
 			len(plan.IntentsIrreversible)+len(plan.IntentsAmbiguous))
 	}
-	if b := plan.BlindSpot; b.Total() > 0 {
-		fmt.Fprintf(w, "\nNULL-psp blind spot (rows no PSP-scoped predicate can reach — reported, never silently excluded):\n"+
-			"  subscriptions=%d payments=%d checkout_sessions=%d payment_methods=%d unfired_intents=%d\n",
-			b.Subscriptions, b.Payments, b.CheckoutSessions, b.PaymentMethods, b.UnfiredIntents)
-	}
+	// or#893: PlanUndoRun refuses before returning if this is ever non-zero, so
+	// reaching here means the invariant held. Print it anyway — an operator
+	// reading a rollback plan should see the coverage proof, not infer it.
+	fmt.Fprintf(w, "  coverage: every live provider row is PSP-attributed (unattributed=%d)\n", plan.Unattributed.Total())
 	fmt.Fprintf(w, "\nTo apply, confirm the row count:\n"+
 		"  openrails undo-run --merchant %s --run %s --apply --expect-rows %d\n",
 		strings.TrimSpace(merchantSlug), plan.RunID, plan.ExpectedRows())

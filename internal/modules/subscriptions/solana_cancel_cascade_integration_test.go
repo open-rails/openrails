@@ -164,6 +164,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	require.NoError(t, err)
 
 	subPriceID := priceID
+	pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Pool(), dbtest.TestMerchantID.UUID(), string(models.RailSolana))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		CustomerID:            dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Pool(), userID),
@@ -172,6 +173,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailSolana),
+		PspID:                 pspID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
 		StartedAt:             now,

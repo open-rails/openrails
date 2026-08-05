@@ -77,6 +77,7 @@ type ccbillFixture struct {
 	store  *Store
 	subID  uuid.UUID
 	psid   string
+	pspID  uuid.UUID
 	userID uuid.UUID
 }
 
@@ -103,16 +104,17 @@ func seedCCBillSubscription(t *testing.T) ccbillFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
+	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "ccbill")
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
-	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'ccbill', $4, $5, $6, $5, $7, $8)`,
+	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'active', 'ccbill', $4, $5, $6, $5, $7, $8, $9)`,
 		fx.subID, priceID, productID, fx.psid,
-		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), fx.userID, tenantID)
+		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), fx.userID, tenantID, fx.pspID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
@@ -375,6 +377,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 		require.NoError(t, err)
 	}
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "ccbreaker-"+sfx)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid, "ccbill")
 	productID, priceID := uuid.New(), uuid.New()
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbreaker-prod-"+sfx, mid)
@@ -390,13 +393,14 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         cancelled_at, cancel_type, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'cancelled', 'ccbill', $4, $5, $6, $5, $7, 'user', $8, $9)`,
+		         cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'cancelled', 'ccbill', $4, $5, $6, $5, $7, 'user', $8, $9, $10)`,
 			subID, priceID, productID, psid,
-			now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), now, custID, mid)
+			now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), now, custID, mid, pspID)
 		_, err := store.Enqueue(ctx, EnqueueParams{
 			MerchantID:     mid,
 			Provider:       "ccbill",
+			PspID:          pspID,
 			IntentType:     TypeCCBillCancelSubscription,
 			SubscriptionID: &subID,
 			Payload:        CCBillCancelPayload{UserID: custID.String(), RailSubscriptionID: psid},

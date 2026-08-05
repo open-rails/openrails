@@ -63,49 +63,6 @@ func (q *Queries) CountConvergeRestorableForRun(ctx context.Context, arg CountCo
 	return i, err
 }
 
-const countNullPSPBlindSpot = `-- name: CountNullPSPBlindSpot :one
-SELECT
-    (SELECT count(*) FROM openrails.subscriptions
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
-    (SELECT count(*) FROM openrails.payments
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS payments,
-    (SELECT count(*) FROM openrails.checkout_sessions
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
-    -- payment_methods carries no soft-delete column; every row is live.
-    (SELECT count(*) FROM openrails.payment_methods
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL)::bigint AS payment_methods,
-    (SELECT count(*) FROM openrails.rail_intents
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL
-        AND status IN ('pending', 'failed_retryable'))::bigint AS unfired_intents
-`
-
-type CountNullPSPBlindSpotRow struct {
-	Subscriptions    int64
-	Payments         int64
-	CheckoutSessions int64
-	PaymentMethods   int64
-	UnfiredIntents   int64
-}
-
-// or#859 §3.2, hole 1: `psp_id` is NULLABLE on all eight PSP-tagged tables, so a
-// PSP-scoped predicate silently SKIPS legacy rows. For a prune that nullability
-// is a safety property; for a rollback it is a coverage hole, and the rule is
-// that the undo reports it as an explicit count rather than excluding it in
-// silence. Live rows only — a tombstoned row is already accounted for by
-// whichever run took it.
-func (q *Queries) CountNullPSPBlindSpot(ctx context.Context, merchantID uuid.UUID) (CountNullPSPBlindSpotRow, error) {
-	row := q.db.QueryRow(ctx, countNullPSPBlindSpot, merchantID)
-	var i CountNullPSPBlindSpotRow
-	err := row.Scan(
-		&i.Subscriptions,
-		&i.Payments,
-		&i.CheckoutSessions,
-		&i.PaymentMethods,
-		&i.UnfiredIntents,
-	)
-	return i, err
-}
-
 const countPruneRestorableForRun = `-- name: CountPruneRestorableForRun :one
 
 SELECT
@@ -155,6 +112,56 @@ func (q *Queries) CountPruneRestorableForRun(ctx context.Context, arg CountPrune
 		&i.Payments,
 		&i.CheckoutSessions,
 		&i.Entitlements,
+	)
+	return i, err
+}
+
+const countUnattributedProviderRows = `-- name: CountUnattributedProviderRows :one
+SELECT
+    (SELECT count(*) FROM openrails.subscriptions
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
+    (SELECT count(*) FROM openrails.payments
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL
+        AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
+    (SELECT count(*) FROM openrails.checkout_sessions
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
+    -- payment_methods carries no soft-delete column; every row is live.
+    (SELECT count(*) FROM openrails.payment_methods
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL)::bigint AS payment_methods,
+    (SELECT count(*) FROM openrails.rail_intents
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL
+        AND status IN ('pending', 'failed_retryable'))::bigint AS unfired_intents
+`
+
+type CountUnattributedProviderRowsRow struct {
+	Subscriptions    int64
+	Payments         int64
+	CheckoutSessions int64
+	PaymentMethods   int64
+	UnfiredIntents   int64
+}
+
+// or#859 §3.2, hole 1, CLOSED by or#893: PSP provenance is required on every
+// PROVIDER row, so a PSP-scoped predicate can no longer skip one. This is
+// therefore no longer a blind-spot count to report — it is the INVARIANT,
+// asserted where the rollback relies on it. Every count is structurally zero
+// (NOT NULL, or payments' CHECK); a non-zero answer means the schema was
+// reopened underneath this code and the undo refuses rather than silently
+// under-covering.
+//
+// `payments` excludes the OFF-RAIL channels (manual/admin). Those rows carry no
+// PSP because no provider took the money, so no PSP-scoped operation was ever
+// supposed to reach them — counting them here would report the exemption as a
+// hole. Live rows only.
+func (q *Queries) CountUnattributedProviderRows(ctx context.Context, merchantID uuid.UUID) (CountUnattributedProviderRowsRow, error) {
+	row := q.db.QueryRow(ctx, countUnattributedProviderRows, merchantID)
+	var i CountUnattributedProviderRowsRow
+	err := row.Scan(
+		&i.Subscriptions,
+		&i.Payments,
+		&i.CheckoutSessions,
+		&i.PaymentMethods,
+		&i.UnfiredIntents,
 	)
 	return i, err
 }

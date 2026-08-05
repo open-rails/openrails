@@ -61,8 +61,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailNMI),
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
@@ -76,6 +78,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:              pspID,
 		RailSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -141,10 +144,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
 	// The decision is on the ledger: pending, system-origin, window-bounded.
-	// (#592 ripped out the #365/#518 provider-account binding/identity resolution,
-	// so the materialized intent carries no psp_id.)
+	// (or#893: psp_id is now total provenance — the materialized intent carries
+	// the subscription's own PSP, stamped from sub.PspID at enqueue.)
 	var status, origin, intentType string
-	var providerAccountID *uuid.UUID
+	var providerAccountID uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT status, origin, intent_type, psp_id, expires_at
@@ -153,7 +156,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
 	assert.Equal(t, intents.TypeManualRebill, intentType)
-	require.Nil(t, providerAccountID, "#592 ripped out provider-account binding; materialized intents carry none")
+	assert.Equal(t, pspID, providerAccountID, "or#893: the materialized intent carries the subscription's PSP")
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 
 	// No lifecycle movement, and the forensic retry fields are untouched
@@ -216,6 +219,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	require.NoError(t, err)
 
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	// Months-stale: the legacy-migration shape. Window for 30-day cycle is
 	// ~2 weeks; 90 days is far past it.
 	periodEnd := now.Add(-90 * 24 * time.Hour)
@@ -224,6 +228,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_wexp_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,

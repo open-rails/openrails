@@ -75,9 +75,9 @@ type CheckoutSession struct {
 	// PspID is the psps row selected for this provider
 	// checkout. It prevents provider sessions from being confused across rotated
 	// Stripe/NMI/CCBill accounts.
-	PspID     *uuid.UUID `json:"psp_id,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	PspID     uuid.UUID `json:"psp_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	Price      *Price  `json:"price,omitempty"`
 	LastFour   *string `json:"last_four,omitempty"`

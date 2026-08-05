@@ -81,6 +81,7 @@ type intentFixture struct {
 	store  *Store
 	subID  uuid.UUID
 	psid   string
+	pspID  uuid.UUID
 	userID uuid.UUID // tenant subject
 }
 
@@ -109,6 +110,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		require.NoError(t, err)
 	}
 	tenantID := dbtest.TestMerchantID.UUID()
+	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "mobius")
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "intent-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
@@ -116,11 +118,11 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9, $10)`,
+	         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9, $10, $11)`,
 		fx.subID, priceID, productID, fx.psid,
 		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), now,
-		deletionScheduledAt.UTC(), fx.userID, tenantID)
+		deletionScheduledAt.UTC(), fx.userID, tenantID, fx.pspID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
@@ -138,6 +140,7 @@ func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Ti
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,
 		Payload:        NMIDeletePayload{UserID: fx.userID.String(), RailSubscriptionID: fx.psid},
@@ -518,6 +521,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 		row, err := fx.store.Enqueue(ctx, EnqueueParams{
 			MerchantID:     dbtest.TestMerchantID.UUID(),
 			Provider:       "mobius",
+			PspID:          fx.pspID,
 			IntentType:     typePruneTest,
 			SubscriptionID: &fx.subID, // so the fixture cleanup reaps the row
 			Payload:        map[string]any{"big": "heavy payload that must be pruned on success", "rebill_amount": 4999},
@@ -537,6 +541,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 	_, err := runner.EnqueueAndExecute(ctx, EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     typePruneTest,
 		SubscriptionID: &fx.subID,
 		Payload:        map[string]any{"big": "heavy payload that must be pruned on success"},
@@ -575,6 +580,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 	again, err := runner.EnqueueAndExecute(ctx, EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     typePruneTest,
 		SubscriptionID: &fx.subID,
 		Payload:        map[string]any{"big": "re-enqueue payload should not revive a succeeded row"},
@@ -635,6 +641,7 @@ func TestRelevanceWindowExpiry(t *testing.T) {
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,
 		IdempotencyKey: NMIDeleteIdempotencyKey(fx.subID),

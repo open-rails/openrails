@@ -32,16 +32,20 @@ func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSou
 	if resolver == nil {
 		return nil, "", false, errors.New("nmi client resolver is not configured")
 	}
-	client, ok, err := resolver.ResolveNMIClient(ctx, sub.MerchantID, sub.PspID)
+	client, ok, err := resolver.ResolveNMIClient(ctx, sub.MerchantID, &sub.PspID)
 	if err != nil || !ok {
 		return nil, strings.ToLower(string(sub.Rail)), false, err
 	}
 	return client, strings.ToLower(string(sub.Rail)), true, nil
 }
 
+// PaymentMethodMatchesSubscriptionProvider reports whether the instrument was
+// vaulted by the same PSP that owns the subscription. or#893: both sides are
+// always attributed, so this is a real comparison — it no longer waves through
+// an unattributed row.
 func PaymentMethodMatchesSubscriptionProvider(pm *models.PaymentMethod, sub *models.Subscription) bool {
-	if pm == nil || sub == nil || pm.PspID == nil || sub.PspID == nil {
+	if pm == nil || sub == nil {
 		return true
 	}
-	return *pm.PspID == *sub.PspID
+	return pm.PspID == sub.PspID
 }

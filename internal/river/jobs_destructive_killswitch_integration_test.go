@@ -44,9 +44,10 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 				productID, "ks-prod-"+suffix, "ks-tier-"+suffix, merchantID)
 			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 				priceID, productID, merchantID)
-			exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,status,amount,currency,expires_at,merchant_id,customer_id)
-			      VALUES ($1,$2,'one_off','nmi','created',999,'USD',$3,$4,$5)`,
-				sessionID, priceID, time.Now().Add(-time.Hour), merchantID, customer)
+			pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
+			exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
+			      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
+				sessionID, priceID, pspID, time.Now().Add(-time.Hour), merchantID, customer)
 			return nil
 		}))
 		t.Cleanup(func() {
@@ -113,9 +114,10 @@ func TestConvergeSweepHonorsReadonlyMode(t *testing.T) {
 			productID, "ro-prod-"+suffix, "ro-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,status,amount,currency,expires_at,merchant_id,customer_id)
-		      VALUES ($1,$2,'one_off','nmi','created',999,'USD',$3,$4,$5)`,
-			sessionID, priceID, time.Now().Add(-time.Hour), merchantID, customer)
+		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
+		exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
+		      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
+			sessionID, priceID, pspID, time.Now().Add(-time.Hour), merchantID, customer)
 		return nil
 	}))
 	t.Cleanup(func() {

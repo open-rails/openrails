@@ -64,15 +64,16 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "sweep-prod-"+suffix, "sweep-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
 		// drift #1: a checkout session that expired but is still 'created'
-		exec(`INSERT INTO openrails.checkout_sessions (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id)
-		      VALUES ($1,$2,'one_off','nmi','created',999,'USD',$3,$4,$5)`,
-			sessionID, priceID, time.Now().Add(-1*time.Hour), merchantID, customer)
+		exec(`INSERT INTO openrails.checkout_sessions (id, price_id, mode, rail, psp_id, status, amount, currency, expires_at, merchant_id, customer_id)
+		      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
+			sessionID, priceID, pspID, time.Now().Add(-1*time.Hour), merchantID, customer)
 		// drift #2: a past_due subscription whose grace window already elapsed
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9)`,
+		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9,$10)`,
 			subID, priceID, productID, "sweep-sub-"+suffix,
-			time.Now().Add(-33*24*time.Hour), time.Now().Add(-3*time.Hour), graceEnd, customer, merchantID)
+			time.Now().Add(-33*24*time.Hour), time.Now().Add(-3*time.Hour), graceEnd, customer, merchantID, pspID)
 		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 			entID, customer, feature, time.Now().Add(-33*24*time.Hour), time.Now().Add(27*24*time.Hour), subID, merchantID)
