@@ -3,6 +3,7 @@ INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
     rail,
     psp_id,
+    custodian_id,
     rail_intent_id,
     intent_type,
     idempotency_key,
@@ -11,7 +12,7 @@ INSERT INTO openrails.rail_mutation_logs (
     reason,
     evidence
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 );
 
 -- Operator read surface (#735: replaced the ClickHouse mirror; this table is

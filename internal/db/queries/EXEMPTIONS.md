@@ -181,8 +181,8 @@ production writes. Deliberately not started.
 
 ### The inline exemptions
 
-Thirty-nine statements, fifty-six rule instances, all classified
-**PERMANENT**. All but `0048`, `0061` and `0063` are **history** —
+Forty-five statements, sixty-four rule instances, all classified
+**PERMANENT**. All but `0048`, `0061`, `0063` and `0077` are **history** —
 rewriting them changes no live database and the honest record is what actually
 ran. The rules stay armed for new migrations.
 
@@ -203,6 +203,9 @@ ran. The rules stay armed for new migrations.
 | `0063` payments + invoice_payments `psp_required_on_rail` CHECKs | `constraint-missing-not-valid` | These are the two tables where a CHECK is the RIGHT shape (both also record off-rail money), so only the lock argument applies: `NOT VALID` buys nothing inside a single-transaction migrator — see `0014`. The rows it validates were just rewritten by the same transaction. |
 | `0063` rail_mutation_logs + rail_customer_accounts psp FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | Both re-point at `openrails.psps` after the column closed: the mutation-log FK moves `ON DELETE SET NULL` → `CASCADE` (SET NULL is unrepresentable against NOT NULL — the same choice `0060` made for the watermark cursor), and rail_customer_accounts' is a brand-new column whose rows were attributed or deleted three statements earlier. Same single-transaction argument as `0014`. |
 | `0063` ×2 rail-transaction unique rebuilds | `disallowed-unique-constraint` | The rule wants a `UNIQUE` constraint rather than a unique index; every equivalent invariant in this schema is a PARTIAL unique index (`WHERE deleted_at IS NULL`, `WHERE rail_subscription_id <> ''`), which a table constraint cannot express at all. Dropping the partial predicate to satisfy the rule would change the invariant. |
+| `0077` ×2 rail_intents/rail_mutation_logs custodian FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | Composite `(custodian_id, merchant_id)` FKs, the same shape `psps_custodian_fk` carries, so the reference cannot cross a merchant boundary. The column is added in the statement above each, so every existing row is NULL and the validating scan is over an all-NULL column — the case `0018` records squawk cannot see. `NOT VALID` buys nothing inside a single-transaction migrator (`0014`). |
+| `0077` ×2 psp_id `DROP NOT NULL` | `ban-drop-not-null` | **Deliberate, and not a weakening.** or#795's batch account updater is addressed to a CUSTODIAN — one custodian backs many PSPs, so no single `psp_id` names the write. The `rail_intents_addressed` / `rail_mutation_logs_addressed` CHECKs added two lines below each restate `0063`'s actual invariant (*an outbound write names the account it will execute against*) over both kinds of account, so nothing becomes unattributable. The rule's concern is a client that assumes non-NULL; the readers were changed in the same PR and the CHECK is what they now rely on. |
+| `0077` ×2 addressed CHECKs | `constraint-missing-not-valid` | Every existing row has `psp_id` NOT NULL — it was the column attribute until two statements earlier — so the scan validates rows already known to satisfy the constraint. Same single-transaction argument as `0014`. |
 | `0048` DROP payer_spend_limits | `ban-drop-table` | **Deliberate hard cut, not history.** or#897 replaces the table with `billing_policies` + `billing_policy_bindings`; the rule's concern (breaking existing clients) is the intended effect, and prelaunch there is no deployment holding rows worth keeping. Leaving the table alongside its replacement would be the two-substrate disease or#878 removed from exposure. |
 
 A new migration that genuinely needs one of these must add the constraint

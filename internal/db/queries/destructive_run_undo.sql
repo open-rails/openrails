@@ -83,6 +83,13 @@ SELECT
     -- payment_methods carries no soft-delete column; every row is live.
     (SELECT count(*) FROM openrails.payment_methods
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL)::bigint AS payment_methods,
+    -- rail_intents excludes the CUSTODIAN-addressed lane (or#795's batch
+    -- account updater): those rows carry no psp_id because the write goes to a
+    -- custodian that backs many PSPs, so no PSP-scoped operation was ever
+    -- supposed to reach them. rail_intents_addressed guarantees they name a
+    -- custodian instead, which is what makes the exclusion safe rather than a
+    -- second blind spot.
     (SELECT count(*) FROM openrails.rail_intents
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL
+        AND custodian_id IS NULL
         AND status IN ('pending', 'failed_retryable'))::bigint AS unfired_intents;

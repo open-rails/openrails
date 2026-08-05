@@ -25,14 +25,14 @@
 INSERT INTO openrails.rail_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, expires_at, psp_id
+    actor, expires_at, psp_id, custodian_id
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(expires_at),
-    sqlc.arg(psp_id)::uuid
+    sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE

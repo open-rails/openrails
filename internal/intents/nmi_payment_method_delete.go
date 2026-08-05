@@ -287,7 +287,7 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 		Rail:            models.Rail(strings.ToLower(intent.Rail)),
 		RailCustomerRef: p.RailCustomerRef,
 		RailMethodRef:   p.RailMethodRef,
-		PspID:           intent.PspID,
+		PspID:           derefUUID(intent.PspID),
 	}, nil
 }
 

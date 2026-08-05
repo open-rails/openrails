@@ -453,7 +453,12 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, t
 		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
 		return merchants.CustodianIdentity{}, noop, false
 	}
-	r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), custodian.MerchantID))
+	// or#893/or#795: pin the custodian the event demonstrably came from, the way
+	// the PSP routes pin theirs. Nothing on this plane enqueues an intent today,
+	// but anything that starts to is custodian-addressed by construction — the
+	// event identifies a custodian that backs many PSPs, never one of them.
+	ctx := merchant.WithID(r.Request.Context(), custodian.MerchantID)
+	r.Request = r.Request.WithContext(db.WithCustodianID(ctx, custodian.ID))
 	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
 	if !ok {
 		return merchants.CustodianIdentity{}, noop, false

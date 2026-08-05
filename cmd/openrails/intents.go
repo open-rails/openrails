@@ -231,7 +231,8 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			if row.LastFailureReason != nil {
 				reason = *row.LastFailureReason
 			}
-			account := row.PspID.String()
+			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
+			account := intentAddress(row.PspID, row.CustodianID)
 			if row.Status == intents.StatusPending {
 				byMode[executesUnder(row.Origin)]++
 			}
@@ -349,7 +350,8 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
 		for _, row := range rows {
-			account := row.PspID.String()
+			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
+			account := intentAddress(row.PspID, row.CustodianID)
 			intent := ""
 			if row.RailIntentID != nil {
 				intent = row.RailIntentID.String()
@@ -388,4 +390,15 @@ func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx cont
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return fn(ctx, database)
 	})
+}
+
+// intentAddress renders whichever account an intent or mutation log names.
+func intentAddress(psp, custodian *uuid.UUID) string {
+	if psp != nil {
+		return psp.String()
+	}
+	if custodian != nil {
+		return "custodian:" + custodian.String()
+	}
+	return ""
 }

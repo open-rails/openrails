@@ -54,10 +54,15 @@ type EnqueueParams struct {
 	SubscriptionID *uuid.UUID
 	PaymentID      *uuid.UUID
 	PriceID        *uuid.UUID
-	// PspID is the PSP the outbound write is addressed to. Required (or#893):
-	// rail_intents.psp_id is NOT NULL, and an intent nobody can attribute cannot
-	// be executed against the right credentials.
-	PspID          uuid.UUID
+	// PspID is the PSP the outbound write is addressed to. Required (or#893)
+	// unless the intent is CUSTODIAN-addressed: an intent nobody can attribute
+	// cannot be executed against the right credentials.
+	PspID uuid.UUID
+	// CustodianID addresses the write to a custodian instead (or#795's batch
+	// account updater uploads one token batch to a custodian that backs many
+	// PSPs, so no single psp_id names it). Exactly the rail_intents_addressed
+	// constraint: one of the two must be set.
+	CustodianID    uuid.UUID
 	Payload        any
 	IdempotencyKey string
 	NextAttemptAt  time.Time
@@ -77,11 +82,16 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
-	// or#893: rail_intents.psp_id is NOT NULL. An explicit PspID wins; otherwise
-	// the PSP the caller already routed to and pinned on ctx (checkout's
-	// stampPSP, the webhook plane) is the answer. Nothing else is: an intent
-	// nobody can attribute cannot be executed against the right credentials.
-	if p.PspID == uuid.Nil {
+	// or#893/or#795 (rail_intents_addressed): the intent names the account it
+	// will execute against — a PSP, or a custodian for the writes addressed to
+	// one. An explicit value wins; otherwise the PSP the caller already routed
+	// to and pinned on ctx (checkout's stampPSP, the webhook plane) is the
+	// answer. Nothing else is: an intent nobody can attribute cannot be executed
+	// against the right credentials.
+	if p.CustodianID == uuid.Nil {
+		p.CustodianID = db.CustodianIDFromContext(ctx)
+	}
+	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
 		psp, err := db.RequirePSPID(ctx)
 		if err != nil {
 			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
@@ -141,7 +151,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		OriginReason:   originReason,
 		Actor:          actorPtr,
 		ExpiresAt:      p.ExpiresAt,
-		PspID:          p.PspID,
+		PspID:          uuidPtrOrNil(p.PspID),
+		CustodianID:    uuidPtrOrNil(p.CustodianID),
 	})
 }
 
@@ -426,4 +437,14 @@ func one(rows int64, err error) error {
 		return err
 	}
 	return nil
+}
+
+// uuidPtrOrNil maps the zero uuid to a NULL column: the two addressing columns
+// are nullable and constrained as a pair, so "unset" must reach the DB as NULL
+// rather than as a zero uuid no row could ever reference.
+func uuidPtrOrNil(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }
