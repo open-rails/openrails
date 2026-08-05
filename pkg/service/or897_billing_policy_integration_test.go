@@ -302,7 +302,10 @@ func TestOr897_ValidatorIsSharedByBothDeclarationPaths(t *testing.T) {
 	}{
 		{"no kind", billingservice.BillingPolicyInput{Name: "p"}, "kind is required"},
 		{"unknown kind", billingservice.BillingPolicyInput{Name: "p", Kind: "spend_cap"}, `unknown kind "spend_cap"`},
-		{"pr3 kind", billingservice.BillingPolicyInput{Name: "p", Kind: "accrual_rate_cap"}, "not implemented yet"},
+		{"rate cap with no rate", billingservice.BillingPolicyInput{Name: "p", Kind: "accrual_rate_cap"}, "requires a positive accrual_rate_cap_per_hour"},
+		{"per-policy cycle boundary", billingservice.BillingPolicyInput{
+			Name: "p", Kind: "outstanding_cap", CollectionCycleBoundary: "calendar_month",
+		}, "cannot be per-policy"},
 		{"cross-kind limit", billingservice.BillingPolicyInput{
 			Name: "p", Kind: "outstanding_cap",
 			SpendWindows: []billingservice.SpendLimitWindowInput{{Key: "m", WindowSeconds: 60, Limit: 1}},

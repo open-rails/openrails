@@ -14,6 +14,11 @@ import (
 // NormalizeCheckoutRouting (or#288): it REJECTS rather than repairs, because a
 // silently-dropped limit is a spend cap nobody chose.
 
+// MinAccrualRateWindowSeconds is the shortest accrual-rate lookback a policy may
+// declare. Below a minute the measurement is dominated by how usage reporting
+// happens to be batched rather than by what is actually deployed.
+const MinAccrualRateWindowSeconds int64 = 60
+
 // MaxBillingPolicyNameLength bounds a policy name. Names are merchant-chosen
 // identifiers that travel in manifests, bindings and API payloads, not prose.
 const MaxBillingPolicyNameLength = 64
@@ -50,13 +55,9 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 
 	kind := models.BillingPolicyKind(strings.ToLower(strings.TrimSpace(string(p.Kind))))
 	switch kind {
-	case models.BillingPolicyOutstandingCap, models.BillingPolicyWindowSpendCap:
-	case models.BillingPolicyAccrualRateCap:
-		// Representable so the vocabulary is complete and the refusal is a real
-		// answer instead of "unknown kind". or#897 PR 3 builds the rate measurement.
-		return models.BillingPolicy{}, fmt.Errorf("%s: kind %q is not implemented yet (or#897 PR 3)", label, kind)
+	case models.BillingPolicyOutstandingCap, models.BillingPolicyWindowSpendCap, models.BillingPolicyAccrualRateCap:
 	case "":
-		return models.BillingPolicy{}, fmt.Errorf("%s: kind is required (outstanding_cap or window_spend_cap)", label)
+		return models.BillingPolicy{}, fmt.Errorf("%s: kind is required (outstanding_cap, window_spend_cap or accrual_rate_cap)", label)
 	default:
 		return models.BillingPolicy{}, fmt.Errorf("%s: unknown kind %q", label, kind)
 	}
@@ -68,21 +69,24 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 	}
 	out.PolicyCurrency = currency
 
-	// Each kind accepts only ITS limit. Accepting the other kind's field would
+	// Each kind accepts only ITS limit. Accepting another kind's field would
 	// store a cap that is never read — a knob that looks enforced and is not.
+	if kind != models.BillingPolicyOutstandingCap && p.OutstandingCapAmount != 0 {
+		return models.BillingPolicy{}, fmt.Errorf("%s: outstanding_cap_amount belongs to kind outstanding_cap", label)
+	}
+	if kind != models.BillingPolicyWindowSpendCap && len(p.SpendWindows) > 0 {
+		return models.BillingPolicy{}, fmt.Errorf("%s: spend_windows belong to kind window_spend_cap", label)
+	}
+	if kind != models.BillingPolicyAccrualRateCap && (p.AccrualRateCapPerHour != 0 || p.AccrualRateWindowSeconds != 0) {
+		return models.BillingPolicy{}, fmt.Errorf("%s: accrual_rate_cap_per_hour and accrual_rate_window_seconds belong to kind accrual_rate_cap", label)
+	}
 	switch kind {
 	case models.BillingPolicyOutstandingCap:
-		if len(p.SpendWindows) > 0 {
-			return models.BillingPolicy{}, fmt.Errorf("%s: spend_windows belong to kind window_spend_cap", label)
-		}
 		if p.OutstandingCapAmount < 0 {
 			return models.BillingPolicy{}, fmt.Errorf("%s: outstanding_cap_amount must be non-negative", label)
 		}
 		out.OutstandingCapAmount = p.OutstandingCapAmount
 	case models.BillingPolicyWindowSpendCap:
-		if p.OutstandingCapAmount != 0 {
-			return models.BillingPolicy{}, fmt.Errorf("%s: outstanding_cap_amount belongs to kind outstanding_cap", label)
-		}
 		if len(p.SpendWindows) == 0 {
 			return models.BillingPolicy{}, fmt.Errorf("%s: kind window_spend_cap requires at least one spend_windows entry", label)
 		}
@@ -91,6 +95,46 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 			return models.BillingPolicy{}, err
 		}
 		out.SpendWindows = windows
+	case models.BillingPolicyAccrualRateCap:
+		// A rate cap with no rate is not a policy — unlike outstanding_cap, there
+		// is no per-account lever to fall back to.
+		if p.AccrualRateCapPerHour <= 0 {
+			return models.BillingPolicy{}, fmt.Errorf("%s: kind accrual_rate_cap requires a positive accrual_rate_cap_per_hour (micros per hour)", label)
+		}
+		if p.AccrualRateWindowSeconds < 0 {
+			return models.BillingPolicy{}, fmt.Errorf("%s: accrual_rate_window_seconds must be non-negative", label)
+		}
+		if p.AccrualRateWindowSeconds > 0 && p.AccrualRateWindowSeconds < MinAccrualRateWindowSeconds {
+			return models.BillingPolicy{}, fmt.Errorf("%s: accrual_rate_window_seconds must be at least %d — a shorter lookback measures noise, not a rate", label, MinAccrualRateWindowSeconds)
+		}
+		out.AccrualRateCapPerHour = p.AccrualRateCapPerHour
+		out.AccrualRateWindowSeconds = p.AccrualRateWindowSeconds
+	}
+
+	// Collection + delinquency ride on ANY kind: what a payer may owe or spend and
+	// when its debt is chased are separate questions, and every kind of payer
+	// eventually stops paying.
+	if strings.TrimSpace(p.CollectionCycleBoundary) != "" {
+		return models.BillingPolicy{}, fmt.Errorf(
+			"%s: collection_cycle_boundary cannot be per-policy — a payer's statement periods must tile its lifetime with no gap or overlap, and rebinding is a live runtime lever, so a mid-cycle change would bill a stretch twice or never. Set invoice.billing_period_boundary on the merchant instead", label)
+	}
+	if p.CollectionThresholdAmount != nil {
+		if *p.CollectionThresholdAmount < 0 {
+			return models.BillingPolicy{}, fmt.Errorf("%s: collection_threshold_amount must be non-negative", label)
+		}
+		out.CollectionThresholdAmount = p.CollectionThresholdAmount
+	}
+	if p.DelinquencyGraceDays != nil {
+		if *p.DelinquencyGraceDays < 0 {
+			return models.BillingPolicy{}, fmt.Errorf("%s: delinquency_grace_days must be non-negative", label)
+		}
+		out.DelinquencyGraceDays = p.DelinquencyGraceDays
+	}
+	if p.DelinquencyAmountFloor != nil {
+		if *p.DelinquencyAmountFloor < 0 {
+			return models.BillingPolicy{}, fmt.Errorf("%s: delinquency_amount_floor must be non-negative", label)
+		}
+		out.DelinquencyAmountFloor = p.DelinquencyAmountFloor
 	}
 
 	// Wasted-spend grace is orthogonal to the capped quantity, so it rides on

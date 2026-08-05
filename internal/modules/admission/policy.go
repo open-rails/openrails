@@ -51,18 +51,44 @@ type ResolvedPolicy struct {
 	OutstandingCapAmount int64
 	SpendWindows         []budgets.BudgetWindow
 	PolicyCurrency       string
+	// AccrualRateCapPerHour / AccrualRateWindowSeconds are the kind=accrual_rate_cap
+	// quota: the ceiling on measured accrual in micros PER HOUR, and the lookback
+	// the measurement smooths over.
+	AccrualRateCapPerHour    int64
+	AccrualRateWindowSeconds int64
 	// BadSpendWindows are the #497 per-PAYER wasted-spend grace windows;
 	// direct-payer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
+	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
+	// override the merchant-wide invoice policy for payers bound here. Nil defers
+	// to the merchant-wide value — these are orthogonal to Kind, because when a
+	// debt is chased is a different question from what may be owed.
+	CollectionThresholdAmount *int64
+	DelinquencyGraceDays      *int
+	DelinquencyAmountFloor    *int64
 }
 
 // GatesOnOutstandingOwed reports whether unpaid arrears reduce this payer's
-// admission headroom. This ONE branch is the whole difference between the two
-// seed businesses: the API business's $200 line is a ceiling on DEBT, while the
-// cloud business's $2k/month cap is a ceiling on NEW SPEND and lets prior debt
-// drive delinquency instead.
+// admission headroom. This ONE branch is the whole difference between or#897's
+// two seed businesses: the API business's $200 line is a ceiling on DEBT, while
+// the cloud kinds cap NEW spend or the accrual RATE and let prior debt drive
+// delinquency instead.
 func (p ResolvedPolicy) GatesOnOutstandingOwed() bool {
-	return p.Kind != models.BillingPolicyWindowSpendCap
+	switch p.Kind {
+	case models.BillingPolicyWindowSpendCap, models.BillingPolicyAccrualRateCap:
+		return false
+	default:
+		return true
+	}
+}
+
+// RateWindow is the effective accrual-rate lookback.
+func (p ResolvedPolicy) RateWindow() time.Duration {
+	seconds := p.AccrualRateWindowSeconds
+	if seconds <= 0 {
+		seconds = models.DefaultAccrualRateWindowSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 type catalogUsageLimitWindow struct {
@@ -225,12 +251,17 @@ func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.Custome
 			}
 		}
 		out = ResolvedPolicy{
-			Name:                 row.PolicyName,
-			Kind:                 body.Kind,
-			OutstandingCapAmount: body.OutstandingCapAmount,
-			SpendWindows:         toBudgetWindows(body.SpendWindows),
-			PolicyCurrency:       body.PolicyCurrency,
-			BadSpendWindows:      body.BadSpendWindows,
+			Name:                      row.PolicyName,
+			Kind:                      body.Kind,
+			OutstandingCapAmount:      body.OutstandingCapAmount,
+			SpendWindows:              toBudgetWindows(body.SpendWindows),
+			PolicyCurrency:            body.PolicyCurrency,
+			AccrualRateCapPerHour:     body.AccrualRateCapPerHour,
+			AccrualRateWindowSeconds:  body.AccrualRateWindowSeconds,
+			BadSpendWindows:           body.BadSpendWindows,
+			CollectionThresholdAmount: body.CollectionThresholdAmount,
+			DelinquencyGraceDays:      body.DelinquencyGraceDays,
+			DelinquencyAmountFloor:    body.DelinquencyAmountFloor,
 		}
 		return nil
 	})

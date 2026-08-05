@@ -264,9 +264,14 @@ type AdmitRequest struct {
 	Resource        string `json:"resource,omitempty"`
 	Currency        string `json:"currency,omitempty"`
 	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id"`
-	Source          string `json:"source,omitempty"`
-	ExpiresAt       *int64 `json:"expires_at,omitempty"`
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it. Zero means the request adds no ongoing rate, which
+	// leaves an accrual_rate_cap payer gated on what is already running.
+	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
+	RequestID               string `json:"request_id"`
+	Source                  string `json:"source,omitempty"`
+	ExpiresAt               *int64 `json:"expires_at,omitempty"`
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated
@@ -401,15 +406,31 @@ type MerchantTrustLevelSchedule struct {
 type BillingPolicyInput struct {
 	Name string `json:"name"`
 	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
-	// line on debt, refused with deny code outstanding_cap_reached) or
-	// "window_spend_cap" (cap NEW spend per rolling window; prior debt drives
-	// delinquency, not admission).
+	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
+	// (cap NEW spend per rolling window; prior debt drives delinquency, not
+	// admission), or "accrual_rate_cap" (cap the measured accrual RATE in
+	// micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
 	Kind string `json:"kind"`
 	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
 	// Zero defers to the payer's own arrears credit limit.
 	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
 	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
 	SpendWindows []BudgetWindowInput `json:"spend_windows,omitempty"`
+	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
+	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
+	// measurement lookback (default 3600).
+	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty"`
+	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
+	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
+	// override the merchant-wide invoice policy for payers bound here; nil defers
+	// to it. All three ride on any kind.
+	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
+	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
+	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty"`
+	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
+	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// stays merchant-wide. Declaring it here fails with that reason.
+	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.

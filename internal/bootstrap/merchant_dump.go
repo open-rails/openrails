@@ -175,13 +175,21 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if mt.BillingPolicies == nil {
 			mt.BillingPolicies = map[string]BillingPolicyConfig{}
 		}
-		mt.BillingPolicies[name] = BillingPolicyConfig{
-			Kind:            string(body.Kind),
-			OutstandingCap:  body.OutstandingCapAmount,
-			SpendWindows:    dumpBudgetWindows(body.SpendWindows),
-			BadSpendWindows: dumpBudgetWindows(body.BadSpendWindows),
-			PolicyCurrency:  body.PolicyCurrency,
+		entry := BillingPolicyConfig{
+			Kind:                   string(body.Kind),
+			OutstandingCap:         body.OutstandingCapAmount,
+			SpendWindows:           dumpBudgetWindows(body.SpendWindows),
+			AccrualRateCapPerHour:  body.AccrualRateCapPerHour,
+			BadSpendWindows:        dumpBudgetWindows(body.BadSpendWindows),
+			CollectionThreshold:    body.CollectionThresholdAmount,
+			DelinquencyGraceDays:   body.DelinquencyGraceDays,
+			DelinquencyAmountFloor: body.DelinquencyAmountFloor,
+			PolicyCurrency:         body.PolicyCurrency,
 		}
+		if body.AccrualRateWindowSeconds > 0 {
+			entry.AccrualRateWindow = formatWindowSeconds(body.AccrualRateWindowSeconds)
+		}
+		mt.BillingPolicies[name] = entry
 	}
 	storedBindings, err := policyStore.ListDeclarativeBindings(mctx)
 	if err != nil {

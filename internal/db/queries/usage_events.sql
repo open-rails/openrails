@@ -81,3 +81,13 @@ WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = sqlc.arg(curren
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY 1, 2
 ORDER BY 1;
+
+-- name: SumUsageAmountSince :one
+-- or#897 accrual_rate_cap: the payer's rated usage over a LOOKBACK WINDOW, for
+-- the measured accrual rate. Window-bounded by construction — it reads what the
+-- payer did in the last N seconds, never its history — and served by
+-- ix_usage_events_payer_time (merchant_id, customer_id, occurred_at).
+SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
+FROM openrails.usage_events
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND occurred_at >= sqlc.arg(since)::timestamptz;

@@ -53,10 +53,10 @@ func TestNormalizeBillingPolicy_KindErrors(t *testing.T) {
 	_, err = NormalizeBillingPolicy("p", models.BillingPolicy{Kind: "spend_cap"})
 	require.ErrorContains(t, err, `unknown kind "spend_cap"`)
 
-	// Representable, deliberately refused with a real answer rather than the
-	// misleading "unknown kind" (or#897 PR 3 builds the rate measurement).
+	// accrual_rate_cap is implemented now, but a rate cap with no rate is not a
+	// policy — unlike outstanding_cap there is no per-account lever to defer to.
 	_, err = NormalizeBillingPolicy("quota", models.BillingPolicy{Kind: models.BillingPolicyAccrualRateCap})
-	require.ErrorContains(t, err, "not implemented yet")
+	require.ErrorContains(t, err, "requires a positive accrual_rate_cap_per_hour")
 	require.ErrorContains(t, err, "billing policy quota")
 }
 
@@ -138,4 +138,79 @@ func TestNormalizeBillingPolicyBinding_Rungs(t *testing.T) {
 	// Most-specific-wins cannot rank a binding that is both.
 	_, _, _, err = NormalizeBillingPolicyBinding("p", "gold", true)
 	require.ErrorContains(t, err, "a customer OR a tier, not both")
+}
+
+// The cloud quota: micros per hour, plus an optional measurement lookback that
+// smooths the reading without changing the unit.
+func TestNormalizeBillingPolicy_AccrualRateCap(t *testing.T) {
+	ok, err := NormalizeBillingPolicy("quota", models.BillingPolicy{
+		Kind:                     models.BillingPolicyAccrualRateCap,
+		AccrualRateCapPerHour:    2_000_000,
+		AccrualRateWindowSeconds: 900,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2_000_000, ok.AccrualRateCapPerHour)
+	require.EqualValues(t, 900, ok.AccrualRateWindowSeconds)
+
+	// An undeclared window means one hour — the same unit the cap is written in.
+	ok, err = NormalizeBillingPolicy("quota", models.BillingPolicy{
+		Kind: models.BillingPolicyAccrualRateCap, AccrualRateCapPerHour: 1,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, models.DefaultAccrualRateWindowSeconds, ok.RateWindowSeconds())
+
+	_, err = NormalizeBillingPolicy("quota", models.BillingPolicy{
+		Kind: models.BillingPolicyAccrualRateCap, AccrualRateCapPerHour: 1, AccrualRateWindowSeconds: 5,
+	})
+	require.ErrorContains(t, err, "measures noise, not a rate")
+
+	// The rate fields belong to this kind alone.
+	_, err = NormalizeBillingPolicy("p", models.BillingPolicy{
+		Kind: models.BillingPolicyOutstandingCap, AccrualRateCapPerHour: 1,
+	})
+	require.ErrorContains(t, err, "belong to kind accrual_rate_cap")
+}
+
+// Collection and delinquency ride on ANY kind — what a payer may owe or spend
+// is a different question from when its debt is chased.
+func TestNormalizeBillingPolicy_CollectionAndDelinquencyOnEveryKind(t *testing.T) {
+	threshold, grace, floor := int64(50_000_000), 7, int64(1_000_000)
+	for _, kind := range []models.BillingPolicyKind{
+		models.BillingPolicyOutstandingCap, models.BillingPolicyWindowSpendCap, models.BillingPolicyAccrualRateCap,
+	} {
+		p := models.BillingPolicy{
+			Kind:                      kind,
+			CollectionThresholdAmount: &threshold,
+			DelinquencyGraceDays:      &grace,
+			DelinquencyAmountFloor:    &floor,
+		}
+		switch kind {
+		case models.BillingPolicyWindowSpendCap:
+			p.SpendWindows = []models.BudgetWindowPolicy{{Key: "m", WindowSeconds: 60, Limit: 1}}
+		case models.BillingPolicyAccrualRateCap:
+			p.AccrualRateCapPerHour = 1
+		}
+		out, err := NormalizeBillingPolicy("p", p)
+		require.NoError(t, err, kind)
+		require.NotNil(t, out.CollectionThresholdAmount, kind)
+		require.NotNil(t, out.DelinquencyGraceDays, kind)
+		require.NotNil(t, out.DelinquencyAmountFloor, kind)
+	}
+
+	negative := -1
+	_, err := NormalizeBillingPolicy("p", models.BillingPolicy{
+		Kind: models.BillingPolicyOutstandingCap, DelinquencyGraceDays: &negative,
+	})
+	require.ErrorContains(t, err, "delinquency_grace_days must be non-negative")
+}
+
+// The cycle boundary is declarable and REFUSED, with the reason: statement
+// periods must tile a payer's lifetime, and rebinding is a live runtime lever.
+func TestNormalizeBillingPolicy_RefusesPerPolicyCycleBoundary(t *testing.T) {
+	_, err := NormalizeBillingPolicy("p", models.BillingPolicy{
+		Kind: models.BillingPolicyOutstandingCap, CollectionCycleBoundary: "calendar_month",
+	})
+	require.ErrorContains(t, err, "cannot be per-policy")
+	require.ErrorContains(t, err, "tile its lifetime")
+	require.ErrorContains(t, err, "invoice.billing_period_boundary")
 }

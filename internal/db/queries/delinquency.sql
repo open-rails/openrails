@@ -20,19 +20,44 @@ SELECT merchant_id FROM openrails.delinquency_work_merchant_ids(
 -- OLDEST DEBT FIRST, and capped: one pass is bounded work. If a merchant ever
 -- has more overdue payers than the cap, the ones who have owed longest are the
 -- ones evaluated — truncation with a defensible order beats an unbounded pass.
-SELECT customer_id,
-       currency,
-       MIN(due_at)::timestamptz AS overdue_since,
-       COALESCE(SUM(amount_due), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_invoices
-FROM openrails.invoices
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND status IN ('open', 'past_due')
-  AND amount_due > 0
-  AND due_at IS NOT NULL
-  AND due_at < sqlc.arg(now)::timestamptz
-GROUP BY customer_id, currency
-ORDER BY MIN(due_at), customer_id, currency
+--
+-- or#897: each row also carries the BOUND policy's delinquency overrides, so a
+-- pass over N payers stays one query. money_settings.tier supplies the tier
+-- rung, so the same most-specific-wins resolution the admission path runs is
+-- available here without an N+1 per candidate.
+SELECT i.customer_id,
+       i.currency,
+       MIN(i.due_at)::timestamptz AS overdue_since,
+       COALESCE(SUM(i.amount_due), 0)::bigint AS overdue_amount,
+       COUNT(*)::bigint AS overdue_invoices,
+       -- -1 = NO OVERRIDE (fall back to the merchant-wide policy). An explicit
+       -- sentinel, not a guess: both values are validated non-negative, so -1
+       -- cannot collide with a declared one, and a nullable LATERAL column
+       -- would be inferred non-null by sqlc and mis-scan.
+       COALESCE(pol.grace_days, -1)::int AS grace_days,
+       COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
+FROM openrails.invoices i
+LEFT JOIN LATERAL (
+    SELECT (p.policy ->> 'delinquency_grace_days')::int AS grace_days,
+           (p.policy ->> 'delinquency_amount_floor')::bigint AS amount_floor
+    FROM openrails.billing_policy_bindings b
+    JOIN openrails.billing_policies p
+      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
+    LEFT JOIN openrails.money_settings ms
+      ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
+    WHERE b.merchant_id = i.merchant_id
+      AND (b.customer_id = i.customer_id OR b.customer_id IS NULL)
+      AND (b.tier = ms.tier OR b.tier IS NULL)
+    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
+    LIMIT 1
+) pol ON true
+WHERE i.merchant_id = sqlc.arg(merchant_id)
+  AND i.status IN ('open', 'past_due')
+  AND i.amount_due > 0
+  AND i.due_at IS NOT NULL
+  AND i.due_at < sqlc.arg(now)::timestamptz
+GROUP BY i.customer_id, i.currency, pol.grace_days, pol.amount_floor
+ORDER BY MIN(i.due_at), i.customer_id, i.currency
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetOverdueInvoiceAggregate :one
