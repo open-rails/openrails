@@ -21,11 +21,12 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 		SecurityKey: "test-security-key",
 	}
 
-	t.Run("test mode uses fixed endpoints", func(t *testing.T) {
+	t.Run("test mode uses sandbox endpoints", func(t *testing.T) {
 		client, err := NewClient("mobius", baseCfg, true)
 		require.NoError(t, err)
-		assert.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "should use fixed direct post URL")
-		assert.Equal(t, DefaultQueryAPIURL, client.QueryURL, "should use fixed query URL")
+		assert.Equal(t, SandboxDirectPostURL, client.DirectPostURL)
+		assert.Equal(t, SandboxQueryAPIURL, client.QueryURL)
+		assert.Equal(t, SandboxV5BaseURL, client.V5BaseURL)
 		assert.True(t, client.TestMode)
 	})
 
@@ -34,6 +35,7 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "should use production direct post URL")
 		assert.Equal(t, DefaultQueryAPIURL, client.QueryURL, "should use production query URL")
+		assert.Equal(t, DefaultV5BaseURL, client.V5BaseURL, "should use production v5 URL")
 		assert.False(t, client.TestMode)
 	})
 

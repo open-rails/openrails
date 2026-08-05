@@ -19,6 +19,8 @@ import (
 const (
 	DefaultDirectPostURL = "https://secure.networkmerchants.com/api/transact.php"
 	DefaultQueryAPIURL   = "https://secure.nmi.com/api/query.php"
+	SandboxDirectPostURL = "https://sandbox.nmi.com/api/transact.php"
+	SandboxQueryAPIURL   = "https://sandbox.nmi.com/api/query.php"
 )
 
 type NMIClient struct {
@@ -192,21 +194,30 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		log.WithField("provider", provider).Warn("NMI security_key not configured - NMI API calls will be disabled")
 	}
 
+	directPostURL := DefaultDirectPostURL
+	queryURL := DefaultQueryAPIURL
+	v5BaseURL := DefaultV5BaseURL
+	if testMode {
+		directPostURL = SandboxDirectPostURL
+		queryURL = SandboxQueryAPIURL
+		v5BaseURL = SandboxV5BaseURL
+	}
+
 	log.WithFields(log.Fields{
 		"provider":    provider,
 		"test_mode":   testMode,
-		"v5":          DefaultV5BaseURL,
-		"direct_post": DefaultDirectPostURL,
-		"query":       DefaultQueryAPIURL,
+		"v5":          v5BaseURL,
+		"direct_post": directPostURL,
+		"query":       queryURL,
 	}).Info("NMI endpoint selection")
 
 	return &NMIClient{
 		providerName:  provider,
 		SecurityKey:   securityKey,
 		WebhookSecret: webhookSecret,
-		DirectPostURL: DefaultDirectPostURL,
-		QueryURL:      DefaultQueryAPIURL,
-		V5BaseURL:     DefaultV5BaseURL,
+		DirectPostURL: directPostURL,
+		QueryURL:      queryURL,
+		V5BaseURL:     v5BaseURL,
 		TestMode:      testMode,
 		httpClient: &http.Client{
 			// Backstop only; the real bound is the per-request context

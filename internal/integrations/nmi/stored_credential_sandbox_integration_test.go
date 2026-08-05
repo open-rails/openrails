@@ -37,7 +37,7 @@ func TestLiveSandboxStoredCredentialCITThenMIT(t *testing.T) {
 
 	client, err := NewClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
 	require.NoError(t, err)
-	require.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "must hit the real gateway, not a stub")
+	require.Equal(t, SandboxDirectPostURL, client.DirectPostURL, "must hit the real sandbox gateway, not a stub")
 
 	// Vault the standard test card (raw-PAN classic shortcut — production
 	// vaulting takes a Collect.js token; see TestLiveSandboxClientSurface).
