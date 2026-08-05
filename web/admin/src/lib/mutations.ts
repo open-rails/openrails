@@ -9,7 +9,9 @@ import {
   activatePrice,
   activateProduct,
   cancelReprice,
+  cancelSubscription,
   changeTeamRole,
+  changeSubscriptionPaymentMethod,
   createAlertRule,
   createApiKey,
   createOffChannelPayment,
@@ -35,6 +37,7 @@ import {
   refreshCatalogDrift,
   removeTeamMember,
   repriceAllPriorVersions,
+  resumeSubscription,
   revokeApiKey,
   revokeEntitlement,
   revokeProductAccess,
@@ -67,6 +70,86 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  cancelSubscription: (
+    queryClient: QueryClient,
+    subscriptionId: string,
+    customerId?: string
+  ) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, subscriptionId, "cancel"],
+      mutationFn: ({
+        reason,
+        revokeAccess,
+      }: {
+        reason: string
+        revokeAccess: boolean
+      }) => cancelSubscription(subscriptionId, reason, revokeAccess),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          ...(customerKey
+            ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+            : []),
+        ]),
+    })
+  },
+  resumeSubscription: (
+    queryClient: QueryClient,
+    subscriptionId: string,
+    customerId?: string
+  ) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, subscriptionId, "resume"],
+      mutationFn: () => resumeSubscription(subscriptionId),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          ...(customerKey
+            ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+            : []),
+        ]),
+    })
+  },
+  changeSubscriptionPaymentMethod: (
+    queryClient: QueryClient,
+    subscriptionId: string,
+    customerId?: string
+  ) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, subscriptionId, "payment-method"],
+      mutationFn: (paymentMethodId: string) =>
+        changeSubscriptionPaymentMethod(subscriptionId, paymentMethodId),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          ...(customerKey
+            ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+            : []),
+        ]),
+    })
+  },
+  cancelSubscriptionReprice: (
+    queryClient: QueryClient,
+    subscriptionId: string
+  ) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    const catalogKey = queryKeys.catalog()
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, subscriptionId, "reprices", "cancel"],
+      mutationFn: (repriceId: string) => cancelReprice(repriceId),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          queryClient.invalidateQueries({ queryKey: catalogKey }),
+        ]),
+    })
+  },
   grantCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
     const customerKey = queryKeys.customer(customerId)
     return mutationOptions({

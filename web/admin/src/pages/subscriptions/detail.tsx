@@ -3,9 +3,11 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { StatusBadge } from "@/components/status-badge"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -38,29 +40,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  cancelReprice,
-  cancelSubscription,
-  changeSubscriptionPaymentMethod,
-  resumeSubscription,
-} from "@/lib/api/endpoints"
 import type { SubscriptionReprice } from "@/lib/api/types"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
-import { adminQueries, queryKeys } from "@/lib/queries"
 
 export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const { data: sub, isPending: loading } = useQuery(
     adminQueries.subscription(id)
   )
-  const reload = () =>
-    void queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions() })
   // #777: pending-reprice badge — at most one scheduled reprice can exist per
   // subscription at a time.
-  const { data: scheduledReprices, refetch: reloadReprices } = useQuery(
+  const { data: scheduledReprices } = useQuery(
     adminQueries.subscriptionReprices(id)
   )
   const pendingReprice = scheduledReprices?.items?.[0]
@@ -96,14 +90,17 @@ export function SubscriptionDetailPage() {
           </p>
         </div>
         <div className="ml-auto flex gap-2">
-          {resumable && <ResumeButton id={sub.id} onDone={reload} />}
+          {resumable && (
+            <ResumeButton id={sub.id} customerId={sub.customer_id} />
+          )}
           <ChangePaymentMethodDialog
             subscriptionId={sub.id}
             customerId={sub.customer_id}
             rail={sub.rail}
-            onDone={reload}
           />
-          {cancellable && <CancelDialog id={sub.id} onDone={reload} />}
+          {cancellable && (
+            <CancelDialog id={sub.id} customerId={sub.customer_id} />
+          )}
         </div>
       </div>
 
@@ -160,11 +157,8 @@ export function SubscriptionDetailPage() {
             )}
             {pendingReprice && (
               <PendingRepriceBadge
+                subscriptionId={sub.id}
                 reprice={pendingReprice}
-                onCancelled={() => {
-                  reloadReprices()
-                  reload()
-                }}
               />
             )}
           </div>
@@ -226,10 +220,24 @@ export function SubscriptionDetailPage() {
   )
 }
 
-function CancelDialog({ id, onDone }: { id: string; onDone: () => void }) {
+function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
   const [open, setOpen] = React.useState(false)
-  const [reason, setReason] = React.useState("")
-  const [revokeAccess, setRevokeAccess] = React.useState(false)
+  const queryClient = useQueryClient()
+  const cancel = useMutation(
+    adminMutations.cancelSubscription(queryClient, id, customerId)
+  )
+  const form = useForm({
+    defaultValues: { reason: "", revokeAccess: false },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      form.reset()
+      cancel.reset()
+    }
+  }
+
   return (
     <>
       <Button variant="destructive" size="sm" onClick={() => setOpen(true)}>
@@ -237,16 +245,15 @@ function CancelDialog({ id, onDone }: { id: string; onDone: () => void }) {
       </Button>
       <TypedConfirmDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
         title="Cancel subscription"
         description="Terminal cancellation at the payment rail. This is a last resort — dunning parks subscriptions as past_due without losing entitlements."
         confirmationWord="CANCEL"
         actionLabel="Cancel subscription"
         onConfirm={async () => {
           try {
-            await cancelSubscription(id, reason, revokeAccess)
+            await cancel.mutateAsync(form.state.values)
             toast.success("Subscription cancelled")
-            onDone()
           } catch (err) {
             toastApiError(err, "Cancel subscription")
             throw err
@@ -254,52 +261,60 @@ function CancelDialog({ id, onDone }: { id: string; onDone: () => void }) {
         }}
       >
         <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="cancel-reason">Reason</Label>
-            <Input
-              id="cancel-reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="why is this being cancelled?"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="cancel-revoke"
-              checked={revokeAccess}
-              onCheckedChange={setRevokeAccess}
-            />
-            <Label htmlFor="cancel-revoke">
-              Also revoke access immediately
-            </Label>
-          </div>
+          <form.Field name="reason">
+            {(field) => (
+              <div className="grid gap-1.5">
+                <Label htmlFor="cancel-reason">Reason</Label>
+                <Input
+                  id="cancel-reason"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder="why is this being cancelled?"
+                />
+              </div>
+            )}
+          </form.Field>
+          <form.Field name="revokeAccess">
+            {(field) => (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="cancel-revoke"
+                  checked={field.state.value}
+                  onCheckedChange={field.handleChange}
+                />
+                <Label htmlFor="cancel-revoke">
+                  Also revoke access immediately
+                </Label>
+              </div>
+            )}
+          </form.Field>
         </div>
       </TypedConfirmDialog>
     </>
   )
 }
 
-function ResumeButton({ id, onDone }: { id: string; onDone: () => void }) {
-  const [busy, setBusy] = React.useState(false)
+function ResumeButton({ id, customerId }: { id: string; customerId?: string }) {
+  const queryClient = useQueryClient()
+  const resume = useMutation(
+    adminMutations.resumeSubscription(queryClient, id, customerId)
+  )
   return (
     <Button
       variant="outline"
       size="sm"
-      disabled={busy}
+      disabled={resume.isPending}
       onClick={async () => {
-        setBusy(true)
         try {
-          await resumeSubscription(id)
+          await resume.mutateAsync()
           toast.success("Resume queued")
-          onDone()
         } catch (err) {
           toastApiError(err, "Resume subscription")
-        } finally {
-          setBusy(false)
         }
       }}
     >
-      {busy ? "Queuing…" : "Resume"}
+      {resume.isPending ? "Queuing…" : "Resume"}
     </Button>
   )
 }
@@ -308,24 +323,49 @@ function ChangePaymentMethodDialog({
   subscriptionId,
   customerId,
   rail,
-  onDone,
 }: {
   subscriptionId: string
   customerId?: string
   rail: string
-  onDone: () => void
 }) {
   const [open, setOpen] = React.useState(false)
-  const [paymentMethodId, setPaymentMethodId] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const changePaymentMethod = useMutation(
+    adminMutations.changeSubscriptionPaymentMethod(
+      queryClient,
+      subscriptionId,
+      customerId
+    )
+  )
   const { data: pms } = useQuery(
     adminQueries.customerPaymentMethods(open ? customerId : undefined)
   )
+  const form = useForm({
+    defaultValues: { paymentMethodId: "" },
+    onSubmit: async ({ value }) => {
+      try {
+        await changePaymentMethod.mutateAsync(value.paymentMethodId)
+        toast.success("Payment method updated")
+        handleOpenChange(false)
+      } catch (err) {
+        toastApiError(err, "Change payment method")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      form.reset()
+      changePaymentMethod.reset()
+    }
+  }
+
   // Payment-method swap is an NMI-only operation today (see
   // update_subscription_payment_method.go); other rails 400.
   const supported = rail === "nmi"
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button
@@ -350,50 +390,72 @@ function ChangePaymentMethodDialog({
             payment method (same rail).
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-1.5">
-          <Label>Payment method</Label>
-          <Select
-            value={paymentMethodId}
-            onValueChange={(value) => setPaymentMethodId(value ?? "")}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Pick a stored payment method" />
-            </SelectTrigger>
-            <SelectContent>
-              {(pms?.data ?? [])
-                .filter((pm) => pm.rail === rail)
-                .map((pm) => (
-                  <SelectItem key={pm.id} value={pm.id}>
-                    {pm.card?.brand ?? pm.type} •••• {pm.card?.last4 ?? "????"}{" "}
-                    ({pm.rail})
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={!paymentMethodId || busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await changeSubscriptionPaymentMethod(
-                  subscriptionId,
-                  paymentMethodId
-                )
-                toast.success("Payment method updated")
-                setOpen(false)
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Change payment method")
-              } finally {
-                setBusy(false)
-              }
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <form.Field
+            name="paymentMethodId"
+            validators={{
+              onChange: ({ value }) =>
+                value ? undefined : "Pick a stored payment method",
             }}
           >
-            {busy ? "Updating…" : "Update"}
-          </Button>
-        </DialogFooter>
+            {(field) => (
+              <div className="grid gap-1.5">
+                <Label htmlFor="subscription-payment-method">
+                  Payment method
+                </Label>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(value) => field.handleChange(value ?? "")}
+                >
+                  <SelectTrigger
+                    id="subscription-payment-method"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  >
+                    <SelectValue placeholder="Pick a stored payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(pms?.data ?? [])
+                      .filter((pm) => pm.rail === rail)
+                      .map((pm) => (
+                        <SelectItem key={pm.id} value={pm.id}>
+                          {pm.card?.brand ?? pm.type} ••••{" "}
+                          {pm.card?.last4 ?? "????"} ({pm.rail})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <FormFieldErrors errors={field.state.meta.errors} />
+              </div>
+            )}
+          </form.Field>
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.paymentMethodId,
+                  state.canSubmit,
+                  state.isSubmitting,
+                ] as const
+              }
+            >
+              {([paymentMethodId, canSubmit, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={!paymentMethodId || !canSubmit || isSubmitting}
+                >
+                  {isSubmitting ? "Updating…" : "Update"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
@@ -405,14 +467,17 @@ function ChangePaymentMethodDialog({
 // already-applied reprice cannot reach this badge (it's filtered to
 // status=scheduled by the caller).
 function PendingRepriceBadge({
+  subscriptionId,
   reprice,
-  onCancelled,
 }: {
+  subscriptionId: string
   reprice: SubscriptionReprice
-  onCancelled: () => void
 }) {
+  const queryClient = useQueryClient()
   const { data: toPrice } = useQuery(adminQueries.price(reprice.to_price_id))
-  const [busy, setBusy] = React.useState(false)
+  const cancel = useMutation(
+    adminMutations.cancelSubscriptionReprice(queryClient, subscriptionId)
+  )
   return (
     <span className="flex items-center gap-1.5">
       <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
@@ -426,17 +491,13 @@ function PendingRepriceBadge({
         variant="ghost"
         size="sm"
         className="h-5 px-1.5 text-xs"
-        disabled={busy}
+        disabled={cancel.isPending}
         onClick={async () => {
-          setBusy(true)
           try {
-            await cancelReprice(reprice.id)
+            await cancel.mutateAsync(reprice.id)
             toast.success("Reprice canceled")
-            onCancelled()
           } catch (err) {
             toastApiError(err, "Cancel reprice")
-          } finally {
-            setBusy(false)
           }
         }}
       >

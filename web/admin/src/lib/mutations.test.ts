@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
 import {
   cancelReprice,
+  cancelSubscription,
+  changeSubscriptionPaymentMethod,
   createOffChannelPayment,
   createPrice,
   createProduct,
@@ -18,6 +20,7 @@ import {
   putPaymentProvider,
   refreshCatalogDrift,
   repriceAllPriorVersions,
+  resumeSubscription,
   revokeEntitlement,
   revokeProductAccess,
 } from "@/lib/api/endpoints"
@@ -33,7 +36,9 @@ vi.mock("@/lib/api/endpoints", () => ({
   activatePrice: vi.fn(),
   activateProduct: vi.fn(),
   cancelReprice: vi.fn(),
+  cancelSubscription: vi.fn(),
   changeTeamRole: vi.fn(),
+  changeSubscriptionPaymentMethod: vi.fn(),
   createAlertRule: vi.fn(),
   createApiKey: vi.fn(),
   createOffChannelPayment: vi.fn(),
@@ -59,6 +64,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   removeTeamMember: vi.fn(),
   refreshCatalogDrift: vi.fn(),
   repriceAllPriorVersions: vi.fn(),
+  resumeSubscription: vi.fn(),
   revokeApiKey: vi.fn(),
   revokeEntitlement: vi.fn(),
   revokeProductAccess: vi.fn(),
@@ -99,6 +105,12 @@ beforeEach(() => {
   } as never)
   vi.mocked(repriceAllPriorVersions).mockResolvedValue({} as never)
   vi.mocked(cancelReprice).mockResolvedValue({ message: "ok" })
+  vi.mocked(cancelSubscription).mockResolvedValue({} as never)
+  vi.mocked(changeSubscriptionPaymentMethod).mockResolvedValue({
+    success: true,
+    message: "ok",
+  })
+  vi.mocked(resumeSubscription).mockResolvedValue({ status: "queued" })
   vi.mocked(createOffChannelPayment).mockResolvedValue({
     payment_id: "payment-1",
     status: "created",
@@ -128,6 +140,141 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("subscription mutations", () => {
+  it("cancels a subscription and refreshes subscription and customer data", async () => {
+    const queryClient = new QueryClient()
+    const subscriptionKey = queryKeys.subscription("subscription-1")
+    const customerKey = queryKeys.customer("customer-1")
+    const paymentsKey = queryKeys.payments()
+    queryClient.setQueryData(subscriptionKey, { id: "subscription-1" })
+    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
+    queryClient.setQueryData(paymentsKey, { data: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.cancelSubscription(
+          queryClient,
+          "subscription-1",
+          "customer-1"
+        )
+      )
+      .execute({ reason: "requested", revokeAccess: true })
+
+    expect(cancelSubscription).toHaveBeenCalledWith(
+      "subscription-1",
+      "requested",
+      true
+    )
+    expect(queryClient.getQueryState(subscriptionKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(false)
+  })
+
+  it("routes resume and payment-method changes through their endpoints", async () => {
+    const queryClient = new QueryClient()
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.resumeSubscription(
+          queryClient,
+          "subscription-1",
+          "customer-1"
+        )
+      )
+      .execute()
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.changeSubscriptionPaymentMethod(
+          queryClient,
+          "subscription-1",
+          "customer-1"
+        )
+      )
+      .execute("payment-method-1")
+
+    expect(resumeSubscription).toHaveBeenCalledWith("subscription-1")
+    expect(changeSubscriptionPaymentMethod).toHaveBeenCalledWith(
+      "subscription-1",
+      "payment-method-1"
+    )
+  })
+
+  it("cancels a scheduled reprice and refreshes subscription and catalog data", async () => {
+    const queryClient = new QueryClient()
+    const scheduledKey = [
+      ...queryKeys.subscription("subscription-1"),
+      "reprices",
+      "scheduled",
+    ] as const
+    const catalogRepricesKey = [...queryKeys.catalog(), "reprices"] as const
+    const paymentsKey = queryKeys.payments()
+    queryClient.setQueryData(scheduledKey, { items: [] })
+    queryClient.setQueryData(catalogRepricesKey, { items: [] })
+    queryClient.setQueryData(paymentsKey, { data: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.cancelSubscriptionReprice(queryClient, "subscription-1")
+      )
+      .execute("reprice-1")
+
+    expect(cancelReprice).toHaveBeenCalledWith("reprice-1")
+    expect(queryClient.getQueryState(scheduledKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(catalogRepricesKey)?.isInvalidated).toBe(
+      true
+    )
+    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(false)
+  })
+
+  it("keeps subscription invalidation scoped to the initiating merchant", async () => {
+    const queryClient = new QueryClient()
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    )
+    const subscriptionAKey = queryKeys.subscription("subscription-1")
+    const customerAKey = queryKeys.customer("customer-1")
+    const options = adminMutations.cancelSubscription(
+      queryClient,
+      "subscription-1",
+      "customer-1"
+    )
+    queryClient.setQueryData(subscriptionAKey, {})
+    queryClient.setQueryData(customerAKey, {})
+
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
+    )
+    const subscriptionBKey = queryKeys.subscription("subscription-1")
+    const customerBKey = queryKeys.customer("customer-1")
+    queryClient.setQueryData(subscriptionBKey, {})
+    queryClient.setQueryData(customerBKey, {})
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, options)
+      .execute({ reason: "requested", revokeAccess: false })
+
+    expect(queryClient.getQueryState(subscriptionAKey)?.isInvalidated).toBe(
+      true
+    )
+    expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(subscriptionBKey)?.isInvalidated).toBe(
+      false
+    )
+    expect(queryClient.getQueryState(customerBKey)?.isInvalidated).toBe(false)
+  })
+})
 
 describe("customer mutations", () => {
   it("changes entitlements and refreshes only that customer tree", async () => {
