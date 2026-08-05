@@ -1,13 +1,28 @@
-import { LogOutIcon, MoonIcon, SunIcon, UserIcon } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Logout01Icon,
+  MoonIcon,
+  Settings01Icon,
+  Sun01Icon,
+} from "@hugeicons/core-free-icons"
+import { Link, useNavigate } from "react-router-dom"
 
 import { NotificationBell } from "@/components/notification-bell"
 import { useTheme } from "@/components/theme-provider"
-import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -18,57 +33,105 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
 
 export function SiteHeader({ title }: { title: string }) {
-  const { theme, setTheme } = useTheme()
-  const { me, logout } = useAuth()
-  const navigate = useNavigate()
-
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
-      <h1 className="text-sm font-medium">{title}</h1>
+      <Breadcrumb>
+        <BreadcrumbList>
+          {title === "Dashboard" ? (
+            <BreadcrumbItem>
+              <BreadcrumbPage>Dashboard</BreadcrumbPage>
+            </BreadcrumbItem>
+          ) : (
+            <>
+              <BreadcrumbItem>
+                <BreadcrumbLink render={<Link to="/">Dashboard</Link>} />
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{title}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </>
+          )}
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
         <NotificationBell />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Toggle theme"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          <SunIcon className="size-4 dark:hidden" />
-          <MoonIcon className="hidden size-4 dark:block" />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Account">
-              <UserIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-56">
-            <DropdownMenuLabel className="flex flex-col gap-1">
-              <span>{me?.email || me?.username || "Signed in"}</span>
-              {me?.roles?.length ? (
-                <span className="flex flex-wrap gap-1">
-                  {me.roles.map((r) => (
-                    <Badge key={r} variant="secondary" className="text-[10px]">
-                      {r}
-                    </Badge>
-                  ))}
-                </span>
-              ) : null}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={async () => {
-                await logout()
-                navigate("/login")
-              }}
-            >
-              <LogOutIcon className="size-4" /> Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <UserMenu />
       </div>
     </header>
+  )
+}
+
+function UserMenu() {
+  const { me, logout } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const navigate = useNavigate()
+  if (!me) return null
+
+  const name = me.username || me.email || "Signed in"
+  const initials = name.slice(0, 2).toUpperCase()
+  const dark =
+    theme === "dark" ||
+    (theme === "system" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Account menu"
+            className="rounded-lg p-0"
+          >
+            <Avatar className="size-7 rounded-md">
+              <AvatarFallback className="rounded-md text-xs">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        }
+      />
+      <DropdownMenuContent side="bottom" align="end" className="min-w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            <div className="grid leading-tight">
+              <span className="text-sm font-medium">{name}</span>
+              {me.email && (
+                <span className="text-xs text-muted-foreground">
+                  {me.email}
+                </span>
+              )}
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate("/settings")}>
+          <HugeiconsIcon icon={Settings01Icon} />
+          Settings
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme(dark ? "light" : "dark")}>
+          {dark ? (
+            <HugeiconsIcon icon={Sun01Icon} />
+          ) : (
+            <HugeiconsIcon icon={MoonIcon} />
+          )}
+          {dark ? "Light mode" : "Dark mode"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={async () => {
+            await logout()
+            navigate("/login")
+          }}
+        >
+          <HugeiconsIcon icon={Logout01Icon} />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -1,5 +1,6 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { ArrowLeftIcon } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
@@ -40,29 +41,32 @@ export function PriceDetailPage() {
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
   // against every attached provider, which is a network round trip per PSP.
   const [verify, setVerify] = React.useState(false)
-  const { data: price, loading, error, reload } = useApiData(() => getPrice(id, verify), [id, verify])
+  const {
+    data: price,
+    loading,
+    error,
+    reload,
+  } = useApiData(() => getPrice(id, verify), [id, verify])
   const { data: product } = useApiData(
     () => (price ? getProduct(price.product_id) : Promise.resolve(null)),
-    [price?.product_id],
+    [price?.product_id]
   )
   const { data: history, reload: reloadHistory } = useApiData(
     () => (price ? getPriceKeyHistory(price.key) : Promise.resolve(null)),
-    [price?.key],
+    [price?.key]
   )
   const { data: batches, reload: reloadBatches } = useApiData(
-    () => (price ? listRepriceBatchesByKey(price.key, 5) : Promise.resolve(null)),
-    [price?.key],
+    () =>
+      price ? listRepriceBatchesByKey(price.key, 5) : Promise.resolve(null),
+    [price?.key]
   )
   const latestBatch = batches?.items?.[0]
-  const {
-    data: batchReprices,
-    reload: reloadBatchReprices,
-  } = useApiData(
+  const { data: batchReprices, reload: reloadBatchReprices } = useApiData(
     () =>
       latestBatch
         ? listReprices({ reprice_batch_id: latestBatch.id }, 1000)
         : Promise.resolve(null),
-    [latestBatch?.id],
+    [latestBatch?.id]
   )
 
   React.useEffect(() => {
@@ -77,31 +81,45 @@ export function PriceDetailPage() {
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
-  if (!price) {
+  if (!price)
     return (
-      <p className="text-sm text-muted-foreground">{loading ? "Loading…" : "Price not found."}</p>
+      <p className="text-sm text-muted-foreground">
+        {loading ? "Loading…" : "Price not found."}
+      </p>
     )
-  }
 
-  const scheduled = batchReprices?.items?.filter((r) => r.status === "scheduled") ?? []
-  const applied = batchReprices?.items?.filter((r) => r.status === "applied") ?? []
+  const scheduled =
+    batchReprices?.items?.filter((r) => r.status === "scheduled") ?? []
+  const applied =
+    batchReprices?.items?.filter((r) => r.status === "applied") ?? []
   const isPending = !!latestBatch && scheduled.length > 0
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
-          <ArrowLeftIcon className="size-4" />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate(-1)}
+          aria-label="Back"
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
         <div>
-          <h2 className="flex items-center gap-2 font-mono text-sm">
+          <h2 className="flex items-center gap-2 text-sm">
             {price.key}
             {price.archived && <Badge variant="secondary">archived</Badge>}
           </h2>
-          <p className="text-xs text-muted-foreground">{shortId(price.id, 16)}</p>
+          <p className="text-xs text-muted-foreground">
+            {shortId(price.id, 16)}
+          </p>
         </div>
         <div className="ml-auto">
-          <PriceChangeWizard price={price} productName={product?.display_name ?? "…"} onDone={reloadAll} />
+          <PriceChangeWizard
+            price={price}
+            productName={product?.display_name ?? "…"}
+            onDone={reloadAll}
+          />
         </div>
       </div>
 
@@ -111,7 +129,9 @@ export function PriceDetailPage() {
             {product?.display_name ?? shortId(price.product_id, 13)}
           </Link>
         </Fact>
-        <Fact label="Amount">{formatMicros(price.unit_amount, price.currency)}</Fact>
+        <Fact label="Amount">
+          {formatMicros(price.unit_amount, price.currency)}
+        </Fact>
         <Fact label="Currency · interval">
           {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
         </Fact>
@@ -147,18 +167,25 @@ export function PriceDetailPage() {
               <TableBody>
                 {history.items.map((entry) => (
                   <TableRow key={`${entry.price.id}-${entry.effective_at}`}>
-                    <TableCell>{formatMicros(entry.price.unit_amount, entry.price.currency)}</TableCell>
+                    <TableCell>
+                      {formatMicros(
+                        entry.price.unit_amount,
+                        entry.price.currency
+                      )}
+                    </TableCell>
                     <TableCell>{formatDate(entry.effective_at)}</TableCell>
                     <TableCell>
                       {entry.price.archived ? (
                         <Badge variant="secondary">grandfathered</Badge>
                       ) : (
-                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">current</Badge>
+                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                          current
+                        </Badge>
                       )}
                     </TableCell>
                     <TableCell>
                       <Link
-                        className="font-mono text-xs underline-offset-2 hover:underline"
+                        className="text-xs underline-offset-2 hover:underline"
                         to={`/catalog/prices/${entry.price.id}`}
                       >
                         {shortId(entry.price.id, 13)}
@@ -198,7 +225,8 @@ export function PriceDetailPage() {
             <p className="text-xs text-muted-foreground">
               {latestBatch.subscriptions_skipped > 0 &&
                 `${latestBatch.subscriptions_skipped} subscription(s) were skipped (constraint violation or existing schedule conflict) at schedule time. `}
-              Progress is computed live from individual reprice rows (up to 1,000 fetched per batch).
+              Progress is computed live from individual reprice rows (up to
+              1,000 fetched per batch).
             </p>
           </CardContent>
         </Card>
@@ -207,7 +235,13 @@ export function PriceDetailPage() {
   )
 }
 
-function CancelMigrationButton({ repriceIds, onDone }: { repriceIds: string[]; onDone: () => void }) {
+function CancelMigrationButton({
+  repriceIds,
+  onDone,
+}: {
+  repriceIds: string[]
+  onDone: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   return (
     <Button
@@ -219,7 +253,7 @@ function CancelMigrationButton({ repriceIds, onDone }: { repriceIds: string[]; o
         try {
           await Promise.all(repriceIds.map((id) => cancelReprice(id)))
           toast.success(
-            `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`,
+            `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
           )
           onDone()
         } catch (err) {

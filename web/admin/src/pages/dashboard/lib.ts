@@ -14,7 +14,11 @@ export function newWidgetId(): string {
 }
 
 // formatMeasure renders one measure cell by its column unit.
-export function formatMeasure(value: MetricsCell, unit: string | undefined, currency?: string): string {
+export function formatMeasure(
+  value: MetricsCell,
+  unit: string | undefined,
+  currency?: string
+): string {
   if (value === null || value === undefined) return "—"
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
@@ -37,11 +41,22 @@ export function formatBucket(iso: string, grain?: string): string {
   switch (grain) {
     case "month":
     case "quarter":
-      return d.toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" })
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
     case "year":
-      return d.toLocaleDateString(undefined, { year: "numeric", timeZone: "UTC" })
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        timeZone: "UTC",
+      })
     default:
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      })
   }
 }
 
@@ -89,9 +104,15 @@ export function pivotTimeSeries(result: MetricsResult): Pivoted {
       entry = { bucket: formatBucket(t, result.grain), bucketISO: t }
       buckets.set(t, entry)
     }
-    const dimLabel = idx.dims.map((d) => String(row[d.index] ?? "")).filter(Boolean).join(" · ")
+    const dimLabel = idx.dims
+      .map((d) => String(row[d.index] ?? ""))
+      .filter(Boolean)
+      .join(" · ")
     for (const m of idx.measures) {
-      const key = dimLabel && idx.measures.length > 1 ? `${m.name} · ${dimLabel}` : dimLabel || m.name
+      const key =
+        dimLabel && idx.measures.length > 1
+          ? `${m.name} · ${dimLabel}`
+          : dimLabel || m.name
       if (!series.has(key)) series.set(key, { key, unit: m.unit })
       entry[key] = Number(row[m.index] ?? 0)
     }
@@ -118,12 +139,22 @@ export function deepLinkFor(query: MetricsQuery): string | null {
   const status = query.filters?.status?.[0]
   const has = (...names: string[]) => names.some((n) => measures.includes(n))
   if (has("subscriptions", "billable_subscriptions")) {
-    return status ? `/subscriptions?status=${encodeURIComponent(status)}` : "/subscriptions"
+    return status
+      ? `/subscriptions?status=${encodeURIComponent(status)}`
+      : "/subscriptions"
   }
   if (has("new_subscriptions")) return "/subscriptions?status=active"
   if (has("cancellations")) return "/subscriptions?status=cancelled"
   if (has("payment_failures", "unique_failed_customers")) return "/payments"
-  if (has("payment_count", "refund_count", "chargeback_count", "unique_rebilled_customers")) return "/payments"
+  if (
+    has(
+      "payment_count",
+      "refund_count",
+      "chargeback_count",
+      "unique_rebilled_customers"
+    )
+  )
+    return "/payments"
   if (has("entitled_customers")) return "/customers"
   return null
 }

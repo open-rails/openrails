@@ -162,6 +162,21 @@ func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReade
 // vault is created IN that PSP's account, and the row's rail comes from the
 // resolved scope.
 func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, userID string, req *CreatePaymentMethodRequest) (*models.PaymentMethod, error) {
+	startedAt := time.Now()
+	var providerDuration time.Duration
+	var databaseDuration time.Duration
+	outcome := "failed"
+	defer func() {
+		log.WithFields(log.Fields{
+			"operation":            "payment_method_create",
+			"provider":             strings.TrimSpace(strings.ToLower(req.Provider)),
+			"provider_duration_ms": providerDuration.Milliseconds(),
+			"database_duration_ms": databaseDuration.Milliseconds(),
+			"total_duration_ms":    time.Since(startedAt).Milliseconds(),
+			"outcome":              outcome,
+		}).Info("Payment method create timing")
+	}()
+
 	psp := strings.TrimSpace(strings.ToLower(req.Provider))
 	if psp == "" {
 		return nil, errors.New("provider is required")
@@ -208,7 +223,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
+	providerStartedAt := time.Now()
 	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)
+	providerDuration = time.Since(providerStartedAt)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
 		var nmiErr *nmi.CustomerVaultError
@@ -247,7 +264,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		pm.PspID = *pspID
 	}
 
+	databaseStartedAt := time.Now()
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
+		databaseDuration = time.Since(databaseStartedAt)
 		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store payment method locally")
 		// Best-effort direct remote cleanup — deliberately NOT intent-routed
 		// (#674 tail): the vault was created milliseconds ago and is referenced
@@ -255,7 +274,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		return nil, fmt.Errorf("failed to store payment method locally: %w", err)
 	}
+	databaseDuration = time.Since(databaseStartedAt)
 
+	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
 	return pm, nil
 }

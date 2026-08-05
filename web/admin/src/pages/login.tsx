@@ -1,5 +1,6 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Key02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { KeyRoundIcon, ZapIcon } from "lucide-react"
 import { Navigate, useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
@@ -16,7 +17,8 @@ import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/lib/auth"
 
 export function LoginPage() {
-  const { ready, bootError, me, capabilities, loginWithPassword, startOIDC } = useAuth()
+  const { ready, bootError, me, capabilities, loginWithPassword, startOIDC } =
+    useAuth()
   const navigate = useNavigate()
   const [login, setLogin] = React.useState("")
   const [password, setPassword] = React.useState("")
@@ -34,7 +36,9 @@ export function LoginPage() {
 
   // OIDC buttons only when the issuer actually advertises login-capable
   // providers; otherwise password-only.
-  const oidcProviders = (capabilities?.providers ?? []).filter((p) => p.supports_login)
+  const oidcProviders = (capabilities?.providers ?? []).filter(
+    (p) => p.supports_login
+  )
   const passwordEnabled = capabilities?.password?.login !== false
 
   const submit = async (e: React.FormEvent) => {
@@ -55,8 +59,8 @@ export function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ZapIcon className="size-5" />
+          <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
+            µ
           </div>
           <CardTitle>OpenRails Admin</CardTitle>
           <CardDescription>Sign in to your merchant console</CardDescription>
@@ -92,7 +96,7 @@ export function LoginPage() {
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button type="submit" disabled={busy}>
-                <KeyRoundIcon className="size-4" />
+                <HugeiconsIcon icon={Key02Icon} className="size-4" />
                 {busy ? "Signing in…" : "Sign in"}
               </Button>
             </form>
@@ -101,12 +105,17 @@ export function LoginPage() {
             <>
               {passwordEnabled && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Separator className="flex-1" /> or <Separator className="flex-1" />
+                  <Separator className="flex-1" /> or{" "}
+                  <Separator className="flex-1" />
                 </div>
               )}
               <div className="grid gap-2">
                 {oidcProviders.map((p) => (
-                  <Button key={p.id} variant="outline" onClick={() => startOIDC(p.id)}>
+                  <Button
+                    key={p.id}
+                    variant="outline"
+                    onClick={() => startOIDC(p.id)}
+                  >
                     Continue with {p.name || p.id}
                   </Button>
                 ))}
@@ -115,8 +124,8 @@ export function LoginPage() {
           )}
           {!passwordEnabled && oidcProviders.length === 0 && !bootError && (
             <p className="text-sm text-muted-foreground">
-              The auth issuer advertises no browser login methods. Check the deployment's
-              AuthKit configuration.
+              The auth issuer advertises no browser login methods. Check the
+              deployment's AuthKit configuration.
             </p>
           )}
         </CardContent>

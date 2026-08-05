@@ -1,7 +1,8 @@
 // Types mirror the Go handlers' JSON shapes exactly (see internal/http/handlers).
 // All money fields are MICROS (millionths of a currency unit).
 
-export type SubscriptionStatus = "pending" | "active" | "past_due" | "cancelled" | "unknown"
+export type SubscriptionStatus =
+  "pending" | "active" | "past_due" | "cancelled" | "unknown"
 export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
 
 // --- Customers (#740 list endpoint) ---
@@ -110,7 +111,12 @@ export interface PaymentMethodResponse {
   object: "payment_method"
   type: string
   rail: Rail
-  card?: { brand?: string; last4?: string; exp_month?: number; exp_year?: number }
+  card?: {
+    brand?: string
+    last4?: string
+    exp_month?: number
+    exp_year?: number
+  }
   livemode: boolean
   created: number
   health?: {
@@ -119,7 +125,12 @@ export interface PaymentMethodResponse {
     last_charge_outcome?: string
     active: boolean
   }
-  subscriptions?: { id: string; display_name: string; description: string; created_at: string }[]
+  subscriptions?: {
+    id: string
+    display_name: string
+    description: string
+    created_at: string
+  }[]
 }
 
 export interface CreditBalance {
@@ -148,7 +159,8 @@ export interface CustomerBillingProfile {
 export interface PaymentObject {
   id: string // pay_...
   object: "charge" | "refund"
-  status?: "succeeded" | "pending" | "failed" | "refunded" | "partially_refunded"
+  status?:
+    "succeeded" | "pending" | "failed" | "refunded" | "partially_refunded"
   amount: number
   amount_refunded: number
   currency: string
@@ -178,7 +190,10 @@ export interface CatalogProduct {
   display_name: string
   description: string
   entitlements_spec?: Record<string, number | null>
-  credits_spec?: Record<string, { unit?: string; amount: number; expiry_hours?: number; cadence?: string }>
+  credits_spec?: Record<
+    string,
+    { unit?: string; amount: number; expiry_hours?: number; cadence?: string }
+  >
   tier_group?: string
   tier_rank: number
   archived: boolean
@@ -535,6 +550,17 @@ export interface Me {
   username?: string
   roles?: string[]
   entitlements?: string[]
+}
+
+export interface MerchantMembership {
+  persona: string
+  instance_slug: string
+  role: string
+}
+
+export interface MerchantMembershipList {
+  object: "list"
+  data: MerchantMembership[]
 }
 
 // --- Alerting (#736) ---

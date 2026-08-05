@@ -75,12 +75,19 @@ export interface CopilotAskResponse {
 // lookups + an answer, plus any drafts the model proposed. 501 when
 // llm.catalog_copilot_enabled / the LLM key are not configured.
 export const askCatalogCopilot = (question: string) =>
-  api<CopilotAskResponse>("/merchant/catalog/ask", { method: "POST", body: { question } })
+  api<CopilotAskResponse>("/merchant/catalog/ask", {
+    method: "POST",
+    body: { question },
+  })
 
 // confirmCopilotDraft: fire-and-forget audit-provenance log, called AFTER a
 // human has already confirmed a copilot-drafted change through the normal
 // wizard/create-price flow. Never a mutation itself.
-export const confirmCopilotDraft = (draftId: string, kind: string, priceKey?: string) =>
+export const confirmCopilotDraft = (
+  draftId: string,
+  kind: string,
+  priceKey?: string
+) =>
   api<{ message: string }>("/merchant/catalog/copilot/confirm", {
     method: "POST",
     body: { draft_id: draftId, kind, price_key: priceKey },
