@@ -584,11 +584,15 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 	if !ok {
 		return false
 	}
-	prepared, _, ok := prepareCCBillWebhookWithAccountID(r, body)
+	prepared, accountID, ok := prepareCCBillWebhookWithAccountID(r, body)
 	if !ok {
 		return false
 	}
-	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, "")
+	// or#893: the payload's clientAccnum-clientSubacc IS the CCBill account
+	// identity, and prepare above already refuses a payload without it — so this
+	// route knows exactly which PSP sent the event and must not discard it. The
+	// per-account route resolves the same thing through the URL.
+	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, accountID)
 }
 
 func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
@@ -621,8 +625,20 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
 	}
+	// Stamp the routed PSP so every row this event materialises is attributable
+	// (or#893). The per-account route pins it in resolveWebhookRailMerchantAccount;
+	// the merchant-slug route resolves it from the payload's own account identity.
+	ctx := r.Request.Context()
+	if accountID != "" && r.State.Merchants != nil {
+		if mid, ok := merchant.FromContext(ctx); ok && !mid.IsZero() {
+			if pid, found, rerr := r.State.Merchants.ResolvePSPID(ctx, mid, subscriptions.RailCCBill, accountID); rerr == nil && found {
+				ctx = db.WithPSPID(ctx, pid)
+				r.Request = r.Request.WithContext(ctx)
+			}
+		}
+	}
 	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
-	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
+	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}

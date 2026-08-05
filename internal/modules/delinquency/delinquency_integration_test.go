@@ -136,6 +136,7 @@ func (e *env) seedCard(t *testing.T) uuid.UUID {
 		MerchantID:           e.merchant.UUID(),
 		CustomerID:           e.payer.UUID(),
 		Rail:                 string(models.RailNMI),
+		PspID:                dbtest.EnsureTestPSP(e.ctx, t, e.pool, e.merchant.UUID(), string(models.RailNMI)),
 		InitialTransactionID: "init_" + pm.String(),
 		RailCustomerRef:      "vault_" + pm.String(),
 	})
@@ -170,6 +171,7 @@ func (e *env) seedActiveSubscription(t *testing.T) uuid.UUID {
 		ID: subID, MerchantID: e.merchant.UUID(), CustomerID: e.payer.UUID(),
 		ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusActive), Rail: string(models.RailNMI),
+		PspID:                 dbtest.EnsureTestPSP(e.ctx, t, e.pool, e.merchant.UUID(), string(models.RailNMI)),
 		RailSubscriptionID:    "sub_or878_" + subID.String(),
 		CurrentPeriodStartsAt: &now, CurrentPeriodEndsAt: &periodEnd, StartedAt: now,
 	})
@@ -377,7 +379,9 @@ func TestDelinquencyIsMerchantIsolated(t *testing.T) {
 		INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		other.UUID(), "or878-other-"+uuid.NewString()[:8])
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), "DELETE FROM openrails.merchants WHERE id = $1", other.UUID()) })
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), "DELETE FROM openrails.merchants WHERE id = $1", other.UUID())
+	})
 
 	otherDB := dbtest.OpenMerchantDB(t, other.UUID())
 	otherCtx := merchant.WithID(context.Background(), other)

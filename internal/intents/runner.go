@@ -282,8 +282,11 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
-		// Pin the intent's merchant for merchant-scoped verify/repair writes (#336).
+		// Pin the intent's merchant for merchant-scoped verify/repair writes
+		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
+		// writes the same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+		ctx = db.WithPSPID(ctx, intent.PspID)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,

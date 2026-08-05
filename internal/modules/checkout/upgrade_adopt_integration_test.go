@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // statefulIdemStub is a checkoutIdempotencyStore that remembers records across
@@ -167,7 +166,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
-	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	ctx := checkoutFixtureCtx(t, pool, "nmi")
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()

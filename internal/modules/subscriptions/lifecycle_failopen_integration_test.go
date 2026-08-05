@@ -45,9 +45,14 @@ type failopenFixture struct {
 // autoRenew=false models a bounded (rental/one-off duration) price.
 func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failopenFixture {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
+	// or#893: these fixtures drive the lifecycle service directly, so they must
+	// arrive in the shape every production caller does — checkout's stampPSP,
+	// the intent runner and the webhook plane all pin the routed PSP on ctx
+	// before any provider-bound row is written.
+	dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	ctx := failopenCtx()
 	q := gen.New(pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -117,7 +122,7 @@ func (f *failopenFixture) windows(t *testing.T, subID uuid.UUID, sourceType stri
 
 func (f *failopenFixture) entitledAt(t *testing.T, at time.Time) bool {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	ok, err := f.entSvc.IsEntitled(ctx, f.userID, f.ent, at)
 	require.NoError(t, err)
 	return ok
@@ -125,7 +130,7 @@ func (f *failopenFixture) entitledAt(t *testing.T, at time.Time) bool {
 
 func (f *failopenFixture) loadSub(t *testing.T, id uuid.UUID) *models.Subscription {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	subSvc := NewSubscriptionService(f.dbi, catalog.NewPriceService(f.dbi), catalog.NewProductService(f.dbi), nil, nil, nil, nil)
 	sub, err := subSvc.GetByID(ctx, id)
 	require.NoError(t, err)
@@ -134,7 +139,7 @@ func (f *failopenFixture) loadSub(t *testing.T, id uuid.UUID) *models.Subscripti
 
 func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscription, string) {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	procSubID := "sub_failopen_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:             f.userID,
@@ -155,7 +160,7 @@ func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscr
 // sweep the window is already open-ended, so access holds trivially.
 func TestFailOpen_WebhookSilence(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	paid := f.windows(t, sub.ID, "subscription")
@@ -208,7 +213,7 @@ func TestFailOpen_WebhookSilence(t *testing.T) {
 // detection agrees the per-period grants are satisfied by the standing window.
 func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, procSubID := f.create(t, models.RailNMI)
 
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
@@ -249,7 +254,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 	// DERIVE parity: no per-period grant is reported as missing its effect —
 	// the standing window satisfies them (detection mirrors MaterializeGrant).
 	customerID := f.loadSub(t, sub.ID).CustomerID
-	missing, err := f.q.ListLiveGrantsMissingEffects(dbtest.WithTestMerchant(context.Background()), gen.ListLiveGrantsMissingEffectsParams{
+	missing, err := f.q.ListLiveGrantsMissingEffects(failopenCtx(), gen.ListLiveGrantsMissingEffectsParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: &customerID,
 	})
 	require.NoError(t, err)
@@ -261,7 +266,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 // system cannot extend a cancelled sub. Access ends exactly at period end.
 func TestFailOpen_UserCancelClosesAtPeriodEnd(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 	created := f.loadSub(t, sub.ID)
 	require.NotNil(t, created.CurrentPeriodEndsAt)
@@ -286,7 +291,7 @@ func TestFailOpen_UserCancelClosesAtPeriodEnd(t *testing.T) {
 // TestFailOpen_ImmediateCancelRevokesNow: an immediate revoke closes access now.
 func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
@@ -304,7 +309,7 @@ func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
 // the standing window (the advance-written closure is undone).
 func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, procSubID := f.create(t, models.RailNMI)
 	created := f.loadSub(t, sub.ID)
 
@@ -342,7 +347,7 @@ func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
 // windows minted.
 func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
@@ -387,7 +392,7 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 // dunning_worker FailMembership cadence tests (#694).
 func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 	f := newFailopenFixture(t, 24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	reason := "rebill declined"
@@ -425,7 +430,7 @@ func (d *failopenDeferredDelete) WithTx(pgx.Tx) DeferredDeleteScheduler { return
 // (no regression).
 func TestFailOpen_ResolveCancelledRemoteAlive(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	deferDelete := &failopenDeferredDelete{}
 	f.lifecycle.SetDeferredDeleteScheduler(deferDelete)
 
@@ -463,7 +468,7 @@ func TestFailOpen_BoundedPurchaseKeepsInterval(t *testing.T) {
 // must not mint overlapping bounded windows next to the standing one.
 func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, procSubID := f.create(t, models.RailNMI)
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
 		Rail:               models.RailNMI,
@@ -502,4 +507,13 @@ func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 	}))
 
 	assert.Equal(t, before, countWindows(), "derive replay must not create windows next to the standing one")
+}
+
+// failopenCtx is the production context shape for a provider-bound write: the
+// merchant, plus the PSP the caller routed to (or#893).
+func failopenCtx() context.Context {
+	return db.WithPSPID(
+		dbtest.WithTestMerchant(context.Background()),
+		dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), string(models.RailNMI)),
+	)
 }
