@@ -102,26 +102,26 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		loader := &PGLocalStateLoader{DB: appDB}
-		stateA, err := loader.Load(ctx, ProviderNMI, &accountA.ID)
+		stateA, err := loader.Load(ctx, ProviderNMI, accountA.ID)
 		require.NoError(t, err)
 		require.Len(t, stateA.Subscriptions, 1)
 		require.Equal(t, customerA, stateA.Subscriptions[0].CustomerID)
 		require.Len(t, stateA.PaymentMethods, 1)
 		require.Equal(t, "1111", stateA.PaymentMethods[0].LastFour)
 
-		paymentsA, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountA.ID, []string{"txn-1111", "txn-2222"})
+		paymentsA, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, accountA.ID, []string{"txn-1111", "txn-2222"})
 		require.NoError(t, err)
 		require.Len(t, paymentsA, 1)
 		require.Equal(t, customerA, paymentsA[0].CustomerID)
 
-		stateB, err := loader.Load(ctx, ProviderNMI, &accountB.ID)
+		stateB, err := loader.Load(ctx, ProviderNMI, accountB.ID)
 		require.NoError(t, err)
 		require.Len(t, stateB.Subscriptions, 1)
 		require.Equal(t, customerB, stateB.Subscriptions[0].CustomerID)
 		require.Len(t, stateB.PaymentMethods, 1)
 		require.Equal(t, "2222", stateB.PaymentMethods[0].LastFour)
 
-		paymentsB, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, &accountB.ID, []string{"txn-1111", "txn-2222"})
+		paymentsB, err := loader.PaymentsByTransactionIDs(ctx, ProviderNMI, accountB.ID, []string{"txn-1111", "txn-2222"})
 		require.NoError(t, err)
 		require.Len(t, paymentsB, 1)
 		require.Equal(t, customerB, paymentsB[0].CustomerID)

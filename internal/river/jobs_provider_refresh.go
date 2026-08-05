@@ -464,10 +464,19 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
-		// Runtime provider-account identity resolution was removed (#592):
-		// watermarks key globally per merchant+provider and reconcile runs
-		// account-agnostic (psps is an operator-declared catalog).
-		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, coverage, nil, nil, fetchers)
+		// or#893: the pass already KNOWS which PSP armed the rail's fetcher —
+		// resolveScopeCoverage recorded it. It used to be thrown away, so the
+		// watermark keyed globally per (merchant, rail) and reconcile ran
+		// account-agnostic: pulling mobius advanced paykings' watermark past
+		// events nobody had read, and every mirror row landed unattributed.
+		binding := coverage[provider].Binding
+		if binding.ID == uuid.Nil {
+			result.ProviderErrors++
+			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "provider": provider}).
+				Error("Provider Refresh: rail armed without a resolved PSP; refusing an unattributed pull")
+			continue
+		}
+		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, coverage, binding, fetchers)
 		result.add(providerRes)
 	}
 	return result
@@ -495,15 +504,17 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	return providers
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.RailMerchantAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.RailMerchantAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
+	pspID := binding.ID
+	bindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{provider: binding}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())
 	if !horizon.After(time.Time{}) {
 		return out
 	}
 
-	since, err := w.loadWatermark(ctx, mid, provider, accountID, horizon.Add(-w.initialLookback()))
+	since, err := w.loadWatermark(ctx, mid, provider, pspID, horizon.Add(-w.initialLookback()))
 	if err != nil {
 		out.WatermarkErrors++
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
@@ -544,7 +555,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		res, err := engine.Run(ctx, params)
 		if err != nil {
 			out.ProviderErrors++
-			if werr := w.recordWatermarkFailure(ctx, mid, provider, accountID, since, now, err); werr != nil {
+			if werr := w.recordWatermarkFailure(ctx, mid, provider, pspID, since, now, err); werr != nil {
 				out.WatermarkErrors++
 				log.WithContext(ctx).WithError(werr).WithField("provider", provider).Warn("Provider Refresh: record failed provider attempt failed")
 			}
@@ -572,7 +583,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 			}
 		}
-		if err := w.recordWatermarkSuccess(ctx, mid, provider, accountID, until, now); err != nil {
+		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until, now); err != nil {
 			out.WatermarkErrors++
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
@@ -589,7 +600,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, fallback time.Time) (time.Time, error) {
+func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, fallback time.Time) (time.Time, error) {
 	var watermark time.Time
 	err := w.DB.Qx(ctx).QueryRow(ctx, `
 SELECT watermark_at
@@ -597,8 +608,8 @@ SELECT watermark_at
  WHERE merchant_id = $1::uuid
    AND rail = $2::text
    AND event_domain = $3::text
-   AND psp_key = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
-`, mid, string(provider), providerRefreshDomainEvents, accountID).Scan(&watermark)
+   AND psp_id = $4::uuid
+`, mid, string(provider), providerRefreshDomainEvents, pspID).Scan(&watermark)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fallback.UTC(), nil
 	}
@@ -608,7 +619,7 @@ SELECT watermark_at
 	return watermark.UTC(), nil
 }
 
-func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time) error {
+func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark, attemptedAt time.Time) error {
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
     merchant_id, rail, psp_id, event_domain, watermark_at,
@@ -621,11 +632,11 @@ DO UPDATE SET
     last_succeeded_at = EXCLUDED.last_succeeded_at,
     last_error = NULL,
     updated_at = now()
-`, mid, string(provider), accountID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC())
+`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC())
 	return err
 }
 
-func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time, cause error) error {
+func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark, attemptedAt time.Time, cause error) error {
 	errText := cause.Error()
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
@@ -637,7 +648,7 @@ DO UPDATE SET
     last_attempted_at = EXCLUDED.last_attempted_at,
     last_error = EXCLUDED.last_error,
     updated_at = now()
-`, mid, string(provider), accountID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC(), errText)
+`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC(), errText)
 	return err
 }
 

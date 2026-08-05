@@ -164,7 +164,27 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		if len(fetchers) == 0 {
 			return fmt.Errorf("no payment providers configured for reconciliation (no armed rail accounts for this merchant)")
 		}
-		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(explicitBindings))
+		// or#893: every armed rail carries the PSP its credentials came from.
+		// An unpinned pull used to run with NO binding at all — reading and
+		// writing the rail's mirror account-agnostically — so default to what
+		// the arming already resolved; --provider-account only overrides it.
+		selected := map[reconcile.Provider]bool{}
+		for _, p := range providers {
+			selected[p] = true
+		}
+		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(armed.Coverage))
+		for provider, cov := range armed.Coverage {
+			if _, ok := fetchers[provider]; !ok {
+				continue
+			}
+			if len(selected) > 0 && !selected[provider] {
+				continue
+			}
+			if cov.Binding.ID == uuid.Nil {
+				return fmt.Errorf("rail %s armed without a resolved PSP: refusing an unattributed pull", provider)
+			}
+			bindings[provider] = cov.Binding
+		}
 		for provider, binding := range explicitBindings {
 			bindings[provider] = binding
 		}

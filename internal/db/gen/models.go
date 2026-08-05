@@ -1111,9 +1111,8 @@ type OpenrailsRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// Current PSP row when resolvable; NULL is the compatibility/global lane for providers without a bound account identity.
-	PspID  *uuid.UUID
-	PspKey *uuid.UUID
+	// The PSP whose event stream this cursor bounds. Required (or#893): a pull arms from exactly one PSP, and a watermark shared across PSPs skips the events of every PSP but the one that advanced it.
+	PspID uuid.UUID
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
 	// Exclusive lower bound for the next successful bounded provider event refresh window.

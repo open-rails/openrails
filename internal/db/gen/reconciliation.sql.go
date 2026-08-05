@@ -1084,7 +1084,7 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
+              AND w.psp_id = s.psp_id
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s
@@ -1864,12 +1864,12 @@ SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_typ
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY ($1::text[])
-  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
+  AND psp_id = $2::uuid
 `
 
 type ReconcileListPaymentMethodsByRailsParams struct {
 	Rails []string
-	PspID *uuid.UUID
+	PspID uuid.UUID
 }
 
 type ReconcileListPaymentMethodsByRailsRow struct {
@@ -1919,13 +1919,13 @@ FROM openrails.payments
 WHERE rail::text = ANY ($1::text[])
   AND deleted_at IS NULL
   AND transaction_id = ANY ($2::text[])
-  AND ($3::uuid IS NULL OR psp_id = $3::uuid)
+  AND psp_id = $3::uuid
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
 	Rails          []string
 	TransactionIds []string
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 }
 
 type ReconcileListPaymentsByTransactionIDsRow struct {
@@ -2062,12 +2062,12 @@ SELECT id, customer_id, price_id, product_id, status, rail,
 FROM openrails.subscriptions
 WHERE rail = ANY ($1::text[])
   AND deleted_at IS NULL
-  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
+  AND psp_id = $2::uuid
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
 	Rails []string
-	PspID *uuid.UUID
+	PspID uuid.UUID
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
@@ -2174,6 +2174,9 @@ WHERE pr.id = $11
       WHERE s.rail_subscription_id = $4
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
+        -- narg here NARROWS nothing: a nil PSP (the declared legacy-book
+        -- import) dedupes against EVERY PSP, which is the conservative side.
+        -- The read queries above are where nil-wide matching was dangerous.
         AND ($10::uuid IS NULL OR s.psp_id = $10::uuid)
   )
 RETURNING id, entitlements_spec_snapshot

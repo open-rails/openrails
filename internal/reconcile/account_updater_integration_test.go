@@ -37,14 +37,15 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 		vaultID  = "vault-au-" + uuid.NewString()[:8]
 		methodID = uuid.New()
 	)
+	psp := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID())
+		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID(), psp.ID)
 		_, err := appDB.Qx(ctx).Exec(ctx, `
 			INSERT INTO openrails.payment_methods
 			  (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
-			   initial_transaction_id, last_four, card_type, expiry_date)
-			VALUES ($1, $2, $3, 'nmi', $4, '', '', '1111', 'visa', '1226')`,
-			methodID, mid.UUID(), seeded.subjectID, vaultID)
+			   initial_transaction_id, last_four, card_type, expiry_date, psp_id)
+			VALUES ($1, $2, $3, 'nmi', $4, '', '', '1111', 'visa', '1226', $5)`,
+			methodID, mid.UUID(), seeded.subjectID, vaultID, psp.ID)
 		return err
 	}))
 	t.Cleanup(func() {
@@ -95,7 +96,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 
 	var enforce *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		enforce = res
 		return err
 	}))
@@ -150,7 +151,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	// to fix the provider's card back to our old copy.
 	var second *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		second = res
 		return err
 	}))
