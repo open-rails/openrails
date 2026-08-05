@@ -4,17 +4,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
 import {
   cancelReprice,
+  createOffChannelPayment,
   createPrice,
   createProduct,
   deactivatePrice,
   getPriceByKey,
   getProduct,
+  grantEntitlement,
+  grantProductAccess,
   previewRepriceAllPriorVersions,
   publishCatalog,
   putMerchantSettings,
   putPaymentProvider,
   refreshCatalogDrift,
   repriceAllPriorVersions,
+  revokeEntitlement,
+  revokeProductAccess,
 } from "@/lib/api/endpoints"
 import { adminMutations } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
@@ -31,6 +36,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   changeTeamRole: vi.fn(),
   createAlertRule: vi.fn(),
   createApiKey: vi.fn(),
+  createOffChannelPayment: vi.fn(),
   createPrice: vi.fn(),
   createProduct: vi.fn(),
   createWebhook: vi.fn(),
@@ -43,6 +49,8 @@ vi.mock("@/lib/api/endpoints", () => ({
   getPriceByKey: vi.fn(),
   getProduct: vi.fn(),
   getTrustLevel: vi.fn(),
+  grantEntitlement: vi.fn(),
+  grantProductAccess: vi.fn(),
   inviteTeamMember: vi.fn(),
   putMerchantSettings: vi.fn(),
   putPaymentProvider: vi.fn(),
@@ -52,6 +60,8 @@ vi.mock("@/lib/api/endpoints", () => ({
   refreshCatalogDrift: vi.fn(),
   repriceAllPriorVersions: vi.fn(),
   revokeApiKey: vi.fn(),
+  revokeEntitlement: vi.fn(),
+  revokeProductAccess: vi.fn(),
   revokeTeamInvite: vi.fn(),
   setCreditLimit: vi.fn(),
   testAlertRule: vi.fn(),
@@ -89,6 +99,14 @@ beforeEach(() => {
   } as never)
   vi.mocked(repriceAllPriorVersions).mockResolvedValue({} as never)
   vi.mocked(cancelReprice).mockResolvedValue({ message: "ok" })
+  vi.mocked(createOffChannelPayment).mockResolvedValue({
+    payment_id: "payment-1",
+    status: "created",
+  })
+  vi.mocked(grantEntitlement).mockResolvedValue({} as never)
+  vi.mocked(grantProductAccess).mockResolvedValue({} as never)
+  vi.mocked(revokeEntitlement).mockResolvedValue({ message: "ok" })
+  vi.mocked(revokeProductAccess).mockResolvedValue({ message: "ok" })
   vi.mocked(askCatalogCopilot).mockResolvedValue({
     answer: "The catalog has one product.",
     evidence: [],
@@ -110,6 +128,149 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("customer mutations", () => {
+  it("changes entitlements and refreshes only that customer tree", async () => {
+    const queryClient = new QueryClient()
+    const customerKey = queryKeys.customer("customer-1")
+    const paymentMethodsKey = [...customerKey, "payment-methods"] as const
+    const customerListKey = [
+      ...queryKeys.customers(),
+      { q: "", limit: 50, offset: 0 },
+    ] as const
+    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
+    queryClient.setQueryData(paymentMethodsKey, { data: [] })
+    queryClient.setQueryData(customerListKey, { data: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.grantCustomerEntitlement(queryClient, "customer-1")
+      )
+      .execute({ entitlement: "premium", hours: 48 })
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.revokeCustomerEntitlement(queryClient, "customer-1")
+      )
+      .execute("entitlement-1")
+
+    expect(grantEntitlement).toHaveBeenCalledWith("customer-1", "premium", 48)
+    expect(revokeEntitlement).toHaveBeenCalledWith(
+      "customer-1",
+      "entitlement-1"
+    )
+    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(paymentMethodsKey)?.isInvalidated).toBe(
+      true
+    )
+    expect(queryClient.getQueryState(customerListKey)?.isInvalidated).toBe(
+      false
+    )
+  })
+
+  it("routes product access grants and revocations through their endpoints", async () => {
+    const queryClient = new QueryClient()
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.grantCustomerProductAccess(queryClient, "customer-1")
+      )
+      .execute({
+        productId: "product-1",
+        endsAt: "2026-09-05T00:00:00.000Z",
+      })
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.revokeCustomerProductAccess(queryClient, "customer-1")
+      )
+      .execute("grant-1")
+
+    expect(grantProductAccess).toHaveBeenCalledWith(
+      "customer-1",
+      "product-1",
+      "2026-09-05T00:00:00.000Z"
+    )
+    expect(revokeProductAccess).toHaveBeenCalledWith("customer-1", "grant-1")
+  })
+
+  it("records off-channel payments and refreshes customer and payment data", async () => {
+    const queryClient = new QueryClient()
+    const customerKey = queryKeys.customer("customer-1")
+    const paymentsKey = [
+      ...queryKeys.payments(),
+      { filters: {}, limit: 50, offset: 0 },
+    ] as const
+    const subscriptionsKey = queryKeys.subscriptions()
+    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
+    queryClient.setQueryData(paymentsKey, { data: [] })
+    queryClient.setQueryData(subscriptionsKey, { data: [] })
+    const payment = {
+      price_id: "price-1",
+      transaction_id: "external-1",
+      amount: 12_500_000,
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.recordCustomerOffChannelPayment(
+          queryClient,
+          "customer-1"
+        )
+      )
+      .execute(payment)
+
+    expect(createOffChannelPayment).toHaveBeenCalledWith("customer-1", payment)
+    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
+      false
+    )
+  })
+
+  it("keeps customer invalidation scoped to the merchant that started it", async () => {
+    const queryClient = new QueryClient()
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    )
+    const customerAKey = queryKeys.customer("customer-1")
+    const paymentsAKey = queryKeys.payments()
+    const options = adminMutations.recordCustomerOffChannelPayment(
+      queryClient,
+      "customer-1"
+    )
+    queryClient.setQueryData(customerAKey, {})
+    queryClient.setQueryData(paymentsAKey, {})
+
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
+    )
+    const customerBKey = queryKeys.customer("customer-1")
+    const paymentsBKey = queryKeys.payments()
+    queryClient.setQueryData(customerBKey, {})
+    queryClient.setQueryData(paymentsBKey, {})
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, options)
+      .execute({ price_id: "price-1", transaction_id: "external-1" })
+
+    expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(paymentsAKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(customerBKey)?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryState(paymentsBKey)?.isInvalidated).toBe(false)
+  })
+})
 
 describe("settings mutations", () => {
   it("updates merchant settings and invalidates only their base query", async () => {

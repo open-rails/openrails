@@ -12,6 +12,7 @@ import {
   changeTeamRole,
   createAlertRule,
   createApiKey,
+  createOffChannelPayment,
   createPrice,
   createProduct,
   createWebhook,
@@ -24,6 +25,8 @@ import {
   getPriceByKey,
   getProduct,
   getTrustLevel,
+  grantEntitlement,
+  grantProductAccess,
   inviteTeamMember,
   putMerchantSettings,
   putPaymentProvider,
@@ -33,12 +36,15 @@ import {
   removeTeamMember,
   repriceAllPriorVersions,
   revokeApiKey,
+  revokeEntitlement,
+  revokeProductAccess,
   revokeTeamInvite,
   setCreditLimit,
   testAlertRule,
   updateAlertRule,
   updateProduct,
   type AlertRuleRequest,
+  type OffChannelPaymentRequest,
   type PriceRequest,
   type ProductRequest,
   type UpsertProviderRequest,
@@ -61,6 +67,74 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  grantCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
+    const customerKey = queryKeys.customer(customerId)
+    return mutationOptions({
+      mutationKey: [...customerKey, "entitlements", "grant"],
+      mutationFn: ({
+        entitlement,
+        hours,
+      }: {
+        entitlement: string
+        hours?: number
+      }) => grantEntitlement(customerId, entitlement, hours),
+      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+    })
+  },
+  revokeCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
+    const customerKey = queryKeys.customer(customerId)
+    return mutationOptions({
+      mutationKey: [...customerKey, "entitlements", "revoke"],
+      mutationFn: (entitlementId: string) =>
+        revokeEntitlement(customerId, entitlementId),
+      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+    })
+  },
+  grantCustomerProductAccess: (
+    queryClient: QueryClient,
+    customerId: string
+  ) => {
+    const customerKey = queryKeys.customer(customerId)
+    return mutationOptions({
+      mutationKey: [...customerKey, "product-access", "grant"],
+      mutationFn: ({
+        productId,
+        endsAt,
+      }: {
+        productId: string
+        endsAt?: string
+      }) => grantProductAccess(customerId, productId, endsAt),
+      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+    })
+  },
+  revokeCustomerProductAccess: (
+    queryClient: QueryClient,
+    customerId: string
+  ) => {
+    const customerKey = queryKeys.customer(customerId)
+    return mutationOptions({
+      mutationKey: [...customerKey, "product-access", "revoke"],
+      mutationFn: (grantId: string) => revokeProductAccess(customerId, grantId),
+      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+    })
+  },
+  recordCustomerOffChannelPayment: (
+    queryClient: QueryClient,
+    customerId: string
+  ) => {
+    const customerKey = queryKeys.customer(customerId)
+    const paymentsKey = queryKeys.payments()
+    return mutationOptions({
+      mutationKey: [...customerKey, "payments", "off-channel"],
+      mutationFn: (payment: OffChannelPaymentRequest) =>
+        createOffChannelPayment(customerId, payment),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: customerKey }),
+          queryClient.invalidateQueries({ queryKey: paymentsKey }),
+        ]),
+    })
+  },
   askCatalogCopilot: () =>
     mutationOptions({
       mutationKey: [...queryKeys.catalog(), "copilot", "ask"],
