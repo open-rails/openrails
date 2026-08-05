@@ -103,7 +103,7 @@ jobs:
             -e DB_PASSWORD=openrails_app_password \
             -e DB_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
-            openrails-smoke:${GITHUB_SHA} server --no-workers)"
+            openrails-smoke:${GITHUB_SHA} run-server --no-workers)"
           trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:3053/health/ready; then
