@@ -112,6 +112,25 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
+// or#795: one batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
+type OpenrailsAccountUpdaterBatch struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	CustodianID uuid.UUID
+	// The custodian-native job id (Basis Theory account-updater job). '' until the create call is confirmed.
+	JobRef string
+	// pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).
+	Status        string
+	Instruments   []byte
+	ResultCounts  []byte
+	FailureReason string
+	SubmittedAt   *time.Time
+	LastPolledAt  *time.Time
+	CompletedAt   *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // #733 hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
 type OpenrailsAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
@@ -939,6 +958,8 @@ type OpenrailsPaymentMethod struct {
 	ParkReason string
 	// #795 when the instrument was parked; NULL = not parked.
 	ParkedAt *time.Time
+	// or#795: when this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
+	AccountUpdaterCheckedAt *time.Time
 }
 
 // or#870 bucket 2: one open row per subscription parked awaiting a payment-method fix, driving the notification ladder. Sends notices only — no path from this table cancels a subscription or touches a stored payment method.

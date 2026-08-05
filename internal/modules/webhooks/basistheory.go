@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // BasisTheoryWebhookHandler folds Basis Theory custody events (#795) into
@@ -290,19 +292,70 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("basistheory account updater: results for job %s: %w", jobID, err)
 	}
-	return s.FoldAccountUpdaterRows(ctx, rows)
+	stats, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+	if err != nil {
+		return err
+	}
+	// or#795: the same job may have been submitted by the batch runner, which
+	// holds a durable row for it. Whoever ingests first closes it; the other
+	// side then finds nothing open and re-submits nothing.
+	return CloseAccountUpdaterBatch(ctx, s.gen(ctx), jobID, stats)
 }
 
 // FoldAccountUpdaterRows applies parsed AU result rows. Exported for the
 // integration test to drive the fold without a live BT job.
 func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, rows []basistheory.AccountUpdaterResultRow) error {
-	q := s.gen(ctx)
-	// or#872: adopted is the number that proves the updater pays for itself —
-	// instruments the network refreshed that never reached dunning.
-	var adopted, rotated, parked int
+	_, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+	return err
+}
+
+// AccountUpdaterFoldStats reports what one fold did. ResultCounts holds the
+// VERBATIM wire codes (#651) — including ones this build does not recognize —
+// and is what the durable batch row records.
+type AccountUpdaterFoldStats struct {
+	Rows int
+	// Adopted: instruments the network refreshed. or#872: this is the number
+	// that proves the updater pays for itself — cards recovered before dunning.
+	Adopted      int
+	Rotated      int
+	Parked       int
+	ResultCounts map[string]int
+}
+
+// FoldAccountUpdaterResults applies parsed account-updater result rows through
+// the EXISTING single writer for each outcome: RotateCustodianMethodRef for the
+// UPD_ family (which also clears the park — or#872) and
+// ParkPaymentMethodByMethodRef for the two "stop and look" outcomes. There is
+// deliberately no second update path: the batch runner (or#795) and the
+// account-updater.job.completed webhook both land here.
+//
+// Doctrine: nothing is ever deleted and nothing is terminally cancelled. A
+// closed account or a contact-cardholder answer PARKS the instrument (or#870
+// bucket 2) so charges fail loudly and an operator decides.
+func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
+	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
+	park := func(token, reason, why string) error {
+		n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
+			Custodian:     models.CustodianBasisTheory,
+			RailMethodRef: token,
+			ParkReason:    reason,
+		})
+		if err != nil {
+			return fmt.Errorf("account updater: park %s: %w", token, err)
+		}
+		if n > 0 {
+			stats.Parked++
+			log.WithContext(ctx).WithFields(log.Fields{
+				"bt_token_id": token, "park_reason": reason,
+			}).Error("basistheory account updater: instrument PARKED — " + why + "; operator action required (never auto-cancelled)")
+		}
+		return nil
+	}
 	for _, row := range rows {
-		switch row.ResultCode {
-		case basistheory.AUUpdatedPAN, basistheory.AUUpdatedExpDate:
+		code := strings.TrimSpace(row.ResultCode)
+		stats.ResultCounts[code]++
+		switch basistheory.ClassifyAccountUpdaterResult(code) {
+		case basistheory.AUOutcomeUpdated:
 			newRef := strings.TrimSpace(row.NewToken)
 			if newRef == "" {
 				// In-place update (dedup): metadata refresh only, same token id.
@@ -318,44 +371,65 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 				NewExpiryDate:  auExpiry(row.NewExpirationMonth, row.NewExpirationYear),
 			})
 			if err != nil {
-				return fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
+				return stats, fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
 			}
 			if n > 0 {
-				adopted++
+				stats.Adopted++
 				if newRef != row.Token {
-					rotated++
+					stats.Rotated++
 					log.WithContext(ctx).WithFields(log.Fields{
-						"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": row.ResultCode,
+						"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": code,
 					}).Info("basistheory account updater: instrument rail_method_ref rotated")
 				}
 			}
-		case basistheory.AUClosedAccount:
-			n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
-				Custodian:     models.CustodianBasisTheory,
-				RailMethodRef: row.Token,
-				ParkReason:    "bt_au_closed_account",
-			})
-			if err != nil {
-				return fmt.Errorf("account updater: park %s: %w", row.Token, err)
+		case basistheory.AUOutcomeClosed:
+			if err := park(row.Token, "bt_au_closed_account", "closed account"); err != nil {
+				return stats, err
 			}
-			if n > 0 {
-				parked++
-				log.WithContext(ctx).WithFields(log.Fields{
-					"bt_token_id": row.Token,
-				}).Error("basistheory account updater: instrument PARKED — closed account; operator action required (never auto-cancelled)")
+		case basistheory.AUOutcomeContactCardholder:
+			if err := park(row.Token, "bt_au_contact_cardholder", "the network will not answer without the cardholder"); err != nil {
+				return stats, err
 			}
-		case basistheory.AUNoUpdate, "":
-			// Recorded verbatim by the vault; nothing to fold.
+		case basistheory.AUOutcomeNoChange:
+			// Recorded verbatim above; no evidence, no action.
 		default:
 			log.WithContext(ctx).WithFields(log.Fields{
-				"bt_token_id": row.Token, "result_code": row.ResultCode,
+				"bt_token_id": row.Token, "result_code": code,
 			}).Warn("basistheory account updater: unrecognized result code recorded verbatim; no fold")
 		}
 	}
-	if adopted > 0 || parked > 0 {
+	if stats.Adopted > 0 || stats.Parked > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"rows": len(rows), "adopted": adopted, "rotated": rotated, "parked": parked,
+			"rows": stats.Rows, "adopted": stats.Adopted, "rotated": stats.Rotated, "parked": stats.Parked,
 		}).Info("basistheory account updater: fold complete")
+	}
+	return stats, nil
+}
+
+// CloseAccountUpdaterBatch marks the durable batch (or#795) that carried this
+// job as completed and records the verbatim result tally. A job with no local
+// batch row — an operator-created job, or one whose row was already closed by
+// the other ingestion path — is a no-op, never an error.
+func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string, stats AccountUpdaterFoldStats) error {
+	jobRef = strings.TrimSpace(jobRef)
+	if jobRef == "" {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	counts, err := json.Marshal(stats.ResultCounts)
+	if err != nil {
+		return fmt.Errorf("account updater: encode result counts: %w", err)
+	}
+	if _, err := q.CompleteAccountUpdaterBatchByJobRef(ctx, gen.CompleteAccountUpdaterBatchByJobRefParams{
+		MerchantID:   mid.UUID(),
+		JobRef:       jobRef,
+		ResultCounts: counts,
+		CompletedAt:  time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("account updater: close batch for job %s: %w", jobRef, err)
 	}
 	return nil
 }

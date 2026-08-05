@@ -31,6 +31,7 @@ type ValueKind string
 const (
 	ValueString ValueKind = "string"
 	ValueBool   ValueKind = "bool"
+	ValueInt    ValueKind = "int"
 )
 
 // SecretKey is one slot in the merchant secret store, addressed as
@@ -85,8 +86,26 @@ type Descriptor struct {
 const (
 	SettingPublicAPIKey  = "public_api_key"
 	SettingNetworkTokens = "network_tokens"
-	SecretAPIKey         = "api_key"
+	// SettingAccountUpdater arms the batch account-updater cycle (or#795). It
+	// is a CONTRACT flag, not a preference: the add-on is priced separately and
+	// the API answers 403 without it, so an unarmed custodian is never
+	// enumerated by the runner at all.
+	SettingAccountUpdater = "account_updater"
+	// SettingAccountUpdaterLookaheadDays is how far ahead of a renewal a card
+	// is refreshed. It earns a knob because the right value is the merchant's
+	// billing shape (a monthly book wants ~2 weeks; an annual one wants more)
+	// against the network's multi-day batch turnaround — nothing derivable.
+	// It doubles as the staleness floor, so there is no second knob: an
+	// instrument refreshed inside the window is not refreshed again.
+	SettingAccountUpdaterLookaheadDays = "account_updater_lookahead_days"
+	SecretAPIKey                       = "api_key"
 )
+
+// DefaultAccountUpdaterLookaheadDays is the sane default for
+// SettingAccountUpdaterLookaheadDays: comfortably longer than a batch
+// turnaround, comfortably shorter than a monthly period, so a card is checked
+// once per cycle and the answer is back before the renewal it protects.
+const DefaultAccountUpdaterLookaheadDays = 14
 
 var registry = map[string]Descriptor{
 	models.CustodianBasisTheory: {
@@ -107,6 +126,10 @@ var registry = map[string]Descriptor{
 			// never load-bearing — a provisioning failure warns and the
 			// instrument stays pan_proxy).
 			{Name: SettingNetworkTokens, Kind: ValueBool},
+			// Batch account updater (or#795): the other $-add-on, and the one
+			// that actually refreshes the FPAN we charge on NMI.
+			{Name: SettingAccountUpdater, Kind: ValueBool},
+			{Name: SettingAccountUpdaterLookaheadDays, Kind: ValueInt},
 		},
 		WebhookSource: models.EventSourceBasisTheory,
 		BrowserFlow:   FlowTokenize,

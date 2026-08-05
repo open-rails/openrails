@@ -15,6 +15,22 @@ type Settings struct {
 	PublicAPIKey string
 	// NetworkTokens arms network-token provisioning at instrument creation.
 	NetworkTokens bool
+	// AccountUpdater arms the batch account-updater cycle (or#795).
+	AccountUpdater bool
+	// AccountUpdaterLookaheadDays is how far ahead of a renewal an instrument
+	// is refreshed, and (deliberately the same number) how long a refresh
+	// stays fresh. 0 = DefaultAccountUpdaterLookaheadDays.
+	AccountUpdaterLookaheadDays int
+}
+
+// LookaheadDays is the declared window or the default. One place decides, so a
+// merchant that declared nothing and a merchant that declared 14 are the same
+// merchant to every caller.
+func (s Settings) LookaheadDays() int {
+	if s.AccountUpdaterLookaheadDays > 0 {
+		return s.AccountUpdaterLookaheadDays
+	}
+	return DefaultAccountUpdaterLookaheadDays
 }
 
 // ParseSettings validates a custodian entry's settings against its kind and
@@ -68,6 +84,17 @@ func ParseSettings(kind string, settings map[string]any) (Settings, error) {
 			switch slot.Name {
 			case SettingNetworkTokens:
 				out.NetworkTokens = v
+			case SettingAccountUpdater:
+				out.AccountUpdater = v
+			}
+		case ValueInt:
+			v, err := asInt(d.Kind, slot.Name, raw)
+			if err != nil {
+				return Settings{}, err
+			}
+			switch slot.Name {
+			case SettingAccountUpdaterLookaheadDays:
+				out.AccountUpdaterLookaheadDays = v
 			}
 		}
 	}
@@ -119,6 +146,43 @@ func asString(kind, name string, raw any) (string, error) {
 		return "", fmt.Errorf("custodian %s: %s must be a string (got %T)", kind, name, raw)
 	}
 	return strings.TrimSpace(v), nil
+}
+
+// asInt accepts JSON numbers (float64), ints and numeric strings — the three
+// shapes a manifest, an env overlay and a jsonb settings blob produce for the
+// same declared value. Negative/zero is refused loudly: a window that cannot
+// select anything is a misdeclaration, not "off" (arming is its own flag).
+func asInt(kind, name string, raw any) (int, error) {
+	var out int
+	switch v := raw.(type) {
+	case nil:
+		return 0, nil
+	case int:
+		out = v
+	case int64:
+		out = int(v)
+	case float64:
+		if v != float64(int(v)) {
+			return 0, fmt.Errorf("custodian %s: %s must be a whole number of days (got %v)", kind, name, v)
+		}
+		out = int(v)
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("custodian %s: %s must be a whole number of days (got %q)", kind, name, v)
+		}
+		out = n
+	default:
+		return 0, fmt.Errorf("custodian %s: %s must be a whole number of days (got %T)", kind, name, raw)
+	}
+	if out <= 0 {
+		return 0, fmt.Errorf("custodian %s: %s must be positive (got %d)", kind, name, out)
+	}
+	return out, nil
 }
 
 func asBool(kind, name string, raw any) (bool, error) {

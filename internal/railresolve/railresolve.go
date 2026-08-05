@@ -296,11 +296,13 @@ func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, 
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
 	}
 	out := &config.CustodianConfig{
-		Key:           custodian.Key,
-		Custodian:     d.Kind,
-		AccountID:     custodian.AccountID,
-		PublicAPIKey:  settings.PublicAPIKey,
-		NetworkTokens: settings.NetworkTokens,
+		Key:                         custodian.Key,
+		Custodian:                   d.Kind,
+		AccountID:                   custodian.AccountID,
+		PublicAPIKey:                settings.PublicAPIKey,
+		NetworkTokens:               settings.NetworkTokens,
+		AccountUpdater:              settings.AccountUpdater,
+		AccountUpdaterLookaheadDays: settings.LookaheadDays(),
 	}
 	for _, slot := range d.Secrets {
 		value, found, err := s.custodianSecret(ctx, mid, custodian, slot.Name)

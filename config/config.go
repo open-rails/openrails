@@ -744,6 +744,12 @@ type CustodianConfig struct {
 	// NetworkTokens arms NT provisioning on instrument creation (never
 	// load-bearing; charge routing stays pan_proxy on NMI gateways).
 	NetworkTokens bool
+	// AccountUpdater arms the batch account-updater cycle (or#795 — the
+	// contracted add-on that refreshes the FPAN we actually charge).
+	AccountUpdater bool
+	// AccountUpdaterLookaheadDays is how far ahead of a renewal an instrument
+	// is refreshed, and the same window it then stays fresh for.
+	AccountUpdaterLookaheadDays int
 	// WebhookKeyURL overrides the custodian's CDN webhook public-key URL (tests only).
 	WebhookKeyURL string
 	// APIBaseURL overrides the custodian API base URL (tests only; "" = production).
