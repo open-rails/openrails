@@ -9,8 +9,10 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,16 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  createAlertRule,
-  createWebhook,
-  deleteAlertRule,
-  deleteWebhook,
-  putMerchantSettings,
-  testAlertRule,
-  updateAlertRule,
-  type AlertRuleRequest,
-} from "@/lib/api/endpoints"
+import type { AlertRuleRequest } from "@/lib/api/endpoints"
 import type {
   AlertChannelRef,
   AlertDeliveryResult,
@@ -64,7 +57,8 @@ import type {
 } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { toastApiError } from "@/lib/toast"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 
 // --- Template copy (v1 set) -------------------------------------------------
 // The param SCHEMA is fetched from GET /merchant/alerts/templates (the create/
@@ -177,7 +171,6 @@ function summarizeDeliveryResults(results: AlertDeliveryResult[]): string {
 // --- Page ------------------------------------------------------------------
 
 export function AlertsTab() {
-  const queryClient = useQueryClient()
   const settingsQuery = useQuery(adminQueries.merchantSettings("Load settings"))
   const templatesQuery = useQuery(adminQueries.alertTemplates())
   const rulesQuery = useQuery(adminQueries.alertRules())
@@ -193,9 +186,6 @@ export function AlertsTab() {
         key={settingsQuery.data?.alert_email ?? "∅"}
         settings={settingsQuery.data ?? undefined}
         loading={settingsQuery.isPending}
-        onSaved={() =>
-          void queryClient.invalidateQueries({ queryKey: queryKeys.settings() })
-        }
       />
       <RulesSection
         rules={rulesQuery.data?.data ?? []}
@@ -204,17 +194,8 @@ export function AlertsTab() {
         templatesLoading={templatesQuery.isPending}
         webhooks={hooks}
         alertEmail={alertEmail}
-        onChanged={() =>
-          void queryClient.invalidateQueries({ queryKey: queryKeys.alerts() })
-        }
       />
-      <WebhooksSection
-        webhooks={hooks}
-        loading={webhooksQuery.isPending}
-        onChanged={() =>
-          void queryClient.invalidateQueries({ queryKey: queryKeys.alerts() })
-        }
-      />
+      <WebhooksSection webhooks={hooks} loading={webhooksQuery.isPending} />
     </div>
   )
 }
@@ -224,19 +205,32 @@ export function AlertsTab() {
 function AlertEmailSection({
   settings,
   loading,
-  onSaved,
 }: {
   settings?: MerchantSettings
   loading: boolean
-  onSaved: () => void
 }) {
-  // Initial value is seeded from props; the parent remounts this section (key on
-  // alert_email) when the saved value changes, so no props→state effect.
   const initial = settings?.alert_email ?? ""
-  const [email, setEmail] = React.useState(initial)
-  const [busy, setBusy] = React.useState(false)
-
-  const dirty = email.trim() !== initial
+  const queryClient = useQueryClient()
+  const updateSettings = useMutation(
+    adminMutations.updateMerchantSettings(queryClient)
+  )
+  const form = useForm({
+    defaultValues: { email: initial },
+    onSubmit: async ({ value }) => {
+      try {
+        await updateSettings.mutateAsync({
+          ...(settings ?? {}),
+          alert_email: value.email.trim() || undefined,
+        })
+        form.reset(value)
+        toast.success(
+          value.email.trim() ? "Alert email saved" : "Alert email cleared"
+        )
+      } catch (err) {
+        toastApiError(err, "Save alert email")
+      }
+    },
+  })
 
   return (
     <section className="grid gap-5">
@@ -247,44 +241,52 @@ function AlertEmailSection({
             Send email alerts to this address.
           </p>
         </div>
-        <Button
-          size="sm"
-          disabled={busy || loading || !dirty}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              // Preserve existing settings; only change alert_email.
-              await putMerchantSettings({
-                ...(settings ?? {}),
-                alert_email: email.trim() || undefined,
-              })
-              toast.success(
-                email.trim() ? "Alert email saved" : "Alert email cleared"
-              )
-              onSaved()
-            } catch (err) {
-              toastApiError(err, "Save alert email")
-            } finally {
-              setBusy(false)
-            }
-          }}
+        <form.Subscribe
+          selector={(state) => [
+            state.canSubmit,
+            state.isSubmitting,
+            state.isDefaultValue,
+          ]}
         >
-          {busy ? "Saving…" : "Save"}
-        </Button>
+          {([canSubmit, isSubmitting, isDefaultValue]) => (
+            <Button
+              type="submit"
+              size="sm"
+              form="alert-email-form"
+              disabled={loading || !canSubmit || isSubmitting || isDefaultValue}
+            >
+              {isSubmitting ? "Saving…" : "Save"}
+            </Button>
+          )}
+        </form.Subscribe>
       </div>
-      <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
-        <Label htmlFor="alert-email">Alert email</Label>
-        <div className="min-w-0">
-          <Input
-            id="alert-email"
-            type="email"
-            placeholder="alerts@example.com"
-            value={email}
-            disabled={loading}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </div>
-      </div>
+      <form
+        id="alert-email-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          void form.handleSubmit()
+        }}
+      >
+        <form.Field name="email">
+          {(field) => (
+            <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
+              <Label htmlFor="alert-email">Alert email</Label>
+              <div className="grid min-w-0 gap-1.5">
+                <Input
+                  id="alert-email"
+                  type="email"
+                  placeholder="alerts@example.com"
+                  value={field.state.value}
+                  disabled={loading}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              </div>
+            </div>
+          )}
+        </form.Field>
+      </form>
     </section>
   )
 }
@@ -342,7 +344,6 @@ function RulesSection({
   templatesLoading,
   webhooks,
   alertEmail,
-  onChanged,
 }: {
   rules: AlertRule[]
   loading: boolean
@@ -350,7 +351,6 @@ function RulesSection({
   templatesLoading: boolean
   webhooks: MerchantWebhook[]
   alertEmail: string
-  onChanged: () => void
 }) {
   const canCreate = templates.length > 0
 
@@ -369,7 +369,6 @@ function RulesSection({
             templates={templates}
             webhooks={webhooks}
             alertEmail={alertEmail}
-            onDone={onChanged}
           />
         ) : (
           <Button size="sm" disabled>
@@ -406,7 +405,6 @@ function RulesSection({
                 templates={templates}
                 webhooks={webhooks}
                 alertEmail={alertEmail}
-                onChanged={onChanged}
               />
             ))}
           </TableBody>
@@ -421,48 +419,41 @@ function RuleRow({
   templates,
   webhooks,
   alertEmail,
-  onChanged,
 }: {
   rule: AlertRule
   templates: AlertTemplateInfo[]
   webhooks: MerchantWebhook[]
   alertEmail: string
-  onChanged: () => void
 }) {
-  const [busy, setBusy] = React.useState(false)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const updateRule = useMutation(adminMutations.updateAlertRule(queryClient))
+  const deleteRule = useMutation(adminMutations.deleteAlertRule(queryClient))
+  const testRule = useMutation(adminMutations.testAlertRule())
   const def = templateByKey(templates, rule.template)
   const label = rule.name || (def ? templateLabel(def) : rule.template)
   const firing = ruleIsFiring(rule)
 
-  const run = async (
-    fn: () => Promise<unknown>,
-    action: string,
-    ok: string
-  ) => {
-    setBusy(true)
+  const runUpdate = async (enabled: boolean) => {
     try {
-      await fn()
-      toast.success(ok)
-      onChanged()
+      await updateRule.mutateAsync({ id: rule.id, rule: { enabled } })
+      toast.success(enabled ? "Rule enabled" : "Rule disabled")
     } catch (err) {
-      toastApiError(err, action)
-    } finally {
-      setBusy(false)
+      toastApiError(err, "Update rule")
     }
   }
 
   const runTest = async () => {
-    setBusy(true)
     try {
-      const { results } = await testAlertRule(rule.id)
+      const { results } = await testRule.mutateAsync(rule.id)
       toast.success(summarizeDeliveryResults(results))
     } catch (err) {
       toastApiError(err, "Send test alert")
-    } finally {
-      setBusy(false)
     }
   }
+
+  const busy =
+    updateRule.isPending || deleteRule.isPending || testRule.isPending
 
   return (
     <TableRow className={rule.enabled ? undefined : "opacity-60"}>
@@ -497,13 +488,7 @@ function RuleRow({
           checked={rule.enabled}
           disabled={busy}
           aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
-          onCheckedChange={(next) =>
-            run(
-              () => updateAlertRule(rule.id, { enabled: next }),
-              "Update rule",
-              next ? "Rule enabled" : "Rule disabled"
-            )
-          }
+          onCheckedChange={(next) => void runUpdate(next)}
         />
       </TableCell>
       <TableCell className="py-3 text-right">
@@ -516,7 +501,6 @@ function RuleRow({
             templates={templates}
             webhooks={webhooks}
             alertEmail={alertEmail}
-            onDone={onChanged}
             trigger={
               <Button variant="outline" size="sm">
                 Edit
@@ -542,9 +526,14 @@ function RuleRow({
             description="This alert rule will stop evaluating and its firing state is discarded. This cannot be undone."
             confirmationWord="DELETE"
             actionLabel="Delete rule"
-            onConfirm={() =>
-              run(() => deleteAlertRule(rule.id), "Delete rule", "Rule deleted")
-            }
+            onConfirm={async () => {
+              try {
+                await deleteRule.mutateAsync(rule.id)
+                toast.success("Rule deleted")
+              } catch (err) {
+                toastApiError(err, "Delete rule")
+              }
+            }}
           />
         </div>
       </TableCell>
@@ -554,112 +543,104 @@ function RuleRow({
 
 // --- Rule create/edit dialog ----------------------------------------------
 
+interface RuleFormValues {
+  template: AlertTemplate
+  severity: AlertSeverity
+  params: Record<string, string>
+  channels: ChannelSelection
+  enabled: boolean
+}
+
+function ruleFormValues(
+  templates: AlertTemplateInfo[],
+  template: AlertTemplate,
+  rule?: AlertRule
+): RuleFormValues {
+  const definition = templateByKey(templates, template)
+  const params: Record<string, string> = {}
+  for (const spec of definition?.params ?? []) {
+    const existing = rule?.params?.[spec.name]
+    if (existing !== undefined && existing !== null) {
+      params[spec.name] = String(existing)
+    } else if (spec.default !== undefined) {
+      params[spec.name] = String(spec.default)
+    } else {
+      params[spec.name] = ""
+    }
+  }
+
+  const severity = rule?.severity ?? definition?.default_severity ?? "warning"
+  return {
+    template,
+    severity,
+    params,
+    channels: rule
+      ? channelsFromWire(rule.channels)
+      : { in_app: true, email: severity === "critical", webhookIds: [] },
+    enabled: rule?.enabled ?? true,
+  }
+}
+
 function RuleDialog({
   rule,
   templates,
   webhooks,
   alertEmail,
-  onDone,
   trigger,
 }: {
   rule?: AlertRule
   templates: AlertTemplateInfo[]
   webhooks: MerchantWebhook[]
   alertEmail: string
-  onDone: () => void
   trigger?: React.ReactElement
 }) {
   const editing = !!rule
   const [open, setOpen] = React.useState(false)
-  const [template, setTemplate] = React.useState<AlertTemplate>(
-    rule?.template ?? templates[0]?.key ?? ""
-  )
-  const [severity, setSeverity] = React.useState<AlertSeverity>(
-    rule?.severity ?? "warning"
-  )
-  const [params, setParams] = React.useState<Record<string, string>>({})
-  const [channels, setChannels] = React.useState<ChannelSelection>({
-    in_app: true,
-    email: false,
-    webhookIds: [],
-  })
-  const [enabled, setEnabled] = React.useState(rule?.enabled ?? true)
-  const [busy, setBusy] = React.useState(false)
-
-  const def = templateByKey(templates, template)
-
-  // (Re)initialize form state whenever the dialog opens or the template changes.
-  const initFor = React.useCallback(
-    (tpl: AlertTemplate, r?: AlertRule) => {
-      const d = templateByKey(templates, tpl)
-      const p: Record<string, string> = {}
-      for (const spec of d?.params ?? []) {
-        const existing = r?.params?.[spec.name]
-        if (existing !== undefined && existing !== null)
-          p[spec.name] = String(existing)
-        else if (spec.default !== undefined) p[spec.name] = String(spec.default)
-        else p[spec.name] = ""
+  const queryClient = useQueryClient()
+  const createRule = useMutation(adminMutations.createAlertRule(queryClient))
+  const updateRule = useMutation(adminMutations.updateAlertRule(queryClient))
+  const initialTemplate = rule?.template ?? templates[0]?.key ?? ""
+  const form = useForm({
+    defaultValues: ruleFormValues(templates, initialTemplate, rule),
+    onSubmit: async ({ value }) => {
+      const definition = templateByKey(templates, value.template)
+      if (!definition) return
+      const params: Record<string, unknown> = {}
+      for (const spec of definition.params) {
+        const raw = (value.params[spec.name] ?? "").trim()
+        if (raw === "") continue
+        params[spec.name] = spec.type === "window" ? raw : Number(raw)
       }
-      setParams(p)
-      if (r) {
-        setSeverity(r.severity)
-        setChannels(channelsFromWire(r.channels))
-        setEnabled(r.enabled)
-      } else {
-        const sev = d?.default_severity ?? "warning"
-        setSeverity(sev)
-        setChannels({ in_app: true, email: sev === "critical", webhookIds: [] })
-        setEnabled(true)
+      const request: AlertRuleRequest = {
+        template: value.template,
+        params,
+        severity: value.severity,
+        channels: channelsToWire(value.channels),
+        enabled: value.enabled,
+      }
+      try {
+        if (rule) {
+          await updateRule.mutateAsync({ id: rule.id, rule: request })
+        } else {
+          await createRule.mutateAsync(request)
+        }
+        toast.success(editing ? "Rule updated" : "Rule created")
+        setOpen(false)
+      } catch (err) {
+        toastApiError(err, editing ? "Update rule" : "Create rule")
       }
     },
-    [templates]
-  )
+  })
 
   const handleOpen = (next: boolean) => {
     setOpen(next)
     if (next) {
-      const tpl = rule?.template ?? template
-      setTemplate(tpl)
-      initFor(tpl, rule)
+      form.reset(ruleFormValues(templates, initialTemplate, rule))
     }
   }
 
   const pickTemplate = (tpl: AlertTemplate) => {
-    setTemplate(tpl)
-    initFor(tpl, undefined)
-  }
-
-  const missingRequired = (def?.params ?? []).some(
-    (spec) => spec.required && !params[spec.name]?.trim()
-  )
-
-  const submit = async () => {
-    if (!def) return
-    const p: Record<string, unknown> = {}
-    for (const spec of def.params) {
-      const raw = (params[spec.name] ?? "").trim()
-      if (raw === "") continue // omit — the server fills the default or requires it
-      p[spec.name] = spec.type === "window" ? raw : Number(raw)
-    }
-    const body: AlertRuleRequest = {
-      template,
-      params: p,
-      severity,
-      channels: channelsToWire(channels),
-      enabled,
-    }
-    setBusy(true)
-    try {
-      if (editing) await updateAlertRule(rule.id, body)
-      else await createAlertRule(body)
-      toast.success(editing ? "Rule updated" : "Rule created")
-      setOpen(false)
-      onDone()
-    } catch (err) {
-      toastApiError(err, editing ? "Update rule" : "Create rule")
-    } finally {
-      setBusy(false)
-    }
+    form.reset(ruleFormValues(templates, tpl))
   }
 
   return (
@@ -674,201 +655,281 @@ function RuleDialog({
         }
       />
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {editing ? "Edit alert rule" : "New alert rule"}
-          </DialogTitle>
-          <DialogDescription>
-            {editing && def
-              ? templateDescription(def)
-              : "Pick what to watch, set the threshold, and choose how you want to be told."}
-          </DialogDescription>
-        </DialogHeader>
+        <form.Subscribe selector={(state) => state.values}>
+          {(values) => {
+            const definition = templateByKey(templates, values.template)
+            const missingRequired = (definition?.params ?? []).some(
+              (spec) => spec.required && !values.params[spec.name]?.trim()
+            )
 
-        <div className="grid gap-4">
-          {!editing && (
-            <div className="grid gap-2">
-              <Label>Template</Label>
-              <div className="grid gap-2">
-                {templates.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => pickTemplate(t.key)}
-                    aria-pressed={template === t.key}
-                    className={cn(
-                      "rounded-md border p-3 text-left transition-colors",
-                      template === t.key
-                        ? "border-primary bg-primary/5"
-                        : "hover:bg-muted/50"
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>
+                    {editing ? "Edit alert rule" : "New alert rule"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {editing && definition
+                      ? templateDescription(definition)
+                      : "Pick what to watch, set the threshold, and choose how you want to be told."}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void form.handleSubmit()
+                  }}
+                  className="grid gap-4"
+                >
+                  {!editing && (
+                    <div className="grid gap-2">
+                      <Label>Template</Label>
+                      <div className="grid gap-2">
+                        {templates.map((template) => (
+                          <button
+                            key={template.key}
+                            type="button"
+                            onClick={() => pickTemplate(template.key)}
+                            aria-pressed={values.template === template.key}
+                            className={cn(
+                              "rounded-md border p-3 text-left transition-colors",
+                              values.template === template.key
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/50"
+                            )}
+                          >
+                            <p className="text-sm font-medium">
+                              {templateLabel(template)}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {templateDescription(template)}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <form.Field name="params">
+                    {(field) => (
+                      <div className="grid gap-3">
+                        {(definition?.params ?? []).map((spec) => {
+                          const readOnly = isFixedParam(
+                            values.template,
+                            spec.name
+                          )
+                          return (
+                            <div key={spec.name} className="grid gap-1.5">
+                              <Label htmlFor={`p-${spec.name}`}>
+                                {humanizeParam(spec.name)}
+                              </Label>
+                              <Input
+                                id={`p-${spec.name}`}
+                                type={
+                                  spec.type === "window" ? "text" : "number"
+                                }
+                                step={
+                                  spec.type === "integer"
+                                    ? 1
+                                    : spec.type === "number"
+                                      ? "any"
+                                      : undefined
+                                }
+                                min={spec.min}
+                                max={spec.max}
+                                placeholder={
+                                  spec.type === "window"
+                                    ? "e.g. 30d, 12w"
+                                    : undefined
+                                }
+                                disabled={readOnly}
+                                value={field.state.value[spec.name] ?? ""}
+                                onChange={(event) =>
+                                  field.handleChange({
+                                    ...field.state.value,
+                                    [spec.name]: event.target.value,
+                                  })
+                                }
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                {spec.description}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
                     )}
-                  >
-                    <p className="text-sm font-medium">{templateLabel(t)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {templateDescription(t)}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+                  </form.Field>
 
-          <div className="grid gap-3">
-            {(def?.params ?? []).map((spec) => {
-              const readOnly = isFixedParam(template, spec.name)
-              return (
-                <div key={spec.name} className="grid gap-1.5">
-                  <Label htmlFor={`p-${spec.name}`}>
-                    {humanizeParam(spec.name)}
-                  </Label>
-                  <Input
-                    id={`p-${spec.name}`}
-                    type={spec.type === "window" ? "text" : "number"}
-                    step={
-                      spec.type === "integer"
-                        ? 1
-                        : spec.type === "number"
-                          ? "any"
-                          : undefined
-                    }
-                    min={spec.min}
-                    max={spec.max}
-                    placeholder={
-                      spec.type === "window" ? "e.g. 30d, 12w" : undefined
-                    }
-                    disabled={readOnly}
-                    value={params[spec.name] ?? ""}
-                    onChange={(e) =>
-                      setParams((prev) => ({
-                        ...prev,
-                        [spec.name]: e.target.value,
-                      }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {spec.description}
-                  </p>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label>Severity</Label>
-            <Select
-              value={severity}
-              onValueChange={(v) => setSeverity(v as AlertSeverity)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="warning">
-                  Warning — in-app by default
-                </SelectItem>
-                <SelectItem value="critical">
-                  Critical — push harder (email + webhooks)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Channels</Label>
-            <div className="grid gap-2 rounded-md border p-3">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-2 text-sm">
-                  <HugeiconsIcon icon={Notification01Icon} className="size-4" />{" "}
-                  In-app
-                </span>
-                <Badge variant="secondary" className="text-[10px]">
-                  always on
-                </Badge>
-              </div>
-
-              <div className="grid gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-2 text-sm">
-                    <HugeiconsIcon icon={Mail01Icon} className="size-4" /> Email
-                  </span>
-                  <Switch
-                    checked={channels.email}
-                    onCheckedChange={(next) =>
-                      setChannels((c) => ({ ...c, email: next }))
-                    }
-                    aria-label="Toggle email channel"
-                  />
-                </div>
-                {channels.email &&
-                  (alertEmail ? (
-                    <p className="text-xs text-muted-foreground">
-                      Sent to{" "}
-                      <span className="font-medium text-foreground">
-                        {alertEmail}
-                      </span>
-                      .
-                    </p>
-                  ) : (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                      No alert email set — email won&apos;t send until you set
-                      one in “Alert email” above (the alert still reaches in-app
-                      and webhooks).
-                    </p>
-                  ))}
-              </div>
-
-              <div className="grid gap-1.5">
-                <span className="inline-flex items-center gap-2 text-sm">
-                  <HugeiconsIcon icon={WebhookIcon} className="size-4" />{" "}
-                  Webhooks
-                </span>
-                {webhooks.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No webhooks configured — add one in the Webhooks section
-                    below.
-                  </p>
-                ) : (
-                  <div className="grid gap-1">
-                    {webhooks.map((w) => {
-                      const on = channels.webhookIds.includes(w.id)
-                      return (
-                        <label
-                          key={w.id}
-                          className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted/50"
+                  <form.Field name="severity">
+                    {(field) => (
+                      <div className="grid gap-1.5">
+                        <Label>Severity</Label>
+                        <Select
+                          value={field.state.value}
+                          onValueChange={(value) =>
+                            field.handleChange(value as AlertSeverity)
+                          }
                         >
-                          <span className="inline-flex items-center gap-2">
-                            <span>{w.name}</span>
-                            <Badge variant="secondary" className="text-[10px]">
-                              {w.format}
-                            </Badge>
-                          </span>
-                          <Switch
-                            checked={on}
-                            aria-label={`Toggle webhook ${w.name}`}
-                            onCheckedChange={(next) =>
-                              setChannels((c) => ({
-                                ...c,
-                                webhookIds: next
-                                  ? [...c.webhookIds, w.id]
-                                  : c.webhookIds.filter((id) => id !== w.id),
-                              }))
-                            }
-                          />
-                        </label>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="warning">
+                              Warning — in-app by default
+                            </SelectItem>
+                            <SelectItem value="critical">
+                              Critical — push harder (email + webhooks)
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </form.Field>
 
-        <DialogFooter>
-          <Button disabled={busy || !def || missingRequired} onClick={submit}>
-            {busy ? "Saving…" : editing ? "Save changes" : "Create rule"}
-          </Button>
-        </DialogFooter>
+                  <form.Field name="channels">
+                    {(field) => (
+                      <div className="grid gap-2">
+                        <Label>Channels</Label>
+                        <div className="grid gap-2 rounded-md border p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="inline-flex items-center gap-2 text-sm">
+                              <HugeiconsIcon
+                                icon={Notification01Icon}
+                                className="size-4"
+                              />{" "}
+                              In-app
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">
+                              always on
+                            </Badge>
+                          </div>
+
+                          <div className="grid gap-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="inline-flex items-center gap-2 text-sm">
+                                <HugeiconsIcon
+                                  icon={Mail01Icon}
+                                  className="size-4"
+                                />{" "}
+                                Email
+                              </span>
+                              <Switch
+                                checked={field.state.value.email}
+                                onCheckedChange={(email) =>
+                                  field.handleChange({
+                                    ...field.state.value,
+                                    email,
+                                  })
+                                }
+                                aria-label="Toggle email channel"
+                              />
+                            </div>
+                            {field.state.value.email &&
+                              (alertEmail ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Sent to{" "}
+                                  <span className="font-medium text-foreground">
+                                    {alertEmail}
+                                  </span>
+                                  .
+                                </p>
+                              ) : (
+                                <p className="text-xs text-amber-600 dark:text-amber-400">
+                                  No alert email set — email won&apos;t send
+                                  until you set one above. The alert still
+                                  reaches in-app and webhooks.
+                                </p>
+                              ))}
+                          </div>
+
+                          <div className="grid gap-1.5">
+                            <span className="inline-flex items-center gap-2 text-sm">
+                              <HugeiconsIcon
+                                icon={WebhookIcon}
+                                className="size-4"
+                              />{" "}
+                              Webhooks
+                            </span>
+                            {webhooks.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                No webhooks configured — add one below.
+                              </p>
+                            ) : (
+                              <div className="grid gap-1">
+                                {webhooks.map((webhook) => {
+                                  const selected =
+                                    field.state.value.webhookIds.includes(
+                                      webhook.id
+                                    )
+                                  return (
+                                    <label
+                                      key={webhook.id}
+                                      className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted/50"
+                                    >
+                                      <span className="inline-flex items-center gap-2">
+                                        <span>{webhook.name}</span>
+                                        <Badge
+                                          variant="secondary"
+                                          className="text-[10px]"
+                                        >
+                                          {webhook.format}
+                                        </Badge>
+                                      </span>
+                                      <Switch
+                                        checked={selected}
+                                        aria-label={`Toggle webhook ${webhook.name}`}
+                                        onCheckedChange={(next) =>
+                                          field.handleChange({
+                                            ...field.state.value,
+                                            webhookIds: next
+                                              ? [
+                                                  ...field.state.value
+                                                    .webhookIds,
+                                                  webhook.id,
+                                                ]
+                                              : field.state.value.webhookIds.filter(
+                                                  (id) => id !== webhook.id
+                                                ),
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </form.Field>
+
+                  <DialogFooter>
+                    <form.Subscribe selector={(state) => state.isSubmitting}>
+                      {(isSubmitting) => (
+                        <Button
+                          type="submit"
+                          disabled={
+                            isSubmitting || !definition || missingRequired
+                          }
+                        >
+                          {isSubmitting
+                            ? "Saving…"
+                            : editing
+                              ? "Save changes"
+                              : "Create rule"}
+                        </Button>
+                      )}
+                    </form.Subscribe>
+                  </DialogFooter>
+                </form>
+              </>
+            )
+          }}
+        </form.Subscribe>
       </DialogContent>
     </Dialog>
   )
@@ -885,11 +946,9 @@ const WEBHOOK_FORMATS: { value: WebhookFormat; label: string }[] = [
 function WebhooksSection({
   webhooks,
   loading,
-  onChanged,
 }: {
   webhooks: MerchantWebhook[]
   loading: boolean
-  onChanged: () => void
 }) {
   return (
     <section className="grid gap-5">
@@ -900,7 +959,7 @@ function WebhooksSection({
             Send alerts to Discord, Slack, or your own endpoint.
           </p>
         </div>
-        <WebhookDialog onDone={onChanged} />
+        <WebhookDialog />
       </div>
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -922,7 +981,7 @@ function WebhooksSection({
           </TableHeader>
           <TableBody>
             {webhooks.map((w) => (
-              <WebhookRow key={w.id} webhook={w} onChanged={onChanged} />
+              <WebhookRow key={w.id} webhook={w} />
             ))}
           </TableBody>
         </Table>
@@ -931,14 +990,10 @@ function WebhooksSection({
   )
 }
 
-function WebhookRow({
-  webhook,
-  onChanged,
-}: {
-  webhook: MerchantWebhook
-  onChanged: () => void
-}) {
+function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const removeWebhook = useMutation(adminMutations.deleteWebhook(queryClient))
   return (
     <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
       <TableCell className="py-3 font-medium">{webhook.name}</TableCell>
@@ -973,9 +1028,8 @@ function WebhookRow({
             actionLabel="Delete webhook"
             onConfirm={async () => {
               try {
-                await deleteWebhook(webhook.id)
+                await removeWebhook.mutateAsync(webhook.id)
                 toast.success("Webhook deleted")
-                onChanged()
               } catch (err) {
                 toastApiError(err, "Delete webhook")
               }
@@ -987,20 +1041,34 @@ function WebhookRow({
   )
 }
 
-function WebhookDialog({ onDone }: { onDone: () => void }) {
+function WebhookDialog() {
   const [open, setOpen] = React.useState(false)
-  const [name, setName] = React.useState("")
-  const [url, setUrl] = React.useState("")
-  const [format, setFormat] = React.useState<WebhookFormat>("generic")
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const addWebhook = useMutation(adminMutations.createWebhook(queryClient))
+  const form = useForm({
+    defaultValues: {
+      name: "",
+      url: "",
+      format: "generic" as WebhookFormat,
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        await addWebhook.mutateAsync({
+          name: value.name.trim(),
+          url: value.url.trim(),
+          format: value.format,
+        })
+        toast.success("Webhook added")
+        handleOpen(false)
+      } catch (err) {
+        toastApiError(err, "Add webhook")
+      }
+    },
+  })
 
   const handleOpen = (next: boolean) => {
     setOpen(next)
-    if (!next) {
-      setName("")
-      setUrl("")
-      setFormat("generic")
-    }
+    if (!next) form.reset()
   }
 
   return (
@@ -1020,69 +1088,117 @@ function WebhookDialog({ onDone }: { onDone: () => void }) {
             “generic” URL your own receiver consumes.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="wh-name">Name</Label>
-            <Input
-              id="wh-name"
-              placeholder="e.g. #billing-alerts"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="wh-format">Format</Label>
-            <Select
-              value={format}
-              onValueChange={(v) => setFormat(v as WebhookFormat)}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            <form.Field
+              name="name"
+              validators={{
+                onChange: ({ value }) =>
+                  value.trim() ? undefined : "Enter a webhook name",
+              }}
             >
-              <SelectTrigger id="wh-format" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WEBHOOK_FORMATS.map((f) => (
-                  <SelectItem key={f.value} value={f.value}>
-                    {f.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="wh-name">Name</Label>
+                  <Input
+                    id="wh-name"
+                    placeholder="e.g. #billing-alerts"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="format">
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="wh-format">Format</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(value) =>
+                      field.handleChange(value as WebhookFormat)
+                    }
+                  >
+                    <SelectTrigger id="wh-format" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEBHOOK_FORMATS.map((format) => (
+                        <SelectItem key={format.value} value={format.value}>
+                          {format.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </form.Field>
+            <form.Field
+              name="url"
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value.trim()) return "Enter a webhook URL"
+                  try {
+                    new URL(value)
+                    return undefined
+                  } catch {
+                    return "Enter a valid webhook URL"
+                  }
+                },
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="wh-url">Webhook URL</Label>
+                  <Input
+                    id="wh-url"
+                    type="url"
+                    className="text-xs"
+                    placeholder="https://discord.com/api/webhooks/…"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="wh-url">Webhook URL</Label>
-            <Input
-              id="wh-url"
-              className="text-xs"
-              placeholder="https://discord.com/api/webhooks/…"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={busy || !name.trim() || !url.trim()}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await createWebhook({
-                  name: name.trim(),
-                  url: url.trim(),
-                  format,
-                })
-                toast.success("Webhook added")
-                handleOpen(false)
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Add webhook")
-              } finally {
-                setBusy(false)
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.name,
+                  state.values.url,
+                  state.canSubmit,
+                  state.isSubmitting,
+                ] as const
               }
-            }}
-          >
-            {busy ? "Adding…" : "Add webhook"}
-          </Button>
-        </DialogFooter>
+            >
+              {([name, url, canSubmit, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={
+                    !name.trim() || !url.trim() || !canSubmit || isSubmitting
+                  }
+                >
+                  {isSubmitting ? "Adding…" : "Add webhook"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

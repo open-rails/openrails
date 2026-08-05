@@ -1,0 +1,214 @@
+import { mutationOptions, type QueryClient } from "@tanstack/react-query"
+
+import {
+  changeTeamRole,
+  createAlertRule,
+  createApiKey,
+  createWebhook,
+  deleteAlertRule,
+  deletePaymentProvider,
+  deleteWebhook,
+  getCreditLimit,
+  getTrustLevel,
+  inviteTeamMember,
+  putMerchantSettings,
+  putPaymentProvider,
+  removeTeamMember,
+  revokeApiKey,
+  revokeTeamInvite,
+  setCreditLimit,
+  testAlertRule,
+  updateAlertRule,
+  type AlertRuleRequest,
+  type UpsertProviderRequest,
+  type WebhookRequest,
+} from "@/lib/api/endpoints"
+import type { MerchantSettings } from "@/lib/api/types"
+import { queryKeys } from "@/lib/queries"
+
+const invalidateExact = (
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+) => queryClient.invalidateQueries({ queryKey, exact: true })
+
+const invalidateExactOnSuccess =
+  (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
+    invalidateExact(queryClient, queryKey)
+
+const invalidateTreeOnSuccess =
+  (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
+    queryClient.invalidateQueries({ queryKey })
+
+export const adminMutations = {
+  updateMerchantSettings: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "update"],
+      mutationFn: (settings: MerchantSettings) => putMerchantSettings(settings),
+      onSuccess: invalidateExactOnSuccess(queryClient, queryKeys.settings()),
+    }),
+  savePaymentProvider: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "payment-providers", "save"],
+      mutationFn: ({
+        rail,
+        provider,
+      }: {
+        rail: string
+        provider: UpsertProviderRequest
+      }) => putPaymentProvider(rail, provider),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.settings(),
+        "payment-providers",
+      ]),
+    }),
+  archivePaymentProvider: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "payment-providers", "archive"],
+      mutationFn: ({
+        rail,
+        environment,
+      }: {
+        rail: string
+        environment?: string
+      }) => deletePaymentProvider(rail, environment),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.settings(),
+        "payment-providers",
+      ]),
+    }),
+  createApiKey: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "api-keys", "create"],
+      mutationFn: ({ name, role }: { name: string; role: string }) =>
+        createApiKey(name, role),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.settings(),
+        "api-keys",
+      ]),
+    }),
+  revokeApiKey: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "api-keys", "revoke"],
+      mutationFn: (id: string) => revokeApiKey(id),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.settings(),
+        "api-keys",
+      ]),
+    }),
+  inviteTeamMember: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.team(), "invite"],
+      mutationFn: ({ email, role }: { email: string; role: string }) =>
+        inviteTeamMember(email, role),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
+    }),
+  revokeTeamInvite: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.team(), "invites", "revoke"],
+      mutationFn: (id: string) => revokeTeamInvite(id),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
+    }),
+  changeTeamRole: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.team(), "role"],
+      mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+        changeTeamRole(userId, role),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
+    }),
+  removeTeamMember: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.team(), "remove"],
+      mutationFn: (userId: string) => removeTeamMember(userId),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
+    }),
+  setCreditLimit: () =>
+    mutationOptions({
+      mutationKey: [
+        ...queryKeys.settings(),
+        "customer-controls",
+        "credit-limit",
+      ],
+      mutationFn: ({
+        customerId,
+        currency,
+        amount,
+      }: {
+        customerId: string
+        currency: string
+        amount: number
+      }) => setCreditLimit(customerId, currency, amount),
+    }),
+  lookupCustomerControls: () =>
+    mutationOptions({
+      mutationKey: [...queryKeys.settings(), "customer-controls", "lookup"],
+      mutationFn: async ({
+        customerId,
+        currency,
+      }: {
+        customerId: string
+        currency: string
+      }) => {
+        const [credit, trust] = await Promise.all([
+          getCreditLimit(customerId, currency),
+          getTrustLevel(customerId, currency),
+        ])
+        return { credit, trust }
+      },
+    }),
+  createAlertRule: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "rules", "create"],
+      mutationFn: (rule: AlertRuleRequest) => createAlertRule(rule),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "rules",
+      ]),
+    }),
+  updateAlertRule: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "rules", "update"],
+      mutationFn: ({
+        id,
+        rule,
+      }: {
+        id: string
+        rule: Partial<AlertRuleRequest>
+      }) => updateAlertRule(id, rule),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "rules",
+      ]),
+    }),
+  deleteAlertRule: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "rules", "delete"],
+      mutationFn: (id: string) => deleteAlertRule(id),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "rules",
+      ]),
+    }),
+  testAlertRule: () =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "rules", "test"],
+      mutationFn: (id: string) => testAlertRule(id),
+    }),
+  createWebhook: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "webhooks", "create"],
+      mutationFn: (webhook: WebhookRequest) => createWebhook(webhook),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "webhooks",
+      ]),
+    }),
+  deleteWebhook: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "webhooks", "delete"],
+      mutationFn: (id: string) => deleteWebhook(id),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "webhooks",
+      ]),
+    }),
+}
