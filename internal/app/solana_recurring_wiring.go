@@ -32,6 +32,10 @@ func (r *Runtime) ArmSolanaRecurringServices(
 	if r.Config.IsTestMode() {
 		network = "devnet"
 	}
+	// or#881: a mint LOOKUP table for the recurring plan services, NOT an
+	// acceptance list. What a merchant accepts is per-merchant and resolved by
+	// tokens.ResolveDeclared; plan publishing is separately gated by the
+	// recurring allowlist (recurring.RecurringStablecoins).
 	tokens := solanatokens.ForNetwork(network)
 	r.SetSolanaCranker(recurring.NewCrankService(submitter))
 

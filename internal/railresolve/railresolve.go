@@ -270,11 +270,12 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, s
 
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
 // rail account's declared settings: network derives from test_mode alone
-// (#349), the token set is the network's built-in registry extended by the
-// merchant's declarations (or#881 — a built-in symbol is SELECTED, its mint is
-// never restated), and the #360 pricing policy then drops tokens that cannot
-// function (degrade-not-die). A misdeclared token set is fail-closed: the PSP
-// does not arm rather than arming against a mint nobody vouched for.
+// (#349), the token set is exactly what the merchant declared — USDC alone when
+// they declared nothing (or#881 select-and-restrict; a built-in symbol is
+// SELECTED and its mint is never restated) — and the #360 pricing policy then
+// drops tokens that cannot function (degrade-not-die). A misdeclared token set
+// is fail-closed: the PSP does not arm rather than arming against a mint nobody
+// vouched for.
 func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) (*config.SolanaRailConfig, error) {
 	network := "mainnet"
 	if testMode {

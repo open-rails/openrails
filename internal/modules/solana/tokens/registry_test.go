@@ -95,3 +95,18 @@ func TestDevnetRegistryDoesNotReuseMainnetMints(t *testing.T) {
 		require.NotEqualf(t, mainnet[symbol].Mint, token.Mint, "%s devnet mint must not be the mainnet address", symbol)
 	}
 }
+
+// The zero-configuration default (or#881) must exist on every network, or a
+// merchant who declares nothing arms with an empty accepted set.
+func TestDefaultAcceptedSymbolExistsOnEveryNetwork(t *testing.T) {
+	t.Parallel()
+	for _, network := range []string{"mainnet", "devnet"} {
+		token, ok := ForNetwork(network)[DefaultAcceptedSymbol]
+		require.Truef(t, ok, "%s has no %s entry", network, DefaultAcceptedSymbol)
+		require.NotEmptyf(t, token.Mint, "%s %s has no mint", network, DefaultAcceptedSymbol)
+	}
+	// It must also be a stablecoin — recurring plans hold an immutable on-chain
+	// amount. Recurring-allowlist membership is pinned in the recurring package,
+	// which cannot be imported from here.
+	require.True(t, IsStablecoin(DefaultAcceptedSymbol))
+}

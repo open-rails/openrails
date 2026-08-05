@@ -6,10 +6,20 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
+// DefaultAcceptedSymbol is the token a merchant accepts when they declare
+// nothing (or#881). USDC only — deliberately not the whole registry: it is the
+// one token present on every network AND on the recurring allowlist, so the
+// zero-configuration merchant can take one-off payments and rebill. Accepting
+// more than that is a decision a merchant makes explicitly.
+const DefaultAcceptedSymbol = PreferredStablecoin
+
 // ResolveDeclared turns a merchant's DECLARED token map into the accepted token
 // set for network (or#881).
 //
-// Select-and-restrict, not restate:
+// SELECT AND RESTRICT: the declared set IS the accepted set. Declaring
+// `{USDC: {}, SOL: {}}` accepts exactly those two. Declaring nothing accepts
+// DefaultAcceptedSymbol. The registry's only job is resolving a known symbol's
+// on-chain identity — it is a lookup table, never an acceptance list.
 //
 //   - A registry symbol is SELECTED by name — `tokens: {USDC: {}}`. Its mint
 //     comes from ForNetwork(network). Declaring `mint:` for it is an ERROR even
@@ -18,8 +28,6 @@ import (
 //     the one that was priced.
 //   - A custom symbol still REQUIRES `mint:` — there the mint IS the token's
 //     identity, so it is genuinely declared rather than restated.
-//   - Declarations EXTEND the registry per symbol; they never replace it, so
-//     adding one custom token cannot silently drop the canonical set.
 //
 // TEST MODE (devnet): the registry has its own devnet column, so USDC/SOL/PYUSD
 // select identically there. Registry symbols with no devnet entry are not
@@ -30,10 +38,10 @@ import (
 // there), so the restatement hazard the rule exists to prevent does not apply.
 func ResolveDeclared(network string, declared map[string]config.TokenConfig) (map[string]config.TokenConfig, error) {
 	registry := ForNetwork(network)
-	out := make(map[string]config.TokenConfig, len(registry)+len(declared))
-	for symbol, token := range registry {
-		out[symbol] = token
+	if len(declared) == 0 {
+		return map[string]config.TokenConfig{DefaultAcceptedSymbol: registry[DefaultAcceptedSymbol]}, nil
 	}
+	out := make(map[string]config.TokenConfig, len(declared))
 	for rawSymbol, token := range declared {
 		symbol := strings.ToUpper(strings.TrimSpace(rawSymbol))
 		if symbol == "" {

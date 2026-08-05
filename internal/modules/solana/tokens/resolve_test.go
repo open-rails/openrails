@@ -8,8 +8,9 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-// or#881: the mint of a well-known token comes from the registry. A merchant
-// selects the symbol; they never re-type the address.
+// or#881 select-and-restrict: the declared set IS the accepted set, and a
+// well-known token's mint comes from the registry — a merchant selects the
+// symbol, they never re-type the address.
 
 func TestResolveDeclared_RegistrySymbolSelectsWithoutAMint(t *testing.T) {
 	t.Parallel()
@@ -61,11 +62,8 @@ func TestResolveDeclared_CustomSymbolRequiresMint(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, customMint, out["MYTK"].Mint)
-
-	// Additive: one custom token never costs the merchant the registry.
-	for symbol, want := range DefaultSupportedTokens() {
-		require.Equalf(t, want.Mint, out[symbol].Mint, "registry token %s was dropped or changed", symbol)
-	}
+	// Restrict: declaring a custom token accepts THAT token, not the registry too.
+	require.Len(t, out, 1)
 }
 
 // Test mode: the registry's devnet column is the built-in set there. A mainnet
@@ -90,16 +88,37 @@ func TestResolveDeclared_DevnetOnlyBuiltInWhereTheRegistryHasAMint(t *testing.T)
 	require.ErrorContains(t, err, "built-in token")
 }
 
-func TestResolveDeclared_NoDeclarationIsTheRegistry(t *testing.T) {
+// The declared set IS the accepted set: everything not named is refused.
+func TestResolveDeclared_DeclaredSetIsTheAcceptedSet(t *testing.T) {
+	t.Parallel()
+
+	out, err := ResolveDeclared("mainnet", map[string]config.TokenConfig{
+		"USDC": {},
+		"SOL":  {},
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]config.TokenConfig{
+		"USDC": DefaultSupportedTokens()["USDC"],
+		"SOL":  DefaultSupportedTokens()["SOL"],
+	}, out)
+	for _, refused := range []string{"USDT", "PYUSD", "USD1", "USDG"} {
+		require.NotContainsf(t, out, refused, "%s was never declared and must not be accepted", refused)
+	}
+}
+
+// Declaring nothing accepts USDC alone — not the whole registry. USDC is the one
+// token on every network that also rebills, so the zero-config merchant can do
+// both.
+func TestResolveDeclared_DefaultIsUSDCOnly(t *testing.T) {
 	t.Parallel()
 
 	out, err := ResolveDeclared("mainnet", nil)
 	require.NoError(t, err)
-	require.Equal(t, DefaultSupportedTokens(), out)
+	require.Equal(t, map[string]config.TokenConfig{"USDC": DefaultSupportedTokens()["USDC"]}, out)
 
 	out, err = ResolveDeclared("devnet", map[string]config.TokenConfig{})
 	require.NoError(t, err)
-	require.Equal(t, DefaultDevnetTokens(), out)
+	require.Equal(t, map[string]config.TokenConfig{"USDC": DefaultDevnetTokens()["USDC"]}, out)
 
 	_, err = ResolveDeclared("mainnet", map[string]config.TokenConfig{"  ": {Mint: "x"}})
 	require.ErrorContains(t, err, "empty symbol")
