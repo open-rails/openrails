@@ -57,15 +57,14 @@ func (ns NullOpenrailsPaymentStatus) Value() (driver.Value, error) {
 	return string(ns.OpenrailsPaymentStatus), nil
 }
 
+// or#893: the canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us (#632); cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.
 type OpenrailsSubscriptionStatus string
 
 const (
 	OpenrailsSubscriptionStatusPending   OpenrailsSubscriptionStatus = "pending"
 	OpenrailsSubscriptionStatusActive    OpenrailsSubscriptionStatus = "active"
-	OpenrailsSubscriptionStatusExpired   OpenrailsSubscriptionStatus = "expired"
-	OpenrailsSubscriptionStatusCancelled OpenrailsSubscriptionStatus = "cancelled"
-	OpenrailsSubscriptionStatusFailed    OpenrailsSubscriptionStatus = "failed"
 	OpenrailsSubscriptionStatusPastDue   OpenrailsSubscriptionStatus = "past_due"
+	OpenrailsSubscriptionStatusCancelled OpenrailsSubscriptionStatus = "cancelled"
 	OpenrailsSubscriptionStatusUnknown   OpenrailsSubscriptionStatus = "unknown"
 )
 

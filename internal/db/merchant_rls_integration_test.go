@@ -261,7 +261,7 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 		status string
 	}{
 		{id: subscriptionID, status: "active"},
-		{id: nextSubscriptionID, status: "expired"},
+		{id: nextSubscriptionID, status: "pending"},
 	} {
 		_, err = pool.Exec(ctx, `
 			INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, status, rail, psp_id)

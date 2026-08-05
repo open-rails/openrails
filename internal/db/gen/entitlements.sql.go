@@ -23,27 +23,6 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 	return err
 }
 
-const attachEntitlementCustomer = `-- name: AttachEntitlementCustomer :exec
-UPDATE openrails.entitlements ent SET
-    customer_id = $2,
-    updated_at = $3
-WHERE ent.id = $1
-  AND ent.customer_id IS NULL
-  AND ent.deleted_at IS NULL
-`
-
-type AttachEntitlementCustomerParams struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	UpdatedAt  time.Time
-}
-
-// Backfill the payable subject onto a legacy row that predates #317.
-func (q *Queries) AttachEntitlementCustomer(ctx context.Context, arg AttachEntitlementCustomerParams) error {
-	_, err := q.db.Exec(ctx, attachEntitlementCustomer, arg.ID, arg.CustomerID, arg.UpdatedAt)
-	return err
-}
-
 const createEntitlement = `-- name: CreateEntitlement :one
 
 INSERT INTO openrails.entitlements (

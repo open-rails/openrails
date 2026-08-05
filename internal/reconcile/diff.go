@@ -573,6 +573,12 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		// Local past_due requires a period end (chk_past_due_has_period_end).
 		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
 	}
+	localStatus, materializable := LocalMaterializeStatus(r.Status)
+	if !materializable {
+		// or#893: the local lifecycle has no state that means "the provider's
+		// date passed". Only a live remote subscription is minted locally.
+		blockers = append(blockers, fmt.Sprintf("remote status %q has no canonical local lifecycle state; only a live remote subscription is materialized", r.Status))
+	}
 	if discoveredNotLocalRaw(r.Raw) {
 		// #714: chain-scan discoveries (permissionless `subscribe`) never
 		// auto-create local billing state — operator decision only.
@@ -590,7 +596,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		CustomerID:         subjectID,
 		PriceID:            link.price.ID,
 		ProductID:          link.price.ProductID,
-		Status:             string(r.Status),
+		Status:             localStatus,
 		PeriodEndsAt:       r.NextBillingAt,
 		UserEmail:          strings.TrimSpace(r.Email),
 		IdentityVia:        identityVia,

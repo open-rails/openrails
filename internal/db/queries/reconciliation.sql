@@ -734,7 +734,7 @@ FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
-  AND s.status IN ('cancelled', 'expired', 'failed')
+  AND s.status = 'cancelled'
   AND EXISTS (
       SELECT 1 FROM openrails.entitlements e
       WHERE e.merchant_id = s.merchant_id
@@ -833,7 +833,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'subscription'
-          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND s.status = 'cancelled'
           AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )

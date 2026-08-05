@@ -144,22 +144,6 @@ func GetEntitlementByGrant(ctx context.Context, qx gen.DBTX, merchantID, grantID
 	return models.EntitlementFromGen(row), nil
 }
 
-// AttachCustomerIfMissing backfills customer_id onto a legacy row
-// (#317); no-op when the row already carries one.
-func AttachCustomerIfMissing(ctx context.Context, qx gen.DBTX, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
-	if ent == nil || tenantSubjectID == uuid.Nil || ent.CustomerID != uuid.Nil {
-		return nil
-	}
-	if err := gen.New(qx).AttachEntitlementCustomer(ctx, gen.AttachEntitlementCustomerParams{
-		ID: ent.ID, CustomerID: tenantSubjectID, UpdatedAt: now,
-	}); err != nil {
-		return err
-	}
-	ent.CustomerID = tenantSubjectID
-	ent.UpdatedAt = now
-	return nil
-}
-
 // SoftDeleteEntitlementByID soft-deletes one (future) window.
 func SoftDeleteEntitlementByID(ctx context.Context, qx gen.DBTX, id uuid.UUID, now time.Time) error {
 	return gen.New(qx).SoftDeleteEntitlementByID(ctx, gen.SoftDeleteEntitlementByIDParams{ID: id, Now: now})

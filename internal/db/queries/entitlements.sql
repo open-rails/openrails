@@ -306,15 +306,6 @@ WHERE ent.customer_id = $1
 ORDER BY ent.end_at DESC NULLS LAST
 LIMIT 1;
 
--- name: AttachEntitlementCustomer :exec
--- Backfill the payable subject onto a legacy row that predates #317.
-UPDATE openrails.entitlements ent SET
-    customer_id = $2,
-    updated_at = $3
-WHERE ent.id = $1
-  AND ent.customer_id IS NULL
-  AND ent.deleted_at IS NULL;
-
 -- name: SoftDeleteEntitlementByID :exec
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,

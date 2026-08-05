@@ -181,8 +181,8 @@ production writes. Deliberately not started.
 
 ### The inline exemptions
 
-Forty-five statements, sixty-four rule instances, all classified
-**PERMANENT**. All but `0048`, `0061`, `0063` and `0077` are **history** —
+Forty-eight statements, sixty-seven rule instances, all classified
+**PERMANENT**. All but `0048`, `0061`, `0063`, `0077` and `0078` are **history** —
 rewriting them changes no live database and the honest record is what actually
 ran. The rules stay armed for new migrations.
 
@@ -207,6 +207,7 @@ ran. The rules stay armed for new migrations.
 | `0077` ×2 rail_intents/rail_mutation_logs custodian FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | Composite `(custodian_id, merchant_id)` FKs, the same shape `psps_custodian_fk` carries, so the reference cannot cross a merchant boundary. The column is added in the statement above each, so every existing row is NULL and the validating scan is over an all-NULL column — the case `0018` records squawk cannot see. `NOT VALID` buys nothing inside a single-transaction migrator (`0014`). |
 | `0077` ×2 psp_id `DROP NOT NULL` | `ban-drop-not-null` | **Deliberate, and not a weakening.** or#795's batch account updater is addressed to a CUSTODIAN — one custodian backs many PSPs, so no single `psp_id` names the write. The `rail_intents_addressed` / `rail_mutation_logs_addressed` CHECKs added two lines below each restate `0063`'s actual invariant (*an outbound write names the account it will execute against*) over both kinds of account, so nothing becomes unattributable. The rule's concern is a client that assumes non-NULL; the readers were changed in the same PR and the CHECK is what they now rely on. |
 | `0077` ×2 addressed CHECKs | `constraint-missing-not-valid` | Every existing row has `psp_id` NOT NULL — it was the column attribute until two statements earlier — so the scan validates rows already known to satisfy the constraint. Same single-transaction argument as `0014`. |
+| `0078` ×3 subscription lifecycle retype | `changing-column-type` | **Deliberate hard cut, not history.** or#893 phase 2 removes `expired`/`failed` from `openrails.subscription_status`. Postgres cannot drop an enum label, so the only shape that exists is a new type plus three `ALTER COLUMN … TYPE` (subscriptions.status, subscription_status_transitions.from_status/to_status) — there is no split, `NOT VALID` two-step or lock-free variant to move to. The rule's other concern, breaking clients that read the column, is the intended effect: a caller still writing `'expired'` must fail loudly rather than store a state the lifecycle no longer has. Prelaunch, no deployment holds rows. |
 | `0048` DROP payer_spend_limits | `ban-drop-table` | **Deliberate hard cut, not history.** or#897 replaces the table with `billing_policies` + `billing_policy_bindings`; the rule's concern (breaking existing clients) is the intended effect, and prelaunch there is no deployment holding rows worth keeping. Leaving the table alongside its replacement would be the two-substrate disease or#878 removed from exposure. |
 
 A new migration that genuinely needs one of these must add the constraint

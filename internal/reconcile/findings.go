@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // FindingType is the PS-1..PS-9 discrepancy taxonomy from #107.
@@ -170,7 +172,9 @@ type MaterializeSubscriptionAction struct {
 	CustomerID         uuid.UUID
 	PriceID            uuid.UUID
 	ProductID          uuid.UUID
-	Status             string // active | past_due (PS-1 only fires for live remote subs)
+	// Status is the CANONICAL LOCAL lifecycle state (or#893) the row is created
+	// with — active or past_due; PS-1 only fires for a live remote subscription.
+	Status models.SubscriptionStatus
 	PeriodStartsAt     *time.Time
 	PeriodEndsAt       *time.Time
 	StartedAt          *time.Time

@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // Provider identifies the payment rail a snapshot came from. Values match
@@ -46,6 +48,23 @@ const (
 	SubscriptionStatusPastDue   SubscriptionStatus = "past_due"
 	SubscriptionStatusUnknown   SubscriptionStatus = "unknown"
 )
+
+// LocalMaterializeStatus maps a REMOTE roster status onto the canonical LOCAL
+// lifecycle (or#893). It is deliberately partial: only a live remote
+// subscription may be materialized. A remote `expired` means the provider's
+// paid-through date passed — a clock reading, not a local lifecycle state, and
+// there is no longer a local status that says it. When a pull PROVES the remote
+// subscription is dead, the #665 decider converges the existing local row to
+// cancelled (cancel_type=expired); it never mints one.
+func LocalMaterializeStatus(remote SubscriptionStatus) (models.SubscriptionStatus, bool) {
+	switch remote {
+	case SubscriptionStatusActive:
+		return models.StatusActive, true
+	case SubscriptionStatusPastDue:
+		return models.StatusPastDue, true
+	}
+	return "", false
+}
 
 // TransactionType is the normalized cross-provider transaction kind.
 type TransactionType string

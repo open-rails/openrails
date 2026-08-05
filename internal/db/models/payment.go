@@ -35,8 +35,7 @@ func (m MoneyMovement) Valid() bool {
 type Payment struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	// Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	PriceID    uuid.UUID `json:"price_id"`
 
