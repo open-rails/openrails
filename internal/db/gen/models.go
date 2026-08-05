@@ -585,7 +585,8 @@ type OpenrailsLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
-	CustomerID  *uuid.UUID
+	CustomerID *uuid.UUID
+	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER (or#897): its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits / fx_liquidity / world are merchant-wide system accounts.
 	AccountType string
 	Currency    string
 	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.

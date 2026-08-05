@@ -49,12 +49,21 @@ SELECT
     -- held is always 0 here (the two-phase pending columns were dropped, #512).
     0::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
-    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount
+    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
+    -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
+    -- the same O(1) point lookup. Debt is a negative arrears balance, so the
+    -- exposure is (debits - credits), floored at 0.
+    COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
 FROM openrails.ledger_accounts a
 LEFT JOIN openrails.money_settings s
   ON s.merchant_id = a.merchant_id
  AND s.customer_id = a.customer_id
  AND s.currency = a.currency
+LEFT JOIN openrails.ledger_accounts ar
+  ON ar.merchant_id = a.merchant_id
+ AND ar.customer_id = a.customer_id
+ AND ar.currency = a.currency
+ AND ar.account_type = 'arrears_liability'
 WHERE a.merchant_id = $1::uuid
   AND a.customer_id = $2::uuid
   AND a.currency = $3::text
@@ -73,6 +82,7 @@ type GetAdmissionCapacityRow struct {
 	Held              int64
 	BillingMode       string
 	CreditLimitAmount int64
+	OutstandingOwed   int64
 }
 
 // Hot-path affordability snapshot for service admit. The customer_balance account
@@ -87,6 +97,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 		&i.Held,
 		&i.BillingMode,
 		&i.CreditLimitAmount,
+		&i.OutstandingOwed,
 	)
 	return i, err
 }

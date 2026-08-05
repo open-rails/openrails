@@ -100,8 +100,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 
 		// Account-capacity gate. Prepaid accounts gate on available balance.
 		// Arrears accounts gate on prepaid availability plus remaining credit line:
-		// credit_limit_amount - invoice-derived exposure. A zero credit line means
-		// no arrears capacity; prepaid balance can still admit work.
+		// credit_limit_amount - LEDGER-measured outstanding owed (or#878 ruling /
+		// or#897). This subtracted an invoice-derived exposure, which is the
+		// second substrate that ruling removed.
+		//
+		// NOTE (or#897 finding): AuthorizeAndHold has no production caller — the
+		// live admission path is admission.Admitter.Admit -> payerCapacity ->
+		// GetAdmissionCapacity -> the Redis spendgate. Policy enforcement belongs
+		// there, not here.
 		accountCapacity := available
 		exposure := int64(0)
 		switch {
@@ -114,7 +120,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			}
 		default:
 			var eerr error
-			exposure, eerr = txSvc.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+			exposure, eerr = txSvc.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
 			if eerr != nil {
 				return eerr
 			}

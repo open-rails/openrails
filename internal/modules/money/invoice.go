@@ -496,6 +496,16 @@ func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerI
 		}); e != nil {
 			return e
 		}
+		// or#897: cancel the DEBT, not just the invoice row. The ledger is the
+		// exposure substrate, so an unreversed accrual would keep capping the
+		// payer for a bill that no longer exists. Idempotent on the invoice
+		// coordinate, so a double void writes off once.
+		before, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: id,
+		})
+		if e != nil {
+			return e
+		}
 		row, e := q.VoidInvoiceForPayer(ctx, gen.VoidInvoiceForPayerParams{
 			MerchantID: tid.UUID(),
 			CustomerID: payer.UUID(),
@@ -504,6 +514,15 @@ func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerI
 		})
 		if e != nil {
 			return e
+		}
+		if before.AmountDue > 0 {
+			if _, we := s.moneyLedger(q, tid.UUID()).WriteOffOwed(
+				ctx, payer.UUID(), normalizeCurrency(before.Currency), before.AmountDue,
+				ledger.Coord{Operation: ledger.OpInvoiceVoid, Source: "invoice_void", SourceID: id.String()},
+				&id,
+			); we != nil {
+				return we
+			}
 		}
 		var merr error
 		inv, merr = invoiceFromGen(row)

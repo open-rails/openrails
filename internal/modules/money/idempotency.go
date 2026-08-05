@@ -56,6 +56,7 @@ const (
 	OpMinimumSpendTrueUp = ledger.OpMinimumSpendTrueUp
 	OpInvoicePayment     = ledger.OpInvoicePayment
 	OpManualInvoicePay   = ledger.OpManualInvoicePay
+	OpInvoiceVoid        = ledger.OpInvoiceVoid
 )
 
 // UsageOperation is the operation kind of a metered usage charge (usage:<event_type>).

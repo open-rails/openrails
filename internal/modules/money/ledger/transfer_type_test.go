@@ -48,12 +48,18 @@ func allMigrations(t *testing.T) string {
 	return b.String()
 }
 
+// sqlLiterals reads the LAST definition in migration order, not the first: a
+// constraint can be dropped and re-added by a later migration (or#897 added
+// owed_writeoff that way), and the final definition is the one the database
+// actually has. Matching the first would pin the vocabulary against a
+// superseded CHECK and pass while the two drifted apart.
 func sqlLiterals(t *testing.T, re *regexp.Regexp, schema, what string) []string {
 	t.Helper()
-	m := re.FindStringSubmatch(schema)
-	if m == nil {
+	all := re.FindAllStringSubmatch(schema, -1)
+	if len(all) == 0 {
 		t.Fatalf("migrations do not define %s", what)
 	}
+	m := all[len(all)-1]
 	var out []string
 	for _, lit := range reSQLText.FindAllStringSubmatch(m[1], -1) {
 		out = append(out, lit[1])
