@@ -65,9 +65,12 @@ const (
 // platform:merchants:* map 1:1 onto these. They gate the standalone
 // cross-merchant directory and root-only operational overrides.
 const (
-	RootMerchantsRead         = "root:merchants:read"
-	RootMerchantsDelete       = "root:merchants:delete"
-	RootMerchantsRestore      = "root:merchants:restore"
+	RootMerchantsRead    = "root:merchants:read"
+	RootMerchantsDelete  = "root:merchants:delete"
+	RootMerchantsRestore = "root:merchants:restore"
+	// RootWorkerHealthRead gates the cross-merchant worker-health view, whose
+	// last_error text is another merchant's verbatim job error (#SEC-22).
+	RootWorkerHealthRead      = "root:worker-health:read"
 	RootAdminRateLimitsUnlock = "root:admin-rate-limits:unlock"
 )
 

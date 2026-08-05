@@ -22,11 +22,59 @@ import (
 
 // Account Updater result codes (result CSV v1.2).
 const (
-	AUUpdatedPAN     = "UPD_PAN"
-	AUUpdatedExpDate = "UPD_EXP_DATE"
-	AUNoUpdate       = "NO_UPDATE"
-	AUClosedAccount  = "WRN_CLOSED_ACCOUNT"
+	AUUpdatedPAN        = "UPD_PAN"
+	AUUpdatedExpDate    = "UPD_EXP_DATE"
+	AUNoUpdate          = "NO_UPDATE"
+	AUNoMatch           = "NO_MATCH"
+	AUClosedAccount     = "WRN_CLOSED_ACCOUNT"
+	AUContactCardholder = "WRN_CONTACT_CARDHOLDER"
 )
+
+// AUOutcome is the DOCTRINE class of one result row — what OpenRails is
+// entitled to do about it. The wire code is always recorded verbatim (#651);
+// this is only the mapping onto the actions that already exist.
+type AUOutcome string
+
+const (
+	// AUOutcomeUpdated: the network reissued the credential. Rotate the method
+	// ref / refresh the metadata — and clear any park, because this row is the
+	// newest evidence about the card (or#872).
+	AUOutcomeUpdated AUOutcome = "updated"
+	// AUOutcomeClosed: the account is closed. Park (bucket 2) — never delete,
+	// never terminal-cancel.
+	AUOutcomeClosed AUOutcome = "closed"
+	// AUOutcomeContactCardholder: the network will say nothing more without the
+	// cardholder. Same destination as closed: park and surface, since charging
+	// on regardless is how a book quietly turns into declines.
+	AUOutcomeContactCardholder AUOutcome = "contact_cardholder"
+	// AUOutcomeNoChange: nothing was reported (NO_UPDATE) or the card is not
+	// enrolled/matched (NO_MATCH). No evidence, no action.
+	AUOutcomeNoChange AUOutcome = "no_change"
+	// AUOutcomeUnrecognized: a code this build does not know. Recorded
+	// verbatim, folded by nothing — a guess on a money path is worse than a
+	// gap an operator can see.
+	AUOutcomeUnrecognized AUOutcome = "unrecognized"
+)
+
+// ClassifyAccountUpdaterResult maps a verbatim result code onto its outcome.
+// The UPD_ family is matched by PREFIX on purpose: the row itself carries the
+// new token/expiry, so a future UPD_* variant must still be applied rather than
+// dropped — refusing the network's own repair is the or#872 failure mode.
+func ClassifyAccountUpdaterResult(code string) AUOutcome {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	switch code {
+	case "", AUNoUpdate, AUNoMatch:
+		return AUOutcomeNoChange
+	case AUClosedAccount:
+		return AUOutcomeClosed
+	case AUContactCardholder:
+		return AUOutcomeContactCardholder
+	}
+	if strings.HasPrefix(code, "UPD_") {
+		return AUOutcomeUpdated
+	}
+	return AUOutcomeUnrecognized
+}
 
 type AccountUpdaterJob struct {
 	ID          string     `json:"id"`
@@ -92,6 +140,13 @@ func (c *Client) UploadAccountUpdaterCSV(ctx context.Context, uploadURL string, 
 	if uploadURL == "" {
 		return errors.New("basistheory: upload url is required")
 	}
+	// SEC-24 item 5 (same class): this URL comes from the PROVIDER's job
+	// payload. It is a pre-signed object-store URL, so its host cannot be
+	// pinned — but it must at least be publicly routable, or the job payload
+	// becomes a lever to POST a CSV of card tokens at an internal service.
+	if err := c.outbound.ValidateURL(uploadURL); err != nil {
+		return fmt.Errorf("basistheory: account updater upload url refused: %w", err)
+	}
 	if len(rows) == 0 {
 		return errors.New("basistheory: account updater upload requires at least one row")
 	}
@@ -130,6 +185,9 @@ func (c *Client) DownloadAccountUpdaterResults(ctx context.Context, downloadURL 
 	downloadURL = strings.TrimSpace(downloadURL)
 	if downloadURL == "" {
 		return nil, errors.New("basistheory: download url is required")
+	}
+	if err := c.outbound.ValidateURL(downloadURL); err != nil {
+		return nil, fmt.Errorf("basistheory: account updater download url refused: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -65,7 +67,10 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 }
 
 func Webhook(r *httprequest.Request) {
-	provider := webhookutil.CanonicalRail(r.Param("provider"))
+	provider, ok := canonicalWebhookRail(r)
+	if !ok {
+		return
+	}
 	clientIP := r.ClientIP()
 	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
 	if r.State == nil || r.State.Config == nil {
@@ -80,15 +85,15 @@ func Webhook(r *httprequest.Request) {
 	// surface a generic error (audit OR-API-C2).
 	mid, err := merchant.Require(r.Request.Context())
 	if err != nil {
-		if handled, accepted := processRailMerchantAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
+		if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 			if accepted {
 				r.SuccessJSON(map[string]string{"status": "accepted"})
 			}
 			return
 		}
 		log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).
-			Warn("global webhook surface hit with no configured merchant and no resolvable provider account")
-		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no provider account could be resolved from the webhook")
+			Warn("global webhook surface hit with no configured merchant and no resolvable PSP")
+		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no PSP could be resolved from the webhook")
 		return
 	}
 	// #788: ONE ingestion seam — the pinned-merchant global surface routes
@@ -102,7 +107,10 @@ func MerchantWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
 		return
 	}
-	provider := webhookutil.CanonicalRail(r.Param("provider"))
+	provider, ok := canonicalWebhookRail(r)
+	if !ok {
+		return
+	}
 	route, err := r.State.Merchants.ResolveBySlug(r.Request.Context(), r.Param("merchant"))
 	if err != nil {
 		if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
@@ -134,7 +142,10 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Host-routed webhook resolution is not configured")
 			return
 		}
-		provider := webhookutil.CanonicalRail(r.Param("provider"))
+		provider, ok := canonicalWebhookRail(r)
+		if !ok {
+			return
+		}
 		mid, err := resolve(r.Request.Context(), r.Request.Host)
 		if err != nil || mid.IsZero() {
 			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
@@ -146,14 +157,53 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 	}
 }
 
+// pinWebhookMerchantConn pins the resolved merchant's DB connection (the
+// app.merchant_id GUC) on the request for the rest of the dispatch, and returns
+// the release the caller must defer.
+//
+// The webhook surfaces resolve their merchant INSIDE the handler — from the URL
+// slug (MerchantWebhook), the Host header (HostWebhook) or the payload's account
+// identity (processPSPWebhook) — so middleware.MerchantDBConnMW
+// cannot have run: at middleware time there is no merchant to pin. Without this,
+// every RLS-forced read the dispatch performs outside a MerchantTx (the price
+// lookup behind a CCBill NewSaleSuccess, subscription/customer lookups) runs on
+// the base pool and, under the production openrails_app role, matches ZERO ROWS
+// AND RAISES NOTHING — the webhook fails as "price not found" for a price that
+// exists. Writes were never affected (they go through MerchantTx), which is why
+// this only ever showed up as a phantom missing row.
+//
+// Nested calls are a no-op (db.WithMerchantConn returns the existing pin), so
+// the Stripe-by-account path that re-enters processResolvedMerchantWebhook is
+// safe.
+func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (func(), bool) {
+	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
+		return func() {}, true
+	}
+	ctx, release, err := r.State.DB.WithMerchantConn(merchant.WithID(r.Request.Context(), merchantID))
+	if err != nil {
+		log.WithError(err).WithField("merchant_id", merchantID.String()).
+			Error("webhook: merchant db connection setup failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		return func() {}, false
+	}
+	r.Request = r.Request.WithContext(ctx)
+	return release, true
+}
+
 func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
+	release, ok := pinWebhookMerchantConn(r, merchantID)
+	if !ok {
+		return
+	}
+	defer release()
+
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
 	}
-	if provider == string(models.RailVaultedCard) {
+	if provider == string(models.EventSourceBasisTheory) {
 		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
@@ -188,7 +238,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		var found bool
 		creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
 		if err == nil && !found {
-			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 			return
 		}
 		if err == nil && found {
@@ -198,6 +248,14 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 	} else {
 		creds, err = r.State.Merchants.LoadStripeCredentials(r.Request.Context(), merchantID)
+		// or#893: stamp with the account whose secret verifies this event — the
+		// same scope LoadStripeCredentials just resolved. Rows this event creates
+		// must be attributed, and this is the only account it can have come from.
+		if err == nil {
+			if pid, ok, rerr := r.State.Merchants.ResolveActivePSPIDForRail(r.Request.Context(), merchantID, provider); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
@@ -213,6 +271,12 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		secrets = append(secrets, s)
 	}
 	if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
+		secrets = append(secrets, s)
+	}
+	// #856: through an api_version rollover the superseded endpoint keeps
+	// delivering with the OLD secret. Accepting it is what makes the rollover
+	// gapless — deliveries already queued there still verify.
+	if s := strings.TrimSpace(creds.WebhookSigningPrevious); s != "" {
 		secrets = append(secrets, s)
 	}
 	if len(secrets) == 0 {
@@ -270,7 +334,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
-func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
+func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
 	if r.State == nil || r.State.Merchants == nil {
 		return false, false
 	}
@@ -286,10 +350,11 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "NMI webhook payload is missing merchant account identity")
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailNMI), environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, string(models.RailNMI), environment, accountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailCCBill:
 		if !ccbillWebhookIPAllowed(r, clientIP) {
@@ -304,12 +369,13 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		if !ok {
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailCCBill, environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailCCBill, environment, accountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
-	case rail == string(models.RailVaultedCard):
+	case rail == string(models.EventSourceBasisTheory):
 		body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 		if !ok {
 			return true, false
@@ -319,18 +385,28 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "Basis Theory webhook payload is missing tenant identity")
 			return true, false
 		}
-		account, ok := resolveWebhookRailMerchantAccount(r, string(models.RailVaultedCard), environment, tenantID)
+		// or#880: a custodian event routes by the CUSTODIAN's tenant identity.
+		// It resolves a CUSTODIAN, not a PSP — one custodian may back several
+		// PSPs, and the event is about the instrument, not about a gateway.
+		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
 		if !ok {
 			return true, false
 		}
-		return true, processMerchantBasisTheoryWebhookBody(r, account.MerchantID, account.AccountID, body)
+		defer release()
+		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {
 			return true, false
 		}
+		defer release()
+		// SEC-24 item 7: handled=true, accepted=FALSE. processResolvedMerchantWebhook
+		// writes its OWN response — 401 on a failed signature, 200 on success.
+		// Returning accepted=true made the caller write {"status":"accepted"}
+		// again on top, so a body-parsing monitor saw a REJECTED FORGERY
+		// reported as accepted. The status was always right; the body lied.
 		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
-		return true, true
+		return true, false
 	default:
 		return false, false
 	}
@@ -361,21 +437,66 @@ var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 	}
 }
 
-func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, bool) {
-	account, ok, err := r.State.Merchants.ResolveRailMerchantAccountByIdentity(r.Request.Context(), rail, environment, accountID)
+// resolveWebhookPSP resolves the merchant + PSP a payload-identified
+// account belongs to, pins BOTH on the request (merchant id, psp id) and pins the
+// merchant's DB connection. The returned release must be deferred by the caller —
+// see pinWebhookMerchantConn for why the pin cannot live in middleware.
+func resolveWebhookPSP(r *httprequest.Request, rail, environment, accountID string) (merchants.PSPIdentity, func(), bool) {
+	return pinWebhookAccount(r, rail, environment, accountID,
+		r.State.Merchants.ResolvePSPByIdentity)
+}
+
+// resolveWebhookCustodianAccount is the custody sibling: it resolves the
+// CUSTODIAN a tenant identity belongs to (or#880) and pins its merchant.
+// Unlike a rail-routed webhook it pins NO psp id — a custodian may back
+// several PSPs, and a custodian event is about the instrument, not a gateway.
+func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, tenantID string) (merchants.CustodianIdentity, func(), bool) {
+	noop := func() {}
+	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, environment, tenantID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
-		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")
-		return merchants.RailMerchantAccountIdentity{}, false
+		log.WithError(err).WithFields(log.Fields{"custodian": kind, "environment": environment, "account_id": tenantID}).Error("webhook custodian resolution failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Custodian resolution failed")
+		return merchants.CustodianIdentity{}, noop, false
 	}
 	if !ok {
-		r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
-		return merchants.RailMerchantAccountIdentity{}, false
+		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
+		return merchants.CustodianIdentity{}, noop, false
+	}
+	// or#893/or#795: pin the custodian the event demonstrably came from, the way
+	// the PSP routes pin theirs. Nothing on this plane enqueues an intent today,
+	// but anything that starts to is custodian-addressed by construction — the
+	// event identifies a custodian that backs many PSPs, never one of them.
+	ctx := merchant.WithID(r.Request.Context(), custodian.MerchantID)
+	r.Request = r.Request.WithContext(db.WithCustodianID(ctx, custodian.ID))
+	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
+	if !ok {
+		return merchants.CustodianIdentity{}, noop, false
+	}
+	return custodian, release, true
+}
+
+func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
+	resolve func(context.Context, string, string, string) (merchants.PSPIdentity, bool, error),
+) (merchants.PSPIdentity, func(), bool) {
+	noop := func() {}
+	account, ok, err := resolve(r.Request.Context(), rail, environment, accountID)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook PSP resolution failed")
+		r.ErrorJSON(http.StatusInternalServerError, "PSP resolution failed")
+		return merchants.PSPIdentity{}, noop, false
+	}
+	if !ok {
+		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		return merchants.PSPIdentity{}, noop, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
 	ctx = db.WithPSPID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
-	return account, true
+	release, ok := pinWebhookMerchantConn(r, account.MerchantID)
+	if !ok {
+		return merchants.PSPIdentity{}, noop, false
+	}
+	return account, release, true
 }
 
 func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) bool {
@@ -395,7 +516,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		var found bool
 		signingKey, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
 		if err == nil && !found {
-			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 			return false
 		}
 		// Pin the routed account so records this event creates are stamped with it
@@ -407,6 +528,13 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		}
 	} else {
 		signingKey, err = r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)
+		// or#893: see the Stripe branch — attribute with the account whose secret
+		// verifies the event.
+		if err == nil {
+			if pid, ok, rerr := r.State.Merchants.ResolveActivePSPIDForRail(r.Request.Context(), merchantID, provider); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
@@ -417,7 +545,13 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
 		return false
 	}
-	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, firstPresentHeader(r.Request.Header, "Webhook-Signature", "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"))
+	// or#893: ONE signature header. NMI sends `Webhook-Signature: t=<ts>,s=<hex>`
+	// (docs/rails/nmi.md, live-verified in tests/nmi_webhook_signature_http_test.go),
+	// and the embedded service seam has only ever read that name. The three
+	// X-… spellings were speculative aliases: accepting them widened the set of
+	// headers an attacker could aim a forged signature at for no gateway that
+	// ever sends them.
+	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, strings.TrimSpace(r.Request.Header.Get("Webhook-Signature")))
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
@@ -470,11 +604,15 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool 
 	if !ok {
 		return false
 	}
-	prepared, _, ok := prepareCCBillWebhookWithAccountID(r, body)
+	prepared, accountID, ok := prepareCCBillWebhookWithAccountID(r, body)
 	if !ok {
 		return false
 	}
-	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, "")
+	// or#893: the payload's clientAccnum-clientSubacc IS the CCBill account
+	// identity, and prepare above already refuses a payload without it — so this
+	// route knows exactly which PSP sent the event and must not discard it. The
+	// per-account route resolves the same thing through the URL.
+	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, accountID)
 }
 
 func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
@@ -507,8 +645,20 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
 	}
+	// Stamp the routed PSP so every row this event materialises is attributable
+	// (or#893). The per-account route pins it in resolveWebhookPSP;
+	// the merchant-slug route resolves it from the payload's own account identity.
+	ctx := r.Request.Context()
+	if accountID != "" && r.State.Merchants != nil {
+		if mid, ok := merchant.FromContext(ctx); ok && !mid.IsZero() {
+			if pid, found, rerr := r.State.Merchants.ResolvePSPID(ctx, mid, subscriptions.RailCCBill, accountID); rerr == nil && found {
+				ctx = db.WithPSPID(ctx, pid)
+				r.Request = r.Request.WithContext(ctx)
+			}
+		}
+	}
 	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
-	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
+	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}
@@ -593,9 +743,14 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 		return nil, fmt.Errorf("stripe secret key not configured for thin event hydration")
 	}
 
-	url := strings.TrimSpace(envelope.RelatedObject.URL)
-	if !strings.HasPrefix(url, "http") {
-		url = "https://api.stripe.com" + url
+	// SEC-24 item 5. The payload-supplied value is ALWAYS a path, never a URL.
+	// The previous `if !strings.HasPrefix(url, "http")` was the inverse of a
+	// guard: an absolute URL was accepted verbatim and then handed
+	// `Authorization: Bearer sk_live_…`, so a leaked webhook secret escalated
+	// into live-API-key exfiltration. The host is ours and is not negotiable.
+	url, err := stripeRelatedObjectURL(envelope.RelatedObject.URL)
+	if err != nil {
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -627,6 +782,43 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 	}{ID: envelope.ID, Type: envelope.Type}
 	synthesized.Data.Object = object
 	return json.Marshal(synthesized)
+}
+
+// stripeAPIBase is the ONE host thin-event hydration may reach. Not derived
+// from the payload, not configurable per request.
+const stripeAPIBase = "https://api.stripe.com"
+
+// stripeRelatedObjectURL treats the payload's related-object value strictly as a
+// PATH under the Stripe API host. Anything that could redirect the request
+// elsewhere — a scheme, a protocol-relative "//host", a backslash, a control
+// character — is refused rather than normalised, because a normaliser is
+// something to be outwitted and a refusal is not.
+func stripeRelatedObjectURL(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return "", fmt.Errorf("thin event related object has no url")
+	}
+	if strings.ContainsAny(p, "\\\x00") || strings.ContainsRune(p, '\n') || strings.ContainsRune(p, '\r') {
+		return "", fmt.Errorf("thin event related object url is not a plain path")
+	}
+	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
+		return "", fmt.Errorf("thin event related object url must be a path, not an absolute or protocol-relative url")
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	// A parsed path must stay a path: no host, no scheme, no ".." escape.
+	u, err := neturl.Parse(p)
+	if err != nil {
+		return "", fmt.Errorf("thin event related object url is unparseable: %w", err)
+	}
+	if u.Scheme != "" || u.Host != "" || u.User != nil {
+		return "", fmt.Errorf("thin event related object url must be a path, not an absolute url")
+	}
+	if u.Path != path.Clean(u.Path) {
+		return "", fmt.Errorf("thin event related object path is not canonical")
+	}
+	return stripeAPIBase + u.String(), nil
 }
 
 func nmiWebhookAccountID(body []byte) string {
@@ -665,13 +857,16 @@ func ccbillWebhookAccountID(body []byte) string {
 	return clientAccnum + "-" + clientSubacc
 }
 
-func firstPresentHeader(header http.Header, names ...string) string {
-	for _, name := range names {
-		if value := strings.TrimSpace(header.Get(name)); value != "" {
-			return value
-		}
+// canonicalWebhookRail resolves the URL's rail segment, writing a 400 with the
+// rename when the segment is a retired alias (or#893). The rail segment is the
+// gateway kind; a PSP is named by :account_id or the payload's account identity.
+func canonicalWebhookRail(r *httprequest.Request) (string, bool) {
+	provider, err := webhookutil.CanonicalRail(r.Param("provider"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return "", false
 	}
-	return ""
+	return provider, true
 }
 
 func readRequestBody(body io.ReadCloser) ([]byte, error) {

@@ -93,12 +93,13 @@ func (f *fakeNMIPusher) CanPush(_ context.Context, sub *models.Subscription) boo
 	return f != nil && f.canPush && strings.TrimSpace(sub.RailSubscriptionID) != ""
 }
 
-func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, amountMicros int64) error {
+func (f *fakeNMIPusher) PushPlanAmount(_ context.Context, sub *models.Subscription, currency string, amountNative int64) error {
 	if f.pushErr != nil {
 		return f.pushErr
 	}
 	f.pushes = append(f.pushes, map[string]any{
-		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID, "amount_micros": amountMicros,
+		"subscription_id": sub.ID, "rail_subscription_id": sub.RailSubscriptionID,
+		"amount_micros": amountNative, "currency": currency,
 	})
 	return nil
 }
@@ -138,7 +139,7 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 	insertPrice := func(id, productID uuid.UUID, amount int64, key string, psp string) {
 		_, e := base.pool.Exec(ctx, `
 			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, psp_links, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'usd',720,true,false,$5,$6::jsonb,$7,$7)`,
+			VALUES ($1,$2,$3,$4,'USD',720,true,false,$5,$6::jsonb,$7,$7)`,
 			id, productID, base.merchantID, amount, key, psp, now)
 		require.NoError(t, e)
 	}
@@ -190,13 +191,14 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1,$2) RETURNING id`,
 		f.merchantID, subject).Scan(&customerID))
+	pspID := dbtest.EnsureTestPSP(ctx, t, f.pool, f.merchantID, rail)
 	var pmID *uuid.UUID
 	if withPM {
 		id := uuid.New()
 		_, err := f.pool.Exec(ctx, `
-			INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			id, customerID, rail, "cust-"+uuid.NewString()[:8], "init-"+uuid.NewString()[:8], "anchor-"+uuid.NewString()[:8], f.merchantID)
+			INSERT INTO openrails.payment_methods (id, customer_id, rail, psp_id, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			id, customerID, rail, pspID, "cust-"+uuid.NewString()[:8], "init-"+uuid.NewString()[:8], "anchor-"+uuid.NewString()[:8], f.merchantID)
 		require.NoError(t, err)
 		pmID = &id
 	}
@@ -204,9 +206,9 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	now := f.clock.Now()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
-		VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$8) RETURNING id`,
-		f.merchantID, customerID, productID, priceID, rail, railSubID, pmID, now, periodEnd).Scan(&subID))
+		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
+		VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$9) RETURNING id`,
+		f.merchantID, customerID, productID, priceID, rail, pspID, railSubID, pmID, now, periodEnd).Scan(&subID))
 	return subID, railSubID
 }
 
@@ -503,7 +505,7 @@ func TestPlanMigration_Validation(t *testing.T) {
 	eurTargetID := uuid.New()
 	_, e := f.pool.Exec(ctx, `
 		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
-		VALUES ($1,$2,$3,9000000,'eur',720,true,false,$4,$5,$5)`,
+		VALUES ($1,$2,$3,9000000,'EUR',720,true,false,$4,$5,$5)`,
 		eurTargetID, f.targetProductID, f.merchantID, "planmig-eur-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, e)
 	_, err = f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: eurTargetID})

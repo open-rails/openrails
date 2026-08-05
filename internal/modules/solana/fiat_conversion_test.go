@@ -116,22 +116,3 @@ func TestPegConversionExhaustiveWholeCents(t *testing.T) {
 		}
 	}
 }
-
-func TestFormatBaseUnits(t *testing.T) {
-	cases := []struct {
-		units    uint64
-		decimals int
-		want     string
-	}{
-		{10_000_000, 6, "10.000000"},
-		{19_990_000, 6, "19.990000"},
-		{1, 6, "0.000001"},
-		{10_000_000_000, 9, "10.000000000"},
-		{0, 6, "0.000000"},
-	}
-	for _, c := range cases {
-		if got := FormatBaseUnits(c.units, c.decimals); got != c.want {
-			t.Fatalf("FormatBaseUnits(%d, %d) = %q, want %q", c.units, c.decimals, got, c.want)
-		}
-	}
-}

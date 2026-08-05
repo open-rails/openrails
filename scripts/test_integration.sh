@@ -37,4 +37,10 @@ docker compose -f docker-compose.yaml up -d --wait postgres garnet
 export OPENRAILS_TEST_DB_DSN="${OPENRAILS_TEST_DB_DSN:-postgresql://admin:admin_password@127.0.0.1:${POSTGRES_HOST_PORT}/openrails_db?sslmode=disable}"
 export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNET_HOST_PORT}}"
 
-go test -p 1 -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"
+# -count=1 is MANDATORY, not stylistic. Go's test-result cache keys on package
+# content, env vars and files read — it cannot see the Postgres/Garnet stack
+# these tests actually exercise, so a cached `ok` is a pass that was never
+# re-earned against the current schema and data. Observed live (or#855): with a
+# warm GOCACHE, whole integration packages came back `ok … (cached)` without a
+# single query running.
+go test -count=1 -p 1 -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"

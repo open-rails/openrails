@@ -5,7 +5,7 @@
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
 
-env: development
+env: development # REQUIRED (SEC-18); no default — an undeclared environment refuses to boot, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one
 provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest
 
@@ -21,8 +21,10 @@ db:
   host: localhost
   port: "5434"
   database: openrails_db
-  username: admin
-  password: admin_password
+  # Unprivileged, NOBYPASSRLS. Boot refuses a superuser/BYPASSRLS role in EVERY
+  # environment; the privileged role is for `openrails migrate up` only.
+  username: openrails_app
+  password: openrails_app_password
   sslmode: disable
   schema: openrails # defaults to 'openrails' if not specified
 

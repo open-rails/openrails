@@ -25,7 +25,7 @@ func TestCombinedMountRoutesAndRewrites(t *testing.T) {
 		{"/api/openrails/v1/merchant/subscriptions", "user /billing/v1/merchant/subscriptions"},
 		{"/api/openrails/v1/merchant", "user /billing/v1/merchant"},
 		{"/api/openrails/v1/products", "user /billing/v1/products"},
-		{"/api/openrails/v1/webhooks/mobius", "user /billing/v1/webhooks/mobius"},
+		{"/api/openrails/v1/webhooks/nmi", "user /billing/v1/webhooks/nmi"},
 		// /v1/meow merely starts like /v1/me — NOT the self subtree.
 		{"/api/openrails/v1/meow", "user /billing/v1/meow"},
 	}

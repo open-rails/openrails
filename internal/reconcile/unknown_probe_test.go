@@ -240,7 +240,7 @@ func TestStripeSubscriptionProber_Verdicts(t *testing.T) {
 				Found: true, Status: "active",
 				CurrentPeriodStart: remoteStart, CurrentPeriodEnd: remoteEnd,
 				LatestInvoicePaid: true, LatestInvoiceTransactionID: "ch_1",
-				LatestInvoiceAmountPaid: 999, LatestInvoiceCurrency: "usd",
+				LatestInvoiceAmountPaid: 999, LatestInvoiceCurrency: "USD",
 			},
 			wantKind: TransitionRenew,
 		},

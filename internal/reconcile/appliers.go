@@ -23,7 +23,7 @@ import (
 type LocalWriter interface {
 	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
 	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
-	AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error)
+	AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error)
 	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
@@ -60,9 +60,9 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	if currency == "" {
 		return false, fmt.Errorf("payment currency required")
 	}
-	amount := moneyutil.CentsToMicros(a.AmountCents)
+	amount := moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))
 	if a.AmountMicros != nil {
-		amount = *a.AmountMicros
+		amount = moneyutil.Micros(*a.AmountMicros)
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -73,7 +73,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		PriceID:        a.PriceID,
 		Rail:           string(a.Rail),
 		TransactionID:  a.TransactionID,
-		Amount:         amount,
+		Amount:         int64(amount),
 		Currency:       currency,
 		SubscriptionID: a.SubscriptionID,
 		Metadata:       metadataJSON(a.Metadata),
@@ -100,7 +100,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID)
 		return n > 0, err
 	}
-	amount := moneyutil.CentsToMicros(a.AmountCents)
+	amount := moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}
@@ -117,7 +117,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		PriceID:           a.PriceID,
 		Rail:              string(a.Rail),
 		TransactionID:     a.TransactionID,
-		Amount:            amount,
+		Amount:            int64(amount),
 		Currency:          currency,
 		SubscriptionID:    a.SubscriptionID,
 		RefundedPaymentID: a.RefundedPaymentID,
@@ -137,7 +137,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	return n > 0, nil
 }
 
-func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error) {
+func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
 	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{
 		LastFour:   a.LastFour,
 		ExpiryDate: a.ExpiryDate,

@@ -154,7 +154,10 @@ func TestInvoiceVerify_NotExecutedReleasesAndCollectsOnce(t *testing.T) {
 
 	released, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
 	require.NoError(t, err)
-	require.Equal(t, "past_due", released.Status)
+	// or#828: no charge ever landed and nothing declined, so the invoice is
+	// exactly where the clock left it. Claiming and parking an attempt never
+	// age an invoice — only a terminal outcome and MarkInvoicesPastDue do.
+	require.Equal(t, "open", released.Status)
 	require.Nil(t, released.LastCollectionFailureCode)
 	attempts, total, err := svc.ListInvoicePaymentAttempts(ctx, payer, invoiceID, 20, 0)
 	require.NoError(t, err)
@@ -191,6 +194,10 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 
 	// Crash forensics, verbatim: claim marker on the invoice + the claimed
 	// attempt row, dispatched 20 minutes ago, outcome never recorded.
+	// psp_id mirrors invoice_recovery.go's real writer, which resolves it from
+	// the claimed payment method.
+	var pspID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, "SELECT psp_id FROM openrails.payment_methods WHERE id = $1", method).Scan(&pspID))
 	attemptID := uuid.New()
 	key := "invoice:" + invoice.ID.String() + ":attempt:0"
 	_, err = pool.Exec(ctx, `UPDATE openrails.invoices
@@ -199,9 +206,9 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 		WHERE id = $1`, invoice.ID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.invoice_payments
-		(id, merchant_id, customer_id, invoice_id, currency, amount, status, attempted_at, created_at, updated_at, payment_method_id, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6, 'attempted', now() - interval '20 minutes', now() - interval '20 minutes', now() - interval '20 minutes', $7, $8)`,
-		attemptID, invoice.MerchantID, payer.UUID(), invoice.ID, invoice.Currency, invoice.AmountDue, method, key)
+		(id, merchant_id, customer_id, invoice_id, currency, amount, status, attempted_at, created_at, updated_at, payment_method_id, idempotency_key, psp_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'attempted', now() - interval '20 minutes', now() - interval '20 minutes', now() - interval '20 minutes', $7, $8, $9)`,
+		attemptID, invoice.MerchantID, payer.UUID(), invoice.ID, invoice.Currency, invoice.AmountDue, method, key, pspID)
 	require.NoError(t, err)
 
 	// The next sweep's stale-claim takeover parks it unknown instead of
@@ -339,7 +346,10 @@ func TestInvoiceVerify_ScheduleParityAndTerminal(t *testing.T) {
 	// The accrual lands AT clock-now; the finalize window is [from, to) so the
 	// frozen clock must advance past it.
 	clock.Advance(time.Minute)
-	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, clock.Now().Add(-time.Hour), clock.Now())
+	// A MONTHLY statement period — parity is "same cycle ⇒ same offsets", and
+	// since or#828 the invoice consumer reads its cycle off this window rather
+	// than assuming a month for every invoice ever issued.
+	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, clock.Now().AddDate(0, -1, 0), clock.Now())
 	require.NoError(t, err)
 
 	offsets := collection.RetryOffsets(collection.MonthlyCycleHours)

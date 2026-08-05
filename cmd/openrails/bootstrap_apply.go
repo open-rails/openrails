@@ -28,10 +28,10 @@ type pushAuthBootstrapOptions struct {
 
 type pushMerchantConfigOptions struct {
 	file      string
-	dryRun    bool
 	insert    bool
 	overwrite bool
 	prune     bool
+	seed      bool
 }
 
 func newPushAuthBootstrapCmd() *cobra.Command {
@@ -62,16 +62,18 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultMerchantConfigManifestPath, "merchant config manifest YAML file")
-	addPushMutationFlags(cmd, &opts.dryRun, &opts.insert, &opts.overwrite, &opts.prune,
+	addPushMutationFlags(cmd, &opts.insert, &opts.overwrite, &opts.prune,
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
+	cmd.Flags().BoolVar(&opts.seed, "seed", false, "merchant_source=api only (#851): seed-once import — create missing merchants/PSPs/secrets into the persistent stores; existing values are never touched and the HTTP APIs own merchant config afterward")
 	return cmd
 }
 
-func addPushMutationFlags(cmd *cobra.Command, dryRun, insert, overwrite, prune *bool, insertHelp, overwriteHelp, pruneHelp string) {
-	cmd.Flags().BoolVar(dryRun, "dry-run", false, "deprecated alias for the default plan-only behavior")
-	_ = cmd.Flags().MarkHidden("dry-run")
+// addPushMutationFlags declares the mutation classes. or#893: there is no
+// --dry-run here — a bare command is plan-only, so a hidden flag that ALSO
+// meant "plan only" could silently override an explicitly requested mutation.
+func addPushMutationFlags(cmd *cobra.Command, insert, overwrite, prune *bool, insertHelp, overwriteHelp, pruneHelp string) {
 	cmd.Flags().BoolVar(insert, "insert", false, insertHelp)
 	cmd.Flags().BoolVar(overwrite, "overwrite", false, overwriteHelp)
 	cmd.Flags().BoolVar(prune, "prune", false, pruneHelp)
@@ -156,11 +158,13 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
-	// #723: in api mode (MODE 2) a merchant manifest is a second truth — the
-	// APIs own merchant config. Manifest mode applies DB projections (secrets
-	// are validated but never persisted; the server holds them in memory).
-	if !cfg.IsManifestMerchantSource() {
-		return fmt.Errorf("merchant_source=api refuses push-merchant-config (two truths, #723/#724): provision merchants via the HTTP APIs, or run merchant_source=manifest")
+	// #723/#851: in api mode (MODE 2) the APIs own merchant config, so a bare
+	// run refuses (two truths) — but --seed runs the command as a seed-once
+	// importer into the persistent stores. Manifest mode applies DB projections
+	// (secrets are validated but never persisted; the server holds them in memory).
+	reconcileOpts, err := bootstrap.ResolvePushMerchantConfigOptions(cfg, opts.seed, opts.insert, opts.overwrite, opts.prune)
+	if err != nil {
+		return err
 	}
 
 	application := &app.App{Config: cfg}
@@ -174,11 +178,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, opts.dryRun, bootstrap.MerchantManifestReconcileOptions{
-		Insert:    opts.insert,
-		Overwrite: opts.overwrite,
-		Prune:     opts.prune,
-	})
+	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {
@@ -242,9 +242,9 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 }
 
 // applyStartupBootstrap applies the AuthKit authority manifest on the FIRST
-// server start only. Merchant config and catalog files are never reconciled from
-// normal server startup; operators run those explicit CLI commands as init jobs
-// or manual operations.
+// server start only. Catalog files are never reconciled from normal server
+// startup (explicit CLI/init-job); the MODE-1 merchant manifest converges
+// separately EVERY boot (#847, serverboot.ReconcileBootMerchantManifest).
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {
@@ -297,11 +297,11 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest aut
 // merchant config manifest: permission-group + optional host-app issuer-as-owner,
 // merchant row, provider secrets, and profile (#527). It intentionally does not
 // touch catalog/provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}
-	if dryRun || !reconcileOpts.HasMutations() {
+	if !reconcileOpts.HasMutations() {
 		fmt.Fprintf(out, "merchants: %d declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", len(manifest.Merchants), reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
 		return nil
 	}

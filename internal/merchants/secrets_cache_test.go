@@ -80,7 +80,7 @@ func TestCachedSecretStore_TTLHitThenExpiry(t *testing.T) {
 	ctx := context.Background()
 	backend := newCountingStore()
 	id := dbtest.TestMerchantID
-	if _, err := backend.Put(ctx, id, SecretStripeSecretKey, "sk_1"); err != nil {
+	if _, err := backend.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_1"); err != nil {
 		t.Fatal(err)
 	}
 	backend.puts = 0 // reset; we only count cache-driven backend hits below
@@ -89,7 +89,7 @@ func TestCachedSecretStore_TTLHitThenExpiry(t *testing.T) {
 
 	// First Get is a miss -> 1 backend read; second within TTL is served cached.
 	for i := 0; i < 3; i++ {
-		got, err := cache.Get(ctx, id, SecretStripeSecretKey)
+		got, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key")
 		if err != nil || got.Value != "sk_1" {
 			t.Fatalf("get %d: %v / %q", i, err, got.Value)
 		}
@@ -100,7 +100,7 @@ func TestCachedSecretStore_TTLHitThenExpiry(t *testing.T) {
 
 	// Advance past TTL -> next Get re-reads the backend.
 	advance(46 * time.Second)
-	if _, err := cache.Get(ctx, id, SecretStripeSecretKey); err != nil {
+	if _, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); err != nil {
 		t.Fatal(err)
 	}
 	if backend.gets != 2 {
@@ -114,14 +114,14 @@ func TestCachedSecretStore_PutRefreshesImmediately(t *testing.T) {
 	id := dbtest.TestMerchantID
 	cache, _ := withClock(t, backend, 45*time.Second)
 
-	if _, err := cache.Put(ctx, id, SecretStripeSecretKey, "sk_old"); err != nil {
+	if _, err := cache.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_old"); err != nil {
 		t.Fatal(err)
 	}
 	// Rotate through the cache; the new value must be visible with NO backend Get.
-	if _, err := cache.Put(ctx, id, SecretStripeSecretKey, "sk_new"); err != nil {
+	if _, err := cache.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_new"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := cache.Get(ctx, id, SecretStripeSecretKey)
+	got, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,17 +139,17 @@ func TestCachedSecretStore_DeleteInvalidates(t *testing.T) {
 	id := dbtest.TestMerchantID
 	cache, _ := withClock(t, backend, 45*time.Second)
 
-	if _, err := cache.Put(ctx, id, SecretStripeSecretKey, "sk_1"); err != nil {
+	if _, err := cache.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cache.Get(ctx, id, SecretStripeSecretKey); err != nil { // populate cache
+	if _, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); err != nil { // populate cache
 		t.Fatal(err)
 	}
-	if err := cache.Delete(ctx, id, SecretStripeSecretKey); err != nil {
+	if err := cache.Delete(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); err != nil {
 		t.Fatal(err)
 	}
 	// After delete the cached copy must be gone -> a fresh backend read that 404s.
-	if _, err := cache.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("post-delete Get = %v, want ErrSecretNotFound", err)
 	}
 }
@@ -162,15 +162,15 @@ func TestCachedSecretStore_ErrorsNotCached(t *testing.T) {
 
 	// Backend transiently unavailable: the error must propagate and NOT be cached.
 	backend.getErr = ErrSecretBackendUnavailable
-	if _, err := cache.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrSecretBackendUnavailable) {
+	if _, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("get = %v, want ErrSecretBackendUnavailable", err)
 	}
 	// Recovery: backend now returns a value; the cache must not be pinned on the error.
 	backend.getErr = nil
-	if _, err := backend.Put(ctx, id, SecretStripeSecretKey, "sk_ok"); err != nil {
+	if _, err := backend.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_ok"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := cache.Get(ctx, id, SecretStripeSecretKey)
+	got, err := cache.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil || got.Value != "sk_ok" {
 		t.Fatalf("after recovery: %v / %q", err, got.Value)
 	}
@@ -203,7 +203,7 @@ func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error) { ret
 func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T) {
 	ctx := context.Background()
 	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")}, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug})
-	_, err := store.Get(ctx, dbtest.TestMerchantID, SecretStripeSecretKey)
+	_, err := store.Get(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("unreachable Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}
@@ -215,7 +215,7 @@ func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T)
 func TestVaultSecretStore_AbsentIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := NewVaultSecretStore("secret", newFakeVaultKV(), staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}) // empty store -> no value
-	_, err := store.Get(ctx, dbtest.TestMerchantID, SecretStripeSecretKey)
+	_, err := store.Get(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("absent Get = %v, want ErrSecretNotFound", err)
 	}
@@ -230,7 +230,7 @@ func TestVaultSecretStore_StubWrapsBackendUnavailable(t *testing.T) {
 	if !errors.Is(ErrVaultNotConfigured, ErrSecretBackendUnavailable) {
 		t.Fatal("ErrVaultNotConfigured must wrap ErrSecretBackendUnavailable")
 	}
-	_, err := NewVaultSecretStore("secret", nil, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}).Get(context.Background(), dbtest.TestMerchantID, SecretStripeSecretKey)
+	_, err := NewVaultSecretStore("secret", nil, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}).Get(context.Background(), dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("stub Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}

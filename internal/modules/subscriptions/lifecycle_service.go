@@ -523,11 +523,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			purchasedAt = params.PurchasedAt.UTC()
 		}
 		payment := &models.Payment{
-			ID:                       uuidutil.NewV7(),
-			CustomerID:               subscription.CustomerID,
-			PriceID:                  price.ID,
-			SubscriptionID:           &subscription.ID,
-			Rail:                     params.Rail,
+			ID:             uuidutil.NewV7(),
+			CustomerID:     subscription.CustomerID,
+			PriceID:        price.ID,
+			SubscriptionID: &subscription.ID,
+			Rail:           params.Rail,
+			// or#893: the charge belongs to the account that took it, which is
+			// the account the subscription itself names.
+			PspID:                    pspIDOf(subscription),
 			TransactionID:            params.TransactionID,
 			Amount:                   amount,
 			ListAmount:               price.Amount,
@@ -537,6 +540,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
+			MoneyMovement:            models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
 			PurchasedAt:              purchasedAt,
 			CreatedAt:                now,
 		}
@@ -749,6 +753,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PriceID:                  price.ID,
 				SubscriptionID:           &subscription.ID,
 				Rail:                     params.Rail,
+				PspID:                    pspIDOf(subscription),
 				TransactionID:            params.TransactionID,
 				Amount:                   amount,
 				ListAmount:               amount,
@@ -758,10 +763,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
 				AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
+				MoneyMovement:            models.MoneyMovementRail, // or#827: the rebill settled at the rail.
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
-			if tt := payments.DefaultTokenTypeForRail(string(params.Rail)); tt != "" {
+			if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
 				payment.TokenType = &tt
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
@@ -1533,11 +1539,16 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 		// (stale decline, roster didn't confirm gone) — durably record the
 		// deferred NMI delete like FailMembership.
 		scheduleDelete := false
+		// or#842: the automated delete is due after a cooling-off window, not at
+		// `now`. The handler's relevance re-check supersedes it if this row stops
+		// being a cancelled-awaiting-delete one in the meantime, so a convergence
+		// we got wrong never reaches the provider.
+		deleteAt := SystemDeferredDeleteAt(sub, now)
 		if res == ResolveCancelledRemoteAlive {
 			fb = "renewal declined beyond dunning window (converged from unknown)"
 			if rails.RemoteDeleteOnTerminalCancel(sub.Rail) && sub.RailSubscriptionID != "" {
 				if s.deferDelete != nil {
-					sub.DeletionScheduledAt = &now
+					sub.DeletionScheduledAt = &deleteAt
 					scheduleDelete = true
 				} else {
 					log.WithContext(ctx).WithFields(log.Fields{
@@ -1566,7 +1577,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			if err := s.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
 				return err
 			}
-			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now)
+			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, deleteAt)
 		})
 	default:
 		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
@@ -1742,12 +1753,14 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		PriceID:        price.ID,
 		SubscriptionID: &subscription.ID,
 		Rail:           subscription.Rail,
+		PspID:          pspIDOf(subscription),
 		TransactionID:  fmt.Sprintf("renewal_declined:%s:attempt%d", subscription.ID, attemptNum),
 		Amount:         price.Amount,
 		ListAmount:     price.Amount,
 		Currency:       price.Currency,
 		Status:         payments.PaymentStatusFailedValue,
 		AttemptKind:    &kind,
+		MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 		PurchasedAt:    now,
 		CreatedAt:      now,
 	}
@@ -1756,7 +1769,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
 	}
-	if tt := payments.DefaultTokenTypeForRail(string(subscription.Rail)); tt != "" {
+	if tt := payments.DefaultTokenType(string(subscription.Rail), models.CustodianPSP); tt != "" {
 		failed.TokenType = &tt
 	}
 	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {
@@ -1778,6 +1791,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// Set inside the tx when a terminal cancellation must also stop the
 	// remote NMI recurring subscription; the job is enqueued after commit.
 	var scheduleDeferredDelete bool
+	// or#870 bucket 2: the decline means the customer must fix their card.
+	// Drives the payment_method_update_required notification below.
+	var needsPaymentMethodUpdate bool
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail":                 params.Rail,
@@ -1805,6 +1821,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
 		scheduleDeferredDelete = false // reset in case the tx is retried
+		needsPaymentMethodUpdate = false
 
 		now := s.now()
 
@@ -1820,16 +1837,86 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			failureAttemptNum = *subscription.RetryAttempts + 1
 		}
 
-		// Hard declines (stolen card, do-not-honor, account closed, expired card,
-		// pickup card) terminate immediately: cancel now with no grace period and
-		// no further retry scheduling. Retrying a hard decline cannot succeed and
-		// risks flagging the merchant with the card networks.
-		if params.HardDecline {
+		// #821/#839/#840/#836: ONE gate for every terminal outcome in this flow.
+		// A terminal cancel revokes entitlements AND queues the IRREVERSIBLE
+		// cancellation of the recurring SCHEDULE at the rail (or#870: never the
+		// customer's stored payment method — nothing here can delete that), so it
+		// requires (a) a named certainty leg —
+		// provider truth, a non-retryable decline, or genuinely exhausted dunning
+		// ATTEMPTS — and (b) an open operator kill switch. A date comparison, an
+		// expired dunning window, and the absence of one of our own rows are not
+		// evidence. Refused terminals PARK as `unknown`: access intact, out of the
+		// dunning queue, resolved by the provider-verification plane.
+		terminalRefusal := func(leg string) string {
+			if params.TerminalBlocked != "" {
+				return params.TerminalBlocked
+			}
+			if leg == "" {
+				return "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts"
+			}
+			return ""
+		}
+		// scheduleExhaustionLeg: running the retry schedule out is certainty ONLY
+		// when the attempts were REAL — a recorded charge attempt per failure
+		// (#733 payments row). Attempts we declined to make because our own data
+		// was missing (#840) carry no leg and cannot exhaust anything.
+		scheduleExhaustionLeg := func() string {
+			if params.TerminalCertainty != "" {
+				return params.TerminalCertainty
+			}
+			if params.RecordFailedAttempt || params.AttemptRecorded {
+				return collection.CertaintyDunningExhausted
+			}
+			return ""
+		}
+		// parkUnknown is ApplyLocalUnknown's shape applied inside this tx: the
+		// row leaves the dunning queue without losing the customer's access.
+		parkUnknown := func(why string) {
+			subscription.Status = models.StatusUnknown
+			subscription.GraceEndsAt = nil
+			subscription.NextRetryAt = nil
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":    subscription.ID,
+				"failure_reason":     normalize.FromPtr(params.FailureReason),
+				"terminal_certainty": params.TerminalCertainty,
+				"refusal":            why,
+			}).Warn("Terminal cancellation REFUSED; parking subscription as unknown (entitlements intact, no provider delete queued)")
+		}
+
+		// or#870 bucket 2 — THEIR card, fixable (expired, bad CVC, do-not-honor,
+		// call issuer...). Retrying cannot succeed and burns attempts against the
+		// issuer, but the customer fixes it in a minute. So: stop charging NOW,
+		// keep the subscription alive and its entitlements intact (an `unknown`
+		// row projects standing access, #691), and notify them to update the
+		// payment method. NOT a terminal outcome — no cancel, no revoke, no
+		// certainty leg required, and emphatically no touching of their stored
+		// card. This is where recoverable revenue lives.
+		if params.Decline == collection.DeclineFixPaymentMethod {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID,
 				"failure_code":    normalize.FromPtr(params.FailureCode),
-			}).Warn("Hard decline received; immediately cancelling subscription (no retry)")
+			}).Warn("or#870 bucket 2: payment method needs the customer's attention; charging STOPS, access and the stored card are untouched")
+			subscription.Status = models.StatusUnknown
+			subscription.GraceEndsAt = nil
+			subscription.NextRetryAt = nil
+			needsPaymentMethodUpdate = true
+		} else if params.Decline == collection.DeclineNonRecoverable && terminalRefusal(params.TerminalCertainty) != "" {
+			// Bucket 3 with the #836 kill switch closed (or no certainty leg
+			// named): the mandate is gone, so continuing to charge is wrong, but
+			// cancelling is forbidden. Park as `unknown` — access intact, out of
+			// the dunning queue, no rail action queued.
+			parkUnknown(terminalRefusal(params.TerminalCertainty))
+		} else if params.Decline == collection.DeclineNonRecoverable {
+			// or#870 bucket 3 — the issuer withdrew the recurring mandate, or the
+			// instrument is permanently dead. Cancel now with no grace and no
+			// further retries; the deferred rail-side SCHEDULE delete below stops
+			// NMI rebilling forever. The stored payment method is not touched.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.CustomerID,
+				"failure_code":    normalize.FromPtr(params.FailureCode),
+			}).Warn("or#870 bucket 3: non-recoverable decline; cancelling the subscription at the rail (stored payment method left intact)")
 			expired := models.CancelTypeExpired
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
@@ -1879,11 +1966,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				terminal = *subscription.RetryAttempts >= maxFailures
 			}
 
-			// Terminal (window expired, or the schedule's max failures reached):
-			// cancel; otherwise schedule the next retry at the schedule's gap
-			// for this failure count (relative to now, so a late worker run
-			// never schedules into the past)
-			if terminal {
+			// Terminal (the schedule's max failures reached, or a caller-declared
+			// terminal): cancel — but only through the certainty + kill-switch
+			// gate. Refused ⇒ park as `unknown`. Otherwise schedule the next retry
+			// at the schedule's gap for this failure count (relative to now, so a
+			// late worker run never schedules into the past).
+			leg := params.TerminalCertainty
+			if !params.Terminal {
+				leg = scheduleExhaustionLeg()
+			}
+			if refusal := terminalRefusal(leg); terminal && refusal != "" {
+				parkUnknown(refusal)
+			} else if terminal {
 				expired := models.CancelTypeExpired
 				reason := normalize.FromPtr(params.FailureReason)
 				if reason == "" {
@@ -1921,11 +2015,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// recorded UNCONDITIONALLY — provider_write_mode / credentials / the
 		// volume breaker gate EXECUTION at the intent executor, never queuing
 		// (limited mode parks system-origin intents until mode=full).
+		// or#842: due after a cooling-off window, not at `now` — dunning
+		// exhaustion is our own inference, and the handler's relevance re-check
+		// supersedes the delete if the row recovers inside the window.
+		deferredDeleteAt := SystemDeferredDeleteAt(subscription, now)
 		if subscription.Status == models.StatusCancelled &&
 			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
 			if s.deferDelete != nil {
-				subscription.DeletionScheduledAt = &now
+				subscription.DeletionScheduledAt = &deferredDeleteAt
 				scheduleDeferredDelete = true
 			} else {
 				log.WithContext(ctx).WithFields(log.Fields{
@@ -1948,7 +2046,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// DeletionScheduledAt marker and the intent commit atomically (no
 		// crash window between them).
 		if scheduleDeferredDelete {
-			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, now); err != nil {
+			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, deferredDeleteAt); err != nil {
 				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
 			}
 		}
@@ -2012,14 +2110,39 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
+		// or#870 notification ladder. One rung per outcome, so a customer is
+		// never silent-treated through a whole dunning cycle and then suddenly
+		// cancelled:
+		//   bucket 1, still trying  -> payment_method_failed ("we'll keep trying")
+		//   bucket 1, schedule out  -> premium_ended / expired ("we gave up")
+		//   bucket 2                -> payment_method_update_required ("fix it,
+		//                              your access is still on")
+		//   bucket 3                -> premium_ended / non_recoverable ("the
+		//                              mandate is gone; re-subscribe")
 		eventType := models.NotificationPaymentMethodFailed
-		if subscription.Status == models.StatusCancelled {
-			eventType = models.NotificationPremiumEnded
-		}
-
 		var data map[string]any
-		if eventType == models.NotificationPremiumEnded {
-			data = map[string]any{"reason": string(PremiumEndReasonExpired)}
+		switch {
+		case needsPaymentMethodUpdate:
+			eventType = models.NotificationPaymentMethodUpdateRequired
+			data = map[string]any{
+				"failure_code": normalize.FromPtr(params.FailureCode),
+				"rung":         1,
+				"final":        collection.IsFinalPaymentMethodNotice(1),
+			}
+			// or#870: open the LADDER with this rung counted. Bucket 2 stops
+			// charging, which removes the only clock the customer was on — so
+			// the follow-up rungs have to be durable work, not a hope that some
+			// other event fires. Same transaction as the notification: a ladder
+			// without its first rung, or a rung without its ladder, is exactly
+			// the silence this is here to prevent.
+			openPaymentMethodNoticeLadder(ctx, tx, subscription, params.FailureCode, now)
+		case subscription.Status == models.StatusCancelled:
+			eventType = models.NotificationPremiumEnded
+			endReason := PremiumEndReasonExpired
+			if params.Decline == collection.DeclineNonRecoverable {
+				endReason = PremiumEndReasonNonRecoverable
+			}
+			data = map[string]any{"reason": string(endReason)}
 		}
 
 		notification := &models.NotificationQueue{
@@ -2078,3 +2201,14 @@ func validateCompletedPayment(payment *models.Payment, expectedAmount int64, exp
 }
 
 // Parameter structs for lifecycle operations
+
+// pspIDOf is the subscription's PSP as a payment stamp. or#893: a charge — a
+// signup, a rebill, or a decline marker — belongs to the account that attempted
+// it, and the subscription row is the authority on which one that is.
+func pspIDOf(subscription *models.Subscription) *uuid.UUID {
+	if subscription == nil || subscription.PspID == uuid.Nil {
+		return nil
+	}
+	id := subscription.PspID
+	return &id
+}

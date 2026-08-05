@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
@@ -37,23 +38,37 @@ type Prepared struct {
 	SignatureVerified bool
 }
 
-func (p Prepared) UniqueKey() string {
-	return ComputeUniqueKey(p.Rail, p.EventID, p.EventType, p.Body)
+// ErrWebhookRailRetired reports a webhook URL segment that is no longer a rail.
+var ErrWebhookRailRetired = errors.New("retired webhook rail segment")
+
+// retiredRailSegments maps a URL segment that used to fold onto a rail to the
+// canonical segment. or#893: the webhook path's segment is the gateway KIND —
+// a PSP key is not a rail, and folding one onto the other made two URLs mean
+// the same endpoint while implying the PSP was routable by name.
+var retiredRailSegments = map[string]string{
+	"mobius": "nmi",
+	// #795 accepted both spellings of the Basis Theory endpoint; the URL is
+	// /webhooks/basistheory.
+	"basis_theory": "basistheory",
 }
 
-// CanonicalRail normalizes a webhook URL's rail segment. The legacy "mobius"
-// path resolves to the NMI rail; everything else passes through lower-cased.
-func CanonicalRail(rail string) string {
+// CanonicalRail normalizes a webhook URL's rail segment to the rail (or event
+// source) it names. The segment is the gateway KIND — nmi, ccbill, stripe,
+// solana, basistheory. Which PSP on that rail sent the event comes from the
+// :account_id segment or the payload's own account identity, never from this
+// segment: mobius and paykings both post to /webhooks/nmi.
+func CanonicalRail(rail string) (string, error) {
 	rail = strings.Trim(strings.ToLower(rail), " /")
-	if rail == "mobius" {
-		return "nmi"
+	if canonical, retired := retiredRailSegments[rail]; retired {
+		return "", fmt.Errorf("%w: /webhooks/%s was removed (or#893) — post to /webhooks/%s; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
 	}
-	// #795: the BT webhook endpoint is /webhooks/basistheory; the rail is
-	// vaulted_card (basis_theory is the vault_provider, not the rail).
-	if rail == "basistheory" || rail == "basis_theory" {
-		return "vaulted_card"
+	// #795: the event source of a Basis Theory event is the CUSTODIAN itself
+	// (or#879) — Basis Theory holds the card, NMI charges it, and only the
+	// custodian emits these events.
+	if rail == "basistheory" {
+		return string(models.EventSourceBasisTheory), nil
 	}
-	return rail
+	return rail, nil
 }
 
 func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
@@ -144,7 +159,8 @@ func PrepareNMI(rail string, body []byte, secret, header string) (Prepared, erro
 	}
 
 	return Prepared{
-		Rail:              CanonicalRail(rail),
+		// The caller canonicalizes the rail segment before it gets here.
+		Rail:              strings.ToLower(strings.TrimSpace(rail)),
 		EventID:           payload.EventID,
 		EventType:         strings.TrimSpace(payload.EventType),
 		Body:              body,
@@ -168,7 +184,7 @@ func ParseStripeEventMeta(body []byte) (string, string, error) {
 }
 
 func ComputeUniqueKey(rail, eventID, eventType string, body []byte) string {
-	rail = CanonicalRail(rail)
+	rail = strings.ToLower(strings.TrimSpace(rail))
 	eventID = strings.TrimSpace(eventID)
 	if eventID != "" {
 		return fmt.Sprintf("webhook:%s:%s", rail, eventID)

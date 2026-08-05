@@ -521,7 +521,10 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 const fleetHealthKind = "openrails.river_fleet"
 
 func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.OpenrailsWorkerHealth, reason string, now time.Time, report ProgressReport) error {
-	merchantIDs, err := m.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	// Cross-merchant read on purpose: the alert fans out to every active
+	// merchant, so this must be the explicit directory accessor, not a
+	// merchant-scoped handle (or#861/or#877 — a bare RLS context reads nothing).
+	merchantIDs, err := m.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list merchants: %w", err)
 	}

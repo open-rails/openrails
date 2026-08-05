@@ -54,7 +54,15 @@ type EnqueueParams struct {
 	SubscriptionID *uuid.UUID
 	PaymentID      *uuid.UUID
 	PriceID        *uuid.UUID
-	PspID          *uuid.UUID
+	// PspID is the PSP the outbound write is addressed to. Required (or#893)
+	// unless the intent is CUSTODIAN-addressed: an intent nobody can attribute
+	// cannot be executed against the right credentials.
+	PspID uuid.UUID
+	// CustodianID addresses the write to a custodian instead (or#795's batch
+	// account updater uploads one token batch to a custodian that backs many
+	// PSPs, so no single psp_id names it). Exactly the rail_intents_addressed
+	// constraint: one of the two must be set.
+	CustodianID    uuid.UUID
 	Payload        any
 	IdempotencyKey string
 	NextAttemptAt  time.Time
@@ -73,6 +81,22 @@ type EnqueueParams struct {
 func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+	}
+	// or#893/or#795 (rail_intents_addressed): the intent names the account it
+	// will execute against — a PSP, or a custodian for the writes addressed to
+	// one. An explicit value wins; otherwise the PSP the caller already routed
+	// to and pinned on ctx (checkout's stampPSP, the webhook plane) is the
+	// answer. Nothing else is: an intent nobody can attribute cannot be executed
+	// against the right credentials.
+	if p.CustodianID == uuid.Nil {
+		p.CustodianID = db.CustodianIDFromContext(ctx)
+	}
+	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
+		psp, err := db.RequirePSPID(ctx)
+		if err != nil {
+			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
+		}
+		p.PspID = psp
 	}
 	var payload []byte
 	if p.Payload != nil {
@@ -127,7 +151,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		OriginReason:   originReason,
 		Actor:          actorPtr,
 		ExpiresAt:      p.ExpiresAt,
-		PspID:          p.PspID,
+		PspID:          uuidPtrOrNil(p.PspID),
+		CustodianID:    uuidPtrOrNil(p.CustodianID),
 	})
 }
 
@@ -166,8 +191,48 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 	return s.db.Gen(ctx).GetRailIntent(ctx, id)
 }
 
+// DueExecuteMerchants lists the merchants with executor work (claimable or
+// expirable intents) through migration 0022's SECURITY DEFINER work queue —
+// the executor's fan-out list. Ids only; each merchant's pass then runs under
+// its own pinned connection (or#862).
+func (s *Store) DueExecuteMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
+	rows, err := s.db.GenDirectory().ListDueRailIntentMerchants(ctx, gen.ListDueRailIntentMerchantsParams{
+		Now: now.UTC(), MerchantLimit: limit,
+	})
+	return derefIDs(rows), err
+}
+
+// DueVerifyMerchants is DueExecuteMerchants for the verifier pass (or#862).
+func (s *Store) DueVerifyMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
+	rows, err := s.db.GenDirectory().ListDueVerifyRailIntentMerchants(ctx, gen.ListDueVerifyRailIntentMerchantsParams{
+		Now: now.UTC(), MerchantLimit: limit,
+	})
+	return derefIDs(rows), err
+}
+
+// derefIDs drops the pointer indirection sqlc emits for a set-returning
+// function's column. The definer bodies select a NOT NULL column, so a nil
+// here is impossible; it is skipped rather than dereferenced.
+func derefIDs(rows []*uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, id := range rows {
+		if id != nil {
+			out = append(out, *id)
+		}
+	}
+	return out
+}
+
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
+//
+// or#862: this MUST run on a merchant-pinned connection. rail_intents FORCEs
+// RLS, so a bare-context claim matched `merchant_id = NULL` and leased ZERO
+// intents — silently, with no error — which is how the entire outbound
+// provider-mutation plane came to be inert while its tests passed.
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent executor claim"); err != nil {
+		return nil, err
+	}
 	return s.db.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -175,8 +240,12 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	})
 }
 
-// ClaimDueVerify leases up to batch due unknown_needs_verify intents.
+// ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
+// merchant-pin requirement as ClaimDue (or#862).
 func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent verifier claim"); err != nil {
+		return nil, err
+	}
 	return s.db.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -188,6 +257,9 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 // except destructive intents whose merchant has an OPEN held_bulk finding
 // (#679): breaker-held intents never expire out from under the operator.
 func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error) {
+	if err := s.db.AssertMerchantScope(ctx, "intent expiry sweep"); err != nil {
+		return 0, err
+	}
 	return s.db.Gen(ctx).ExpireOverdueRailIntents(ctx, gen.ExpireOverdueRailIntentsParams{
 		Now:              now.UTC(),
 		BreakerHeldTypes: DestructiveIntentTypes(),
@@ -365,4 +437,14 @@ func one(rows int64, err error) error {
 		return err
 	}
 	return nil
+}
+
+// uuidPtrOrNil maps the zero uuid to a NULL column: the two addressing columns
+// are nullable and constrained as a pair, so "unset" must reach the DB as NULL
+// rather than as a zero uuid no row could ever reference.
+func uuidPtrOrNil(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }

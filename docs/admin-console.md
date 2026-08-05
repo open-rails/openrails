@@ -154,9 +154,9 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access; off-channel payment |
 | Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view; cancel (typed confirmation), resume, NMI payment-method change |
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
-| Catalog | `/catalog` | Products/prices, price detail + change wizard, activate/deactivate, drift view, catalog copilot panel |
+| Catalog | `/catalog` | Products/prices, price detail + change wizard, activate/deactivate, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
 | Ops | `/ops` | Findings queue (approve/ignore), repair alerts, worker health |
-| Settings | `/settings` | Tabs: Merchant profile, Team, Alerts, Payment providers, API keys, Customer controls |
+| Settings | `/settings` | Tabs: Merchant profile, Team, Alerts, Payment providers (configure, rotate credentials, archive), API keys, Customer controls |
 
 **Natural-language features** are fail-closed on the server's `llm:` config and
 mirrored into `config.json` so the UI shows a pointed empty-state (naming the

@@ -50,7 +50,7 @@ type stripeProductLister interface {
 // nmiPlanLister is the subset of the NMI client the loop needs. Defining it as
 // an interface lets unit tests inject fixture plans without a live NMI account.
 type nmiPlanLister interface {
-	ListRecurringPlans() ([]nmi.V5Plan, error)
+	ListRecurringPlans(ctx context.Context) ([]nmi.V5Plan, error)
 }
 
 // localCatalogSnapshot is the OpenRails-side view the diffs compare against.
@@ -249,7 +249,7 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 			DetectedAt:            now,
 		})
 	}
-	remoteUnitAmountMicros := moneyutil.CentsToMicros(sp.UnitAmount)
+	remoteUnitAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sp.UnitAmount)))
 	if local.Amount != remoteUnitAmountMicros {
 		emit("unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteUnitAmountMicros, 10))
 	}
@@ -281,30 +281,28 @@ type nmiPlan struct {
 func mapNMIPlans(plans []nmi.V5Plan) []nmiPlan {
 	out := make([]nmiPlan, 0, len(plans))
 	for _, p := range plans {
+		cents, err := dollarStringToCents(p.PlanAmount)
+		if err != nil {
+			// FAB-6: an unparseable provider amount is not a zero-dollar plan.
+			// Reporting it as 0 would raise drift against every local price.
+			log.WithError(err).WithFields(log.Fields{"plan_id": p.ID, "plan_amount": p.PlanAmount}).
+				Warn("nmi catalog drift: skipping plan with unparseable amount")
+			continue
+		}
 		out = append(out, nmiPlan{
 			PlanID:      strings.TrimSpace(p.ID),
 			PlanName:    p.PlanName,
-			AmountCents: dollarStringToCents(p.PlanAmount),
+			AmountCents: int64(cents),
 		})
 	}
 	return out
 }
 
 // dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") into
-// integer cents, rounding to the nearest cent. Unparseable values yield 0.
-func dollarStringToCents(dollars string) int64 {
-	trimmed := strings.TrimSpace(dollars)
-	if trimmed == "" {
-		return 0
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0
-	}
-	if f < 0 {
-		return -int64(-f*100 + 0.5)
-	}
-	return int64(f*100 + 0.5)
+// integer cents via the exact-rational parser (MONEY-6). A blank or malformed
+// amount is an error, never a silent zero (FAB-6).
+func dollarStringToCents(dollars string) (moneyutil.Cents, error) {
+	return moneyutil.ParseDecimalToCents(dollars)
 }
 
 // computeNMICatalogDrift is the pure NMI diff: given the full list of NMI
@@ -352,7 +350,7 @@ func computeNMICatalogDrift(
 		if local == nil {
 			continue
 		}
-		remoteAmountMicros := moneyutil.CentsToMicros(plan.AmountCents)
+		remoteAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(plan.AmountCents)))
 		if local.Amount != remoteAmountMicros {
 			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteAmountMicros, 10), now))
 		}
@@ -557,8 +555,8 @@ func fetchStripeCatalog(ctx context.Context, lister stripeProductLister) ([]cata
 }
 
 // fetchNMIPlans pulls all NMI recurring plans (GET /v5/plans).
-func fetchNMIPlans(lister nmiPlanLister) ([]nmiPlan, error) {
-	plans, err := lister.ListRecurringPlans()
+func fetchNMIPlans(ctx context.Context, lister nmiPlanLister) ([]nmiPlan, error) {
+	plans, err := lister.ListRecurringPlans(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list nmi recurring plans: %w", err)
 	}
@@ -624,7 +622,7 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 	}
 
 	if nmiLister != nil {
-		plans, ferr := fetchNMIPlans(nmiLister)
+		plans, ferr := fetchNMIPlans(ctx, nmiLister)
 		if ferr != nil {
 			return nil, ferr
 		}

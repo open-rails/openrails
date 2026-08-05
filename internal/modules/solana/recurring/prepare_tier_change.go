@@ -106,7 +106,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		return nil, fmt.Errorf("recurring: upgrade requires a non-zero prorated first charge")
 	}
 
-	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

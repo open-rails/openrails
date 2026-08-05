@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
-// TestUpsertMerchantConfig_SeedsRailMerchantAccounts verifies the #593 public
-// provisioning API: an embedded host declares its merchant's rail provider
-// accounts via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
+// TestUpsertMerchantConfig_SeedsPSPs verifies the #593 public
+// provisioning API: an embedded host declares its merchant's PSPs
+// via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
 // land bound to the merchant, and re-running it is idempotent. This is the call
 // doujins #426 makes from `migrate legacy`.
-func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
+func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	appDB := dbtest.OpenAppDB(t, dsn)
@@ -39,10 +39,10 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
-				"nmi": {Environment: "live", AccountID: "579145"},
+				"nmi": {AccountID: "579145"},
 			},
 			"ccbill": {
-				"ccbill": {Environment: "live", AccountID: "945280-0000"},
+				"ccbill": {AccountID: "945280-0000"},
 			},
 		},
 	}
@@ -50,9 +50,9 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 
-	// rail_merchant_accounts is RLS-scoped: read it on a connection pinned to the
+	// psps is RLS-scoped: read it on a connection pinned to the
 	// merchant so the policy admits its rows.
-	countRailMerchantAccounts := func() int {
+	countPSPs := func() int {
 		t.Helper()
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
@@ -65,12 +65,12 @@ func TestUpsertMerchantConfig_SeedsRailMerchantAccounts(t *testing.T) {
 			[]string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}
-	require.Equal(t, 2, countRailMerchantAccounts(), "both declared provider accounts are seeded")
+	require.Equal(t, 2, countPSPs(), "both declared PSPs are seeded")
 
 	// Re-running is idempotent — no error, no duplicate rows.
 	_, err = rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
-	require.Equal(t, 2, countRailMerchantAccounts(), "re-run does not duplicate provider accounts")
+	require.Equal(t, 2, countPSPs(), "re-run does not duplicate PSPs")
 
 	// #770: the engine is bound to `slug` now — upserting a DIFFERENT merchant
 	// into the same engine must fail loudly (one embedded engine, one merchant),

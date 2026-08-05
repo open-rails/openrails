@@ -119,7 +119,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, invoker_type, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at FROM openrails.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at FROM openrails.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND event_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -149,7 +149,6 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.InvokerID,
-		&i.InvokerType,
 		&i.Currency,
 		&i.Resource,
 		&i.EventType,
@@ -387,4 +386,34 @@ func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollup
 		return nil, err
 	}
 	return items, nil
+}
+
+const sumUsageAmountSince = `-- name: SumUsageAmountSince :one
+SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
+FROM openrails.usage_events
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND occurred_at >= $4::timestamptz
+`
+
+type SumUsageAmountSinceParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Since      time.Time
+}
+
+// or#897 accrual_rate_cap: the payer's rated usage over a LOOKBACK WINDOW, for
+// the measured accrual rate. Window-bounded by construction — it reads what the
+// payer did in the last N seconds, never its history — and served by
+// ix_usage_events_payer_time (merchant_id, customer_id, occurred_at).
+func (q *Queries) SumUsageAmountSince(ctx context.Context, arg SumUsageAmountSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumUsageAmountSince,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Since,
+	)
+	var total_amount int64
+	err := row.Scan(&total_amount)
+	return total_amount, err
 }

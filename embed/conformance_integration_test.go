@@ -107,29 +107,6 @@ func observeTxn(t *testing.T, label string, txn *openrails.CreditTransaction) ob
 	return o
 }
 
-type obsBudget struct {
-	Key        string
-	Limit      int64
-	Used       int64
-	Reserved   int64
-	Remaining  int64
-	HasReset   bool
-	HasResetAt bool
-	Allowed    bool
-}
-
-func observeBudgets(ws []openrails.BudgetWindow) []obsBudget {
-	out := make([]obsBudget, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, obsBudget{
-			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
-			Remaining: w.Remaining, HasReset: w.ResetAfterSeconds > 0,
-			HasResetAt: !w.ResetAt.IsZero(), Allowed: w.Allowed,
-		})
-	}
-	return out
-}
-
 type obsWindow struct {
 	Unit      string
 	Limit     int64
@@ -144,24 +121,20 @@ type obsMerchantProfile struct {
 }
 
 type obsAdmit struct {
-	Allowed              bool
-	BlockedBy            string
-	DenyCode             string
-	HasRetry             bool
-	HasReservation       bool
-	HasBudgetReservation bool
-	Budget               []obsBudget
+	Allowed        bool
+	BlockedBy      string
+	DenyCode       string
+	HasRetry       bool
+	HasReservation bool
 }
 
 func observeAdmit(res *openrails.AdmitResponse) obsAdmit {
 	o := obsAdmit{
-		Allowed:              res.Allowed,
-		BlockedBy:            res.BlockedBy,
-		DenyCode:             res.DenyCode,
-		HasRetry:             res.RetryAfterSeconds > 0,
-		HasReservation:       res.HoldExpiresAt != nil,
-		HasBudgetReservation: res.BudgetReservationID != "",
-		Budget:               observeBudgets(res.BudgetWindows),
+		Allowed:        res.Allowed,
+		BlockedBy:      res.BlockedBy,
+		DenyCode:       res.DenyCode,
+		HasRetry:       res.RetryAfterSeconds > 0,
+		HasReservation: res.HoldExpiresAt != nil,
 	}
 	return o
 }
@@ -465,8 +438,9 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.HasProductAccess(ctx, env.subject, "not-a-uuid")
 	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
 
-	// 11) Merchant settings sync: install profile, tier policy, schedule, and the
-	// delegated wasted-spend window through the new single settings document.
+	// 11) Merchant settings sync: install profile, a named billing policy + its
+	// tier binding, the trust-level schedule, and the delegated wasted-spend
+	// window through the single settings document.
 	require.NoError(t, c.SetMerchantSettings(ctx, openrails.MerchantSettings{
 		Profile: &openrails.MerchantProfileInput{
 			DisplayName: "Conformance Billing",
@@ -478,11 +452,15 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 			Currency: money.DefaultCurrency,
 			Schedule: []openrails.TrustLevelScheduleRung{{TrustLevel: "conf", MinCumulativePaidAmount: 0}},
 		}},
-		TrustLevelSpendLimits: []openrails.PayerSpendLimitInput{{
-			TrustLevel: "conf",
-			BudgetWindows: []openrails.BudgetWindowInput{
+		BillingPolicies: []openrails.BillingPolicyInput{{
+			Name: "conf_window",
+			Kind: "window_spend_cap",
+			SpendWindows: []openrails.BudgetWindowInput{
 				{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
 			},
+		}},
+		BillingPolicyBindings: []openrails.BillingPolicyBindingInput{{
+			PolicyName: "conf_window", Tier: "conf",
 		}},
 		DelegatedInvokerWastedSpendLimits: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
@@ -563,7 +541,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"
-	productAccessSvc := productaccess.NewService(dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)))
+	productAccessSvc := productaccess.NewService(dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	newPayer := func(side string) (uuid.UUID, string, uuid.UUID) {
 		id := uuid.New()
 		subject := id.String()

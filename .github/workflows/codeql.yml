@@ -1,10 +1,12 @@
 name: CodeQL
 
+# #855: CodeQL is the long pole and stays OFF the PR fast pipeline. It runs
+# on master pushes, weekly, and on demand. If "Analyze (go)" is ever listed as
+# a required PR check, it must be removed there (or CodeQL re-added to
+# pull_request) — otherwise PRs would block forever.
 on:
   push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
+    branches: [master]
   schedule:
     - cron: "0 7 * * 1"
   workflow_dispatch: {}

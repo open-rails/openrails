@@ -51,8 +51,10 @@ type FleetSnapshot struct {
 }
 
 // FleetAnalytics returns cross-merchant operator aggregates (openrails-saas
-// #28) from the control plane's privileged pool — the fleet view no
-// per-merchant RLS scope can compute. Like SearchMerchants (#226) this is a
+// #28) — the fleet view no per-merchant RLS scope can compute. It reaches
+// across merchants through migration 0022's SECURITY DEFINER aggregates, not a
+// privileged pool: the control plane shares the app's role and DSN, so a
+// base-pool read of these tables returns zero rows and no error (or#861). Like SearchMerchants (#226) this is a
 // sensitive cross-merchant read: the CALLER gates it behind platform-superadmin
 // authority and audits every request. exclude removes one merchant from every
 // aggregate (a hosted platform passes its own platform merchant); zero excludes

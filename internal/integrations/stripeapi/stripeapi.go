@@ -75,14 +75,17 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // Client returns the *http.Client all Stripe API calls must go through. Writes
 // (non-GET/HEAD) are blocked with ErrProviderReadOnly when
-// cfg.IsProviderReadOnly() (mode=readonly); reads always pass. A nil cfg is
-// treated as not read-only (config validation guarantees a config in real
-// boots; nil only occurs in tests of unrelated failure paths, which error on
-// the missing secret key before any request is built).
+// cfg.IsProviderReadOnly() (mode=readonly); reads always pass.
+//
+// A nil cfg FAILS CLOSED — it yields a read-only client (or#865). It used to be
+// treated as "not read-only", which meant the one input that tells us nothing
+// about the operating mode produced the most permissive client. Config
+// validation guarantees a config in real boots, so nil is a wiring bug; a
+// wiring bug must not be the thing that unblocks provider writes.
 //
 // timeout <= 0 selects DefaultTimeout.
 func Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return newClient(cfg != nil && cfg.IsProviderReadOnly(), timeout)
+	return newClient(cfg == nil || cfg.IsProviderReadOnly(), timeout)
 }
 
 // ReadOnlyClient returns a Stripe client that blocks writes UNCONDITIONALLY,
@@ -111,16 +114,30 @@ func SetIdempotencyKey(req *http.Request, key string) {
 	req.Header.Set(IdempotencyKeyHeader, key)
 }
 
-// testBaseTransport, when non-nil, replaces http.DefaultTransport UNDER the
-// guard (readonly + version pinning still apply). Settable only in
-// `integration` builds via SetTestBaseTransport (stripeapi_integration.go) so
-// e2e tests can point every Stripe byte at a fake wire server; always nil in
-// production builds.
-var testBaseTransport http.RoundTripper
+// baseTransportOverride, when non-nil, replaces http.DefaultTransport UNDER the
+// guard (readonly + version pinning still apply). nil in production.
+var baseTransportOverride http.RoundTripper
+
+// SetBaseTransport installs rt as the base RoundTripper every Stripe request
+// travels on, UNDER the choke-point guard — readonly enforcement and the
+// Stripe-Version pin still run above it, so a fake wire server never buys a
+// caller an unguarded write. nil restores http.DefaultTransport.
+//
+// This is a TEST seam, deliberately NOT behind a build tag (#814): an embedding
+// host cannot compile internal/ test-tagged code, so an integration-first host
+// had no way to drive a rail-push path against a fake Stripe. The supported
+// entry point is embedded.Options.StripeTransport, which calls this; hosts
+// never reach the choke point directly.
+//
+// Process-global and not safe for parallel use — the integration suite runs
+// serially (-p 1 -parallel 1).
+func SetBaseTransport(rt http.RoundTripper) {
+	baseTransportOverride = rt
+}
 
 func defaultBaseTransport() http.RoundTripper {
-	if testBaseTransport != nil {
-		return testBaseTransport
+	if baseTransportOverride != nil {
+		return baseTransportOverride
 	}
 	return http.DefaultTransport
 }

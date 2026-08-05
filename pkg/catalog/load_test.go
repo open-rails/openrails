@@ -161,8 +161,41 @@ credit_balances:
   - {key: credits, unit: credit}
 `
 	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "providers/provider_links were renamed to psps/psp_links") {
-		t.Fatalf("want retired provider-key error, got %v", err)
+	if err == nil {
+		t.Fatal("a retired providers: key must not load")
+	}
+	for _, want := range []string{`unknown field "providers"`, "providers: was renamed to psps:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error must carry %q, got:\n%v", want, err)
+		}
+	}
+}
+
+// or#893 phase 7: provider_links: is the same one mechanism — strict decoding
+// plus the rename, not a sentinel struct field.
+func TestLoad_RejectsRetiredProviderLinksKey(t *testing.T) {
+	body := `
+version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        psps: [stripe]
+        provider_links:
+          stripe:
+            lookup_key: p-monthly
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil {
+		t.Fatal("a retired provider_links: key must not load")
+	}
+	for _, want := range []string{`unknown field "provider_links"`, "provider_links: was renamed to psp_links:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error must carry %q, got:\n%v", want, err)
+		}
 	}
 }
 
@@ -228,7 +261,7 @@ func TestValidate_CreditGrantPreservesInternalCurrency(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 	grant := m.TierGroups[0].Products[0].Credits[0]
-	if grant.Unit != "credit" {
+	if grant.Unit != "CREDIT" {
 		t.Fatalf("credit did not derive balance unit: %q", grant.Unit)
 	}
 	if grant.Currency != "usd" {
@@ -419,137 +452,24 @@ func ranksByKey(m *Manifest) map[string]int {
 	return ranks
 }
 
-func TestLoad_SolanaSettlementToken(t *testing.T) {
-	tests := []struct {
-		name    string
-		price   string
-		wantErr string
-	}{
-		{
-			name: "one-off may quote a non-USD billing currency",
-			price: `
-      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
-`,
-		},
-		{
-			name: "recurring defaults to USDC",
-			price: `
-      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
-`,
-		},
-		{
-			name: "recurring rejects an ineligible settlement token",
-			price: `
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {token: SOL}
-`,
-			wantErr: `got "SOL"`,
-		},
-		{
-			name: "recurring requires USD billing currency",
-			price: `
-      - currency: eur
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {token: USDC}
-`,
-			wantErr: "recurring solana currently requires USD billing currency",
-		},
-		{
-			name: "recurring accepts USDC independently from USD",
-			price: `
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {token: USDC}
-`,
-		},
-		{
-			name: "recurring existing plan resolves its token on-chain",
-			price: `
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {plan_pda: 7XyPdA}
-`,
-		},
-		{
-			name: "recurring existing plan rejects duplicate token input",
-			price: `
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {plan_pda: 7XyPdA, token: USD1}
-`,
-			wantErr: "token selects a new plan; omit it when plan_pda is supplied",
-		},
-		{
-			name: "mint symbol is output only",
-			price: `
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {mint_symbol: USDC}
-`,
-			wantErr: "mint_symbol is output metadata",
-		},
-		{
-			name: "legacy stablecoin currency gets a migration hint",
-			price: `
-      - currency: usdc
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-`,
-			wantErr: "redeclare as currency: usd with psp_links.solana.token: USDC",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := `
+func TestLoad_SolanaNonStablecoinRejected(t *testing.T) {
+	body := `
 version: 1
 products:
   - key: p
     display_name: P
+    tier_group: g
+    tier_rank: 1
     prices:
-` + tt.price
-			_, err := Load(writeManifest(t, body))
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("Load: %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("want error containing %q, got %v", tt.wantErr, err)
-			}
-		})
+      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
+		t.Fatalf("want solana eligibility error, got %v", err)
 	}
 }
 
-func TestLoad_FlatProductsBenefitsUsageLimitsAndMetered(t *testing.T) {
+func TestLoad_FlatProductsBenefitsUsageLimitsAndRateCards(t *testing.T) {
 	body := `
 version: 1
 usage_limits:
@@ -559,7 +479,7 @@ usage_limits:
       - {window: 5h, amount: 10_000_000}
 meters:
   - key: api-calls
-    kind: counter
+    aggregation: sum
 credit_balances:
   - key: monthly-usd
     unit: usd
@@ -577,11 +497,13 @@ products:
         cadence: per_renewal
       - key: ai-images
         amount: 100
-    prices:
-      - currency: usd
-        unit_amount: 0
-        psps: []
-        metered: {meter: api-calls, rate: 200_000, per_units: 1_000_000}
+    rate_cards:
+      - meter: api-calls
+        payment_term: in_arrears
+        price:
+          model: per_unit
+          currency: usd
+          per_unit: {unit_amount: 200_000, divide_by: 1_000_000}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -594,7 +516,8 @@ products:
 	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
 		t.Fatalf("product benefits not normalized: %+v", p)
 	}
-	if got := p.Credits[0].Unit; got != "usd" {
+	// or#883: a grant's unit is always the named balance's unit — never declared.
+	if got := p.Credits[0].Unit; got != "USD" {
 		t.Fatalf("credit did not derive balance unit: %q", got)
 	}
 	if got := p.Credits[0].ExpiryHours; got == nil || *got != 30*24 {
@@ -603,42 +526,43 @@ products:
 	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
 		t.Fatalf("credit did not derive qualified balance unit: %q", got)
 	}
-	// #707: the metered: sugar translates into a rate card; the pure-usage
-	// (unit_amount 0) price row disappears.
+	// A pure-usage product carries no price row — only the rate card.
 	if len(p.Prices) != 0 {
-		t.Fatalf("pure-usage metered price should be translated away, got %+v", p.Prices)
+		t.Fatalf("pure-usage product should declare no price row, got %+v", p.Prices)
 	}
 	if len(p.RateCards) != 1 {
-		t.Fatalf("expected one translated rate card, got %+v", p.RateCards)
+		t.Fatalf("expected one rate card, got %+v", p.RateCards)
 	}
 	rc := p.RateCards[0]
 	if rc.Meter != "api-calls" || rc.PaymentTerm != PaymentInArrears {
-		t.Fatalf("translated rate card meter/term wrong: %+v", rc)
+		t.Fatalf("rate card meter/term wrong: %+v", rc)
 	}
 	if rc.Price.Model != ModelPerUnit || rc.Price.PerUnit == nil ||
 		rc.Price.PerUnit.UnitAmount != 200_000 || rc.Price.PerUnit.DivideBy != 1_000_000 {
-		t.Fatalf("translated rate card price wrong: %+v", rc.Price)
+		t.Fatalf("rate card price wrong: %+v", rc.Price)
 	}
-	if rc.Price.Currency != "usd" {
-		t.Fatalf("translated rate card currency wrong: %q", rc.Price.Currency)
+	if rc.Price.Currency != "USD" {
+		t.Fatalf("rate card currency wrong: %q", rc.Price.Currency)
 	}
 }
 
-// A gauge metered: price translates its per-duration into the divide_by
-// denominator (per_units x per-seconds) — the #599 gauge math, verbatim.
-func TestLoad_MeteredGaugeTranslatesPerSecondsDenominator(t *testing.T) {
+// The former gauge shape ({kind: gauge} + metered.per) is expressed canonically:
+// divide_by carries per_units x per-seconds directly. Same integer math, one input.
+func TestLoad_RateCardCarriesTimeDenominatorInDivideBy(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: vm-seconds, kind: gauge}
+  - {key: vm-seconds, aggregation: sum}
 products:
   - key: vm
     display_name: VM
-    prices:
-      - currency: usd
-        unit_amount: 0
-        psps: []
-        metered: {meter: vm-seconds, rate: 500_000, per: 1h}
+    rate_cards:
+      - meter: vm-seconds
+        payment_term: in_arrears
+        price:
+          model: per_unit
+          currency: usd
+          per_unit: {unit_amount: 500_000, divide_by: 3600}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
@@ -646,21 +570,21 @@ products:
 	}
 	p := m.TierGroups[0].Products[0]
 	if len(p.RateCards) != 1 {
-		t.Fatalf("expected one translated rate card, got %+v", p.RateCards)
+		t.Fatalf("expected one rate card, got %+v", p.RateCards)
 	}
 	pu := p.RateCards[0].Price.PerUnit
 	if pu == nil || pu.UnitAmount != 500_000 || pu.DivideBy != 3600 {
-		t.Fatalf("gauge translation wrong: %+v", pu)
+		t.Fatalf("per-unit denominator wrong: %+v", pu)
 	}
 }
 
-// A metered: price with a base amount keeps its price row (minus the metered
-// block) and still gains the usage rate card.
-func TestLoad_MeteredWithBaseFeeKeepsPriceRow(t *testing.T) {
+// A subscription base fee and a usage rate card coexist on one product: the
+// price row is the recurring term, the rate card is the arrears usage.
+func TestLoad_BaseFeePriceRowCoexistsWithRateCard(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: api-calls, kind: counter}
+  - {key: api-calls, aggregation: sum}
 products:
   - key: api
     display_name: API
@@ -670,39 +594,46 @@ products:
         duration: 30d
         auto_renew: true
         psps: []
-        metered: {meter: api-calls, rate: 2_000}
+    rate_cards:
+      - meter: api-calls
+        payment_term: in_arrears
+        price:
+          model: per_unit
+          currency: usd
+          per_unit: {unit_amount: 2_000}
 `
 	m, err := Load(writeManifest(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	p := m.TierGroups[0].Products[0]
-	if len(p.Prices) != 1 || p.Prices[0].Metered != nil || p.Prices[0].UnitAmount != 5_000_000 {
+	if len(p.Prices) != 1 || p.Prices[0].UnitAmount != 5_000_000 {
 		t.Fatalf("base-fee price row not preserved: %+v", p.Prices)
 	}
 	if len(p.RateCards) != 1 || p.RateCards[0].Meter != "api-calls" {
-		t.Fatalf("expected translated rate card: %+v", p.RateCards)
+		t.Fatalf("expected the usage rate card: %+v", p.RateCards)
 	}
 }
 
-// One meter, one usage price — across BOTH shapes: a rate card and a metered:
-// price on the same meter must be rejected (post-translation they collide).
-func TestLoad_MeteredAndRateCardShareMeterRejected(t *testing.T) {
+// One meter backs at most one usage rate card, whichever product declares it.
+func TestLoad_RateCardsMayNotShareAMeter(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: api-calls, kind: counter}
+  - {key: droplet-vcpu-seconds, aggregation: sum}
 products:
-  - key: api
-    display_name: API
+  - key: basic-droplet
+    display_name: Basic Droplet
     rate_cards:
-      - meter: api-calls
-        price: {model: per_unit, per_unit: {unit_amount: 100}}
-    prices:
-      - currency: usd
-        unit_amount: 0
-        psps: []
-        metered: {meter: api-calls, rate: 2_000}
+      - meter: droplet-vcpu-seconds
+        payment_term: in_arrears
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 7_000, divide_by: 3_600}}
+  - key: premium-droplet
+    display_name: Premium Droplet
+    rate_cards:
+      - meter: droplet-vcpu-seconds
+        payment_term: in_arrears
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 14_000, divide_by: 3_600}}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "one meter per usage rate card") {
@@ -710,28 +641,43 @@ products:
 	}
 }
 
-func TestLoad_MeteredGaugeRequiresPer(t *testing.T) {
-	body := `
+// or#893 phase 5: the rate card is THE pricing input. The #599 metered: sugar
+// and the counter|gauge meter kind are gone; a manifest that still declares
+// either fails loudly, and the error carries the rewrite.
+func TestLoad_RetiredPricingInputsFailWithTheRewrite(t *testing.T) {
+	t.Run("metered: price sugar", func(t *testing.T) {
+		body := `
 version: 1
 meters:
-  - {key: storage-mb, kind: gauge}
+  - {key: api-calls, aggregation: sum}
 products:
-  - key: storage
-    display_name: Storage
+  - key: api
+    display_name: API
     prices:
       - currency: usd
         unit_amount: 0
         psps: []
-        metered: {meter: storage-mb, rate: 100}
+        metered: {meter: api-calls, rate: 2_000}
 `
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "requires per") {
-		t.Fatalf("want gauge per error, got %v", err)
-	}
-}
+		_, err := Load(writeManifest(t, body))
+		if err == nil {
+			t.Fatal("a metered: price must not load")
+		}
+		for _, want := range []string{
+			`unknown field "metered"`,
+			"the metered: price sugar was removed (or#893/#707)",
+			"rate_cards:",
+			"payment_term: in_arrears",
+			"model: per_unit",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error must carry %q, got:\n%v", want, err)
+			}
+		}
+	})
 
-func TestLoad_MeteredRejectsProviders(t *testing.T) {
-	body := `
+	t.Run("meter kind:", func(t *testing.T) {
+		body := `
 version: 1
 meters:
   - {key: api-calls, kind: counter}
@@ -739,40 +685,40 @@ products:
   - key: api
     display_name: API
     prices:
-      - currency: usd
-        unit_amount: 0
-        psps: [stripe]
-        metered: {meter: api-calls, rate: 2_000}
+      - {currency: usd, unit_amount: 1_000, duration: 30d}
 `
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "must not declare external providers") {
-		t.Fatalf("want metered provider error, got %v", err)
-	}
-}
+		_, err := Load(writeManifest(t, body))
+		if err == nil {
+			t.Fatal("a kind: meter must not load")
+		}
+		for _, want := range []string{
+			`unknown field "kind"`,
+			"meter kind: counter|gauge was removed (or#893/#707)",
+			"aggregation: sum",
+			"aggregation: count",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error must carry %q, got:\n%v", want, err)
+			}
+		}
+	})
 
-func TestLoad_MeteredRejectsDuplicateMeterRates(t *testing.T) {
-	body := `
+	t.Run("meter without aggregation", func(t *testing.T) {
+		body := `
 version: 1
 meters:
-  - {key: droplet-vcpu-seconds, kind: counter}
+  - {key: api-calls}
 products:
-  - key: basic-droplet
-    display_name: Basic Droplet
+  - key: api
+    display_name: API
     prices:
-      - currency: usd
-        unit_amount: 0
-        metered: {meter: droplet-vcpu-seconds, rate: 7_000, per_units: 3_600}
-  - key: premium-droplet
-    display_name: Premium Droplet
-    prices:
-      - currency: usd
-        unit_amount: 0
-        metered: {meter: droplet-vcpu-seconds, rate: 14_000, per_units: 3_600}
+      - {currency: usd, unit_amount: 1_000, duration: 30d}
 `
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "used by multiple metered prices") {
-		t.Fatalf("want duplicate metered meter error, got %v", err)
-	}
+		_, err := Load(writeManifest(t, body))
+		if err == nil || !strings.Contains(err.Error(), `meter "api-calls" must set aggregation (sum/count/max/min/unique_count/latest)`) {
+			t.Fatalf("want missing-aggregation error, got %v", err)
+		}
+	})
 }
 
 func TestLoad_UsageLimitReferenceMustExist(t *testing.T) {
@@ -789,32 +735,6 @@ products:
 	}
 }
 
-func TestLoad_SolanaSharedUSDPriceDefaultsToUSDC(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: premium
-    display_name: Premium
-    prices:
-      - currency: usd
-        unit_amount: 23000000
-        duration: 30d
-        auto_renew: true
-        psps: [nmi, ccbill, solana]
-`
-	manifest, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("shared USD price should be accepted: %v", err)
-	}
-	price := manifest.TierGroups[0].Products[0].Prices[0]
-	if price.Currency != "usd" {
-		t.Fatalf("shared price currency = %q, want usd", price.Currency)
-	}
-	if got := price.PSPLinks["solana"]["token"]; got != "USDC" {
-		t.Fatalf("default Solana token = %q, want USDC", got)
-	}
-}
-
 func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
@@ -824,20 +744,10 @@ products:
     tier_group: g
     tier_rank: 1
     prices:
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {token: usd1}
+      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
 `
-	manifest, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("usd billed + usd1 settled should be accepted, got %v", err)
-	}
-	if got := manifest.Products[0].Prices[0].PSPLinks["solana"]["token"]; got != "USD1" {
-		t.Fatalf("normalized Solana token = %q, want USD1", got)
+	if _, err := Load(writeManifest(t, body)); err != nil {
+		t.Fatalf("usdc + solana should be accepted, got %v", err)
 	}
 }
 

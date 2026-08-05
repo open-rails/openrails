@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -12,13 +13,19 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/gagliardetto/solana-go/rpc/jsonrpc"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
 // RPCEndpoint represents a single RPC endpoint with metadata.
 type RPCEndpoint struct {
-	Name     string // Human-readable name (e.g., "Helius", "Solana Public")
-	URL      string // Full RPC URL
-	Priority int    // Lower = higher priority
+	Name string // Human-readable name (e.g., "Helius", "Solana Public")
+	// URL is CREDENTIAL-FREE and safe to log (#SEC-17): provider API keys are
+	// stripped into secret and re-attached at the transport.
+	URL      string
+	Priority int // Lower = higher priority
+
+	secret url.Values
 }
 
 // RPCFallbackClient wraps multiple RPC clients and provides automatic failover.
@@ -60,11 +67,8 @@ func DefaultMainnetEndpoints(heliusAPIKey string) []RPCEndpoint {
 
 	// Helius (primary if API key provided)
 	if heliusAPIKey != "" {
-		endpoints = append(endpoints, RPCEndpoint{
-			Name:     "Helius",
-			URL:      fmt.Sprintf("https://mainnet.helius-rpc.com/?api-key=%s", heliusAPIKey),
-			Priority: priority,
-		})
+		endpoints = append(endpoints, newSecretEndpoint(
+			"Helius", "https://mainnet.helius-rpc.com/", priority, url.Values{"api-key": {heliusAPIKey}}))
 		priority++
 	}
 
@@ -85,11 +89,8 @@ func DefaultDevnetEndpoints(heliusAPIKey string) []RPCEndpoint {
 
 	// Helius devnet (primary if API key provided)
 	if heliusAPIKey != "" {
-		endpoints = append(endpoints, RPCEndpoint{
-			Name:     "Helius Devnet",
-			URL:      fmt.Sprintf("https://devnet.helius-rpc.com/?api-key=%s", heliusAPIKey),
-			Priority: priority,
-		})
+		endpoints = append(endpoints, newSecretEndpoint(
+			"Helius Devnet", "https://devnet.helius-rpc.com/", priority, url.Values{"api-key": {heliusAPIKey}}))
 		priority++
 	}
 
@@ -117,15 +118,13 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 
 	var endpoints []RPCEndpoint
 
-	// If custom endpoint is provided, use it exclusively (no fallback)
+	// If custom endpoint is provided, use it exclusively (no fallback). A
+	// merchant-supplied endpoint may itself embed a key — it is split the same
+	// way as the built-in ones (#SEC-17).
 	if cfg.CustomEndpoint != "" {
-		endpoints = []RPCEndpoint{{
-			Name:     "Custom",
-			URL:      cfg.CustomEndpoint,
-			Priority: 0,
-		}}
+		endpoints = []RPCEndpoint{newSecretEndpoint("Custom", cfg.CustomEndpoint, 0, nil)}
 		log.WithFields(log.Fields{
-			"endpoint": cfg.CustomEndpoint,
+			"endpoint": endpoints[0].URL,
 			"network":  network,
 		}).Info("Using custom RPC endpoint (fallback disabled)")
 	} else {
@@ -158,7 +157,7 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 	// Create RPC clients for each endpoint
 	clients := make([]*rpc.Client, len(endpoints))
 	for i, ep := range endpoints {
-		clients[i] = rpc.New(ep.URL)
+		clients[i] = newEndpointClient(ep)
 	}
 
 	return &RPCFallbackClient{
@@ -274,15 +273,37 @@ func (c *RPCFallbackClient) withFallback(ctx context.Context, operation string, 
 
 		c.markFailed(idx, cooldown)
 
+		// Belt-and-braces over the credential-free endpoint URL: upstream error
+		// text is third-party-formatted and must never be logged verbatim.
 		log.WithFields(log.Fields{
 			"endpoint":  endpoint.Name,
 			"operation": operation,
-			"error":     err.Error(),
+			"error":     redact.Secrets(err.Error()),
 		}).Info("RPC operation failed, trying next endpoint")
 	}
 
-	return fmt.Errorf("all RPC endpoints failed for %s: %w", operation, lastErr)
+	return &allEndpointsFailedError{operation: operation, err: lastErr}
 }
+
+// ErrAllRPCEndpointsFailed marks a transport-level failure of every armed
+// endpoint. Its message carries upstream detail (endpoint text, provider
+// wording) and is for OPERATORS: HTTP handlers must map it to a generic message
+// rather than echo it to a client (#SEC-17).
+var ErrAllRPCEndpointsFailed = errors.New("all RPC endpoints failed")
+
+// allEndpointsFailedError keeps the underlying error in the chain (callers
+// still errors.Is it against rpc.ErrNotFound) while its rendered message is
+// redacted.
+type allEndpointsFailedError struct {
+	operation string
+	err       error
+}
+
+func (e *allEndpointsFailedError) Error() string {
+	return fmt.Sprintf("all RPC endpoints failed for %s: %s", e.operation, redact.Secrets(e.err.Error()))
+}
+
+func (e *allEndpointsFailedError) Unwrap() []error { return []error{ErrAllRPCEndpointsFailed, e.err} }
 
 // GetBalance returns the SOL balance for an address with automatic failover.
 func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {

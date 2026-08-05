@@ -26,7 +26,7 @@ func main() {
         Redis:   yourRedis,    // Share your existing Redis client
         PaymentProviders: []embedded.PaymentProvider{
             {
-                Config: config.RailMerchantAccountConfig{
+                Config: config.PSPConfig{
                     Rail:      models.RailStripe,
                     AccountID: "acct_1M9QZULkdIwHu7ix",
                     Stripe:    &config.StripeRailConfig{SecretKey: hostSecrets.StripeKey},
@@ -34,7 +34,7 @@ func main() {
             },
             {
                 Name: "stripe_old",
-                Config: config.RailMerchantAccountConfig{
+                Config: config.PSPConfig{
                     Rail:      models.RailStripe,
                     AccountID: "acct_1N2YbMLkdIwHu7ix",
                     Archived:  true,
@@ -111,7 +111,7 @@ security boundary).
 
 Embedded hosts have two credential planes; `config.yaml` carries neither:
 
-1. **Per-merchant secrets store (preferred)** — declare provider accounts +
+1. **Per-merchant secrets store (preferred)** — declare PSPs +
    secrets in the merchant manifest (`embed.Runtime.UpsertMerchantConfig` /
    bootstrap). Checkout, webhooks AND the pull plane (provider refresh,
    unknown-cohort resolution, per-subscription probes, `PullProvider`) all
@@ -127,7 +127,7 @@ openrails, err := embedded.New(embedded.Options{
     Config: cfg,
     PaymentProviders: []embedded.PaymentProvider{
         {
-            Config: config.RailMerchantAccountConfig{
+            Config: config.PSPConfig{
                 Rail:      models.RailStripe,
                 AccountID: "acct_1M9QZULkdIwHu7ix",
                 Stripe:    &config.StripeRailConfig{SecretKey: stripeSecret},
@@ -135,7 +135,7 @@ openrails, err := embedded.New(embedded.Options{
         },
         {
             Name: "stripe_old",
-            Config: config.RailMerchantAccountConfig{
+            Config: config.PSPConfig{
                 Rail:      models.RailStripe,
                 AccountID: "acct_1N2YbMLkdIwHu7ix",
                 Archived:  true,
@@ -144,7 +144,7 @@ openrails, err := embedded.New(embedded.Options{
         },
         {
             Name: "mobius",
-            Config: config.RailMerchantAccountConfig{
+            Config: config.PSPConfig{
                 Rail:      models.RailNMI,
                 AccountID: "579145",
                 NMI:       &config.NMIRailConfig{SecurityKey: mobiusSecurityKey},
@@ -155,11 +155,11 @@ openrails, err := embedded.New(embedded.Options{
 ```
 
 `Name` is only a local selector for config, logs, and explicit operations. It is
-not durable identity. OpenRails resolves durable provider-account identity from
+not durable identity. OpenRails resolves durable PSP identity from
 the provider itself, such as Stripe `/v1/account` or the NMI profile report, and
-stores provider-owned rows against that provider account id.
+stores provider-owned rows against that PSP id.
 
-`Archived` controls provider-account lifecycle. Omit it, or set it false, for
+`Archived` controls PSP lifecycle. Omit it, or set it false, for
 accounts eligible for new checkout/subscription work. Set `Archived: true` for
 old accounts that must still handle existing provider-bound obligations,
 historical pulls, refunds, webhooks, or subscriptions that still rebill there.
@@ -377,3 +377,42 @@ hold, err := svc.HoldCredits(ctx, service.HoldCreditsRequest{
 // Capture actual usage
 trx, err = svc.CaptureHold(ctx, service.CaptureHoldRequest{HoldID: hold.ID, Amount: actualAmount})
 ```
+
+### Merchant scoping (required)
+
+Every merchant-owned table is RLS-scoped by the `app.merchant_id` session GUC.
+HTTP callers get it from middleware; an in-process Go caller must ask for it, or
+reads silently see zero rows and writes are rejected:
+
+```go
+// The engine is bound to one merchant: no id to pass, no id to get wrong.
+err := openrails.RunInMerchant(ctx, func(ctx context.Context) error {
+	_, err := svc.CreateProduct(ctx, service.CreateProductRequest{ /* … */ })
+	return err
+})
+
+// Multi-merchant engines name the merchant explicitly.
+err = openrails.RunInMerchantConn(ctx, merchantID, func(ctx context.Context) error { /* … */ })
+```
+
+Both PROVE the pin took before running the callback, and a bound engine refuses
+a call that names a different merchant.
+
+## Testing rail pushes against a fake Stripe
+
+`Options.StripeTransport` installs a host-supplied `http.RoundTripper` under
+OpenRails' Stripe choke point, so an integration test can drive real rail-push
+paths (catalog push, checkout, plan migration) against an `httptest` server.
+Readonly enforcement and the pinned `Stripe-Version` still apply above it, and
+the option is refused when `Config.TestMode` is `CredentialPostureLive`.
+
+```go
+e, err := embedded.New(embedded.Options{
+	Config:          cfg, // TestMode: config.CredentialPostureSandbox
+	PGXPool:         pool,
+	River:           embedded.RiverManagedByOpenRails(),
+	StripeTransport: hostRewriteTransport{target: fakeStripe.URL},
+})
+```
+
+`Close` removes it. It is process-global, so one engine per process may set it.

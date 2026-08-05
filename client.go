@@ -264,9 +264,14 @@ type AdmitRequest struct {
 	Resource        string `json:"resource,omitempty"`
 	Currency        string `json:"currency,omitempty"`
 	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id"`
-	Source          string `json:"source,omitempty"`
-	ExpiresAt       *int64 `json:"expires_at,omitempty"`
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it. Zero means the request adds no ongoing rate, which
+	// leaves an accrual_rate_cap payer gated on what is already running.
+	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
+	RequestID               string `json:"request_id"`
+	Source                  string `json:"source,omitempty"`
+	ExpiresAt               *int64 `json:"expires_at,omitempty"`
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated
@@ -277,22 +282,17 @@ type AdmitRequest struct {
 // AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
-// keyed Redis hold; BudgetReservationID is the budget reservation settled with
-// the request. A deny is returned as (Allowed=false, nil error) on both
+// keyed Redis hold. A deny is returned as (Allowed=false, nil error) on both
 // transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
-	Allowed             bool           `json:"allowed"`
-	BlockedBy           string         `json:"blocked_by,omitempty"`
-	DenyCode            string         `json:"deny_code,omitempty"`
-	Currency            string         `json:"currency,omitempty"`
-	EstimatedAmount     int64          `json:"estimated_amount,omitempty"`
-	PolicyCurrency      string         `json:"policy_currency,omitempty"`
-	PolicyAmount        int64          `json:"policy_amount,omitempty"`
-	StartCapacityAmount int64          `json:"start_capacity_amount,omitempty"`
-	RetryAfterSeconds   int64          `json:"retry_after_seconds,omitempty"`
-	HoldExpiresAt       *time.Time     `json:"hold_expires_at,omitempty"`
-	BudgetReservationID string         `json:"budget_reservation_id,omitempty"`
-	BudgetWindows       []BudgetWindow `json:"budget_windows,omitempty"`
+	Allowed             bool       `json:"allowed"`
+	BlockedBy           string     `json:"blocked_by,omitempty"`
+	DenyCode            string     `json:"deny_code,omitempty"`
+	Currency            string     `json:"currency,omitempty"`
+	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
+	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
+	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
+	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
@@ -356,23 +356,6 @@ type CreditAccount struct {
 	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
 }
 
-// AccountSettingsInput patches an OpenRails credit account policy.
-// All pointer fields are optional — nil means "no change" for that setting.
-// Amounts are in the currency's internal precision (e.g. cents for USD).
-type AccountSettingsInput struct {
-	// BillingMode controls how the account is charged ("prepaid" or "postpaid").
-	BillingMode *string `json:"billing_mode,omitempty"`
-	// LowBalanceThreshold triggers a low-balance alert when prepaid balance falls below this.
-	LowBalanceThreshold *int64 `json:"low_balance_threshold,omitempty"`
-	AutoTopupEnabled    *bool  `json:"auto_topup_enabled,omitempty"`
-	// AutoTopupAmount is the topup deposit size in currency-internal units.
-	AutoTopupAmount        *int64  `json:"auto_topup_amount,omitempty"`
-	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id,omitempty"`
-	// DefaultCreditExpiryHours is the default lifetime in hours for credit deposits that
-	// don't carry an explicit ExpiresAt.
-	DefaultCreditExpiryHours *int `json:"default_credit_expiry_hours,omitempty"`
-}
-
 // UsageRollupRow is one grouped spend bucket from OpenRails.
 type UsageRollupRow struct {
 	Key         string `json:"key"`
@@ -402,10 +385,14 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                           *MerchantProfileInput        `json:"profile,omitempty"`
-	TrustLevelSchedules               []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
-	TrustLevelSpendLimits             []PayerSpendLimitInput       `json:"trust_level_spend_limits,omitempty"`
-	DelegatedInvokerWastedSpendLimits []BudgetWindowInput          `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	Profile             *MerchantProfileInput        `json:"profile,omitempty"`
+	TrustLevelSchedules []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
+	// policies and the rungs that decide who gets which. They REPLACE the retired
+	// trust_level_spend_limits field, which could only ever mean "window cap".
+	BillingPolicies                   []BillingPolicyInput        `json:"billing_policies,omitempty"`
+	BillingPolicyBindings             []BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
+	DelegatedInvokerWastedSpendLimits []BudgetWindowInput         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 }
 
 // MerchantTrustLevelSchedule is one currency's trust-level ladder.
@@ -414,34 +401,53 @@ type MerchantTrustLevelSchedule struct {
 	Schedule []TrustLevelScheduleRung `json:"schedule"`
 }
 
-// BudgetWindow is one computed window from admission policy checks and Admit's
-// budget_windows
-// (pkg/service.AdmitBudgetWindowDTO on the wire).
-type BudgetWindow struct {
-	Key               string `json:"key"`
-	Currency          string `json:"currency"`
-	Limit             int64  `json:"limit"`
-	Used              int64  `json:"used"`
-	Reserved          int64  `json:"reserved"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-	// ResetAt is the exact window boundary (#337 fixed windows).
-	ResetAt time.Time `json:"reset_at,omitzero"`
-	Allowed bool      `json:"allowed"`
+// BillingPolicyInput declares one named billing policy (or#897). The policy says
+// WHICH quantity is capped; the binding says who it applies to.
+type BillingPolicyInput struct {
+	Name string `json:"name"`
+	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
+	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
+	// (cap NEW spend per rolling window; prior debt drives delinquency, not
+	// admission), or "accrual_rate_cap" (cap the measured accrual RATE in
+	// micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
+	Kind string `json:"kind"`
+	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
+	// Zero defers to the payer's own arrears credit limit.
+	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
+	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+	SpendWindows []BudgetWindowInput `json:"spend_windows,omitempty"`
+	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
+	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
+	// measurement lookback (default 3600).
+	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty"`
+	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
+	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
+	// override the merchant-wide invoice policy for payers bound here; nil defers
+	// to it. All three ride on any kind.
+	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
+	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
+	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty"`
+	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
+	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
+	// stays merchant-wide. Declaring it here fails with that reason.
+	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
+	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// windows: at most Limit of host-reported wasted spend is forgiven per window;
+	// direct-payer overage is charged. Allowed on either kind.
+	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
+	PolicyCurrency  string              `json:"policy_currency,omitempty"`
 }
 
-// PayerSpendLimitInput configures a per-payer trust-level policy via merchant
-// settings (#298): fixed money-budget windows and wasted
-// spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
-// travels alongside it).
-type PayerSpendLimitInput struct {
-	TrustLevel     string              `json:"trust_level,omitempty"`
-	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
-	PolicyCurrency string              `json:"policy_currency,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this trust level: at most Limit of host-reported wasted spend is
-	// forgiven per window; direct-payer overage is charged.
-	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
+// BillingPolicyBindingInput points one rung at a declared policy name (or#897).
+// Set CustomerID for the per-customer rung, Tier for the per-tier rung, neither
+// for the merchant default — never both. Most specific wins.
+//
+// GetMerchantSettings returns only the DECLARATIVE rungs (default + tier):
+// per-customer bindings are runtime segmentation state and are not enumerated.
+type BillingPolicyBindingInput struct {
+	PolicyName string `json:"policy"`
+	CustomerID string `json:"customer_id,omitempty"`
+	Tier       string `json:"tier,omitempty"`
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
@@ -532,7 +538,6 @@ type SpendLimitWindow struct {
 type SpendDelegationInput struct {
 	Scope    string             `json:"scope"`
 	ScopeKey string             `json:"scope_key,omitempty"`
-	RoleID   string             `json:"role_id,omitempty"`
 	Windows  []SpendLimitWindow `json:"windows"`
 }
 

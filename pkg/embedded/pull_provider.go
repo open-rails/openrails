@@ -20,10 +20,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -54,6 +50,14 @@ type PullProviderOptions struct {
 	Overwrite    bool
 	Prune        bool
 	Out          io.Writer
+
+	// PruneExpectRows is the operator's typed confirmation and the ONLY way a
+	// prune writes (or#858). Nil = dry-run: discover, report the number to
+	// confirm, change nothing. Set = apply, refusing if the number disagrees
+	// with what the pass found.
+	PruneExpectRows *int
+	// PruneActor is recorded on the destructive run. Empty = "unknown".
+	PruneActor string
 
 	// MerchantManifest is the parsed MODE-1 merchant manifest (#723) for this
 	// one-off process — embedded hosts pass the same manifest they boot from.
@@ -122,9 +126,9 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	ctx = merchant.WithID(ctx, merchantID)
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		accountPins := map[reconcile.Provider]string{}
-		explicitBindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{}
+		explicitBindings := map[reconcile.Provider]reconcile.PSPBinding{}
 		if strings.TrimSpace(opts.PSP) != "" {
-			provider, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.PSP)
+			provider, binding, err := resolvePullPSPTarget(ctx, rt, opts.PSP)
 			if err != nil {
 				return err
 			}
@@ -156,7 +160,27 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		if len(fetchers) == 0 {
 			return fmt.Errorf("no payment providers configured for reconciliation (no armed rail accounts for this merchant)")
 		}
-		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(explicitBindings))
+		// or#893: every armed rail carries the PSP its credentials came from.
+		// An unpinned pull used to run with NO binding at all — reading and
+		// writing the rail's mirror account-agnostically — so default to what
+		// the arming already resolved; --provider-account only overrides it.
+		selected := map[reconcile.Provider]bool{}
+		for _, p := range providers {
+			selected[p] = true
+		}
+		bindings := make(map[reconcile.Provider]reconcile.PSPBinding, len(armed.Coverage))
+		for provider, cov := range armed.Coverage {
+			if _, ok := fetchers[provider]; !ok {
+				continue
+			}
+			if len(selected) > 0 && !selected[provider] {
+				continue
+			}
+			if cov.Binding.ID == uuid.Nil {
+				return fmt.Errorf("rail %s armed without a resolved PSP: refusing an unattributed pull", provider)
+			}
+			bindings[provider] = cov.Binding
+		}
 		for provider, binding := range explicitBindings {
 			bindings[provider] = binding
 		}
@@ -177,19 +201,34 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		var pruneLogs []pullProviderPruneLog
 		var pruneChanges []reconcile.MutationRecord
 		if opts.Prune && runErr == nil {
+			// The typed confirmation is a per-PSP number, so applying across
+			// several armed PSPs at once would check the SAME count against each
+			// of them — an operator confirming 3 for Mobius would silently
+			// authorise 3 for every other account too. Applying is one PSP at a
+			// time; planning across all of them is fine.
+			if opts.PruneExpectRows != nil && len(bindings) > 1 {
+				return fmt.Errorf("refusing to apply a prune across %d PSPs at once: --expect-rows is a per-account count. Scope it with --provider-account=<uuid> and apply one at a time", len(bindings))
+			}
 			for provider, binding := range bindings {
 				fetcher, ok := fetchers[provider]
 				if !ok {
 					continue
 				}
-				pr, err := reconcile.PruneRailMerchantAccountExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
-					Since: sinceT, Until: untilT, Apply: true,
+				pr, err := reconcile.PrunePSPExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
+					Since: sinceT, Until: untilT,
+					Apply:        opts.PruneExpectRows != nil,
+					ExpectedRows: opts.PruneExpectRows,
+					Actor:        opts.PruneActor,
 				})
 				if err != nil {
 					return fmt.Errorf("prune %s (%s): %w", provider, binding.AccountID, err)
 				}
-				pruneLogs = append(pruneLogs, pullProviderPruneLog{Provider: provider, Binding: binding, Result: pr})
-				pruneChanges = append(pruneChanges, pruneMutationRecords(provider, pr, "applied")...)
+				phase := "planned"
+				if opts.PruneExpectRows != nil {
+					phase = "applied"
+				}
+				pruneLogs = append(pruneLogs, pullProviderPruneLog{Provider: provider, Binding: binding, Result: pr, Applied: opts.PruneExpectRows != nil})
+				pruneChanges = append(pruneChanges, pruneMutationRecords(provider, pr, phase)...)
 			}
 		}
 
@@ -200,7 +239,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			// rail account), never blindly. A full-head --insert --overwrite pull
 			// remains the manual bulk-import way to establish the gate.
 			if opts.Insert && opts.Overwrite {
-				if _, err := reconcile.MarkReconciledSourceDomains(ctx, rt.DB.Gen(ctx), merchantID.UUID(), res.PullProofs(), time.Now().UTC()); err != nil {
+				if _, err := reconcile.MarkReconciledSourceDomains(ctx, rt.DB.Gen(ctx), merchantID.UUID(), res.PullProofs()); err != nil {
 					return fmt.Errorf("mark reconciled domains: %w", err)
 				}
 			}
@@ -224,7 +263,9 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			return err
 		}
 		appliedChanges := append([]reconcile.MutationRecord(nil), res.AppliedChanges...)
-		appliedChanges = append(appliedChanges, pruneChanges...)
+		if opts.PruneExpectRows != nil {
+			appliedChanges = append(appliedChanges, pruneChanges...)
+		}
 		logPath, err := writePullProviderLog(opts.LogDir, run, res, appliedChanges, pruneLogs, convergeLog, pullProviderMutationFlags{
 			Insert: opts.Insert, Overwrite: opts.Overwrite, Prune: opts.Prune,
 		})
@@ -252,9 +293,9 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	if opts.Config == nil || opts.Config.DB == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(opts.Config.DB)
+	database, err := openEmbeddedDB(ctx, opts.Config, nil)
 	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
+		return err
 	}
 	defer func() {
 		_ = database.Close()
@@ -300,14 +341,14 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	})
 }
 
+// pullProviderRuntime is the one-off pull process's world. The live fetchers
+// arm per merchant from Merchants (#699), so there are no process-wide rail
+// clients here — the empty PSPSet and the nil NMI/CCBill/Solana clients this
+// struct used to carry were read by nothing (or#893).
 type pullProviderRuntime struct {
-	DB             *db.DB
-	Config         *config.Config
-	Rails          config.PSPSet
-	Merchants      *merchants.Service
-	NMIClients     map[string]*nmi.NMIClient
-	CCBillDataLink *ccbill.DataLinkClient
-	SolanaRPC      *solanaint.RPCClient
+	DB        *db.DB
+	Config    *config.Config
+	Merchants *merchants.Service
 }
 
 func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pullProviderRuntime, func(), error) {
@@ -315,29 +356,23 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	if cfg == nil || cfg.DB == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := openEmbeddedDB(ctx, cfg, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open postgres: %w", err)
+		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
-	rails := config.PSPSet{}
-	nmiClients := map[string]*nmi.NMIClient{}
-	ccbillDataLink, err := pullProviderCCBillDataLink(cfg, rails)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	solanaRPC, err := pullProviderSolanaRPC(cfg, rails)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	// #699: pulls arm from the per-merchant secrets store with the same
-	// semantics as the server's River pulls (store wins; a declared account
-	// with a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the
-	// manifest is on disk for a one-off process too — an ephemeral in-memory
-	// plane seeded from it IS the store. Mode-2 store build failure degrades
-	// loudly to the boot-config plane instead of aborting the operator command.
+	// #699/#788: pulls arm from the per-merchant secrets store, with the same
+	// semantics as the server's River pulls (store wins; a declared account with
+	// a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the manifest
+	// is on disk for a one-off process too — an ephemeral in-memory plane seeded
+	// from it IS the store.
+	//
+	// or#893: a MODE-2 store/service build failure is a hard error. It used to
+	// warn and continue "arming from boot-config rails only" — but that plane
+	// was an empty config.PSPSet this function itself constructed and never
+	// filled, so the degradation armed NOTHING: the operator got a pull that
+	// read zero providers and reported success-shaped output over a snapshot it
+	// never fetched. There is no credential plane to fall back to; say so.
 	var merchantsSvc *merchants.Service
 	if cfg.IsManifestMerchantSource() {
 		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
@@ -346,30 +381,34 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 			return nil, nil, err
 		}
 		merchantsSvc = svc
-	} else if backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool()); err != nil {
-		log.WithError(err).Warn("pull-provider: merchant secret store unavailable; pulls arm from boot-config rails only (#699)")
-	} else if svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode())); err != nil {
-		log.WithError(err).Warn("pull-provider: merchants service unavailable; pulls arm from boot-config rails only (#699)")
 	} else {
+		backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool())
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("pull-provider: merchant secret store unavailable, so no rail can be armed: %w", err)
+		}
+		svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("pull-provider: merchants service unavailable, so no rail can be armed: %w", err)
+		}
 		merchantsSvc = svc
 	}
 	return &pullProviderRuntime{
-		DB:             database,
-		Config:         cfg,
-		Rails:          rails,
-		Merchants:      merchantsSvc,
-		NMIClients:     nmiClients,
-		CCBillDataLink: ccbillDataLink,
-		SolanaRPC:      solanaRPC,
+		DB:        database,
+		Config:    cfg,
+		Merchants: merchantsSvc,
 	}, cleanup, nil
 }
 
 // pullProviderManifestPlane builds the MODE-1 pull plane for a one-off process
 // (#723): the on-disk manifest seeds an EPHEMERAL in-memory secret store — the
 // same plane the server seeds at boot; nothing persists — and the merchants
-// service arms #699 pulls over it. No manifest passed and none at the
-// conventional path → nil service (boot-config rails only, e.g. a read-side
-// bind host); a manifest that fails to load or seed aborts the command.
+// service arms #699 pulls over it. A manifest that fails to load or seed aborts
+// the command. No manifest passed and none at the conventional path → nil
+// service: nothing can arm, and the caller's "no armed rail accounts for this
+// merchant" refusal names that plainly (or#893 — there is no second credential
+// plane to fall back to).
 func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database *db.DB, opts PullProviderOptions) (*merchants.Service, error) {
 	manifest := opts.MerchantManifest
 	if manifest == nil {
@@ -380,7 +419,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		}
 		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
 		if os.IsNotExist(err) && !explicit {
-			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; pulls arm from boot-config rails only (#723)")
+			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; no rail can be armed (#723)")
 			return nil, nil
 		}
 		if err != nil {
@@ -424,48 +463,6 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	return svc, nil
 }
 
-func pullProviderCCBillDataLink(cfg *config.Config, rails config.PSPSet) (*ccbill.DataLinkClient, error) {
-	_, proc, err := rails.ActiveRailByType(models.RailCCBill)
-	if err != nil {
-		return nil, err
-	}
-	if proc == nil || proc.CCBill == nil || proc.CCBill.DataLinkUsername == "" || proc.CCBill.DataLinkPassword == "" {
-		return nil, nil
-	}
-	ccbillConfig := proc.ToCCBillConfig()
-	if ccbillConfig.ClientAccNum == "" {
-		return nil, nil
-	}
-	ccbillConfig.TestMode = cfg.IsTestMode()
-	return ccbill.NewDataLinkClient(ccbillConfig), nil
-}
-
-func pullProviderSolanaRPC(cfg *config.Config, rails config.PSPSet) (*solanaint.RPCClient, error) {
-	_, proc, err := rails.ActiveRailByType(models.RailSolana)
-	if err != nil {
-		return nil, err
-	}
-	if proc == nil {
-		return nil, nil
-	}
-	rpcProvider := ""
-	rpcAPIKey := ""
-	if proc.Solana != nil {
-		rpcProvider = proc.Solana.RPCProvider
-		rpcAPIKey = proc.Solana.RPCAPIKey
-	}
-	network := "mainnet"
-	if cfg.IsTestMode() {
-		network = "devnet"
-	}
-	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-		RPCProvider: rpcProvider,
-		RPCAPIKey:   rpcAPIKey,
-		Network:     network,
-		ReadOnly:    true,
-	}), nil
-}
-
 func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug string) (merchant.ID, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -481,16 +478,16 @@ func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug stri
 	return merchant.ParseID(id)
 }
 
-func resolvePullRailMerchantAccountTarget(ctx context.Context, rt *pullProviderRuntime, railMerchantAccountStr string) (reconcile.Provider, reconcile.RailMerchantAccountBinding, error) {
-	id, err := uuid.Parse(strings.TrimSpace(railMerchantAccountStr))
+func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {
+	id, err := uuid.Parse(strings.TrimSpace(pspStr))
 	if err != nil {
-		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
+		return "", reconcile.PSPBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
 	}
 	account, err := rt.DB.Gen(ctx).GetPSP(ctx, id)
 	if err != nil {
-		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
+		return "", reconcile.PSPBinding{}, fmt.Errorf("load PSP %s: %w", id, err)
 	}
-	return reconcile.Provider(account.Rail), reconcile.RailMerchantAccountBinding{
+	return reconcile.Provider(account.Rail), reconcile.PSPBinding{
 		ID:        account.ID,
 		Rail:      account.Rail,
 		AccountID: account.AccountID,
@@ -520,8 +517,10 @@ type pullProviderMutationFlags struct {
 
 type pullProviderPruneLog struct {
 	Provider reconcile.Provider
-	Binding  reconcile.RailMerchantAccountBinding
+	Binding  reconcile.PSPBinding
 	Result   reconcile.PruneResult
+	// Applied=false is the default: a plan, nothing written (or#858).
+	Applied bool
 }
 
 type pullProviderConvergeLog struct {
@@ -603,10 +602,10 @@ func writePullProviderLog(logDir string, run reconcile.RunRecord, res *reconcile
 func pruneMutationRecords(provider reconcile.Provider, pr reconcile.PruneResult, phase string) []reconcile.MutationRecord {
 	var out []reconcile.MutationRecord
 	for _, id := range pr.SubscriptionIDs {
-		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "subscriptions", Operation: "delete", RowID: id.String(), RowsAffected: 1})
+		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "subscriptions", Operation: "soft_delete", RowID: id.String(), RowsAffected: 1})
 	}
 	for _, id := range pr.PaymentIDs {
-		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "payments", Operation: "delete", RowID: id.String(), RowsAffected: 1})
+		out = append(out, reconcile.MutationRecord{Phase: phase, Provider: provider, Table: "payments", Operation: "soft_delete", RowID: id.String(), RowsAffected: 1})
 	}
 	return out
 }
@@ -628,6 +627,17 @@ func renderPullProviderStdout(w io.Writer, format, logPath string, run reconcile
 	fmt.Fprintf(w, "applied: %s\n", formatMutationCounts(counts["applied"]))
 	if len(pruneLogs) > 0 {
 		fmt.Fprintf(w, "prune: %s\n", formatPruneCounts(pruneCounts))
+		for _, pl := range pruneLogs {
+			if pl.Applied && pl.Result.RunID != uuid.Nil {
+				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails undo-run --merchant <slug> --run %s`, then re-pull and converge\n",
+					pl.Provider, pl.Binding.AccountID, pl.Result.RunID, pl.Result.RunID)
+			}
+		}
+		if !prunePlanApplied(pruneLogs) {
+			if n := prunePlanTotal(pruneLogs); n > 0 {
+				fmt.Fprintf(w, "  PLAN ONLY — nothing was written. To apply: re-run with --expect-rows %d\n", n)
+			}
+		}
 	}
 	if convergeLog != nil {
 		fmt.Fprintf(w, "converge: %d finding(s), %d auto-fixed, %d reconcile-required, %d requires-review\n", convergeLog.Findings, convergeLog.AutoFixed, convergeLog.ReconcileRequired, convergeLog.RequiresReview)
@@ -651,10 +661,16 @@ func summarizePrune(logs []pullProviderPruneLog) pruneCounts {
 		out[table][key] += n
 	}
 	for _, log := range logs {
-		add("subscriptions", "deleted", log.Result.Subscriptions)
+		key := "would_prune"
+		if log.Applied {
+			key = "soft_deleted"
+		}
+		add("subscriptions", key, log.Result.Subscriptions)
 		add("subscriptions", "skipped", log.Result.SubscriptionsSkipped)
-		add("payments", "deleted", log.Result.Payments)
+		add("payments", key, log.Result.Payments)
 		add("payments", "skipped", log.Result.PaymentsSkipped)
+		add("checkout_sessions", key, log.Result.CheckoutSessions)
+		add("entitlements", key, log.Result.Entitlements)
 	}
 	return out
 }
@@ -719,7 +735,7 @@ func formatPruneCounts(counts pruneCounts) string {
 	var parts []string
 	for _, table := range tables {
 		var values []string
-		for _, key := range []string{"deleted", "skipped"} {
+		for _, key := range []string{"soft_deleted", "would_prune", "skipped"} {
 			if n := counts[table][key]; n > 0 {
 				values = append(values, fmt.Sprintf("%s=%d", key, n))
 			}
@@ -844,4 +860,22 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// prunePlanTotal is the number a dry-run asks the operator to confirm.
+func prunePlanTotal(logs []pullProviderPruneLog) int {
+	n := 0
+	for _, l := range logs {
+		n += l.Result.Subscriptions + l.Result.Payments
+	}
+	return n
+}
+
+func prunePlanApplied(logs []pullProviderPruneLog) bool {
+	for _, l := range logs {
+		if l.Applied {
+			return true
+		}
+	}
+	return false
 }

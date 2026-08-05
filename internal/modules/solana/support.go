@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/internal/modules/money"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -161,7 +162,12 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 }
 
 // FormatBaseUnits renders base units as a fixed-point decimal string with
-// `decimals` fractional digits. Display only — pure integer, no float rounding.
+// `decimals` fractional digits. Pure integer, no float rounding. This is the
+// ONLY Solana amount formatter (#863 collapsed pay.go's trailing-zero-trimming
+// twin into it): it reaches the Solana Pay `amount=` wire as well as display.
+// Fixed precision is deliberate — it states the scale on the wire, so a wrong
+// `decimals` makes the wallet reject the URL (decimal places > mint decimals)
+// instead of silently transferring a 10^n-wrong amount.
 func FormatBaseUnits(units uint64, decimals int) string {
 	if decimals <= 0 {
 		return strconv.FormatUint(units, 10)
@@ -169,32 +175,6 @@ func FormatBaseUnits(units uint64, decimals int) string {
 	div := pow10(decimals)
 	whole, frac := new(big.Int).QuoRem(new(big.Int).SetUint64(units), div, new(big.Int))
 	return fmt.Sprintf("%s.%0*s", whole.String(), decimals, frac.String())
-}
-
-// RequireTokenDecimals resolves the ctx merchant's configured base-unit
-// precision for symbol from its armed Solana rail config. Fails closed: an
-// unarmed rail, an unknown token, or a missing/zero decimals value are errors —
-// guessing the scale is a 10^n mispricing.
-func RequireTokenDecimals(ctx context.Context, src railresolve.Source, symbol string) (int, error) {
-	sym := strings.ToUpper(strings.TrimSpace(symbol))
-	if sym == "" {
-		return 0, fmt.Errorf("solana: token symbol is required")
-	}
-	proc, err := RequireSolanaRailConfig(ctx, src)
-	if err != nil {
-		return 0, err
-	}
-	if proc.Solana == nil {
-		return 0, fmt.Errorf("solana rail is not configured")
-	}
-	tok, ok := proc.Solana.Tokens[sym]
-	if !ok {
-		return 0, fmt.Errorf("solana: token %s is not configured for this merchant", sym)
-	}
-	if err := config.ValidateTokenDecimals(sym, tok.Decimals); err != nil {
-		return 0, err
-	}
-	return tok.Decimals, nil
 }
 
 // RequireSolanaRailConfig resolves the ctx merchant's armed Solana rail
@@ -237,28 +217,39 @@ type TokenPriceProvider interface {
 }
 
 // CalculateTokenQuote converts a fiat amount in MICROS (millionths of a major
-// currency unit, any currency) into token units based on live prices.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.TokenConfig, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
+// currency unit, any currency) into token base units based on live prices.
+//
+// `decimals` is the mint's ON-CHAIN base-unit precision (#817) and is an
+// explicit parameter so no caller can fall back to an assumed 6; resolve it via
+// MintDecimals.ForMint.
+func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("token symbol is required")
 	}
-	if err := config.ValidateTokenDecimals(tokenSymbol, tokenCfg.Decimals); err != nil {
+	if err := config.ValidateTokenDecimals(tokenSymbol, decimals); err != nil {
 		return nil, err
 	}
 
-	currency = strings.ToLower(strings.TrimSpace(currency))
+	// #830: never invent a currency. The FX leg and the resulting on-chain charge
+	// both key off it, so an absent code is a caller bug — not a "usd" default.
+	// Validated against the money registry so an unregistered code cannot reach
+	// the FX provider or the persisted quote.
+	currency = money.NormalizeCurrency(currency)
 	if currency == "" {
-		currency = "usd"
+		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
+	}
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
+		return nil, err
 	}
 	if amountMicros <= 0 {
-		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, tokenCfg.Decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil
+		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil
 	}
 
 	quotedAt := time.Now()
 
 	fxRate := 1.0
-	if currency != "usd" {
+	if currency != money.DefaultCurrency {
 		if fxProvider == nil {
 			return nil, fmt.Errorf("FX conversion required for currency %s but no FX provider configured", currency)
 		}
@@ -269,7 +260,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 		fxRate = fxQuote.Rate
 	}
 
-	if strings.TrimSpace(tokenCfg.Mint) == "" {
+	if strings.TrimSpace(mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
 	// USD-pegged stablecoins are treated as $1.00 (no sub-penny price noise). A
@@ -280,7 +271,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	// pricing. Everything else (SOL, EURC, ...) always requires a live price.
 	var tokenPriceUSD float64
 	atPeg := false
-	if solanatokens.IsUSDPeggedToken(tokenSymbol, tokenCfg.Mint) {
+	if solanatokens.IsUSDPeggedToken(tokenSymbol, mint) {
 		tokenPriceUSD, atPeg = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
 	} else {
 		if priceProvider == nil {
@@ -302,10 +293,10 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 		tokenUnits uint64
 		err        error
 	)
-	if atPeg && currency == "usd" {
-		tokenUnits, err = FiatMicrosToBaseUnitsAtPeg(amountMicros, tokenSymbol, tokenCfg.Decimals)
+	if atPeg && currency == money.DefaultCurrency {
+		tokenUnits, err = FiatMicrosToBaseUnitsAtPeg(amountMicros, tokenSymbol, decimals)
 	} else {
-		tokenUnits, err = fiatMicrosToBaseUnitsAtRate(amountMicros, tokenSymbol, tokenCfg.Decimals, fxRate, tokenPriceUSD)
+		tokenUnits, err = fiatMicrosToBaseUnitsAtRate(amountMicros, tokenSymbol, decimals, fxRate, tokenPriceUSD)
 	}
 	if err != nil {
 		return nil, err
@@ -318,7 +309,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 
 	return &TokenQuote{
 		Units:           tokenUnits,
-		Amount:          FormatBaseUnits(tokenUnits, tokenCfg.Decimals),
+		Amount:          FormatBaseUnits(tokenUnits, decimals),
 		TokenPriceUSD:   tokenPriceUSD,
 		FXRate:          fxRate,
 		FXCurrency:      currency,

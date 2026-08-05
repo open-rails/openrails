@@ -65,7 +65,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	suite := getSharedTestSuite(t)
 	// In-process facade calls require the merchant pinned in context (the raw
 	// Service has no default merchant; the HTTP path below pins it via middleware).
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	userID := uuid.NewString()
 	tenantSubjectID := suite.ensureCustomer(ctx, userID)

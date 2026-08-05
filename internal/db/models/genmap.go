@@ -117,6 +117,7 @@ func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
 		FailureReason:     p.FailureReason,
 		ReversalKind:      p.ReversalKind,
 		TokenType:         p.TokenType,
+		MoneyMovement:     MoneyMovement(p.MoneyMovement),
 		DiscountCode:      p.DiscountCode,
 		DiscountReason:    p.DiscountReason,
 		PurchasedAt:       p.PurchasedAt,
@@ -266,8 +267,8 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 		StoredCredentialRecurringRef:   p.StoredCredentialRecurringRef,
 		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
 
-		VaultProvider:      p.VaultProvider,
-		VaultFingerprint:   p.VaultFingerprint,
+		Custodian:          p.Custodian,
+		Fingerprint:        p.Fingerprint,
 		NetworkTokenID:     p.NetworkTokenID,
 		NetworkTokenStatus: p.NetworkTokenStatus,
 		NetworkTokenPAR:    p.NetworkTokenPar,
@@ -320,6 +321,13 @@ func CheckoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*CheckoutSession, e
 	}
 	if err := FromJSONB(c.RailState, &m.RailState, "checkout_sessions.rail_state"); err != nil {
 		return nil, err
+	}
+	if len(c.RoutingReason) > 0 {
+		var reason CheckoutRoutingReason
+		if err := FromJSONB(c.RoutingReason, &reason, "checkout_sessions.routing_reason"); err != nil {
+			return nil, err
+		}
+		m.RoutingReason = &reason
 	}
 	return m, nil
 }

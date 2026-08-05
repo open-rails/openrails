@@ -106,6 +106,10 @@ type SolanaPayService struct {
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
 	priceProvider      TokenPriceProvider
+	// mints reads SPL mint decimals from the chain (#817). Late-bound like the
+	// poller's merchant RPC: it needs the per-merchant RPC resolver, which is
+	// armed after service construction. nil = quotes fail closed.
+	mints MintDecimalsSource
 }
 
 // NewSolanaPayService creates a new SolanaPayService
@@ -133,6 +137,11 @@ func NewSolanaPayService(
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
 	}
+}
+
+// SetMintDecimals arms the on-chain mint-decimals resolver (#817).
+func (s *SolanaPayService) SetMintDecimals(mints MintDecimalsSource) {
+	s.mints = mints
 }
 
 func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChecker) {
@@ -216,8 +225,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
+	// Decimals come from the MINT on-chain, never from config (#817).
+	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
+	if err != nil {
+		return nil, err
+	}
+
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -268,14 +283,14 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// checkout session id on the wallet-built tx: per the Solana Pay spec the
 	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
 	// Discovery hint, never money truth.
-	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
-		TokenAmount:    formatTokenAmount(tokenUnits, tokenCfg.Decimals),
+		TokenAmount:    FormatBaseUnits(tokenUnits, decimals),
 		TokenUnits:     tokenUnits,
 		TokenMint:      tokenMint,
 		Recipient:      recipient,
@@ -289,26 +304,16 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}, nil
 }
 
-// buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
-func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference, memo string) string {
+// buildTransferRequestURL constructs the solana: URL per the Solana Pay spec.
+// `decimals` is the caller's already-resolved ON-CHAIN mint precision (#817) —
+// re-reading it here from a map without an ok-check turned an unknown symbol
+// into decimals=0, i.e. the raw base-unit count on the wire (a 10^d overcharge).
+func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, decimals int, tokenMint, tokenSymbol, reference, memo string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
-	// Get token config for decimals
-	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
-	if err != nil {
-		return baseURL // fallback without params if not configured
-	}
-	if solanaProc.Solana == nil {
-		return baseURL
-	}
-	tokenCfg := solanaProc.Solana.Tokens[tokenSymbol]
-
-	// Format amount with proper decimals
-	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)
-
 	// Add query params
-	params := fmt.Sprintf("?amount=%s", formattedAmount)
+	params := fmt.Sprintf("?amount=%s", FormatBaseUnits(amount, decimals))
 
 	// Add spl-token param if not native SOL
 	if tokenMint != "" && tokenSymbol != "SOL" {
@@ -346,17 +351,24 @@ func pendingReferenceMember(mid merchant.ID, reference string) string {
 }
 
 // parsePendingReferenceMember splits a set member back into merchant + ref.
-// ok=false = a pre-#728 bare-reference member (unattributable; dropped).
-func parsePendingReferenceMember(member string) (merchant.ID, string, bool) {
+// or#893: `<merchant_id>|<reference>` is the ONLY shape. A member that does not
+// parse is not history — the bare pre-#728 form has long since aged out of any
+// live set through its own TTL — it is corruption of a live poller input, and
+// the poller must say so rather than quietly discarding somebody's payment
+// reference.
+func parsePendingReferenceMember(member string) (merchant.ID, string, error) {
 	midStr, ref, cut := strings.Cut(member, "|")
 	if !cut {
-		return merchant.ID{}, "", false
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: expected <merchant_id>|<reference>", member)
 	}
 	id, err := uuid.Parse(midStr)
-	if err != nil || id == uuid.Nil || strings.TrimSpace(ref) == "" {
-		return merchant.ID{}, "", false
+	if err != nil || id == uuid.Nil {
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: %q is not a merchant id", member, midStr)
 	}
-	return merchant.ID(id), strings.TrimSpace(ref), true
+	if strings.TrimSpace(ref) == "" {
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: empty reference", member)
+	}
+	return merchant.ID(id), strings.TrimSpace(ref), nil
 }
 
 // storePendingPayment stores a pending payment in Redis
@@ -423,9 +435,14 @@ func (s *SolanaPayService) GetPendingPayment(ctx context.Context, reference stri
 }
 
 // PendingReferencesByMerchant returns the pending payment references grouped
-// by merchant (#728) — the poller's per-merchant fan-out input. Pre-#728 bare
-// members carry no merchant attribution and are dropped with a WARN (their
-// Redis records expire on their own TTL).
+// by merchant (#728) — the poller's per-merchant fan-out input.
+//
+// or#893: a member that does not parse FAILS the pass. Every writer
+// (storePendingPayment, RegisterPendingReference) requires a merchant and emits
+// the canonical form, so an unparseable member means the set was written by
+// something else — and silently SREMing it, as the pre-#728 compatibility lane
+// did, deletes a buyer's pending payment reference and with it the poller's
+// only chance to credit a payment that may already be on chain.
 func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map[merchant.ID][]string, error) {
 	if s.redis == nil {
 		return nil, nil
@@ -437,11 +454,9 @@ func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map
 	}
 	out := make(map[merchant.ID][]string, len(members))
 	for _, member := range members {
-		mid, ref, ok := parsePendingReferenceMember(member)
-		if !ok {
-			log.WithField("member", member).Warn("Dropping merchant-unattributed Solana pending reference (#728)")
-			s.redis.SRem(ctx, pendingSolanaPaymentsKey, member)
-			continue
+		mid, ref, err := parsePendingReferenceMember(member)
+		if err != nil {
+			return nil, fmt.Errorf("solana pending set is corrupt: %w", err)
 		}
 		out[mid] = append(out[mid], ref)
 	}
@@ -486,13 +501,16 @@ func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference s
 	key := solanaPayKeyPrefix + reference
 	var removeErr error
 
-	// Remove from set. Members are merchant-attributed (#728); the bare form is
-	// removed too so pre-#728 leftovers self-clean.
-	members := []interface{}{reference}
-	if mid, err := merchant.Require(ctx); err == nil {
-		members = append(members, pendingReferenceMember(mid, reference))
+	// Remove from set. or#893: only the canonical merchant-attributed member —
+	// the bare form is not a shape this set can hold, and SREMing a bare
+	// `<reference>` on a set that only ever holds `<merchant>|<reference>` was
+	// always a no-op dressed as cleanup. A removal with no merchant on ctx
+	// cannot name the member and must say so.
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("solana pending reference removal requires a merchant: %w", err)
 	}
-	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, members...).Err(); err != nil {
+	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
 		removeErr = fmt.Errorf("failed to remove from pending set: %w", err)
 	}
 
@@ -573,11 +591,15 @@ func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, referenc
 
 // GetPaymentStatus checks if a payment is pending, confirmed, or expired
 func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
-	// First check Postgres for confirmed payment
-	payment, err = s.getPaymentByReference(ctx, reference)
-	if err == nil && payment != nil {
-		return "confirmed", payment, nil
-	}
+	// or#869 (staticcheck SA4023): there used to be a "first check Postgres for
+	// a confirmed payment" step here, guarded by `err == nil && payment != nil`.
+	// It could never be taken — its helper, getPaymentByReference, was a stub
+	// that unconditionally returned an error, because a Solana reference is
+	// EPHEMERAL: it exists only for on-chain matching during checkout, and a
+	// confirmed payment is identified by its transaction signature instead.
+	// So there is no confirmed-payment lookup by reference to do, and pretending
+	// to try one made this function read as if there were. Redis is the only
+	// answer this reference can have.
 
 	// Check Redis for pending payment
 	pending, err := s.GetPendingPayment(ctx, reference)
@@ -601,26 +623,4 @@ func (s *SolanaPayService) getPaymentByReference(ctx context.Context, reference 
 	// Once a payment is confirmed, it's identified by its transaction signature.
 	// Return not found - callers should check Redis for pending status.
 	return nil, fmt.Errorf("payment not found for reference")
-}
-
-// formatTokenAmount formats a token amount with the appropriate decimal places
-func formatTokenAmount(amount uint64, decimals int) string {
-	if decimals <= 0 {
-		return fmt.Sprintf("%d", amount)
-	}
-	// Convert to string with decimal point
-	divisor := uint64(1)
-	for i := 0; i < decimals; i++ {
-		divisor *= 10
-	}
-	whole := amount / divisor
-	frac := amount % divisor
-	if frac == 0 {
-		return fmt.Sprintf("%d", whole)
-	}
-	// Format fractional part with leading zeros
-	fracStr := fmt.Sprintf("%0*d", decimals, frac)
-	// Trim trailing zeros
-	fracStr = strings.TrimRight(fracStr, "0")
-	return fmt.Sprintf("%d.%s", whole, fracStr)
 }

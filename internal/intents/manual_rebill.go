@@ -163,7 +163,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	// (lease reclaim, retry after a clean failure) verifies by reading before
 	// sending another charge.
 	if intent.Attempts > 1 {
-		txnID, found, verr := h.findSuccessfulSale(client, p)
+		txnID, found, verr := h.findSuccessfulSale(ctx, client, p)
 		if verr != nil {
 			return Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -200,7 +200,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		}).Warn("manual rebill: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
 	}
 
-	rebillResp, err := client.AttemptManualRebill(nmi.ManualRebillParams{
+	rebillResp, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
 		VaultID:          pm.RailCustomerRef,
 		BillingID:        pm.RailMethodRef,
 		SubscriptionID:   sub.RailSubscriptionID,
@@ -253,7 +253,7 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	txnID, found, err := h.findSuccessfulSale(client, p)
+	txnID, found, err := h.findSuccessfulSale(ctx, client, p)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -271,8 +271,8 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 // period shares the order reference, so a hit from ANY attempt counts — that
 // is the no-double-charge invariant. The probe itself lives on the NMI client
 // (nmi.FindSuccessfulSaleByOrderID) so the #367 liveness sync shares it.
-func (h *ManualRebillHandler) findSuccessfulSale(client *nmi.NMIClient, p ManualRebillPayload) (transactionID string, found bool, err error) {
-	return client.FindSuccessfulSaleByOrderID(p.OrderReference)
+func (h *ManualRebillHandler) findSuccessfulSale(ctx context.Context, client *nmi.NMIClient, p ManualRebillPayload) (transactionID string, found bool, err error) {
+	return client.FindSuccessfulSaleByOrderID(ctx, p.OrderReference)
 }
 
 // finalizeSuccess repairs the local lifecycle from a confirmed successful

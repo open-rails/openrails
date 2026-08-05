@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	openrailsdb "github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -33,6 +32,19 @@ var (
 	ErrSubscriptionNotActive    = errors.New("subscription is not active")
 	ErrNotificationNotFound     = errors.New("notification not found")
 	ErrNotificationAccessDenied = errors.New("notification does not belong to user")
+
+	// ErrSolanaCancelNeedsWalletSignature refuses the rail-agnostic cancel on
+	// Solana (or#896). A Solana cancel is an on-chain transaction the
+	// SUBSCRIBER'S wallet must sign — OpenRails holds no authority to revoke
+	// the delegation and never DB-only "soft cancels" a chain-truth
+	// subscription. This used to fall through the worker's default branch into
+	// a facade with no Solana case and fail permanently, which read as a bug
+	// rather than a rail fact.
+	ErrSolanaCancelNeedsWalletSignature = errors.New(
+		"cancelling a Solana subscription requires the subscriber's wallet signature: " +
+			"POST /v1/me/subscriptions/{id}/solana-cancel-tx to build the unsigned cancel_subscription " +
+			"transaction, sign and send it from the wallet, then POST /v1/me/subscriptions/{id}/solana-cancel " +
+			"with the signature to confirm and mirror it")
 )
 
 // UserSubscriptionService handles user-facing subscription operations
@@ -251,7 +263,6 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 		Recurring:  recurring,
 		Product:    api.FormatProductID(p.ProductID),
 		Active:     p.IsPurchasable(),
-		Livemode:   false,
 		Metadata:   map[string]string{},
 		Created:    api.ToUnix(p.CreatedAt),
 	}
@@ -269,7 +280,6 @@ func productToAPIObject(p *models.Product) api.ProductObject {
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
-		Livemode:         false,
 		Metadata:         map[string]string{},
 		Created:          api.ToUnix(p.CreatedAt),
 		Updated:          api.ToUnix(p.UpdatedAt),
@@ -515,10 +525,10 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			if subscription.RailSubscriptionID != "" {
 				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
 				if err != nil {
-					return fmt.Errorf("resolve subscription provider account: %w", err)
+					return fmt.Errorf("resolve subscription PSP: %w", err)
 				}
 				if ok {
-					if err := client.DeleteRecurringSubscription(subscription.RailSubscriptionID); err != nil {
+					if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {
 						return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
 					}
 				}
@@ -537,6 +547,8 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
 			return s.ccbillCancel.WithTx(tx).ScheduleCCBillCancel(ctx, userID, subscription.ID)
 		}
+	case subscription.Rail == models.RailSolana:
+		return ErrSolanaCancelNeedsWalletSignature
 	default:
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
@@ -562,7 +574,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// Persist the cancellation; any durable remote intent (deferred NMI delete,
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := openrailsdb.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(tx)
 		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
 		if err := txSubSvc.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription status: %w", err)

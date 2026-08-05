@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 func TestCancelSubscriptionRequiresAuth(t *testing.T) {
@@ -156,4 +157,47 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 
 	routerA.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// or#896: the rail-agnostic cancel used to accept a Solana subscription, queue
+// a job, fall through the worker's default branch into a facade with no Solana
+// case, and fail permanently. A Solana cancel is an on-chain transaction the
+// SUBSCRIBER'S wallet must sign, so the request is refused synchronously with
+// the dedicated endpoints named — and nothing local changes.
+func TestCancelSubscriptionSolanaNamesDedicatedEndpoints(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	userID := uuid.New().String()
+	router := newHostSeamSelfRouter(t, suite, userID, nil)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		Rail:      models.RailSolana,
+		RailSubID: "test-solana-sub-" + uuid.NewString(),
+	})
+
+	jsonBody, _ := json.Marshal(map[string]string{"feedback": "I want to cancel"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	body := w.Body.String()
+	assert.Contains(t, body, "solana-cancel-tx", "the refusal must name the prepare endpoint")
+	assert.Contains(t, body, "solana-cancel", "the refusal must name the confirm endpoint")
+	assert.Contains(t, body, "wallet")
+
+	assert.Equal(t, models.StatusActive, suite.GetSubscription(sub.ID).Status,
+		"a refused cancel leaves the subscription untouched")
+
+	// The service refuses it too, so no other producer can drive a DB-only
+	// "soft cancel" of a chain-truth subscription.
+	err := suite.App.Runtime.UserSubscriptionService.CancelUserSubscription(suite.MerchantCtx(), userID, "direct")
+	require.ErrorIs(t, err, subscriptions.ErrSolanaCancelNeedsWalletSignature)
 }

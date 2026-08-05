@@ -57,7 +57,7 @@ type fakeLocal struct {
 	payments []LocalPayment
 }
 
-func (l *fakeLocal) Load(ctx context.Context, provider Provider, _ *uuid.UUID) (*LocalState, error) {
+func (l *fakeLocal) Load(ctx context.Context, provider Provider, _ uuid.UUID) (*LocalState, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cp := LocalState{
@@ -74,7 +74,7 @@ func (l *fakeLocal) entsSnapshot() []localEntitlement {
 	return append([]localEntitlement(nil), l.ents...)
 }
 
-func (l *fakeLocal) PaymentsByTransactionIDs(ctx context.Context, provider Provider, _ *uuid.UUID, ids []string) ([]LocalPayment, error) {
+func (l *fakeLocal) PaymentsByTransactionIDs(ctx context.Context, provider Provider, _ uuid.UUID, ids []string) ([]LocalPayment, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	want := map[string]bool{}
@@ -419,7 +419,7 @@ func (w *fakeWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bo
 	return true, nil
 }
 
-func (w *fakeWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error) {
+func (w *fakeWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
 	w.calls["adopt_vault"]++
 	w.local.mu.Lock()
 	defer w.local.mu.Unlock()
@@ -486,7 +486,7 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 		CustomerID:            a.CustomerID,
 		PriceID:               &priceID,
 		ProductID:             a.ProductID,
-		Status:                a.Status,
+		Status:                string(a.Status),
 		Rail:                  a.Rail,
 		RailSubscriptionID:    a.RailSubscriptionID,
 		UserEmail:             a.UserEmail,
@@ -536,6 +536,35 @@ func tp(t time.Time) *time.Time { return &t }
 
 var testNow = time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 
+// fakeRunRecorder is the in-memory DestructiveRunRecorder these unit tests need
+// (or#859: an enforce pass with no run record REFUSES). It records nothing that
+// is asserted on here — the reversal itself is proven against Postgres in
+// converge_rollback_integration_test.go.
+type fakeRunRecorder struct {
+	opened   int
+	captured int
+	finished []string
+}
+
+func (r *fakeRunRecorder) Open(context.Context, OpenDestructiveRunParams) (uuid.UUID, error) {
+	r.opened++
+	return uuid.New(), nil
+}
+
+func (r *fakeRunRecorder) CaptureSubscription(context.Context, uuid.UUID, uuid.UUID) (time.Time, error) {
+	r.captured++
+	return testNow, nil
+}
+
+func (r *fakeRunRecorder) StampIntents(context.Context, uuid.UUID, uuid.UUID, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (r *fakeRunRecorder) Finish(_ context.Context, _ uuid.UUID, status string, _ map[string]int) error {
+	r.finished = append(r.finished, status)
+	return nil
+}
+
 func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*Engine, *memStore, *fakeWriter) {
 	store := newMemStore()
 	writer := newFakeWriter(local)
@@ -545,6 +574,7 @@ func newTestEngine(provider Provider, snap *RemoteSnapshot, local *fakeLocal) (*
 		Local:     local,
 		Writer:    writer,
 		Decisions: &fakeDecisions{local: local, calls: writer.calls},
+		Runs:      &fakeRunRecorder{},
 		Now:       func() time.Time { return testNow },
 	}
 	return eng, store, writer
@@ -620,7 +650,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
@@ -648,7 +678,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -670,13 +700,17 @@ func TestDiffTaxonomy(t *testing.T) {
 		snap := &RemoteSnapshot{
 			Provider:     ProviderNMI,
 			Capabilities: Capabilities{Subscriptions: true},
+			// #842: only a roster that PROVES it covered everything makes
+			// absence actionable.
+			Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
 			Subscriptions: []RemoteSubscription{
 				{RailSubscriptionID: "alive-1", Status: SubscriptionStatusActive, NextBillingAt: tp(*alive.CurrentPeriodEndsAt)},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		// Below the breaker threshold (2 local live), so absence is honored.
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		// 1 of 2 remote-live clears the ratio breaker, 1 cancellation clears the
+		// per-pass cap.
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		ps2 := findByType(res.Findings, FindingLocalActiveRemoteDead)
@@ -692,7 +726,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["revoke"])
 
 		// Local state converged: the subscription is cancelled, entitlements gone.
-		st, _ := local.Load(ctx, ProviderNMI, nil)
+		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
 		for _, s := range st.Subscriptions {
 			if s.ID == dead.ID {
 				assert.Equal(t, "cancelled", s.Status)
@@ -716,7 +750,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, _ := newTestEngine(ProviderStripe, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 		require.NoError(t, err)
 		ps2 := findByType(res.Findings, FindingLocalActiveRemoteDead)
 		require.Len(t, ps2, 1)
@@ -733,7 +767,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			// Empty ACTIVEMEMBERS + no termination events: proves nothing.
 		}
 		eng, _, _ := newTestEngine(ProviderCCBill, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderCCBill}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderCCBill}, PSPs: testPSPs(ProviderCCBill)})
 		require.NoError(t, err)
 		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead))
 	})
@@ -753,7 +787,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderStripe, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 		require.NoError(t, err)
 		ps3 := findByType(res.Findings, FindingStatusMismatch)
 		require.Len(t, ps3, 1)
@@ -772,7 +806,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		rec := store.record(ProviderStripe, FindingStatusMismatch, sub.ID.String())
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 
-		st, _ := local.Load(ctx, ProviderStripe, nil)
+		st, _ := local.Load(ctx, ProviderStripe, uuid.Nil)
 		assert.Equal(t, "active", st.Subscriptions[0].Status)
 		require.NotNil(t, st.Subscriptions[0].CurrentPeriodEndsAt)
 		assert.True(t, st.Subscriptions[0].CurrentPeriodEndsAt.Equal(remoteEnd))
@@ -793,7 +827,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, writer := newTestEngine(ProviderStripe, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 		require.NoError(t, err)
 		ps3 := findByType(res.Findings, FindingStatusMismatch)
 		require.Len(t, ps3, 1)
@@ -819,7 +853,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		ps4 := findByType(res.Findings, FindingChargeMissingLocal)
@@ -831,7 +865,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 
 		// Payment exists + entitlement granted for the current period.
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-1001"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, uuid.Nil, []string{"txn-1001"})
 		require.Len(t, payments, 1)
 		assert.Equal(t, sub.CustomerID, payments[0].CustomerID)
 		ents := local.entsSnapshot()
@@ -861,7 +895,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Transactions: []RemoteTransaction{txn},
 		}
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps4 := findByType(res.Findings, FindingChargeMissingLocal)
 		require.Len(t, ps4, 1)
@@ -896,7 +930,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			Transactions: []RemoteTransaction{refund},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		ps5 := findByType(res.Findings, FindingRefundUnrecorded)
@@ -904,7 +938,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["record_refund"])
 		rec := store.record(ProviderNMI, FindingRefundUnrecorded, "txn-5001")
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-5001"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, uuid.Nil, []string{"txn-5001"})
 		require.Len(t, payments, 1)
 		assert.Equal(t, "refunded", payments[0].Status)
 	})
@@ -930,7 +964,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, _ := newTestEngine(ProviderStripe, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 		require.NoError(t, err)
 		assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded))
 	})
@@ -955,7 +989,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, writer := newTestEngine(ProviderStripe, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 		require.NoError(t, err)
 		ps6 := findByType(res.Findings, FindingChargebackActiveSub)
 		require.Len(t, ps6, 1)
@@ -970,7 +1004,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		sub := liveLocalSub(ProviderNMI, "nmi-sub-7")
 		pm := LocalPaymentMethod{
 			ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi",
-			VaultID: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
+			RailCustomerRef: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
 		}
 		local.state.Subscriptions = []LocalSubscription{sub}
 		local.state.PaymentMethods = []LocalPaymentMethod{pm}
@@ -980,20 +1014,20 @@ func TestDiffTaxonomy(t *testing.T) {
 			Subscriptions: []RemoteSubscription{
 				{RailSubscriptionID: "nmi-sub-7", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 			},
-			VaultEntries: []RemoteVaultEntry{
-				{CustomerVaultID: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
+			PaymentMethods: []RemotePaymentMethod{
+				{RailCustomerRef: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
 			},
 		}
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
-		ps7 := findByType(res.Findings, FindingVaultMismatch)
+		ps7 := findByType(res.Findings, FindingPaymentMethodMismatch)
 		require.Len(t, ps7, 1)
 		assert.Equal(t, "vault-7", ps7[0].SubjectKey)
 		assert.Equal(t, 1, writer.calls["adopt_vault"])
-		rec := store.record(ProviderNMI, FindingVaultMismatch, "vault-7")
+		rec := store.record(ProviderNMI, FindingPaymentMethodMismatch, "vault-7")
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		st, _ := local.Load(ctx, ProviderNMI, nil)
+		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
 		assert.Equal(t, "2222", st.PaymentMethods[0].LastFour)
 	})
 
@@ -1015,7 +1049,7 @@ func TestDiffTaxonomy(t *testing.T) {
 			},
 		}
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps8 := findByType(res.Findings, FindingDuplicateSubscriptions)
 		require.Len(t, ps8, 1)
@@ -1049,7 +1083,7 @@ func TestPullProofsOnlyFromCompletedProviders(t *testing.T) {
 	eng, _, _ := newTestEngine(ProviderNMI, okSnap, local)
 	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, err: fmt.Errorf("stripe down")}
 
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, PSPs: testPSPs(ProviderNMI, ProviderStripe, ProviderCCBill, ProviderSolana)})
 	require.Error(t, err, "the failed provider fails the run")
 	require.NotNil(t, res)
 
@@ -1069,12 +1103,13 @@ func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
 		Capabilities: Capabilities{Subscriptions: true},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Subscriptions: []RemoteSubscription{
 			{RailSubscriptionID: "nmi-0", Status: SubscriptionStatusActive},
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "circuit breaker")
 	assert.Equal(t, "failed", res.Status)
@@ -1083,17 +1118,32 @@ func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
 	assert.Zero(t, writer.totalCalls())
 }
 
-func TestCircuitBreakerAllowsSmallRosters(t *testing.T) {
+// #837: the breaker used to be DISABLED below ten local live subscriptions —
+// this exact fixture asserted that five subscribers could all be cancelled off
+// an empty roster. Small books need MORE protection, not an exemption, so the
+// floor is gone and a nine-subscriber merchant is protected too.
+func TestSmallMerchantsAreProtectedFromEmptyRosters(t *testing.T) {
 	ctx := context.Background()
-	local := &fakeLocal{}
-	for i := 0; i < 5; i++ { // below MinLocal: absence is honored
-		local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
+	for _, book := range []int{1, 5, 9} {
+		local := &fakeLocal{}
+		for i := 0; i < book; i++ {
+			local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
+		}
+		// An exhaustive-but-empty roster: the shape a misdeclared account_id or
+		// a rotated credential produces.
+		snap := &RemoteSnapshot{
+			Provider:     ProviderNMI,
+			Capabilities: Capabilities{Subscriptions: true},
+			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
+		}
+		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
+		require.Error(t, err, "book of %d: an empty roster must not sail through", book)
+		assert.Contains(t, err.Error(), "circuit breaker")
+		assert.True(t, res.Summary.Providers["nmi"].Aborted)
+		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead), "book of %d", book)
+		assert.Zero(t, writer.calls["cancel"], "book of %d", book)
 	}
-	snap := &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Subscriptions: true}}
-	eng, _, _ := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
-	require.NoError(t, err)
-	assert.Len(t, findByType(res.Findings, FindingLocalActiveRemoteDead), 5)
 }
 
 func TestIdentityStableAcrossRuns(t *testing.T) {
@@ -1111,12 +1161,12 @@ func TestIdentityStableAcrossRuns(t *testing.T) {
 	}
 	eng, store, _ := newTestEngine(ProviderStripe, snap, local)
 
-	res1, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+	res1, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 	require.Len(t, res1.Findings, 1)
 	assert.Equal(t, 1, res1.Summary.Providers["stripe"].NewFindings)
 
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 	require.Len(t, res2.Findings, 1)
 	assert.Equal(t, 0, res2.Summary.Providers["stripe"].NewFindings)
@@ -1141,7 +1191,7 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 		},
 	}
 	eng, store, _ := newTestEngine(ProviderStripe, deadSnap, local)
-	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 	require.Equal(t, FindingStatusReconcileRequired, store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String()).Status)
 
@@ -1153,7 +1203,7 @@ func TestAutoResolveOnDisappearance(t *testing.T) {
 			{RailSubscriptionID: "sub_vanish", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
 		},
 	}}
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
@@ -1181,7 +1231,7 @@ func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 		},
 	}
 	eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 
 	ps3 := findByType(res.Findings, FindingStatusMismatch)
@@ -1198,7 +1248,7 @@ func TestCapabilityGating(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}
 	sub := liveLocalSub(ProviderNMI, "nmi-gate")
-	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
+	pm := LocalPaymentMethod{ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi", RailCustomerRef: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
 	local.state.Subscriptions = []LocalSubscription{sub}
 	local.state.PaymentMethods = []LocalPaymentMethod{pm}
 	subID := sub.ID
@@ -1217,15 +1267,15 @@ func TestCapabilityGating(t *testing.T) {
 			{TransactionID: "cb-1", Type: TransactionTypeChargeback, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"order_id": sub.ID.String()})},
 			{TransactionID: "rf-1", Type: TransactionTypeRefund, Success: true, AmountCents: 999, OccurredAt: testNow.Add(-time.Hour), Raw: rawJSON(map[string]any{"order_id": sub.ID.String()})},
 		},
-		VaultEntries: []RemoteVaultEntry{{CustomerVaultID: "vault-gate", CardLast4: "9999", CardExpiry: "1299"}},
+		PaymentMethods: []RemotePaymentMethod{{RailCustomerRef: "vault-gate", CardLast4: "9999", CardExpiry: "1299"}},
 	}
 	eng, _, _ := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 
 	assert.Empty(t, findByType(res.Findings, FindingChargebackActiveSub), "PS-6 must be capability-gated")
 	assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded), "PS-5 must be capability-gated")
-	assert.Empty(t, findByType(res.Findings, FindingVaultMismatch), "PS-7 must be capability-gated")
+	assert.Empty(t, findByType(res.Findings, FindingPaymentMethodMismatch), "PS-7 must be capability-gated")
 }
 
 func TestEnforceIsIdempotent(t *testing.T) {
@@ -1243,7 +1293,7 @@ func TestEnforceIsIdempotent(t *testing.T) {
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
 
-	res1, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res1, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res1.Summary.Providers["nmi"].AutoFixed)
 	firstCalls := writer.totalCalls()
@@ -1251,7 +1301,7 @@ func TestEnforceIsIdempotent(t *testing.T) {
 
 	// Second enforce run: local state already converged, so the diff is empty
 	// and no write happens.
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 	assert.Empty(t, res2.Findings, "second enforce run must see a converged state")
 	assert.Equal(t, 0, res2.Summary.Providers["nmi"].AutoFixed)
@@ -1276,7 +1326,7 @@ func TestAdvisoryNeverWrites(t *testing.T) {
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Findings)
 	assert.Zero(t, writer.totalCalls(), "advisory mode performs zero local writes")
@@ -1298,7 +1348,7 @@ func TestDismissedFindingsStayDismissed(t *testing.T) {
 		},
 	}
 	eng, store, writer := newTestEngine(ProviderStripe, snap, local)
-	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}})
+	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 
 	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
@@ -1306,7 +1356,7 @@ func TestDismissedFindingsStayDismissed(t *testing.T) {
 	rec.Status = FindingStatusIgnored
 	store.mu.Unlock()
 
-	_, err = eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}})
+	_, err = eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
 	require.NoError(t, err)
 	rec = store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
 	assert.Equal(t, FindingStatusIgnored, rec.Status)
@@ -1356,7 +1406,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 		ID:        uuid.New(),
 		ProductID: uuid.New(),
 		Amount:    999,
-		Currency:  "usd",
+		Currency:  "USD",
 		PSPLinks: map[string]map[string]string{
 			// The provider-link key is the merchant's ACCOUNT key with the
 			// rail recorded inside the entry.
@@ -1366,7 +1416,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 	local.state.Prices = []LocalPrice{price}
 	local.state.PaymentMethods = []LocalPaymentMethod{{
 		ID: uuid.New(), CustomerID: subjectID, Rail: "nmi",
-		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
+		RailCustomerRef: "vault-77", LastFour: "1111", ExpiryDate: "1029",
 	}}
 	end := testNow.Add(20 * 24 * time.Hour)
 	lastBilled := testNow.Add(-10 * 24 * time.Hour)
@@ -1383,7 +1433,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 				NextBillingAt:      &end,
 				LastBilledAt:       &lastBilled,
 				AmountCents:        999,
-				Currency:           "usd",
+				Currency:           "USD",
 			},
 		},
 		Transactions: []RemoteTransaction{
@@ -1393,8 +1443,8 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 				Raw: rawJSON(map[string]any{"customer_vault_id": "vault-77"}),
 			},
 		},
-		VaultEntries: []RemoteVaultEntry{
-			{CustomerVaultID: "vault-77", CardLast4: "1111", CardExpiry: "1029"},
+		PaymentMethods: []RemotePaymentMethod{
+			{RailCustomerRef: "vault-77", CardLast4: "1111", CardExpiry: "1029"},
 		},
 	}
 	return local, snap, price
@@ -1406,7 +1456,7 @@ func TestMaterializePS1(t *testing.T) {
 	t.Run("advisory PS-1 stays requires_review (advisory never writes)", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1419,7 +1469,7 @@ func TestMaterializePS1(t *testing.T) {
 	t.Run("resolvable PS-1 materializes with payment + entitlements and resolves enforced", func(t *testing.T) {
 		local, snap, price := materializeFixture()
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
@@ -1436,7 +1486,7 @@ func TestMaterializePS1(t *testing.T) {
 		assert.Equal(t, true, rec.ResolutionEvid["payment_backfilled"])
 
 		// The local subscription exists with remote status/periods…
-		st, _ := local.Load(ctx, ProviderNMI, nil)
+		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
 		var created *LocalSubscription
 		for i := range st.Subscriptions {
 			if st.Subscriptions[i].RailSubscriptionID == "remote-77" {
@@ -1450,14 +1500,14 @@ func TestMaterializePS1(t *testing.T) {
 		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
 
 		// …the snapshot charge is backfilled and entitlements granted.
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-mat-1"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, uuid.Nil, []string{"txn-mat-1"})
 		require.Len(t, payments, 1)
 		ents := local.entsSnapshot()
 		require.Len(t, ents, 1)
 		assert.Equal(t, created.ID, ents[0].SourceID)
 
 		// Re-run: converged, no duplicate, no second materialize write.
-		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		assert.Empty(t, findByType(res2.Findings, FindingRemoteSubMissingLocal))
 		assert.Equal(t, 1, writer.calls["materialize"])
@@ -1473,7 +1523,7 @@ func TestMaterializePS1(t *testing.T) {
 			RailSubscriptionID: "other-1", Status: SubscriptionStatusActive,
 		})
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1486,7 +1536,7 @@ func TestMaterializePS1(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		local.state.Prices = nil // no provider link anywhere
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1500,7 +1550,7 @@ func TestMaterializePS1(t *testing.T) {
 		snap.Subscriptions[0].Status = SubscriptionStatusPastDue
 		snap.Subscriptions[0].NextBillingAt = nil
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1552,7 +1602,7 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 			{Table: "subscription_events", EventType: "subscription_cancelled", Rail: "nmi", RailSubscriptionID: "nmi-hist", OccurredAt: histAt.Add(24 * time.Hour)},
 			{Table: "payment_events", EventType: "charge_failed", Rail: "nmi", OccurredAt: histAt}, // uncorrelated: no ids
 		}}
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 
 		d := res.Summary.Providers["nmi"].Dunning
@@ -1589,7 +1639,7 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 		local, snap, _ := newFixture()
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 		eng.History = &fakeHistorySource{configured: true, err: fmt.Errorf("dial tcp: connection refused")}
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err, "history source failure must not fail the run")
 		d := res.Summary.Providers["nmi"].Dunning
 		require.NotNil(t, d)
@@ -1601,7 +1651,7 @@ func TestDunningForensicsHistorySource(t *testing.T) {
 		local, snap, _ := newFixture()
 		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
 		eng.History = &fakeHistorySource{configured: false}
-		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 		require.NoError(t, err)
 		d := res.Summary.Providers["nmi"].Dunning
 		require.NotNil(t, d)
@@ -1625,4 +1675,76 @@ func TestParseRebillOrderID(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = parseRebillOrderID("upgrade-12345678-87654321")
 	assert.False(t, ok)
+}
+
+// testPSPs is the or#893 binding every pull now requires: a pass is bound to
+// the ONE PSP whose credentials armed its fetcher. Unit fakes ignore the id;
+// what matters is that the engine refuses to run without it.
+func testPSPs(providers ...Provider) map[Provider]PSPBinding {
+	out := make(map[Provider]PSPBinding, len(providers))
+	for _, p := range providers {
+		out[p] = PSPBinding{ID: uuid.New(), Rail: string(p), AccountID: string(p) + "-test-account"}
+	}
+	return out
+}
+
+// or#893: a pull section with no PSP binding used to run account-agnostically —
+// it read the rail's ENTIRE local mirror (so PSP A's roster judged PSP B's
+// subscriptions) and stamped every row it wrote with NULL provenance. The
+// binding is now a precondition, and the refusal is the whole point: the pull
+// plane always knows which PSP armed it, so an unbound section is a wiring bug,
+// never a lane to fall back to.
+func TestRunRefusesAProviderSectionWithNoPSPBinding(t *testing.T) {
+	ctx := context.Background()
+	local := &fakeLocal{}
+	dead := liveLocalSub(ProviderNMI, "vanished-1")
+	local.state.Subscriptions = []LocalSubscription{dead}
+	withLiveEntitlement(local, &dead)
+	snap := &RemoteSnapshot{
+		Provider:      ProviderNMI,
+		Capabilities:  Capabilities{Subscriptions: true},
+		Coverage:      SnapshotCoverage{SubscriptionsExhaustive: true},
+		Subscriptions: []RemoteSubscription{},
+	}
+	eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+
+	_, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no PSP binding for provider nmi")
+	// And it refused BEFORE touching local state: no cancel, no mirror write.
+	assert.Zero(t, writer.totalCalls())
+
+	// A zero-uuid binding is the same absence wearing a struct.
+	_, err = eng.Run(ctx, RunParams{
+		Mode:      ModeEnforce,
+		Providers: []Provider{ProviderNMI},
+		PSPs:      map[Provider]PSPBinding{ProviderNMI: {Rail: "nmi", AccountID: "mobius"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no PSP binding for provider nmi")
+	assert.Zero(t, writer.totalCalls())
+}
+
+// or#893: every local write the pass plans carries the pull's PSP. Before, a
+// nil binding short-circuited bindApplyActions and the mirror row landed with
+// NULL provenance — invisible to a PSP-scoped prune, and indistinguishable from
+// the row a sibling PSP would have produced.
+func TestApplyActionsCarryThePullsPSP(t *testing.T) {
+	psp := uuid.New()
+	findings := []Finding{
+		{Apply: &ApplyAction{BackfillPayment: &BackfillPaymentAction{TransactionID: "txn-1"}}},
+		{Apply: &ApplyAction{RecordRefund: &RecordRefundAction{TransactionID: "re-1"}}},
+		{Apply: &ApplyAction{Materialize: &MaterializeSubscriptionAction{
+			RailSubscriptionID: "sub-1",
+			Backfill:           &BackfillPaymentAction{TransactionID: "txn-2"},
+		}}},
+	}
+	bindApplyActions(findings, psp)
+	require.NotNil(t, findings[0].Apply.BackfillPayment.PspID)
+	assert.Equal(t, psp, *findings[0].Apply.BackfillPayment.PspID)
+	require.NotNil(t, findings[1].Apply.RecordRefund.PspID)
+	assert.Equal(t, psp, *findings[1].Apply.RecordRefund.PspID)
+	assert.Equal(t, psp, findings[2].Apply.Materialize.PspID)
+	require.NotNil(t, findings[2].Apply.Materialize.Backfill.PspID)
+	assert.Equal(t, psp, *findings[2].Apply.Materialize.Backfill.PspID)
 }

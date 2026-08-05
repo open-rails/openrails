@@ -35,21 +35,23 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 			err     error
 		)
 		if strings.TrimSpace(g.accountID) != "" {
-			account, ok, err = solanaRailMerchantAccountByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
+			account, ok, err = solanaPSPByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
 		} else {
-			account, ok, err = primarySolanaRailMerchantAccount(ctx, g.database, merchantID, g.environment)
+			account, ok, err = primarySolanaPSP(ctx, g.database, merchantID, g.environment)
 		}
 		if err != nil {
 			return "", err
 		}
 		if !ok {
-			return "", fmt.Errorf("solana: no active provider account for signing key")
+			return "", fmt.Errorf("solana: no active PSP for signing key")
 		}
-		secretName, err := merchants.PSPSecretName(account.Rail, account.Environment, account.AccountID, "private_key")
+		// or#812: read at or above the rotation version floor the PSP row
+		// records, so a key rotated on another node is never served stale here.
+		ref, err := merchants.PSPSecretRef(account.Rail, account.Environment, account.AccountID, account.Evidence, "private_key")
 		if err != nil {
 			return "", err
 		}
-		sec, err := g.store.Get(ctx, merchantID, secretName)
+		sec, err := merchants.ReadSecretRef(ctx, g.store, merchantID, ref)
 		if err != nil {
 			return "", err
 		}
@@ -62,11 +64,11 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID
 	return sec.Value, nil
 }
 
-// NewSignerFromRailMerchantAccounts builds the per-merchant signer. environment
+// NewSignerFromPSPs builds the per-merchant signer. environment
 // is required (#681): deployment posture, via config.ExpectedProviderEnvironment.
-func NewSignerFromRailMerchantAccounts(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment string) solanaint.Signer {
+func NewSignerFromPSPs(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment string) solanaint.Signer {
 	env := strings.TrimSpace(environment)
-	return railMerchantAccountSigner{
+	return pspSigner{
 		keypair:     solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database, environment: env}, ttl),
 		store:       store,
 		transit:     transit,
@@ -76,7 +78,7 @@ func NewSignerFromRailMerchantAccounts(store merchants.MerchantSecretReader, tra
 	}
 }
 
-type railMerchantAccountSigner struct {
+type pspSigner struct {
 	keypair     solanaint.Signer
 	store       merchants.MerchantSecretReader
 	transit     solanaint.TransitClient
@@ -85,7 +87,7 @@ type railMerchantAccountSigner struct {
 	ttl         time.Duration
 }
 
-func (s railMerchantAccountSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
+func (s pspSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
 	signer, err := s.resolve(ctx, merchantID)
 	if err != nil {
 		return solanago.PublicKey{}, err
@@ -93,7 +95,7 @@ func (s railMerchantAccountSigner) PublicKey(ctx context.Context, merchantID mer
 	return signer.PublicKey(ctx, merchantID)
 }
 
-func (s railMerchantAccountSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
+func (s pspSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
 	signer, err := s.resolve(ctx, merchantID)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -101,7 +103,7 @@ func (s railMerchantAccountSigner) SignMessage(ctx context.Context, merchantID m
 	return signer.SignMessage(ctx, merchantID, message)
 }
 
-func (s railMerchantAccountSigner) SignMessageForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error) {
+func (s pspSigner) SignMessageForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error) {
 	signer, err := s.resolveForPublicKey(ctx, merchantID, publicKey.String())
 	if err != nil {
 		return solanago.Signature{}, err
@@ -109,8 +111,8 @@ func (s railMerchantAccountSigner) SignMessageForPublicKey(ctx context.Context, 
 	return signer.SignMessage(ctx, merchantID, message)
 }
 
-func (s railMerchantAccountSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
-	account, ok, err := primarySolanaRailMerchantAccount(ctx, s.db, merchantID, s.environment)
+func (s pspSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanaint.Signer, error) {
+	account, ok, err := primarySolanaPSP(ctx, s.db, merchantID, s.environment)
 	if err != nil {
 		return nil, err
 	}
@@ -121,23 +123,23 @@ func (s railMerchantAccountSigner) resolve(ctx context.Context, merchantID merch
 			return s.keypair, nil
 		case "vault_transit":
 			if s.transit == nil {
-				return nil, fmt.Errorf("solana: provider account %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
+				return nil, fmt.Errorf("solana: PSP %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
 			}
 			return solanaint.NewTransitSigner(s.transit, func(merchant.ID) string { return cfg.Key }, s.ttl), nil
 		default:
 			return nil, fmt.Errorf("solana: unknown signer mode %q", cfg.Mode)
 		}
 	}
-	return nil, fmt.Errorf("solana: no active provider account for signer")
+	return nil, fmt.Errorf("solana: no active PSP for signer")
 }
 
-func (s railMerchantAccountSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey string) (solanaint.Signer, error) {
-	account, ok, err := solanaRailMerchantAccountByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
+func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.ID, publicKey string) (solanaint.Signer, error) {
+	account, ok, err := solanaPSPByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("solana: no provider account for merchant address %s", publicKey)
+		return nil, fmt.Errorf("solana: no PSP for merchant address %s", publicKey)
 	}
 	cfg := signerConfigFromEvidence(account.Evidence)
 	switch cfg.Mode {
@@ -150,7 +152,7 @@ func (s railMerchantAccountSigner) resolveForPublicKey(ctx context.Context, merc
 		}, s.ttl), nil
 	case "vault_transit":
 		if s.transit == nil {
-			return nil, fmt.Errorf("solana: provider account %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
+			return nil, fmt.Errorf("solana: PSP %s uses vault_transit signer but Vault transit is unavailable", account.AccountID)
 		}
 		return solanaint.NewTransitSigner(s.transit, func(merchant.ID) string { return cfg.Key }, s.ttl), nil
 	default:
@@ -173,13 +175,13 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPsp, bool, error) {
+func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPsp, bool, error) {
 	if database == nil || merchantID.IsZero() {
 		return gen.OpenrailsPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: provider account environment is required")
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
 	var row gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -194,18 +196,18 @@ func primarySolanaRailMerchantAccount(ctx context.Context, database *db.DB, merc
 		if errors.Is(err, pgx.ErrNoRows) {
 			return gen.OpenrailsPsp{}, false, nil
 		}
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup active provider account: %w", err)
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup active PSP: %w", err)
 	}
 	return row, true, nil
 }
 
-func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPsp, bool, error) {
+func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPsp, bool, error) {
 	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
 		return gen.OpenrailsPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: provider account environment is required")
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
 	var row gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -221,7 +223,7 @@ func solanaRailMerchantAccountByIdentity(ctx context.Context, database *db.DB, m
 		if errors.Is(err, pgx.ErrNoRows) {
 			return gen.OpenrailsPsp{}, false, nil
 		}
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup provider account %s: %w", accountID, err)
+		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
 	}
 	return row, true, nil
 }

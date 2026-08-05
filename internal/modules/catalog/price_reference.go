@@ -3,8 +3,6 @@ package catalog
 import (
 	"context"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -26,14 +24,4 @@ func ResolveReference(ctx context.Context, prices *PriceService, ref string) (*m
 		return nil, err
 	}
 	return prices.GetCurrentByKey(ctx, tid.UUID(), ref)
-}
-
-// ResolveReferenceForMerchant is ResolveReference for callers that already
-// have the merchant id in hand (no ambient request context to Require it
-// from) — e.g. batch/background jobs.
-func ResolveReferenceForMerchant(ctx context.Context, prices *PriceService, merchantID uuid.UUID, ref string) (*models.Price, error) {
-	if id, err := api.ParsePriceID(ref); err == nil {
-		return prices.GetByID(ctx, id)
-	}
-	return prices.GetCurrentByKey(ctx, merchantID, ref)
 }

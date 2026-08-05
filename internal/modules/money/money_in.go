@@ -52,12 +52,6 @@ type ChargeResult struct {
 	CapturedStoredCredentialRef string
 }
 
-// Alerter delivers a low-balance notification. Implemented by the notification
-// layer; faked in tests (#240).
-type Alerter interface {
-	LowBalanceAlert(ctx context.Context, payer identity.CustomerID, available, threshold int64) error
-}
-
 // moneyInAccount is a scanned (settings ⨝ balance) row for the money-in workers.
 type moneyInAccount struct {
 	MerchantID      uuid.UUID
@@ -68,7 +62,6 @@ type moneyInAccount struct {
 	AutoTopup       bool
 	TopupAmount     *int64
 	PaymentMethodID *uuid.UUID
-	LastAlertAt     *time.Time
 	LastTopupAt     *time.Time
 }
 
@@ -95,43 +88,10 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 			AutoTopup:       r.AutoTopupEnabled,
 			TopupAmount:     r.AutoTopupAmount,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
-			LastAlertAt:     r.LastAlertAt,
 			LastTopupAt:     r.LastTopupAt,
 		})
 	}
 	return out, nil
-}
-
-// RunLowBalanceAlerts finds accounts below their low-balance threshold and emits
-// one alert per account, deduped by last_alert_at within `cooldown`. Returns the
-// number of alerts sent. (#240)
-func (s *MoneyService) RunLowBalanceAlerts(ctx context.Context, alerter Alerter, cooldown time.Duration) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if alerter == nil {
-		return 0, fmt.Errorf("alerter required")
-	}
-	rows, err := s.belowThresholdAccounts(ctx)
-	if err != nil {
-		return 0, err
-	}
-	now := s.now()
-	sent := 0
-	for _, r := range rows {
-		if r.LastAlertAt != nil && now.Sub(*r.LastAlertAt) < cooldown {
-			continue
-		}
-		payer := identity.CustomerID(r.CustomerID)
-		if err := alerter.LowBalanceAlert(ctx, payer, r.Available, r.Threshold); err != nil {
-			continue // best-effort; try again next tick
-		}
-		if err := s.stampMoneyInTimestamp(ctx, r, "last_alert_at", now); err != nil {
-			return sent, err
-		}
-		sent++
-	}
-	return sent, nil
 }
 
 // AutoTopupCandidate is one account due an auto-top-up episode (#674): below
@@ -146,7 +106,10 @@ type AutoTopupCandidate struct {
 	AmountNative    int64
 	PaymentMethodID uuid.UUID
 	Rail            string
-	EpisodeAnchor   string
+	// PspID is the account that vaulted the instrument, and therefore the one
+	// that will take the charge (or#893).
+	PspID         uuid.UUID
+	EpisodeAnchor string
 }
 
 // ListDueAutoTopups scans for accounts due an auto-top-up episode. The charge
@@ -190,6 +153,7 @@ func (s *MoneyService) ListDueAutoTopups(ctx context.Context, cooldown time.Dura
 			AmountNative:    *r.TopupAmount,
 			PaymentMethodID: *r.PaymentMethodID,
 			Rail:            normalizeRail(method.Rail),
+			PspID:           method.PspID,
 			EpisodeAnchor:   anchor,
 		})
 	}
@@ -253,20 +217,4 @@ func (s *MoneyService) StampAutoTopupAttempt(ctx context.Context, customerID uui
 	return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
 		MerchantID: tid.UUID(), CustomerID: customerID, Currency: normalizeCurrency(currency), Now: &now,
 	})
-}
-
-// stampMoneyInTimestamp sets a single timestamp column on the settings row.
-func (s *MoneyService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccount, column string, now time.Time) error {
-	switch column {
-	case "last_alert_at":
-		return s.db.Gen(ctx).StampMoneyAccountAlertAt(ctx, gen.StampMoneyAccountAlertAtParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
-		})
-	case "last_topup_at":
-		return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
-		})
-	default:
-		return fmt.Errorf("money: unknown money-in timestamp column %q", column)
-	}
 }

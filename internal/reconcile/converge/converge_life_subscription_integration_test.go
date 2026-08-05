@@ -37,14 +37,15 @@ func TestConverge_LifeSubscriptionGraceExhausted(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`, productID, "ge-prod-"+suffix, "ge-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1, $2, 9990000, 'usd', 720, true, $3)`, priceID, productID, merchantID)
+		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at, grace_ends_at,
-		         entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, '{}'::jsonb, $8, $9)`,
+		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, '{}'::jsonb, $8, $9, $10)`,
 			subID, priceID, productID, "ge-sub-"+suffix,
-			time.Now().Add(-33*24*time.Hour), time.Now().Add(-3*time.Hour), graceEnd, customer, merchantID)
+			time.Now().Add(-33*24*time.Hour), time.Now().Add(-3*time.Hour), graceEnd, customer, merchantID, pspID)
 		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
 			entID, customer, feature, time.Now().Add(-33*24*time.Hour), time.Now().Add(27*24*time.Hour), subID, merchantID)

@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 // decision 4.)
 func TestGrants_RevokeClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -33,7 +34,8 @@ func TestGrants_RevokeClawback(t *testing.T) {
 	require.NoError(t, err)
 
 	lot := mustCreditLot(t, ctx, l, customer, product, cur, 100, time.Now().UTC(), nil)
-	require.NoError(t, l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", "spend", "req-1"))
+	_, csErr := l.CreditSpend(ctx, customer, cur, 30, "inv", "gpt", ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: "req-1"})
+	require.NoError(t, csErr)
 	mustBal(t, ctx, ml, custAcc, 70)
 
 	_, err = l.Revoke(ctx, lot.ID, "admin removed")
@@ -62,7 +64,7 @@ func TestGrants_RevokeClawback(t *testing.T) {
 // and conservation — no value was destroyed.
 func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
@@ -80,10 +82,11 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	// Reverse the clawback: revoked_credits -> customer_balance.
 	revAcc, err := ml.EnsureSystemAccount(ctx, ledger.RevokedCredits, cur)
 	require.NoError(t, err)
-	src, sid, c := "grant_reinstate", lot.ID.String(), customer
+	c := customer
 	_, err = ml.Apply(ctx, ledger.Transfer{
-		Debit: revAcc, Credit: custAcc, Amount: 100, Currency: cur, Type: "credit_reinstate",
-		Source: &src, SourceID: &sid, GrantID: &lot.ID, Customer: &c,
+		Debit: revAcc, Credit: custAcc, Amount: 100, Currency: cur, Type: ledger.CreditReinstate,
+		Coord:   ledger.Coord{Operation: ledger.OpCreditReinstate, Source: "grant_reinstate", SourceID: lot.ID.String()},
+		GrantID: &lot.ID, Customer: &c,
 	})
 	require.NoError(t, err)
 	mustBal(t, ctx, ml, custAcc, 100) // restored
@@ -98,7 +101,7 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 // (idx_ledger_transfers_lot_once) backstops the same invariant in the DB.
 func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
-	cur := "TC" + short()
+	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})

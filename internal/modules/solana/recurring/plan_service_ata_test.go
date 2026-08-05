@@ -14,7 +14,7 @@ const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
 
 func testSolanaTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
-		"USDC": {Mint: testDevnetUSDCMint, Decimals: 6},
+		"USDC": {Mint: testDevnetUSDCMint},
 	}
 }
 
@@ -64,13 +64,14 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	}
 	merchantPub := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanServiceWithReader(sub, nil, "devnet", testSolanaTokens())
+	svc := NewPlanServiceWithReader(sub, readerWithMint(6), "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		MerchantID:      merchant.ID{},
 		PlanID:          1,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 	})
 	if err != nil {
@@ -107,13 +108,14 @@ func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	cold := coldKey.PublicKey()
 
 	sub := &fakeSubmitter{merchantPub: merchantPub}
-	svc := NewPlanServiceWithReader(sub, nil, "devnet", testSolanaTokens())
+	svc := NewPlanServiceWithReader(sub, readerWithMint(6), "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		MerchantID:      merchant.ID{},
 		PlanID:          2,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 5_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 		ReceivingWallet: cold.String(),
 	})

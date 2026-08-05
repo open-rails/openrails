@@ -62,7 +62,7 @@ func ImportAdminGrants(ctx context.Context, opts AdminGrantImportOptions) (Admin
 	if len(opts.Grants) == 0 {
 		return res, nil
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return res, err
 	}

@@ -17,11 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -133,7 +135,7 @@ func (s *NMIConvergeService) activatePendingFromProbe(ctx context.Context, rail 
 	}
 
 	since := sub.CreatedAt.UTC().Add(-24 * time.Hour)
-	probe, err := s.NMIClient.ProbeSalesByOrderID(sub.ID.String(), since)
+	probe, err := s.NMIClient.ProbeSalesByOrderID(ctx, sub.ID.String(), since)
 	if err != nil {
 		return fmt.Errorf("nmi converge: probe signup charge for %s: %w", sub.ID, err)
 	}
@@ -163,10 +165,10 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		if perr != nil {
 			return fmt.Errorf("nmi converge: unparseable fetched charge amount %q: %w", raw, perr)
 		}
-		if !nmiAmountMatchesExpected(cents, price.Amount) {
+		if !nmiAmountMatchesExpected(price.Currency, cents, moneyutil.Micros(price.Amount)) {
 			return fmt.Errorf("nmi converge: fetched charge amount %d cents does not match expected price %d micros", cents, price.Amount)
 		}
-		amountMicros = moneyutil.CentsToMicros(cents)
+		amountMicros = int64(moneyutil.CentsToMicros(cents))
 	}
 	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
 
@@ -238,7 +240,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 			amountMicros := int64(0)
 			if raw := strings.TrimSpace(probe.DeclineAmount); raw != "" {
 				if cents, perr := moneyutil.ParseDecimalToCents(raw); perr == nil {
-					amountMicros = moneyutil.CentsToMicros(cents)
+					amountMicros = int64(moneyutil.CentsToMicros(cents))
 				}
 			}
 			if amountMicros == 0 && sub.Price != nil {
@@ -265,6 +267,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				Currency:       currency,
 				Status:         "failed",
 				AttemptKind:    func() *string { k := payments.AttemptInitial; return &k }(),
+				MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
 				PurchasedAt:    purchasedAt,
 			}
 			if probe.DeclineResponseCode != 0 {
@@ -273,7 +276,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
-			if tt := payments.DefaultTokenTypeForRail(rail); tt != "" {
+			if tt := payments.DefaultTokenType(rail, models.CustodianPSP); tt != "" {
 				failed.TokenType = &tt
 			}
 			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
@@ -295,6 +298,12 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		SubscriptionID: &sub.ID,
 		FailureReason:  failureReason,
 		FailureCode:    failureCode,
+		// or#870: the same ONE classifier the dunning worker uses, so a decline
+		// arriving over the webhook plane gets the identical three-way answer.
+		Decline: collection.ClassifyDecline(rail, normalize.FromPtr(failureCode)),
+		// The failed payments row for this decline was written above, so a real
+		// provider attempt underlies this failure (#840 certainty input).
+		AttemptRecorded: true,
 	}); err != nil {
 		return fmt.Errorf("nmi converge: fail pending membership: %w", err)
 	}

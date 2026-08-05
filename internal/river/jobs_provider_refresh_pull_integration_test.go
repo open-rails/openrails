@@ -4,6 +4,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -132,15 +134,21 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	t.Helper()
 	ctx := context.Background()
 	id := merchant.ID(uuid.New())
-	_, err := dbi.Pool().Exec(ctx,
+	_, err := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).Exec(ctx,
 		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
+	// #836/#835: destructive convergence ships OFF and unarmed. These tests
+	// exercise an armed, reviewed deployment; the safe default has its own
+	// tests (TestKillSwitchHaltsAndResumesTheConvergeSweep).
+	dbtest.ArmDestructiveActions(ctx, t, id.UUID())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
@@ -148,7 +156,10 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
-			_, _ = dbi.Pool().Exec(context.Background(), stmt, id.UUID())
+			// Same reason as loadPullWatermark: these rows are `id`'s, so the
+			// cleanup handle must be pinned to `id` or the DELETEs match
+			// nothing and the suite stops being self-cleaning.
+			_, _ = dbtest.SharedMerchantPool(t, id.UUID()).Exec(context.Background(), stmt, id.UUID())
 		}
 	})
 	return id
@@ -156,8 +167,9 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 
 // seedLocalCCBillSub seeds one local ACTIVE ccbill subscription matching the
 // fake DataLink roster (so the pull observes zero drift). periodEnd must equal
-// the roster's rebill date at midnight UTC.
-func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, railSubID string, periodEnd time.Time) {
+// the roster's rebill date at midnight UTC. pspID is the psps row the ccbill
+// PSP seeded (or#893: subscriptions.psp_id is required).
+func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UUID, railSubID string, periodEnd time.Time) {
 	t.Helper()
 	ctx := merchant.WithID(context.Background(), mid)
 	require.NoError(t, dbi.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -170,25 +182,26 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, railSubID str
 		exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`, cust, mid.UUID(), subject)
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1, $2, $2, '{}'::jsonb, $3)`,
 			prod, "pull-cc-"+railSubID, mid.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'usd', $3)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'USD', $3)`,
 			price, prod, mid.UUID())
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, started_at, current_period_starts_at, current_period_ends_at, entitlements_spec_snapshot)
-		      VALUES ($1, $2, $3, $4, $5, 'active', 'ccbill', $6, $7, $7, $8, '{}'::jsonb)`,
-			uuid.New(), mid.UUID(), cust, prod, price, railSubID, periodEnd.Add(-30*24*time.Hour), periodEnd)
+		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, started_at, current_period_starts_at, current_period_ends_at, entitlements_spec_snapshot, psp_id)
+		      VALUES ($1, $2, $3, $4, $5, 'active', 'ccbill', $6, $7, $7, $8, '{}'::jsonb, $9)`,
+			uuid.New(), mid.UUID(), cust, prod, price, railSubID, periodEnd.Add(-30*24*time.Hour), periodEnd, pspID)
 		return nil
 	}))
 }
 
-// seedProviderAccount declares one provider account + scoped secrets through
-// the SAME service surface the merchant manifest funnels into.
-func seedProviderAccount(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) {
+// seedPSP declares one PSP + scoped secrets through
+// the SAME service surface the merchant manifest funnels into. Returns the
+// psps row id.
+func seedPSP(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) uuid.UUID {
 	t.Helper()
-	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{
-		Environment: "live",
+	cfg, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{
 		AccountID:   accountID,
 		Credentials: credentials,
 	})
 	require.NoError(t, err)
+	return cfg.ID
 }
 
 func pullTestMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
@@ -227,19 +240,26 @@ func newStorePullWorker(dbi *db.DB, svc *merchants.Service, nmiSrv *fakeNMIPullS
 	return w
 }
 
-// loadPullWatermark returns the SUCCESSFUL watermark: a failure row (last_error
-// set, never succeeded) does not count as an advanced watermark.
+// loadPullWatermark returns the SUCCESSFUL watermark. or#823 dropped the
+// last_succeeded_at/last_error diagnostics this used to filter on, and the
+// filter is no longer needed: only a COMPLETED window writes a row, so the row's
+// existence is the success signal it was approximating.
 func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider string) (time.Time, bool) {
 	t.Helper()
 	var watermark time.Time
-	err := dbi.Pool().QueryRow(context.Background(), `
+	// The watermark belongs to `mid`, not to the canonical test merchant: read it
+	// on a handle pinned to its OWN merchant or RLS filters the row away and the
+	// helper reports "no watermark" for a watermark that exists.
+	err := dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(context.Background(), `
 		SELECT watermark_at FROM openrails.rail_refresh_watermarks
-		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'
-		   AND last_succeeded_at IS NOT NULL AND last_error IS NULL`,
+		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'`,
 		mid.UUID(), provider).Scan(&watermark)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false
 	}
+	// Anything else (a renamed column, a broken pool) must fail the test loudly:
+	// swallowing it would report "no watermark" for every schema drift.
+	require.NoError(t, err)
 	return watermark.UTC(), true
 }
 
@@ -250,6 +270,7 @@ func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider strin
 func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	enableInstanceDestructiveActionsForTest(t, dbi)
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 
@@ -257,17 +278,17 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 	midB := seedPullMerchant(t, dbi, "pull-b-"+sfx)
 
 	keyA, keyB := "sec-key-a-"+sfx, "sec-key-b-"+sfx
-	seedProviderAccount(t, svc, midA, "nmi", "9911"+sfx, map[string]string{"security_key": keyA})
-	seedProviderAccount(t, svc, midA, "ccbill", "945281-0000", map[string]string{
+	seedPSP(t, svc, midA, "nmi", "9911"+sfx, map[string]string{"security_key": keyA})
+	ccbillPspID := seedPSP(t, svc, midA, "ccbill", "945281-0000", map[string]string{
 		"datalink_username": "dl-user-" + sfx,
 		"datalink_password": "dl-pass-" + sfx,
 	})
-	seedProviderAccount(t, svc, midB, "nmi", "9922"+sfx, map[string]string{"security_key": keyB})
+	seedPSP(t, svc, midB, "nmi", "9922"+sfx, map[string]string{"security_key": keyB})
 
 	// Fake roster member matching a seeded local sub → drift-free pull.
 	railSubID := "0125" + sfx
 	rebill := time.Now().UTC().AddDate(0, 0, 20).Truncate(24 * time.Hour)
-	seedLocalCCBillSub(t, dbi, midA, railSubID, rebill)
+	seedLocalCCBillSub(t, dbi, midA, ccbillPspID, railSubID, rebill)
 
 	nmiSrv := newFakeNMIPullServer(t)
 	dlSrv := newFakeDataLinkServer(t, railSubID, rebill.Format("2006-01-02"))
@@ -316,20 +337,21 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 func TestProviderRefresh_MissingSecret_RailAbsentWithWarn(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
+	enableInstanceDestructiveActionsForTest(t, dbi)
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 
 	mid := seedPullMerchant(t, dbi, "pull-miss-"+sfx)
 	// NMI account declared with NO security_key seeded; ccbill fully seeded.
-	seedProviderAccount(t, svc, mid, "nmi", "9933"+sfx, nil)
-	seedProviderAccount(t, svc, mid, "ccbill", "945282-0000", map[string]string{
+	seedPSP(t, svc, mid, "nmi", "9933"+sfx, nil)
+	ccbillPspID := seedPSP(t, svc, mid, "ccbill", "945282-0000", map[string]string{
 		"datalink_username": "dl-user2-" + sfx,
 		"datalink_password": "dl-pass2-" + sfx,
 	})
 
 	railSubID := "0126" + sfx
 	rebill := time.Now().UTC().AddDate(0, 0, 20).Truncate(24 * time.Hour)
-	seedLocalCCBillSub(t, dbi, mid, railSubID, rebill)
+	seedLocalCCBillSub(t, dbi, mid, ccbillPspID, railSubID, rebill)
 
 	nmiSrv := newFakeNMIPullServer(t)
 	dlSrv := newFakeDataLinkServer(t, railSubID, rebill.Format("2006-01-02"))
@@ -374,7 +396,7 @@ func TestProviderRefresh_ReadonlySkipsStoreArmedPulls(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 
 	mid := seedPullMerchant(t, dbi, "pull-ro-"+sfx)
-	seedProviderAccount(t, svc, mid, "nmi", "9944"+sfx, map[string]string{"security_key": "sec-ro-" + sfx})
+	seedPSP(t, svc, mid, "nmi", "9944"+sfx, map[string]string{"security_key": "sec-ro-" + sfx})
 
 	nmiSrv := newFakeNMIPullServer(t)
 

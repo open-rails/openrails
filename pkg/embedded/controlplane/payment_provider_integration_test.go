@@ -28,8 +28,7 @@ func TestUpsertPaymentProviderConfig(t *testing.T) {
 
 	const signingSecret = "whsec_integration_test"
 	provider, err := embcp.UpsertPaymentProviderConfig(ctx, e.App(), provisioned.MerchantID, "stripe", embcp.UpsertPaymentProviderConfigRequest{
-		Environment: "test",
-		AccountID:   "acct_" + suffix,
+		AccountID: "acct_" + suffix,
 		PublicConfig: map[string]string{
 			"publishable_key": "pk_test_" + suffix,
 		},

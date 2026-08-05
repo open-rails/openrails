@@ -414,9 +414,7 @@ function ProvidersTab() {
                 <ProviderRow
                   key={provider.id}
                   provider={provider}
-                  definition={providerDefinitions.find(
-                    (definition) => definition.rail === provider.rail
-                  )}
+                  providerDefinitions={providerDefinitions}
                   onDone={reload}
                 />
               ))}
@@ -428,16 +426,32 @@ function ProvidersTab() {
   )
 }
 
+// credentialTitle carries or#812's rotation_version alongside the validation
+// stamp — a credential's version floor is what every node cuts over to.
+function credentialTitle(c: {
+  configured: boolean
+  last_validated_at?: string
+  rotation_version?: number
+}) {
+  const parts: string[] = []
+  if (c.last_validated_at)
+    parts.push(`Validated ${formatDate(c.last_validated_at)}`)
+  if (c.rotation_version) parts.push(`rotation v${c.rotation_version}`)
+  if (parts.length) return parts.join(" · ")
+  return c.configured ? "Configured" : "Not configured"
+}
+
 function ProviderRow({
   provider,
-  definition,
+  providerDefinitions,
   onDone,
 }: {
   provider: PaymentProviderConfig
-  definition?: PaymentProviderDefinition
+  providerDefinitions: PaymentProviderDefinition[]
   onDone: () => void
 }) {
   const [busy, setBusy] = React.useState(false)
+  const definition = providerDefinitions.find((d) => d.rail === provider.rail)
   return (
     <TableRow className={provider.archived ? "opacity-60" : undefined}>
       <TableCell className="py-3">
@@ -465,15 +479,14 @@ function ProviderRow({
                     ? ""
                     : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                 }
-                title={
-                  credential.last_validated_at
-                    ? `Validated ${formatDate(credential.last_validated_at)}`
-                    : credential.configured
-                      ? "Configured"
-                      : "Not configured"
-                }
+                title={credentialTitle(credential)}
               >
                 {name}
+                {!!credential.rotation_version && (
+                  <span className="ml-1 opacity-60">
+                    v{credential.rotation_version}
+                  </span>
+                )}
               </Badge>
             ))}
           </span>
@@ -502,28 +515,155 @@ function ProviderRow({
       </TableCell>
       <TableCell className="py-3 text-right">
         {!provider.archived && (
+          <div className="flex justify-end gap-2">
+            <RotateCredentialsDialog
+              provider={provider}
+              credentialKeys={
+                providerDefinitions.find((d) => d.rail === provider.rail)?.credential_keys ??
+                Object.keys(provider.credentials)
+              }
+              onDone={onDone}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await deletePaymentProvider(provider.rail, provider.environment)
+                  toast.success("Provider archived")
+                  onDone()
+                } catch (err) {
+                  toastApiError(err, "Archive provider")
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Archive
+            </Button>
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+// RotateCredentialsDialog is the or#812 rotation flow. Three properties the
+// operator needs stated, because all three are real server behaviour:
+//
+//  1. The NEW credential is live-probed BEFORE anything is written. A failed
+//     probe fails the whole rotation — no secret is stored, no version floor
+//     moves, and the OLD credential keeps serving unchanged.
+//  2. A committed rotation is deployment-wide, not just this node: it raises the
+//     credential's version floor on the shared PSP row, and every node refuses
+//     to answer a credential read from a cache entry below that floor.
+//  3. Plaintext is dropped from browser state the moment it is submitted.
+function RotateCredentialsDialog({
+  provider,
+  credentialKeys,
+  onDone,
+}: {
+  provider: PaymentProviderConfig
+  credentialKeys: string[]
+  onDone: () => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const [credentials, setCredentials] = React.useState<Record<string, string>>({})
+  const [busy, setBusy] = React.useState(false)
+  const supplied = Object.entries(credentials).filter(([, v]) => v.trim() !== "")
+
+  const close = (next: boolean) => {
+    // Never leave plaintext in state behind a closed dialog.
+    if (!next) setCredentials({})
+    setOpen(next)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm">
+            Rotate
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Rotate {provider.rail} credentials · {provider.account_id}
+          </DialogTitle>
+          <DialogDescription>
+            The new credential is validated against the live provider before it is stored. If
+            that check fails, nothing is written and the current credential keeps serving. Leave
+            a field blank to keep the credential it holds now.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          {credentialKeys.map((name) => {
+            const current = provider.credentials[name]
+            return (
+              <Field key={name} label={name} id={`rot-${provider.id}-${name}`}>
+                <Input
+                  id={`rot-${provider.id}-${name}`}
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={current?.configured ? "unchanged" : "not configured"}
+                  value={credentials[name] ?? ""}
+                  onChange={(e) =>
+                    setCredentials((c) => ({ ...c, [name]: e.target.value }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  {current?.rotation_version
+                    ? `current rotation v${current.rotation_version}`
+                    : "no rotation recorded"}
+                  {current?.last_validated_at &&
+                    ` · last validated ${formatDate(current.last_validated_at)}`}
+                </p>
+              </Field>
+            )
+          })}
+          <p className="text-xs text-muted-foreground">
+            On success every OpenRails node cuts over to the new credential at its next charge
+            or pull — the rotation raises a version floor that no node's credential cache may
+            serve below. No restart, no waiting out a cache TTL.
+          </p>
+        </div>
+        <DialogFooter>
           <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
+            disabled={busy || supplied.length === 0}
             onClick={async () => {
               setBusy(true)
               try {
-                await deletePaymentProvider(provider.rail, provider.environment)
-                toast.success("Provider archived")
+                await putPaymentProvider(provider.rail, {
+                  account_id: provider.account_id,
+                  credentials: Object.fromEntries(supplied),
+                })
+                // Clear plaintext before anything else can await.
+                setCredentials({})
+                toast.success(
+                  `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`,
+                )
+                setOpen(false)
                 onDone()
               } catch (err) {
-                toastApiError(err, "Archive provider")
+                setCredentials({})
+                toastApiError(
+                  err,
+                  "Rotation refused — the current credential is unchanged and still serving",
+                )
               } finally {
                 setBusy(false)
               }
             }}
           >
-            Archive
+            {busy ? "Validating…" : "Validate & rotate"}
           </Button>
-        )}
-      </TableCell>
-    </TableRow>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -537,7 +677,6 @@ function ProviderDialog({
   const [open, setOpen] = React.useState(false)
   const [rail, setRail] = React.useState("")
   const [accountID, setAccountID] = React.useState("")
-  const [environment, setEnvironment] = React.useState("")
   const [credentials, setCredentials] = React.useState<Record<string, string>>(
     {}
   )
@@ -553,8 +692,9 @@ function ProviderDialog({
           <DialogTitle>Configure payment provider</DialogTitle>
           <DialogDescription>
             account_id is operator-declared per rail (NMI gateway id, Stripe
-            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet).
-            Credentials are stored in the secret backend.
+            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet). The
+            environment follows the deployment's test_mode. Credentials are
+            stored in the secret backend.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -581,16 +721,6 @@ function ProviderDialog({
               id="pv-acct"
               value={accountID}
               onChange={(e) => setAccountID(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Environment (live | test, empty = deployment default)"
-            id="pv-env"
-          >
-            <Input
-              id="pv-env"
-              value={environment}
-              onChange={(e) => setEnvironment(e.target.value)}
             />
           </Field>
           {selectedProvider?.credential_keys.map((name) => (
@@ -621,7 +751,6 @@ function ProviderDialog({
               try {
                 await putPaymentProvider(rail, {
                   account_id: accountID.trim(),
-                  ...(environment ? { environment } : {}),
                   ...(Object.keys(creds).length ? { credentials: creds } : {}),
                 })
                 setCredentials({})

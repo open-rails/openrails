@@ -8,6 +8,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -51,14 +52,22 @@ type Runner struct {
 	Store    ledger
 	Logger   MutationLogger
 	Registry *Registry
-	// Config gates execution by origin x operating mode. nil (tests) = full.
+	// Config gates execution by origin x operating mode. nil FAILS CLOSED
+	// (or#865): every intent parks rather than executing, because a runner that
+	// cannot tell which mode it is in must not attempt a provider write. A
+	// missing Config is a wiring bug, not a test convenience.
 	Config ModeView
 	// Breaker halts destructive intent execution on merchant-level volume
 	// anomalies (#679). nil = ungated (unit tests, non-destructive-only runners).
 	Breaker *VolumeBreaker
-	Clock   clockwork.Clock
-	Lease   time.Duration
-	Batch   int64
+	// Destructive is the #836 DB-backed operator kill switch, checked before
+	// every destructive intent so an operator can halt in-flight provider
+	// deletes with one UPDATE instead of a deploy. Same convention as Breaker:
+	// nil = ungated (unit tests); production wiring always sets it.
+	Destructive DestructiveGate
+	Clock       clockwork.Clock
+	Lease       time.Duration
+	Batch       int64
 }
 
 func (r *Runner) now() time.Time {
@@ -92,6 +101,19 @@ type Stats struct {
 	Parked     int
 	Superseded int
 	Expired    int64
+}
+
+// Add folds one merchant's pass into the deployment-wide totals the executor
+// and verifier workers log (or#862: a pass is now per-merchant).
+func (s *Stats) Add(o Stats) {
+	s.Claimed += o.Claimed
+	s.Succeeded += o.Succeeded
+	s.Retryable += o.Retryable
+	s.Unknown += o.Unknown
+	s.Terminal += o.Terminal
+	s.Parked += o.Parked
+	s.Superseded += o.Superseded
+	s.Expired += o.Expired
 }
 
 // RunExecuteOnce expires overdue intents, claims due ones and executes them
@@ -133,6 +155,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	// Pin the intent's merchant so handler execution (and any merchant-scoped DB
 	// write it triggers, e.g. membership renewal) resolves it (#336).
 	ctx = merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+	// or#893: and its PSP. The intent row records the account this write is
+	// addressed to, so every mirror row the handler creates — the charge, the
+	// subscription, the vaulted method — inherits that provenance instead of
+	// having to re-resolve (or fail to).
+	ctx = pinIntentAddress(ctx, intent)
 
 	handler := r.Registry.Lookup(intent.IntentType)
 	if handler == nil {
@@ -162,6 +189,16 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
 		r.park(ctx, logEntry, stats, intent.ID, now, reason)
 		return
+	}
+
+	// #836 kill switch: an operator can halt every destructive provider write
+	// on every node with one UPDATE. Parks (never fails) so the intent resumes
+	// the moment the switch is flipped back.
+	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) {
+		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
+			r.park(ctx, logEntry, stats, intent.ID, now, reason)
+			return
+		}
 	}
 
 	// #679 volume breaker: destructive types park (stay pending) while the
@@ -245,8 +282,11 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
-		// Pin the intent's merchant for merchant-scoped verify/repair writes (#336).
+		// Pin the intent's merchant for merchant-scoped verify/repair writes
+		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
+		// writes the same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+		ctx = pinIntentAddress(ctx, intent)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,
@@ -381,7 +421,8 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 	return logger.LogExternalMutation(ctx, MutationLogParams{
 		MerchantID:       intent.MerchantID,
 		Provider:         intent.Rail,
-		PspID:            intent.PspID,
+		PspID:            derefUUID(intent.PspID),
+		CustodianID:      derefUUID(intent.CustodianID),
 		ProviderIntentID: &intentID,
 		IntentType:       intent.IntentType,
 		IdempotencyKey:   intent.IdempotencyKey,
@@ -420,4 +461,30 @@ func mutationLogEvidence(intent gen.OpenrailsRailIntent, evidence map[string]any
 		out[k] = v
 	}
 	return out
+}
+
+// DestructiveGate is the #836 operator kill switch as the runner needs it.
+// internal/destructive.Gate implements it; the indirection keeps intents free
+// of a database dependency it does not otherwise have.
+type DestructiveGate interface {
+	// AllowDestructive reports whether destructive provider writes may execute
+	// for a merchant. It must FAIL CLOSED: an unreadable policy denies.
+	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
+}
+
+// pinIntentAddress puts the account the intent is addressed to on the context,
+// so every mirror row a handler or verifier writes inherits the provenance the
+// intent row already recorded instead of re-resolving it (or#893). An intent
+// names a PSP, a custodian, or — for a custodian-proxy write — both;
+// rail_intents_addressed guarantees at least one.
+func pinIntentAddress(ctx context.Context, intent gen.OpenrailsRailIntent) context.Context {
+	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
+	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))
+}
+
+func derefUUID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
 }

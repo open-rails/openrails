@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/custodians"
 )
 
 const MerchantBillingEnvPrefix = "BILLING_"
@@ -15,10 +17,12 @@ const MerchantBillingEnvPrefix = "BILLING_"
 //	-> merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username
 //	BILLING_MERCHANTS_DOUJINS_ACCOUNTS_MOBIUS_NMI_SECRETS_SECURITY_KEY
 //	-> merchants.doujins.psps.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY
+//	-> merchants.doujins.custodians.bt.basis_theory.secrets.api_key
 //	BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS
 //	-> merchants.doujins.delegated_invoker_wasted_spend_windows (JSON list value)
 //
-// Map-key spans are lower-kebab-cased. Keep merchant/provider account keys
+// Map-key spans are lower-kebab-cased. Keep merchant/PSP keys
 // lowercase, avoid underscores in the YAML keys, and avoid the fixed section
 // words (ACCOUNTS, PROFILE, ...) inside merchant/account key spans.
 func MerchantBillingEnvKey(envName string) string {
@@ -42,7 +46,7 @@ func MerchantBillingEnvKey(envName string) string {
 	rest := tokens[1+sectionIdx+sectionWidth:]
 	base := "merchants." + merchantKey + "." + section
 	switch section {
-	case "display_name", "delegated_invoker_wasted_spend_windows":
+	case "display_name", "api_host", "delegated_invoker_wasted_spend_windows":
 		if len(rest) == 0 {
 			return base
 		}
@@ -51,7 +55,9 @@ func MerchantBillingEnvKey(envName string) string {
 			return base + "." + strings.ToLower(strings.Join(rest, "_"))
 		}
 	case "psps":
-		return providerAccountEnvKey(base, rest)
+		return pspEnvKey(base, rest)
+	case "custodians":
+		return custodianEnvKey(base, rest)
 	}
 	return ""
 }
@@ -62,9 +68,11 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 		key string
 	}{
 		{"DISPLAY_NAME", "display_name"},
+		{"API_HOST", "api_host"},
 		{"PROFILE", "profile"},
 		{"INVOICE", "invoice"},
 		{"PSPS", "psps"},
+		{"CUSTODIANS", "custodians"},
 		{"DELEGATED_INVOKER_WASTED_SPEND_WINDOWS", "delegated_invoker_wasted_spend_windows"},
 	}
 	for i := range tokens {
@@ -78,7 +86,7 @@ func firstMerchantSection(tokens []string) (string, int, int) {
 	return "", -1, 0
 }
 
-func providerAccountEnvKey(base string, tokens []string) string {
+func pspEnvKey(base string, tokens []string) string {
 	railIdx := -1
 	for i, token := range tokens {
 		switch token {
@@ -111,6 +119,42 @@ func providerAccountEnvKey(base string, tokens []string) string {
 		}
 	default:
 		return accountBase + "." + strings.ToLower(strings.Join(rest, "_"))
+	}
+	return ""
+}
+
+// custodianEnvKey is pspEnvKey's custody sibling (or#880). The
+// kind tokens come from the custodian registry, so a new vendor is routable
+// through env overlays the moment its descriptor exists — no second list.
+func custodianEnvKey(base string, tokens []string) string {
+	kindIdx, kindWidth, kind := -1, 0, ""
+	for _, declared := range custodians.Kinds() {
+		parts := strings.Split(strings.ToUpper(declared), "_")
+		for i := range tokens {
+			if hasPrefixTokens(tokens[i:], parts) {
+				kindIdx, kindWidth, kind = i, len(parts), declared
+			}
+		}
+	}
+	if kindIdx <= 0 || kindIdx+kindWidth >= len(tokens) {
+		return ""
+	}
+	custodianBase := base + "." + envKeySpan(tokens[:kindIdx]) + "." + kind
+	rest := tokens[kindIdx+kindWidth:]
+	if len(rest) == 1 {
+		return custodianBase + "." + strings.ToLower(rest[0])
+	}
+	switch rest[0] {
+	case "SECRETS":
+		if len(rest) > 1 {
+			return custodianBase + ".secrets." + strings.ToLower(strings.Join(rest[1:], "_"))
+		}
+	case "SETTINGS":
+		if len(rest) > 1 {
+			return custodianBase + ".settings." + strings.ToLower(strings.Join(rest[1:], "_"))
+		}
+	default:
+		return custodianBase + "." + strings.ToLower(strings.Join(rest, "_"))
 	}
 	return ""
 }

@@ -28,12 +28,21 @@ SELECT
     -- held is always 0 here (the two-phase pending columns were dropped, #512).
     0::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
-    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount
+    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
+    -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
+    -- the same O(1) point lookup. Debt is a negative arrears balance, so the
+    -- exposure is (debits - credits), floored at 0.
+    COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
 FROM openrails.ledger_accounts a
 LEFT JOIN openrails.money_settings s
   ON s.merchant_id = a.merchant_id
  AND s.customer_id = a.customer_id
  AND s.currency = a.currency
+LEFT JOIN openrails.ledger_accounts ar
+  ON ar.merchant_id = a.merchant_id
+ AND ar.customer_id = a.customer_id
+ AND ar.currency = a.currency
+ AND ar.account_type = 'arrears_liability'
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND a.customer_id = sqlc.arg(customer_id)::uuid
   AND a.currency = sqlc.arg(currency)::text
@@ -84,11 +93,6 @@ WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = sqlc.arg(currency);
 
--- name: StampMoneyAccountAlertAt :exec
-UPDATE openrails.money_settings
-SET last_alert_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
 -- name: StampMoneyAccountTopupAt :exec
 UPDATE openrails.money_settings
 SET last_topup_at = sqlc.arg(now), updated_at = sqlc.arg(now)
@@ -118,7 +122,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
-           s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
+           s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
                SELECT a.credits_posted - a.debits_posted
                FROM openrails.ledger_accounts a
@@ -131,6 +135,6 @@ WITH avail AS (
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,
        auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id,
-       last_alert_at, last_topup_at
+       last_topup_at
 FROM avail
 WHERE available < low_balance_threshold;

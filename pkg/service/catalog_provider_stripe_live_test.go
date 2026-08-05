@@ -1,3 +1,11 @@
+//go:build stripelive
+
+// Live Stripe catalog tests (or#896): they hit the REAL Stripe test account.
+// Tagged so they are evidence when a lane runs them and absent otherwise —
+// never silently compiled into `go test ./...` and skipped on an env check.
+//
+//	go test -tags=stripelive ./pkg/service/ -run TestLiveStripe -v
+
 package service
 
 import (
@@ -66,7 +74,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 		Product:          product,
 		ProductKey:       productKey,
 		UnitAmount:       12_340_000,
-		Currency:         "usd",
+		Currency:         "USD",
 		BillingCycleDays: &cycle,
 		LookupKey:        lookup,
 	}
@@ -111,7 +119,7 @@ func TestLiveStripeCatalogAutoCreateReusesContentKeys(t *testing.T) {
 		Product:    product,
 		ProductKey: productKey,
 		UnitAmount: 5_670_000,
-		Currency:   "usd",
+		Currency:   "USD",
 		LookupKey:  oneTimeLookup,
 	}
 	oneTimeFirst, err := adapter.AutoCreate(ctx, oneTimeIn)

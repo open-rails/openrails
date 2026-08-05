@@ -174,6 +174,7 @@ const (
 	PermRootMerchantsRead         = permissions.RootMerchantsRead
 	PermRootMerchantsDelete       = permissions.RootMerchantsDelete
 	PermRootMerchantsRestore      = permissions.RootMerchantsRestore
+	PermRootWorkerHealthRead      = permissions.RootWorkerHealthRead
 	PermRootAdminRateLimitsUnlock = permissions.RootAdminRateLimitsUnlock
 
 	// --- Customer treasury: a customer (any payer) acting on its OWN balance (NOT

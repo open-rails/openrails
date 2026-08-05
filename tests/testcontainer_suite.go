@@ -13,10 +13,12 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -83,10 +85,9 @@ type TestSuiteOption func(*TestContainerSuite)
 
 const testNMIProviderKey = "mobius"
 
-// testNMIRailMerchantAccountID is the suite's ONE active NMI provider
-// account (#788: the mobius gateway id from defaultSuiteRails — the harness
+// testNMIPSPID is the suite's ONE active NMI PSP (#788: the mobius gateway id from defaultSuiteRails — the harness
 // seeds it as the armed rail state every consumer resolves).
-func testNMIRailMerchantAccountID() string {
+func testNMIPSPID() string {
 	return envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145")
 }
 
@@ -101,7 +102,7 @@ func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
 
 // WithSuiteStripeRail adds an active Stripe rail (construction-time config,
 // like the mobius/ccbill/solana defaults) so the hosted Stripe checkout path
-// is reachable. Pair with stripeapi.SetTestBaseTransport so no request ever
+// is reachable. Pair with stripeapi.SetBaseTransport so no request ever
 // leaves the process. Forces a fresh (non-shared) suite boot.
 func WithSuiteStripeRail(secretKey string) TestSuiteOption {
 	return func(suite *TestContainerSuite) {
@@ -154,22 +155,48 @@ func (suite *TestContainerSuite) boot() {
 		// delegated_sub.
 		integrationharness.WithAuthenticator(&suiteDelegatedUserAuthenticator{suite: suite}),
 	}
-	// Super DSN: the legacy tests/ fixtures and direct service calls predate
-	// merchant-pinned contexts; RLS enforcement is covered by the harness's
-	// StartStandalone consumers (cross-merchant isolation + rls suites).
-	suite.surface = suite.harness.StartStandaloneSuper("usd", opts...)
+	// The server connects as openrails_app: RLS enforces on every route this
+	// suite drives, exactly as in production (or#867). Fixtures that write
+	// merchant-owned rows go through suite.MerchantPool (pinned), not suite.Pool.
+	suite.surface = suite.harness.StartStandalone("usd", opts...)
 	suite.App = suite.surface.App()
 	suite.Server = suite.surface.Server()
 	suite.Pool = suite.harness.Pool()
 	suite.RedisClient = suite.harness.Redis
 	suite.Config = suite.App.Config
 	suite.ServerURL = suite.surface.BaseURL
+	// SEC-19 replaced the old implicit "test_mode accepts any source IP" CCBill
+	// bypass with a DECLARED allowlist, honored only under sandbox posture and
+	// only while the catalog proves no live CCBill PSP exists. This suite posts
+	// its CCBill callbacks from loopback, so it has to declare loopback — the
+	// same declaration embed's and internal/http's webhook suites make.
+	suite.Config.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32", "::1/128"}
 
-	suite.seedRailMerchantAccountFixtures()
+	suite.seedPSPFixtures()
 
 	// One real delegated issuer per suite (unique slug: suites share one DB and
 	// an upsert on a shared slug would rotate a live suite's keys mid-run).
 	suite.minter = suite.surface.RegisterDelegatedIssuer("tests-host-"+uuid.NewString()[:8], dbtest.TestMerchantSlug)
+}
+
+// The suite's ONE armed CCBill account, split out of defaultSuiteRails'
+// "945280-0000" account id (#711: the pair derives from the account id).
+const (
+	suiteCCBillAccnum = "945280"
+	suiteCCBillSubacc = "0000"
+)
+
+// CCBillWebhookClient arms the per-merchant half of CCBill webhook
+// authentication. CCBill signs nothing, so matching the callback's
+// clientAccnum/clientSubacc against the merchant's armed account is the only
+// authentication the rail has — and CCBillWebhookService fails CLOSED with no
+// client. A test that constructs the service directly is standing in for the
+// HTTP handler, which arms it from the merchant's PSP catalog.
+func (suite *TestContainerSuite) CCBillWebhookClient() *ccbill.RESTClient {
+	return ccbill.NewRESTClient(&config.CCBillConfig{
+		ClientAccNum: suiteCCBillAccnum,
+		ClientSubAcc: suiteCCBillSubacc,
+	})
 }
 
 // defaultSuiteRails is the construction-time payment-rail merchant-account
@@ -264,7 +291,14 @@ func (suite *TestContainerSuite) MintUserToken(userID, email string) string {
 	return suite.minter.Mint(userID, email, "", nil)
 }
 
-func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
+// suiteSolanaTokensJSON is the suite's declared Solana token set. or#881 made
+// the declared set the ACCEPTED set (undeclared = refused, default = USDC
+// alone), so every fixture that writes this PSP's evidence must carry it —
+// otherwise the last writer silently narrows what later tests can pay in.
+// Built-in symbols carry no mint: it comes from the registry.
+const suiteSolanaTokensJSON = `{"SOL":{},"USDC":{},"PYUSD":{}}`
+
+func (suite *TestContainerSuite) seedPSPFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -277,16 +311,17 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	// webhook path resolves accounts under environment=test.
 	ccbillAccountID := "945280-0000"
 	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	suite.seedRailMerchantAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
+	suite.seedPSPWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
 	ccbillSecret, err := merchants.PSPSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
 
-	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh", `{"source":"test_fixture"}`)
+	suite.seedPSPWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+		`{"source":"test_fixture","settings":{"tokens":`+suiteSolanaTokensJSON+`}}`)
 }
 
-func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
+func (suite *TestContainerSuite) seedPSPWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
 	suite.t.Helper()
 	if evidence == "" {
 		evidence = `{"source":"test_fixture"}`
@@ -351,7 +386,7 @@ func (suite *TestContainerSuite) ResetMutableRuntimeState() {
 func (suite *TestContainerSuite) resetNMIClients() {
 	suite.t.Helper()
 	// #788: NMI clients arm per charge from the armed rail state (the seeded
-	// rail_merchant_accounts rows + secrets); the only per-test mutable state
+	// psps rows + secrets); the only per-test mutable state
 	// is the endpoint override, which resets to the real sandbox endpoints.
 	suite.SetNMIGateway("")
 }
@@ -372,19 +407,19 @@ func (suite *TestContainerSuite) SetNMIGateway(url string) {
 	if rt.CheckoutService != nil {
 		rt.CheckoutService.NMIEndpointOverride = url
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.NMIEndpointOverride = url
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.NMIEndpointOverride = url
 	}
 	suite.RearmIntentPlumbing()
 }
 
-// SeedNMIProviderAccount declares (or re-keys) an NMI provider account in the
+// SeedNMIPSP declares (or re-keys) an NMI PSP in the
 // armed rail state — the #788 Layer-A write every consumer then resolves.
 // The account is removed again at test cleanup so the suite's shared merchant
 // keeps its default active account for later tests.
-func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID, securityKey string) {
+func (suite *TestContainerSuite) SeedNMIPSP(t *testing.T, accountID, securityKey string) {
 	t.Helper()
-	integrationharness.SeedRailMerchantAccounts(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.PSPSet{
+	integrationharness.SeedPSPs(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.PSPSet{
 		accountID: {
 			Rail:      models.RailNMI,
 			AccountID: accountID,
@@ -392,7 +427,18 @@ func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID,
 		},
 	})
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	// Stamp the manifest KEY the account was declared under. The harness's
+	// UpsertPSP carries only the natural key (rail/environment/account_id), so
+	// psps.key stays NULL and the #848 wire selector — "PSP key first,
+	// unambiguous rail-kind fallback" — can never name this account: a second
+	// armed NMI PSP would make every checkout ambiguous with no way to say
+	// which one.
 	rowID, _, _, _ := merchants.PSPNaturalKey(string(models.RailNMI), env, accountID)
+	_, err := suite.MerchantPool().Exec(context.Background(),
+		`UPDATE openrails.psps SET key = $1
+		  WHERE rail = $2 AND environment = $3 AND account_id = $4`,
+		accountID, string(models.RailNMI), env, accountID)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx := dbtest.WithTestMerchant(context.Background())
 		if store := suite.App.Runtime.Merchants.Secrets(); store != nil {
@@ -404,7 +450,10 @@ func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID,
 		}
 		// Archive (not delete): rows this test stamped (payments/subscriptions)
 		// hold FK references; archived accounts drop out of active resolution.
-		_, _ = suite.Pool.Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
+		// psps FORCEs RLS, so this MUST run on the merchant-pinned pool — on the
+		// bare one the UPDATE matched nothing and the extra armed NMI account
+		// leaked into every later test's rail resolution as an ambiguity.
+		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
 	})
 }
 
@@ -422,8 +471,8 @@ func (suite *TestContainerSuite) RearmIntentPlumbing() {
 			rt.CheckoutService.NMISaleService.Intents = runner
 		}
 	}
-	if rt.VaultService != nil {
-		rt.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: runner}
+	if rt.RailPaymentMethodService != nil {
+		rt.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: runner}
 	}
 }
 
@@ -498,10 +547,59 @@ func (suite *TestContainerSuite) ClearJobQueue() {
 	}
 }
 
+// FixtureDB is the handle this suite's fixture helpers write and read through:
+// the RLS-ENFORCING app role with app.merchant_id pinned to the suite's one
+// merchant. Those helpers drive MODULE SERVICES and REPOS directly — below the
+// layer that opens the merchant connection in production (MerchantDBConnMW on
+// the HTTP path, the River worker's own wrap) — so the fixture has to supply
+// what that layer supplies. suite.App.Runtime.DB is the SERVER's unpinned pool:
+// code under test must pin it itself, which is exactly what these tests prove.
+func (suite *TestContainerSuite) FixtureDB() *db.DB {
+	suite.t.Helper()
+	return suite.harness.MerchantDB(dbtest.TestMerchantID.UUID())
+}
+
+// MerchantCtx returns a context carrying the suite's merchant AND a pinned
+// merchant DB connection on the app runtime's pool — literally what
+// MerchantDBConnMW does for every request and what a River job does via
+// RunInMerchantConn. The connection is released at test end.
+//
+// A test that calls an App.Runtime service DIRECTLY has stepped below the layer
+// that pins in production, so it must stand in for that layer; this is how. A
+// test driving a full ENTRY POINT (an HTTP route, a worker) must NOT use the
+// result to reach past the entry point — proving the code pins itself is that
+// test's whole point, and the server pins its own request context regardless of
+// what the test holds.
+func (suite *TestContainerSuite) MerchantCtx() context.Context {
+	suite.t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx, release, err := suite.App.Runtime.DB.WithMerchantConn(ctx)
+	require.NoError(suite.t, err, "pin merchant db connection")
+	suite.t.Cleanup(release)
+	return ctx
+}
+
+// MerchantPool is the raw-SQL counterpart of FixtureDB: the RLS-ENFORCING app
+// role pinned to the suite's merchant. Assertions about the suite merchant's own
+// rows belong here, not on suite.App.Runtime.DB.Pool() — that is the server's
+// BASE pool, which carries no GUC and therefore returns nothing.
+func (suite *TestContainerSuite) MerchantPool() *pgxpool.Pool {
+	suite.t.Helper()
+	return suite.harness.MerchantPool(dbtest.TestMerchantID.UUID())
+}
+
+// WorkerCtx is the context a River worker actually receives in production: no
+// merchant, no pinned connection. A test that drives a worker's Work() directly
+// MUST hand it this and not MerchantCtx() — the worker pinning its own merchant
+// connection (RunInMerchantConn) is precisely what such a test exists to prove,
+// and a pre-pinned context does the worker's job for it, turning an inert sweep
+// into a green test. That is the failure mode or#867 exists to remove.
+func (suite *TestContainerSuite) WorkerCtx() context.Context { return context.Background() }
+
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price, err := catalog.NewPriceService(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
+	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

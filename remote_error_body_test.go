@@ -45,3 +45,29 @@ func TestStatusErrorFromBodyUsesExcerpt(t *testing.T) {
 		t.Fatalf("expected a non-empty excerpt message")
 	}
 }
+
+// or#893 phase 7: ONE error representation. The canonical nested envelope is
+// parsed; the retired top-level {code,message} shape is a foreign body now —
+// excerpted, never mistaken for an OpenRails error code.
+func TestStatusErrorFromBodyParsesOnlyTheCanonicalEnvelope(t *testing.T) {
+	canonical := []byte(`{"error":{"type":"invalid_request_error","code":"parameter_invalid","message":"currency is required"}}`)
+	se, ok := statusErrorFromBody(400, canonical).(*StatusError)
+	if !ok {
+		t.Fatalf("expected *StatusError")
+	}
+	if se.Code != "parameter_invalid" || se.Message != "currency is required" {
+		t.Fatalf("canonical envelope not parsed: code=%q message=%q", se.Code, se.Message)
+	}
+
+	retired := []byte(`{"code":"parameter_invalid","message":"currency is required"}`)
+	se, ok = statusErrorFromBody(400, retired).(*StatusError)
+	if !ok {
+		t.Fatalf("expected *StatusError")
+	}
+	if se.Code != "" {
+		t.Fatalf("the retired top-level shape must not yield a code, got %q", se.Code)
+	}
+	if se.Message != `{"code":"parameter_invalid","message":"currency is required"}` {
+		t.Fatalf("retired shape must be excerpted as an opaque body, got %q", se.Message)
+	}
+}

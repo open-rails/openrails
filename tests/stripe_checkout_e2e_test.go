@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -113,8 +112,8 @@ func newFakeStripeAPI(t *testing.T) *fakeStripeAPI {
 
 	// Install the choke-point fake: every stripeapi client call is host-rewritten
 	// onto the fake server; guard semantics (version pinning) still apply.
-	stripeapi.SetTestBaseTransport(hostRewriteTransport{target: f.server.URL})
-	t.Cleanup(func() { stripeapi.SetTestBaseTransport(nil) })
+	stripeapi.SetBaseTransport(hostRewriteTransport{target: f.server.URL})
+	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
 	return f
 }
 
@@ -156,7 +155,7 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 // a Stripe price id, mirroring how cozy-art catalogs its Stripe plans.
 func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripePriceID string) uuid.UUID {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	product := &models.Product{
 		ID:          uuid.New(),
 		Key:         "stripe-e2e-" + uuid.New().String()[:8],

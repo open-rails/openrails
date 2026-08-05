@@ -33,6 +33,15 @@ const pendingStaleAfter = 72 * time.Hour
 // ponytail: const, not a config knob — make it a knob if a merchant needs to tune it.
 const deriveBackfillWindow = 3 * 365 * 24 * time.Hour
 
+// convergeScanCap bounds ONE pass's per-merchant detector scans (or#837). The
+// sweep runs every 15 minutes across every armed merchant, so a scan whose size
+// is the merchant's whole book is work scaling with records on file. Each capped
+// scan is ordered by URGENCY (oldest lapse / longest-dead / oldest window), and
+// a converge pass REMOVES what it repairs, so a merchant over the cap drains
+// from the front across passes rather than losing findings. Deliberately far
+// above any healthy merchant's drift: hitting it means something is wrong.
+const convergeScanCap = 5000
+
 // The three internal-plane passes, run in DERIVE → LIFE → CON order (sources must
 // be truthful before grant effects are derived; lifecycle state must be current
 // before final consistency checks). Each is fleshed out in #511 Phase D — the
@@ -101,9 +110,12 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	for i := range unretracted {
 		g := unretracted[i]
 		out = append(out, ConvergeFinding{
-			Type:       "derive.grant_effect.excess",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
+			Type:  "derive.grant_effect.excess",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// Ungated: the justification is a LOCAL terminal fact — this grant
+			// was already terminated — not an absence in provider data.
+			Ungated:    true,
 			Severity:   "high",
 			SubjectKey: "grant_effect:" + g.ID.String(),
 			Provider:   "self",
@@ -265,7 +277,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// windows of terminal subs are the freeloader case (derive.entitlement.
 	// unjustified below, ADMIN) — the partition keeps one condition per check.
 	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan dead subscriptions with live entitlements: %w", err)
@@ -307,7 +319,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// decision, never automatic on a derived conclusion), with the #692
 	// revoke/admin-grant recommendation pair.
 	unjustified, err := q.ListUnjustifiedEntitlementWindows(ctx, gen.ListUnjustifiedEntitlementWindowsParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unjustified entitlement windows: %w", err)
@@ -431,9 +443,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	for i := range stale {
 		id := stale[i]
 		out = append(out, ConvergeFinding{
-			Type:       "life.checkout_session.stale",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
+			Type:  "life.checkout_session.stale",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// Ungated: expiring an abandoned checkout session retracts no
+			// access, no money and no provider object.
+			Ungated:    true,
 			Severity:   "low",
 			SubjectKey: "checkout_session:" + id.String(),
 			Provider:   "self",
@@ -461,17 +476,21 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	//   active, no evidence          → life.subscription.needs_verification
 	//   past_due, dunning stalled    → life.subscription.grace_exhausted
 	lapsed, err := q.ListLapsedSubscriptionsWithEvidence(ctx, gen.ListLapsedSubscriptionsWithEvidenceParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("life: scan lapsed subscriptions: %w", err)
 	}
+	// #835 evidence-staleness floor. LIFE cannot reach a cancel today (its
+	// certainty legs are unpopulated), but the floor travels with the decider
+	// invocation so the day a plane starts producing them it is already gated.
+	floor := reconcile.EvidenceFloorFor(ctx, p.e.DB, scope.Merchant.UUID())
 	for i := range lapsed {
 		row := lapsed[i]
 		state := reconcile.SubscriptionState{
 			Status:             string(row.Status),
 			Rail:               row.Rail,
-			Vaulted:            row.Vaulted,
+			HasPaymentMethod:   row.HasPaymentMethod,
 			RailSubscriptionID: row.RailSubscriptionID,
 			PeriodEnd:          row.CurrentPeriodEndsAt,
 			GraceEndsAt:        row.GraceEndsAt,
@@ -483,6 +502,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				RenewalPaymentAfterPeriodEnd: row.RenewalPaymentAfterEnd,
 			},
 			WatermarkNewerThanPeriodEnd: row.WatermarkNewerThanPeriodEnd,
+			EvidenceFloor:               floor,
 		}, now, 0)
 
 		var ftype, severity string
@@ -526,9 +546,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 
 	// life.subscription.pending_stale — a `pending` sub that never confirmed
 	// within the threshold is abandoned; cancel it (no entitlements/money to
-	// unwind). Time-driven EXCESS → AUTO, not gated.
+	// unwind). EXCESS → gated on the `subscriptions` domain (#842): the repair
+	// is justified by an absence (no confirmation arrived), and an absence is
+	// only proof once provider truth has been fully reconciled.
 	stalePending, err := q.ListStalePendingSubscriptions(ctx, gen.ListStalePendingSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-pendingStaleAfter),
+		RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("life: scan stale pending subscriptions: %w", err)
@@ -536,13 +559,17 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	for i := range stalePending {
 		subID := stalePending[i]
 		out = append(out, ConvergeFinding{
-			Type:       "life.subscription.pending_stale",
-			Shape:      ShapeExcess,
-			Class:      ClassAuto,
-			Severity:   "low",
-			SubjectKey: "subscription:" + subID.String(),
-			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": subID.String()},
+			Type:  "life.subscription.pending_stale",
+			Shape: ShapeExcess,
+			Class: ClassAuto,
+			// #842: this cancels a subscription because a confirmation did not
+			// ARRIVE — an absence, and absence needs the §3.2 proof. A delayed
+			// or dropped webhook is not evidence the customer did not pay.
+			SourceDomain: DomainSubscriptions,
+			Severity:     "low",
+			SubjectKey:   "subscription:" + subID.String(),
+			Provider:     "self",
+			Evidence:     map[string]any{"subscription_id": subID.String()},
 			Repair: func(ctx context.Context) error {
 				// Terminal cancel through the shared core. A never-confirmed pending
 				// sub has no entitlements/money to unwind (RevokeSources empty); the

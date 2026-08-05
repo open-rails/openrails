@@ -104,7 +104,7 @@ func renderSummaryTable(w io.Writer, summary *RunSummary) {
 			fmt.Fprintf(w, "  ERROR: %s\n", rep.Error)
 		}
 		fmt.Fprintf(w, "  remote: %d subscriptions, %d transactions, %d vault entries; local: %d subscriptions\n",
-			rep.RemoteSubscriptions, rep.RemoteTransactions, rep.RemoteVaultEntries, rep.LocalSubscriptions)
+			rep.RemoteSubscriptions, rep.RemoteTransactions, rep.RemotePaymentMethods, rep.LocalSubscriptions)
 		fmt.Fprintf(w, "  findings: %d new, %d updated, %d requires-review, %d auto-resolved, %d auto-fixed\n",
 			rep.NewFindings, rep.UpdatedFindings, rep.AdminRequired, rep.AutoResolved, rep.AutoFixed)
 		if len(rep.FindingsByType) > 0 {

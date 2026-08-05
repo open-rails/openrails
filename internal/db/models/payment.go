@@ -6,13 +6,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// MoneyMovement is the positive marker that replaced the settlement feed's
+// transaction_id denylist (or#827). The zero value is UNDECLARED, which is
+// distinct from MoneyMovementNone: a writer that never thought about it must
+// not pass for one that decided no money moved.
+type MoneyMovement string
+
+const (
+	// MoneyMovementUndeclared is the zero value: nobody said. Rejected at
+	// insert for rows that would otherwise be settlement candidates.
+	MoneyMovementUndeclared MoneyMovement = ""
+	// MoneyMovementRail — money actually moved at the payment rail and
+	// transaction_id is the rail's own reference. The host feed publishes
+	// exactly these.
+	MoneyMovementRail MoneyMovement = "rail"
+	// MoneyMovementNone — bookkeeping row: an attempt anchor whose real
+	// charge is a different row, a decline, a placeholder.
+	MoneyMovementNone MoneyMovement = "none"
+)
+
+// Valid reports whether m is a declared, storable value.
+func (m MoneyMovement) Valid() bool {
+	return m == MoneyMovementRail || m == MoneyMovementNone
+}
+
 // Payment represents a payment event (both one-time and subscription payments)
 // This is an immutable event log of all payments received
 type Payment struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	// Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	PriceID    uuid.UUID `json:"price_id"`
 
@@ -31,7 +54,7 @@ type Payment struct {
 	Currency   string `json:"currency"`
 	Status     string `json:"status"`
 
-	// PspID is the provider account (openrails.psps.id)
+	// PspID is the PSP (openrails.psps.id)
 	// that processed this charge (#641). Nil for legacy rows / unresolved accounts.
 	PspID *uuid.UUID `json:"psp_id,omitempty"`
 
@@ -52,8 +75,14 @@ type Payment struct {
 	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal (#733).
 	ReversalKind *string `json:"reversal_kind,omitempty"`
 	// TokenType is the credential form presented at charge time (#796):
-	// network_token|pan_via_vault|provider_vault. Nil = unknown/legacy.
+	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`
+
+	// MoneyMovement declares whether this row records money that actually
+	// moved at the rail (or#827). It is the ONLY thing the host settlement
+	// feed keys on, so it is a required declaration on any completed
+	// positive charge — see paymentInsertParams.
+	MoneyMovement MoneyMovement `json:"money_movement,omitempty"`
 
 	DiscountCode     *string        `json:"discount_code,omitempty"`
 	DiscountReason   *string        `json:"discount_reason,omitempty"`

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // StripeCollectionAdapter collects invoices through Stripe Invoicing using a
@@ -30,6 +31,11 @@ func (a *StripeCollectionAdapter) ChargeSavedMethod(ctx context.Context, method 
 	paymentMethodID := strings.TrimSpace(method.RailMethodRef)
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return ChargeResult{}, fmt.Errorf("stripe payment method missing reusable payment_method id")
+	}
+	// or#864: the third collection adapter never defaulted the currency — it
+	// forwarded a blank one straight to Stripe. Same gate as the other two.
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+		return ChargeResult{}, fmt.Errorf("stripe collection: refusing to charge without an established currency: %w", err)
 	}
 	customerID, err := a.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
 		MerchantID: method.MerchantID,

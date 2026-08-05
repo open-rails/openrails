@@ -11,7 +11,7 @@ import (
 // Solana rail-account `settings` keys (#711). These are the per-merchant home
 // of the Solana runtime knobs: standalone operators declare them in the
 // merchant config manifest under merchants.<slug>.accounts.<key>.solana.settings,
-// and they are stored on the rail_merchant_accounts row (same mechanism as the
+// and they are stored on the psps row (same mechanism as the
 // NMI tokenization_key). Store settings win over the embedded boot plane (#699).
 const (
 	SolanaSettingRPCProvider = "rpc_provider"
@@ -110,9 +110,14 @@ func ValidateSolanaAccountSettings(settings map[string]any) error {
 	return nil
 }
 
-// ApplyTo overlays the declared settings onto a boot-plane SolanaRailConfig
+// ApplyTo overlays the declared RPC settings onto a boot-plane SolanaRailConfig
 // (store-wins, #699) and returns a NEW config; base is never mutated. A nil
 // base starts from an empty config (standalone: the store is the only plane).
+//
+// Tokens are NOT resolved here (or#881): a declaration selects built-in symbols
+// out of a per-NETWORK mint registry, which this layer cannot see. The caller
+// that knows the network resolves them —
+// internal/modules/solana/tokens.ResolveDeclared.
 func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig {
 	out := &SolanaRailConfig{}
 	if base != nil {
@@ -130,12 +135,6 @@ func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig
 	if s.RPCAPIKey != "" {
 		out.RPCAPIKey = s.RPCAPIKey
 	}
-	if len(s.Tokens) > 0 {
-		out.Tokens = make(map[string]TokenConfig, len(s.Tokens))
-		for k, v := range s.Tokens {
-			out.Tokens[k] = v
-		}
-	}
 	return out
 }
 
@@ -148,7 +147,9 @@ func settingString(key string, raw any) (string, error) {
 }
 
 // settingTokens decodes the tokens map. Values arrive as generic maps from
-// either the YAML manifest or the stored evidence JSON.
+// either the YAML manifest or the stored evidence JSON. It decodes SHAPE only —
+// mint semantics are network-dependent and belong to
+// internal/modules/solana/tokens.ResolveDeclared.
 func settingTokens(raw any) (map[string]TokenConfig, error) {
 	entries, err := settingAnyMap("tokens", raw)
 	if err != nil {
@@ -176,19 +177,19 @@ func settingTokens(raw any) (map[string]TokenConfig, error) {
 					return nil, err
 				}
 			case "decimals":
-				if token.Decimals, err = settingInt("tokens."+symbol+".decimals", value); err != nil {
-					return nil, err
-				}
+				// #817: retired. Decimals belong to the mint on-chain and are read
+				// from it; a merchant-declared copy could disagree and misprice by
+				// 10^n. Fail loudly rather than silently ignoring a stale key.
+				return nil, fmt.Errorf("solana settings: tokens.%s.decimals is no longer configurable — "+
+					"decimals are read from the SPL mint on-chain; remove this key", symbol)
 			default:
-				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name, decimals)", symbol, key)
+				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name)", symbol, key)
 			}
 		}
-		if strings.TrimSpace(token.Mint) == "" {
-			return nil, fmt.Errorf("solana settings: tokens.%s requires mint", symbol)
-		}
-		if err := ValidateTokenDecimals(symbol, token.Decimals); err != nil {
-			return nil, fmt.Errorf("solana settings: tokens.%s: %w", symbol, err)
-		}
+		// A missing mint is NOT an error here: for a built-in symbol it is the
+		// correct declaration (or#881 — the mint comes from the registry), and
+		// which symbols are built-in depends on the network, which this layer
+		// does not know. solana/tokens.ResolveDeclared rules on it.
 		out[symbol] = token
 	}
 	return out, nil

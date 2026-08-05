@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -74,10 +76,14 @@ func (p *ExchangeAPIProvider) Quote(ctx context.Context, fromCurrency, toCurrenc
 
 // QuoteToUSD fetches the conversion rate from the given currency to USD.
 func (p *ExchangeAPIProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return p.Quote(ctx, currency, "usd")
+	return p.Quote(ctx, currency, money.DefaultCurrency)
 }
 
 func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, target string) (float64, time.Time, error) {
+	// WIRE boundary: this endpoint addresses currencies in LOWER case, both in
+	// the path and as response keys. Internally the code stays canonical upper.
+	currency = strings.ToLower(currency)
+	target = strings.ToLower(target)
 	url := fmt.Sprintf("%s/%s.json", baseURL, currency)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

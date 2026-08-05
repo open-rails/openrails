@@ -142,12 +142,12 @@ func newFixture() *testFixture {
 	dur := 720
 
 	premiumV1 := &models.Price{ID: uuid.New(), ProductID: premiumProduct.ID, Key: "premium-monthly",
-		Amount: 10_000_000, Currency: "usd", AccessDurationHours: &dur, AutoRenew: true, Archived: true}
+		Amount: 10_000_000, Currency: "USD", AccessDurationHours: &dur, AutoRenew: true, Archived: true}
 	premiumV2 := &models.Price{ID: uuid.New(), ProductID: premiumProduct.ID, Key: "premium-monthly",
-		Amount: 12_000_000, Currency: "usd", AccessDurationHours: &dur, AutoRenew: true,
+		Amount: 12_000_000, Currency: "USD", AccessDurationHours: &dur, AutoRenew: true,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": "price_123"}}}
 	basic := &models.Price{ID: uuid.New(), ProductID: basicProduct.ID, Key: "basic-monthly",
-		Amount: 5_000_000, Currency: "eur", AccessDurationHours: &dur, AutoRenew: true}
+		Amount: 5_000_000, Currency: "EUR", AccessDurationHours: &dur, AutoRenew: true}
 
 	f := &testFixture{
 		premiumProduct: premiumProduct, basicProduct: basicProduct,
@@ -527,7 +527,7 @@ func TestAsk_DraftPriceChange_CrossCurrencyRefusal(t *testing.T) {
 	// Add a same-product, different-currency price to isolate the currency
 	// check from the product check.
 	eurTwin := &models.Price{ID: uuid.New(), ProductID: f.premiumProduct.ID, Key: "premium-monthly-eur",
-		Amount: 11_000_000, Currency: "eur"}
+		Amount: 11_000_000, Currency: "EUR"}
 	f.prices.current["premium-monthly-eur"] = eurTwin
 	f.prices.byID[eurTwin.ID] = eurTwin
 
@@ -554,7 +554,7 @@ func TestAsk_DraftCatalogDiff_NewTierOnExistingProduct(t *testing.T) {
 	require.NotNil(t, d.CatalogDiff)
 	require.Equal(t, "premium-with-ads", d.CatalogDiff.CreatePrice.Key)
 	require.Equal(t, int64(6_000_000), d.CatalogDiff.CreatePrice.UnitAmount)
-	require.Equal(t, "usd", d.CatalogDiff.CreatePrice.Currency, "currency inferred from the product's existing price")
+	require.Equal(t, "USD", d.CatalogDiff.CreatePrice.Currency, "currency inferred from the product's existing price")
 	require.Equal(t, f.premiumProduct.ID.String(), d.CatalogDiff.CreatePrice.ProductID)
 }
 

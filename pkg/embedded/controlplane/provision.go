@@ -42,8 +42,13 @@ type ProvisionMerchantResult struct {
 	MerchantID merchant.ID
 	// GroupID is the merchant permission-group's internal AuthKit id (#567).
 	GroupID string
-	// Created is false when the merchant already existed (both the permission
-	// group and the directory row); true when this call created either.
+	// Created reports whether THIS call brought the merchant into existence,
+	// arbitrated solely by the openrails.merchants directory row insert — the
+	// one step whose winner the database decides (#898). The permission group
+	// is resolve-or-create and its winner can be a DIFFERENT concurrent caller,
+	// so counting it here would let two racers both report true. A call that
+	// only (re)created the group for an already-listed merchant is a repair of
+	// an existing merchant and reports false.
 	Created bool
 }
 
@@ -89,13 +94,17 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	// fmt.Errorf (no stable "already exists" sentinel to errors.Is against —
 	// confirmed against authkit v0.80.0). Rather than string-matching that
 	// error, the loser re-resolves once: if the winner's row is now visible,
-	// the loser proceeds exactly like any other already-provisioned merchant
-	// (groupCreated stays false) — the SAME retry-resolve pattern
-	// EnsureCustomerPermissionGroup already uses for the identical race on
-	// customer groups (customer_group.go). Only when the re-resolve ALSO
-	// fails do we conclude CreatePermissionGroup's error was a genuine
-	// failure (DB outage, etc.), not a slug race, and return it wrapped as
-	// before (hosts 500 it).
+	// the loser proceeds exactly like any other already-provisioned merchant —
+	// the SAME retry-resolve pattern EnsureCustomerPermissionGroup already uses
+	// for the identical race on customer groups (customer_group.go). Only when
+	// the re-resolve ALSO fails do we conclude CreatePermissionGroup's error was
+	// a genuine failure (DB outage, etc.), not a slug race, and return it
+	// wrapped as before (hosts 500 it).
+	//
+	// No orphaned group can survive this race: CreateGroup runs inside authkit's
+	// own transaction and the loser's INSERT is rejected by
+	// permission_groups_persona_instance_uidx, so nothing is committed to clean
+	// up — both callers end up holding the winner's single group id (#898).
 	//
 	// Deliberately no ErrSlugTaken sentinel: the retry-resolve converts every
 	// race loser into the ordinary Created=false idempotent path callers
@@ -106,7 +115,6 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	// future authkit release exposes a stable duplicate-group sentinel,
 	// mapping it to a typed ErrSlugTaken here — skipping the extra
 	// round-trip — is a non-breaking follow-up.
-	groupCreated := false
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
 	switch {
 	case errors.Is(err, authkit.ErrGroupNotFound):
@@ -118,13 +126,11 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		})
 		if err != nil {
 			createErr := err
-			if resolvedID, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug); rerr == nil {
-				groupID = resolvedID
-			} else {
+			resolvedID, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+			if rerr != nil {
 				return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, createErr)
 			}
-		} else {
-			groupCreated = true
+			groupID = resolvedID
 		}
 	case err != nil:
 		return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
@@ -136,7 +142,8 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	// (derived from its INSERT ... RETURNING, not a separate existence check)
 	// is what stays race-safe under concurrent first-provisions of the same
 	// slug — a pre-check-then-insert here would let both racers observe
-	// "did not yet exist" and both wrongly report Created=true.
+	// "did not yet exist" and both wrongly report Created=true. It is the SOLE
+	// input to Created for the same reason (#898).
 	dir, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision: build merchant directory service: %w", err)
@@ -149,6 +156,6 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	return &ProvisionMerchantResult{
 		MerchantID: m.ID,
 		GroupID:    groupID,
-		Created:    groupCreated || rowCreated,
+		Created:    rowCreated,
 	}, nil
 }

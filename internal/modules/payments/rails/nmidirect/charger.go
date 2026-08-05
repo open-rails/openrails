@@ -1,7 +1,7 @@
 // Package nmidirect implements the rail-agnostic charge seam (#297 Phase A,
 // internal/modules/payments/charge) for the direct NMI rail: it translates
 // CIT/MIT context into NMI's credential-on-file wire fields and normalizes
-// gateway outcomes. The future vaulted_card rail (#297 Phase B) is a sibling
+// gateway outcomes. The custodian-proxied transport (nmiproxy) is a sibling
 // implementation of the same seam.
 package nmidirect
 
@@ -63,16 +63,16 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	if c == nil || c.Client == nil {
 		return charge.Result{}, errors.New("nmidirect charger not initialized")
 	}
-	vaultID := strings.TrimSpace(req.Instrument.CustomerRef)
-	if vaultID == "" {
+	railCustomerRef := strings.TrimSpace(req.Instrument.CustomerRef)
+	if railCustomerRef == "" {
 		return charge.Result{}, errors.New("nmi instrument missing customer vault id")
 	}
 	if req.AmountMinor <= 0 {
 		return charge.Result{}, errors.New("charge amount must be positive")
 	}
 
-	sale, err := c.Client.RunSale(nmi.SaleParams{
-		CustomerVaultID:  vaultID,
+	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
+		CustomerVaultID:  railCustomerRef,
 		BillingID:        strings.TrimSpace(req.Instrument.MethodRef),
 		Amount:           req.AmountMinor,
 		Currency:         req.Currency,
@@ -81,12 +81,12 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		StoredCredential: StoredCredentialFor(req.Context),
 	})
 	if err != nil {
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) && IsHardDecline(vaultErr.ResponseCode) {
-			code := FailureCode(vaultErr)
-			message := vaultErr.Error()
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) && IsHardDecline(pmErr.ResponseCode) {
+			code := FailureCode(pmErr)
+			message := pmErr.Error()
 			return charge.Result{
-				TokenType:      charge.TokenTypeProviderVault,
+				TokenType:      charge.TokenTypePSPToken,
 				Declined:       true,
 				FailureCode:    &code,
 				FailureMessage: &message,
@@ -97,7 +97,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 
 	res := charge.Result{
 		TransactionID: strings.TrimSpace(sale.TransactionID),
-		TokenType:     charge.TokenTypeProviderVault,
+		TokenType:     charge.TokenTypePSPToken,
 	}
 	// A charge that ran without a replay reference anchors the credential's
 	// agreement sequence: NMI's reference IS its gateway transactionid.
@@ -110,7 +110,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 // IsHardDecline classifies parsed gateway response codes: communication
 // errors (420, 421) and duplicate-transaction detection (430) are transient —
 // everything else parsed as a failure is a hard decline. Shared with the
-// vaulted_card rail (#795): one decline taxonomy, two transports.
+// custodian-proxied charges (#795): one decline taxonomy, two transports.
 func IsHardDecline(code int) bool {
 	switch code {
 	case 420, 421, 430:

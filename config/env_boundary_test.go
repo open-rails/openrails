@@ -21,7 +21,7 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	// justification per entry — anything else that reads env FAILS.
 	allowedPrefixes := map[string]string{
 		"cmd/":                                   "binary boundary: the process entrypoint owns flags and env",
-		"examples/":                              "executable examples are process entrypoints and own their env",
+		"examples/":                              "standalone example apps: each is its own main(), a binary boundary like cmd/",
 		"config/":                                "the config-loading pipeline — the ONE place env is read",
 		"tests/":                                 "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
 		"scripts/":                               "operational tooling run as its own process, not importable library code",

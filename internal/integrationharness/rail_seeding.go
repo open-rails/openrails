@@ -14,16 +14,17 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SeedRailMerchantAccounts is the test-side Layer-A writer (#788): it converges
+// SeedPSPs is the test-side Layer-A writer (#788): it converges
 // the given rail credential set into the SAME armed state production writers
 // (MODE 1 manifest convergence / MODE 2 API writes) produce —
 // psps rows + scoped secrets in the runtime's merchant
 // secret store. Everything downstream (checkout, webhooks, pulls, rebills)
 // then resolves it through the ONE Layer-C seam exactly like production.
-func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {
+func SeedPSPs(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {
 	t.Helper()
 	if len(set) == 0 {
 		return
@@ -44,10 +45,10 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		require.NotEmpty(t, rail, "rail for account %q", name)
 		accountID := proc.EffectiveAccountID()
 		require.NotEmpty(t, accountID, "account_id for account %q", name)
-		environment := proc.EffectiveEnvironment(testMode)
+		environment := config.ExpectedProviderEnvironment(testMode)
 
 		var evidence []byte
-		if settings := railAccountSettings(proc); len(settings) > 0 {
+		if settings := railAccountSettings(proc, testMode); len(settings) > 0 {
 			raw, err := json.Marshal(map[string]any{"settings": settings})
 			require.NoError(t, err)
 			evidence = raw
@@ -57,6 +58,9 @@ func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime
 		mctx := merchant.WithID(ctx, mid)
 		archived := proc.Archived
 		require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+			// Key is the declared manifest key, not decoration: the #848 wire
+			// selector names a PSP by it, so a NULL key makes a merchant's
+			// second armed PSP unreachable (or#890).
 			_, err := rt.DB.Gen(cctx).UpsertPSP(cctx, gen.UpsertPSPParams{
 				ID:          id,
 				MerchantID:  mid.UUID(),
@@ -104,10 +108,15 @@ func railAccountSecrets(proc *config.PSPConfig) map[string]string {
 
 // railAccountSettings maps the typed Solana block onto the rail-account
 // settings evidence shape (#711).
-func railAccountSettings(proc *config.PSPConfig) map[string]any {
+func railAccountSettings(proc *config.PSPConfig, testMode bool) map[string]any {
 	if proc.Solana == nil {
 		return nil
 	}
+	network := "mainnet"
+	if testMode {
+		network = "devnet"
+	}
+	registry := solanatokens.ForNetwork(network)
 	settings := map[string]any{}
 	if proc.Solana.RPCProvider != "" {
 		settings[config.SolanaSettingRPCProvider] = proc.Solana.RPCProvider
@@ -118,7 +127,17 @@ func railAccountSettings(proc *config.PSPConfig) map[string]any {
 	if len(proc.Solana.Tokens) > 0 {
 		tokens := map[string]any{}
 		for symbol, token := range proc.Solana.Tokens {
-			tokens[symbol] = map[string]any{"mint": token.Mint, "name": token.Name, "decimals": token.Decimals}
+			// or#881: a built-in symbol is SELECTED — its mint comes from the
+			// registry and restating it is a push error. Emit the declaration a
+			// real manifest would carry, not a restatement.
+			entry := map[string]any{}
+			if token.Name != "" {
+				entry["name"] = token.Name
+			}
+			if _, builtin := registry[strings.ToUpper(strings.TrimSpace(symbol))]; !builtin {
+				entry["mint"] = token.Mint
+			}
+			tokens[symbol] = entry
 		}
 		settings[config.SolanaSettingTokens] = tokens
 	}

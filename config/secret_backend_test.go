@@ -11,7 +11,9 @@ func TestSecretStoreBackendDerivation(t *testing.T) {
 		{"nil config", nil, SecretBackendDB},
 		{"explicit db", &Config{SecretBackend: "db"}, SecretBackendDB},
 		{"explicit vault", &Config{SecretBackend: "vault"}, SecretBackendVault},
-		{"empty + vault enabled -> vault (back-compat)", &Config{Vault: &VaultConfig{Enabled: true}}, SecretBackendVault},
+		// or#893: vault.enabled is a Vault CONNECTION (Transit signing counts); it
+		// no longer moves the secret store. Only the declaration selects it.
+		{"empty + vault enabled stays db (or#893: no inference)", &Config{Vault: &VaultConfig{Enabled: true}}, SecretBackendDB},
 		{"empty + no vault -> db", &Config{}, SecretBackendDB},
 		{"explicit db wins over vault enabled", &Config{SecretBackend: "db", Vault: &VaultConfig{Enabled: true}}, SecretBackendDB},
 	}
@@ -33,7 +35,7 @@ func TestValidateSecretBackend(t *testing.T) {
 		{"db is fine without vault", &Config{SecretBackend: "db"}, false},
 		{"vault backend needs vault.enabled", &Config{SecretBackend: "vault"}, true},
 		{"vault backend with vault.enabled", &Config{SecretBackend: "vault", Vault: &VaultConfig{Enabled: true}}, false},
-		{"derived-vault (empty + enabled) is fine", &Config{Vault: &VaultConfig{Enabled: true}}, false},
+		{"empty + vault enabled is db, so no vault requirement", &Config{Vault: &VaultConfig{Enabled: true}}, false},
 		{"unknown value rejected", &Config{SecretBackend: "consul"}, true},
 	}
 	for _, tc := range cases {

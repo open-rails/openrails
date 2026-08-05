@@ -17,7 +17,7 @@ import (
 
 func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 
@@ -109,6 +109,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		GatewayResponse:          []byte(`{}`),
 		CreatedAt:                now,
 		UpdatedAt:                now,
+		PspID:                    account.ID,
 	})
 	require.NoError(t, err)
 
@@ -127,6 +128,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		MerchantID: merchantID,
+		PspID:      account.ID,
 	})
 	require.NoError(t, err)
 	railCustomerID, err := q.GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
@@ -155,6 +157,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Metadata:             []byte(`{"contract":true}`),
 		CreatedAt:            now,
 		UpdatedAt:            now,
+		PspID:                account.ID,
 	})
 	require.NoError(t, err)
 	methods, err := q.ListPaymentMethodsByCustomer(ctx, customerID)
@@ -206,6 +209,8 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		PurchasedAt:    now,
 		CreatedAt:      now,
 		CustomerID:     customerID,
+		MoneyMovement:  string(models.MoneyMovementRail),
+		PspID:          &account.ID,
 	})
 	require.NoError(t, err)
 
@@ -354,9 +359,9 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Empty(t, stalled)
 }
 
-func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
+func TestPSPIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 
@@ -404,7 +409,9 @@ func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
 
 func TestUpsertPSPOnlyRecordsExplicitValidation(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedPGXPool(t)
+	// psps is RLS-FORCED and this contract test carries no app.merchant_id GUC,
+	// so it seeds through the owner like its sibling above (or#782).
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := gen.New(pool)
 	accountID := "validation-" + uuid.NewString()

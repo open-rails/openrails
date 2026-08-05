@@ -12,7 +12,7 @@ import (
 // descriptor's required fields are filled. The unkeyed literals already force
 // every FIELD at compile time; this forces every RAIL.
 func TestRegistryCompleteness(t *testing.T) {
-	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe, models.RailVaultedCard, models.RailPayPal}
+	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe, models.RailPayPal}
 	if len(descriptors) != len(enum) {
 		t.Fatalf("registry has %d descriptors, enum has %d rails", len(descriptors), len(enum))
 	}
@@ -60,14 +60,18 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		autoBilledNilPM      bool
 		autoBilledWithMethod bool
 		remoteDeleteTerminal bool
+		catalogTrial         bool
+		paymentMethodCRUD    bool
 		activeCancelMode     CancelMode
 	}{
-		{models.RailNMI, false, true, true, true, 2, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682
-		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
-		{models.RailStripe, true, true, false, true, 3, false, false, false, CancelModeReversible},
-		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
-		{models.RailVaultedCard, false, true, true, true, 1, false, false, false, CancelModeDestructive}, // #795: BT tenant, one custodial secret (api_key)
-		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},
+		// 2 keys: security_key, webhook_signing_secret. A custodian's own key is
+		// not a rail credential (or#880) — it lives on the custodian.
+		{models.RailNMI, false, true, true, true, 2, true, false, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682; or#896: no first phase, owns the vault
+		{models.RailCCBill, false, false, false, true, 3, true, true, false, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
+		// 4 keys: secret_key, webhook_signing_secret, _thin, _previous (#856 rollover overlap).
+		{models.RailStripe, true, true, false, true, 4, false, false, false, true, false, CancelModeReversible},
+		{models.RailSolana, false, false, true, true, 0, false, false, false, false, false, CancelModeDestructive},
+		{models.RailPayPal, false, false, false, false, 0, false, false, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer
 	// flips NMI to our-rebill; RebillDriver does.
@@ -86,8 +90,8 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		if d.OpenRailsDrivenDunning != c.openRailsDunning {
 			t.Errorf("%s: OpenRailsDrivenDunning = %v", c.rail, d.OpenRailsDrivenDunning)
 		}
-		if d.HasRailMerchantAccounts != c.psps {
-			t.Errorf("%s: HasRailMerchantAccounts = %v", c.rail, d.HasRailMerchantAccounts)
+		if d.HasPSPs != c.psps {
+			t.Errorf("%s: HasPSPs = %v", c.rail, d.HasPSPs)
 		}
 		if got := len(MerchantCredentialKeyNames(c.rail)); got != c.merchantKeyCount {
 			t.Errorf("%s: %d merchant-writable keys, want %d", c.rail, got, c.merchantKeyCount)
@@ -100,6 +104,12 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		}
 		if d.RemoteDeleteOnTerminalCancel != c.remoteDeleteTerminal {
 			t.Errorf("%s: RemoteDeleteOnTerminalCancel = %v", c.rail, d.RemoteDeleteOnTerminalCancel)
+		}
+		if got := SupportsCatalogTrial(c.rail); got != c.catalogTrial {
+			t.Errorf("%s: SupportsCatalogTrial = %v", c.rail, got)
+		}
+		if got := SupportsPaymentMethodCRUD(c.rail); got != c.paymentMethodCRUD {
+			t.Errorf("%s: SupportsPaymentMethodCRUD = %v", c.rail, got)
 		}
 		if got := CancelModeFor(&models.Subscription{Rail: c.rail, Status: models.StatusActive}, time.Now()); got != c.activeCancelMode {
 			t.Errorf("%s: CancelModeFor(active) = %v, want %v", c.rail, got, c.activeCancelMode)
@@ -144,11 +154,11 @@ func TestLookupNormalizes(t *testing.T) {
 	if _, ok := Lookup(" STRIPE "); !ok {
 		t.Error("Lookup must normalize case/whitespace")
 	}
-	// #630: mobius is a provider-account name on rail nmi, not a rail.
+	// #630: mobius is a PSP name on rail nmi, not a rail.
 	if _, ok := Lookup("mobius"); ok {
 		t.Error("mobius must not resolve to a descriptor")
 	}
-	if HasRemoteCustomer("bogus") || SupportsRailMerchantAccounts("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") {
+	if HasRemoteCustomer("bogus") || SupportsPSPs("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") {
 		t.Error("unknown rails must default to false")
 	}
 	if got := CancelModeFor(&models.Subscription{Rail: "bogus"}, time.Now()); got != CancelModeDestructive {

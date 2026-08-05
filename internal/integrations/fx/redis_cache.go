@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -79,7 +80,7 @@ func (p *RedisCachedProvider) Quote(ctx context.Context, fromCurrency, toCurrenc
 }
 
 func (p *RedisCachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return p.Quote(ctx, currency, "usd")
+	return p.Quote(ctx, currency, money.DefaultCurrency)
 }
 
 func (p *RedisCachedProvider) Refresh(ctx context.Context, currencies []string) error {

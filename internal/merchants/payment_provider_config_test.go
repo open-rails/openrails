@@ -14,11 +14,14 @@ import (
 
 func TestPaymentProviderDefinitions(t *testing.T) {
 	expected := []PaymentProviderDefinition{
+		// or#879/or#880: vaulted_card is NOT a rail — it is NMI with the card
+		// held by a third-party custodian. The rail is gone (0031) and the
+		// custodian's own key is NOT an NMI credential: it belongs to the
+		// custodian account (0053), not to whichever gateway it proxies into.
 		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret"}},
 		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
-		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin"}},
+		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}},
 		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}},
-		{Rail: "vaulted_card", DisplayName: "Credit Card", CredentialKeys: []string{"api_key"}},
 	}
 
 	if got := PaymentProviderDefinitions(); !reflect.DeepEqual(got, expected) {
@@ -45,10 +48,7 @@ func TestPaymentProviderConfigFromRowRedactsCredentials(t *testing.T) {
 		LastVerifiedAt: &now,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-	}, []MerchantSecretStatus{{
-		SecretDefinition: SecretDefinition{Name: secretName},
-		Configured:       true,
-	}})
+	}, []MerchantSecretStatus{{Name: secretName, Configured: true}})
 
 	if got.PublicConfig["publishable_key"] != "pk_live_123" {
 		t.Fatalf("public_config = %#v", got.PublicConfig)
@@ -79,10 +79,7 @@ func TestPaymentProviderConfigFromRowHidesUnprovenTimestamp(t *testing.T) {
 		Environment:    "live",
 		AccountID:      "gateway",
 		LastVerifiedAt: &now,
-	}, []MerchantSecretStatus{{
-		SecretDefinition: SecretDefinition{Name: secretName},
-		Configured:       true,
-	}})
+	}, []MerchantSecretStatus{{Name: secretName, Configured: true}})
 
 	if got.LastVerifiedAt != nil || got.Credentials["security_key"].LastValidatedAt != nil {
 		t.Fatal("an auto-stamped timestamp without probe evidence must stay hidden")
@@ -116,7 +113,7 @@ func TestCredentialValidatedAtOnlyMarksLiveProbedCredentials(t *testing.T) {
 	}
 }
 
-func TestRailMerchantAccountSecretNameRejectsMerchantWritableSolanaPrivateKey(t *testing.T) {
+func TestPSPSecretNameRejectsMerchantWritableSolanaPrivateKey(t *testing.T) {
 	name, err := PSPSecretName("solana", "live", "authority", "private_key")
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +139,7 @@ func TestValidateScopedStripeCredentialDoesNotPersist(t *testing.T) {
 	}
 	if statuses, err := svc.ListSecretStatuses(context.Background(), id); err != nil {
 		t.Fatal(err)
-	} else if len(statuses) != len(merchantSecretRegistry) {
-		t.Fatalf("validation should not create provider-account secrets, got %d statuses", len(statuses))
+	} else if len(statuses) != 0 {
+		t.Fatalf("validation should not create PSP secrets, got %d statuses", len(statuses))
 	}
 }

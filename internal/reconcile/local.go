@@ -88,13 +88,13 @@ type LocalPayment struct {
 // LocalPaymentMethod is the slice of openrails.payment_methods the diff engine
 // consumes.
 type LocalPaymentMethod struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Rail       string
-	VaultID    string
-	LastFour   string
-	CardType   string
-	ExpiryDate string
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Rail            string
+	RailCustomerRef string
+	LastFour        string
+	CardType        string
+	ExpiryDate      string
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
@@ -125,9 +125,13 @@ type LocalState struct {
 // provider snapshot. PaymentsByTransactionIDs is queried separately (bounded
 // by the snapshot's transaction set rather than a date window, so clock skew
 // between us and the rail can not fake a missing payment).
+//
+// or#893: pspID is REQUIRED. The mirror rows of one PSP are not the mirror
+// rows of its sibling on the same rail, and a nil-means-every-PSP read let one
+// account's roster judge another account's book.
 type LocalStateLoader interface {
-	Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error)
-	PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
+	Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error)
+	PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
 }
 
 // PGLocalStateLoader loads local state through the sqlc layer on a
@@ -138,7 +142,7 @@ type PGLocalStateLoader struct {
 
 var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
 
-func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error) {
+func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error) {
 	names := localRailNames(provider)
 	q := l.DB.Gen(ctx)
 
@@ -146,7 +150,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
 		Rails: names,
-		PspID: providerAccountID,
+		PspID: pspID,
 	})
 	if err != nil {
 		return nil, err
@@ -222,17 +226,17 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
 		Rails: names,
-		PspID: providerAccountID,
+		PspID: pspID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	for _, row := range pms {
 		pm := LocalPaymentMethod{
-			ID:         row.ID,
-			CustomerID: row.CustomerID,
-			Rail:       row.Rail,
-			VaultID:    row.VaultID,
+			ID:              row.ID,
+			CustomerID:      row.CustomerID,
+			Rail:            row.Rail,
+			RailCustomerRef: row.RailCustomerRef,
 		}
 		if row.LastFour != nil {
 			pm.LastFour = *row.LastFour
@@ -249,13 +253,13 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	return state, nil
 }
 
-func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {
+func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {
 	if len(transactionIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
 		Rails:          localRailNames(provider),
-		PspID:          providerAccountID,
+		PspID:          pspID,
 		TransactionIds: transactionIDs,
 	})
 	if err != nil {
@@ -358,7 +362,7 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 		}
 		out := make(map[string]struct{}, len(rows))
 		for _, r := range rows {
-			out[r.SubscriptionPda] = struct{}{}
+			out[r.OpenrailsSolanaSubscription.SubscriptionPda] = struct{}{}
 		}
 		return out, nil
 	}
@@ -423,11 +427,14 @@ func solanaStateStr(state map[string]any, key string) string {
 }
 
 func solanaStateU64(state map[string]any, key string) uint64 {
+	// or#863: NO float64 case. The canonical JSONB shape for a base-unit amount
+	// is a decimal string (session_service writes strconv.FormatUint), and a
+	// token amount that arrived as a JSON number has already been through a
+	// float64 — it cannot be trusted to equal the on-chain transfer it is about
+	// to be compared against. An unreadable amount yields 0, which parks the
+	// settlement ("carries no bound solana token quote to verify against")
+	// rather than approving a transfer against a rounded expectation.
 	switch v := state[key].(type) {
-	case float64:
-		if v > 0 {
-			return uint64(v)
-		}
 	case string:
 		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
 			return n

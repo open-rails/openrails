@@ -11,9 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/config"
 	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 )
 
 var (
@@ -22,13 +20,6 @@ var (
 	sharedSuiteOnce sync.Once
 	sharedSuite     *TestContainerSuite
 )
-
-func testCCBillWebhookClient() *ccbill.RESTClient {
-	return ccbill.NewRESTClient(&config.CCBillConfig{
-		ClientAccNum: "1234",
-		ClientSubAcc: "0000",
-	})
-}
 
 // personalOwnerID returns the merchant-subject id for the self-hosted /
 // single-merchant personal case. HARDCUT (#221): this matches the caller-provided

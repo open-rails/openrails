@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -161,6 +162,23 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if n != 1 {
 			return fmt.Errorf("set collection payment method: settings row not found")
 		}
+		// or#828 bucket-2 resume. Designating a collection payment method is
+		// exactly the action the "update your payment method" notice asked for,
+		// so every invoice of theirs that STOPPED for want of a working
+		// instrument becomes due again now. Without this the bucket-2 stop is
+		// still a state nothing resolves — the customer does what we asked and
+		// nothing happens.
+		resumed, err := q.ResumeStoppedInvoiceCollection(ctx, gen.ResumeStoppedInvoiceCollectionParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now,
+		})
+		if err != nil {
+			return fmt.Errorf("resume stopped invoice collection: %w", err)
+		}
+		if resumed > 0 {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"customer_id": payer.UUID(), "currency": currency, "invoices": resumed,
+			}).Info("collection payment method set; stopped invoice collection resumed")
+		}
 		return nil
 	})
 }
@@ -273,10 +291,17 @@ func invoiceRetryAttemptKey(providerKey string, paymentMethodID uuid.UUID) strin
 	return providerKey + ":" + paymentMethodID.String()
 }
 
+// invoiceCollectionRetryable gates the MANUAL retry surface. `open` counts once
+// the invoice has failed at least once (or#828): a bucket-2 stop deliberately
+// leaves the status alone, so requiring past_due here would refuse to retry the
+// exact invoices whose notice told the customer to fix their card and try
+// again. A never-attempted open invoice is still not "retryable" — there is
+// nothing to retry.
 func invoiceCollectionRetryable(invoice *models.Invoice) bool {
 	return invoice != nil &&
 		invoice.CollectionMethod == CollectionChargeAutomatically &&
-		(invoice.Status == "past_due" || invoice.Status == "uncollectible") &&
+		(invoice.Status == "past_due" || invoice.Status == "uncollectible" ||
+			(invoice.Status == "open" && invoice.CollectionFailureCount > 0)) &&
 		invoice.AmountDue > 0 &&
 		derefStr(invoice.LastCollectionFailureCode) != collectionAttemptInProgress &&
 		derefStr(invoice.LastCollectionFailureCode) != collectionOutcomeUnknown
@@ -375,6 +400,9 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			return nil
 		}
 		paymentMethodID := options.paymentMethodID
+		// or#893: the attempt is charged through an instrument, and the account
+		// that vaulted that instrument is the account that will take the money.
+		var pspID *uuid.UUID
 		if paymentMethodID != nil {
 			method, err := q.GetPaymentMethodByID(ctx, *paymentMethodID)
 			if err != nil {
@@ -390,6 +418,7 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			if !ok || !descriptor.SupportsChargeSavedMethod {
 				return ErrCollectionPaymentMethodInvalid
 			}
+			pspID = &method.PspID
 		} else {
 			settingsRow, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
 				MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: invoice.Currency,
@@ -414,6 +443,14 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 				}
 				return nil
 			}
+			method, err := q.GetPaymentMethodByID(ctx, *paymentMethodID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrCollectionPaymentMethodInvalid
+				}
+				return fmt.Errorf("load collection payment method: %w", err)
+			}
+			pspID = &method.PspID
 		}
 		attempts, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
@@ -439,7 +476,7 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
 			Currency: invoice.Currency, Amount: invoice.AmountDue, Status: "attempted",
 			AttemptedAt: options.now, CreatedAt: options.now, UpdatedAt: options.now,
-			PaymentMethodID: paymentMethodID, IdempotencyKey: &key,
+			PaymentMethodID: paymentMethodID, IdempotencyKey: &key, PspID: pspID,
 		}); err != nil {
 			return fmt.Errorf("record invoice collection claim: %w", err)
 		}

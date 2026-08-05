@@ -34,8 +34,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, err)
 
 	sfx := uuid.NewString()[:8]
-	prod, price, pspID := uuid.New(), uuid.New(), uuid.New()
-	pspKey := "import-mobius-" + sfx
+	prod, price := uuid.New(), uuid.New()
 	asOf := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	day := 24 * time.Hour
 
@@ -49,16 +48,18 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			prod, "imp-"+sfx, merchantID)
 		require.NoError(t, e)
 		_, e = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'usd',720,true,$3)`,
+			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		require.NoError(t, e)
-		_, e = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.psps (id,merchant_id,rail,environment,account_id,key,archived)
-			 VALUES ($1,$2,'nmi','live',$3,$4,false)`,
-			pspID, merchantID, "acct-"+sfx, pspKey)
-		require.NoError(t, e)
+		// or#893: every declared provider row must attribute a PSP. The book is a
+		// mixed nmi/ccbill legacy account, so DefaultPSP covers the nmi majority
+		// and the one ccbill row below names its own PSP explicitly.
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		return nil
 	}))
+	defaultNMIPSP := PSPRef{Key: "nmi"}
+	ccbillPSPRef := PSPRef{Key: "ccbill"}
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range allCust {
@@ -70,7 +71,6 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			}
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, pspID)
 			return nil
 		})
 	})
@@ -84,16 +84,16 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	chargebackAt := asOf.Add(-30 * day)
 	parkedPaid := asOf.Add(-3 * 365 * day)
 	paidIncr := asOf.Add(10 * day)
-	dunningEventID := uuid.New()
 
 	book := DeclaredBilling{
-		AsOf: asOf,
+		AsOf:       asOf,
+		DefaultPSP: defaultNMIPSP,
 		Customers: []DeclaredCustomer{
 			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed}, {Customer: cUser},
 			{Customer: cUserNMI}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
 		},
 		PaymentMethods: []DeclaredPaymentMethod{{
-			SourceID: "vault", PSPKey: pspKey, Customer: cDunning, Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
+			Customer: cDunning, Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
 			InitialTransactionID: "itx-" + sfx, LastFour: "4242",
 		}},
 		Subscriptions: []DeclaredSubscription{
@@ -105,7 +105,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				SourceID: "dunning", Customer: cDunning, Price: price, Rail: "nmi",
 				RailSubscriptionID: "sub-dunning-" + sfx, StartedAt: asOf.Add(-200 * day), PaidThrough: &paidDunning,
 				Dunning:       &DunningEvidence{Retries: 2, LastRetryAt: &lastRetryAt, ScheduleLive: true},
-				PaymentMethod: &PaymentMethodRef{Rail: "nmi", PSPKey: pspKey, RailCustomerRef: "vault-" + sfx, RailMethodRef: ""},
+				PaymentMethod: &PaymentMethodRef{Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: ""},
 				Evidence:      json.RawMessage(`{"legacy_source":"subscriptions","legacy_id":42}`),
 			},
 			{
@@ -116,6 +116,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			{
 				SourceID: "usercancel", Customer: cUser, Price: price, Rail: "ccbill",
 				RailSubscriptionID: "sub-user-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
+				PSP:    ccbillPSPRef,
 				Cancel: CancelEvidence{Kind: "user_cancelled", At: userCancelAt},
 			},
 			{
@@ -145,22 +146,12 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		},
 		Transactions: []DeclaredTransaction{
 			// Runway's opening charge: cents → micros pin (2300 → 23_000_000).
-			{RailSubscriptionID: "sub-runway-" + sfx, TransactionID: "tx-open-" + sfx, Success: true, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-10 * day)},
+			{RailSubscriptionID: "sub-runway-" + sfx, TransactionID: "tx-open-" + sfx, Success: true, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-10 * day)},
 			// Dunning's failed renewal, within the window.
-			{RailSubscriptionID: "sub-dunning-" + sfx, TransactionID: "tx-decl-" + sfx, Type: "decline", Success: false, AmountCents: 2300, Currency: "usd", OccurredAt: asOf.Add(-4 * day)},
+			{RailSubscriptionID: "sub-dunning-" + sfx, TransactionID: "tx-decl-" + sfx, Type: "decline", Success: false, AmountCents: 2300, Currency: "USD", OccurredAt: asOf.Add(-4 * day)},
 			// Chargeback's reversal.
-			{RailSubscriptionID: "sub-cb-" + sfx, TransactionID: "tx-cb-" + sfx, Type: "chargeback", Success: false, AmountCents: 2300, Currency: "usd", OccurredAt: chargebackAt},
+			{RailSubscriptionID: "sub-cb-" + sfx, TransactionID: "tx-cb-" + sfx, Type: "chargeback", Success: false, AmountCents: 2300, Currency: "USD", OccurredAt: chargebackAt},
 		},
-		Payments: []DeclaredPayment{{
-			SourceID: "oneoff", Customer: cRunway, Price: price, Rail: "solana",
-			TransactionID: "tx-oneoff-" + sfx, AmountMicros: 23_000_001, Currency: "usd",
-			OccurredAt: asOf.Add(-2 * day), Metadata: json.RawMessage(`{"legacy_source":"wallet_transactions"}`),
-		}},
-		DunningEvents: []DeclaredDunningEvent{{
-			SourceID: "history", ID: dunningEventID, Customer: &cDunning,
-			EventType: "charge_failure", Rail: "nmi", OccurredAt: asOf.Add(-3 * day),
-			Source: "test", Detail: json.RawMessage(`{"status":"failed"}`),
-		}},
 	}
 
 	res, err := ImportBilling(context.Background(), BillingImportOptions{
@@ -169,22 +160,6 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res.Blocked, "no blocks expected: %v", res.Reasons)
 	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res.Imported)
-	require.Equal(t, []string{"vault"}, res.PaymentMethodsImported)
-	require.Equal(t, []string{"oneoff"}, res.PaymentsImported)
-	require.Equal(t, []string{"history"}, res.DunningImported)
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		var gotPSP uuid.UUID
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT psp_id FROM openrails.payment_methods WHERE rail_customer_ref=$1`,
-			"vault-"+sfx).Scan(&gotPSP))
-		require.Equal(t, pspID, gotPSP)
-		var amount int64
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount FROM openrails.payments WHERE transaction_id=$1`,
-			"tx-oneoff-"+sfx).Scan(&amount))
-		require.Equal(t, int64(23_000_001), amount)
-		return nil
-	}))
 
 	type subRow struct {
 		status, cancelType             string
@@ -301,15 +276,12 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.Empty(t, res2.Imported)
 	require.Empty(t, res2.Blocked, "re-import blocks: %v", res2.Reasons)
 	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res2.Skipped)
-	require.Equal(t, []string{"vault"}, res2.PaymentMethodsSkipped)
-	require.Equal(t, []string{"oneoff"}, res2.PaymentsSkipped)
-	require.Equal(t, []string{"history"}, res2.DunningSkipped)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.payments WHERE transaction_id LIKE '%'||$1`, sfx).Scan(&n))
-		require.Equal(t, 4, n, "payments idempotent by (rail, transaction_id)")
+		require.Equal(t, 3, n, "payments idempotent by (rail, transaction_id)")
 		r := load(ctx, "sub-user-"+sfx)
 		require.Equal(t, "user", r.cancelType, "re-import never regresses settled history")
 		r = load(ctx, "sub-runway-"+sfx)
@@ -321,7 +293,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// product (different rail key) cannot adopt into the occupied lifecycle
 	// slot — it blocks loudly, stays parked unknown, and never fails the batch.
 	twin := DeclaredBilling{
-		AsOf: asOf,
+		AsOf:       asOf,
+		DefaultPSP: ccbillPSPRef,
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "twin", Customer: cRunway, Price: price, Rail: "ccbill",
 			RailSubscriptionID: "sub-twin-" + sfx, StartedAt: asOf.Add(-50 * day), PaidThrough: &paidRunway,
@@ -341,17 +314,21 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		return nil
 	}))
 
-	// 10) #737 Task 2: incremental re-import terminal cancel. Import #1 landed
-	// "incremental" active with runway (adopted, like "runway"); a pre-existing
-	// open entitlement window stands in for the access a real legacy customer
-	// would already carry. Import #2, at a NEWER AsOf, re-declares the SAME
-	// rail_subscription_id now stalled at the provider (roster past_due, still
-	// no explicit cancel evidence) far beyond the dunning window — the
-	// decider's "roster_past_due_beyond_window" law lands TransitionCancel with
-	// RemoteGone=false (the remote NMI schedule may still be retrying), so
-	// ResolveCancelledRemoteAlive fires: terminal cancel dated at the NEW AsOf,
-	// entitlement window closed, the DeletionScheduledAt marker stamped, and
-	// the real nmi_delete_subscription ledger intent enqueued inline.
+	// 10) #737 Task 2 / #821: incremental re-import of a STALLED row. Import #1
+	// landed "incremental" active with runway; a pre-existing open entitlement
+	// window stands in for the access a real legacy customer already carries.
+	// Import #2, at a NEWER AsOf, re-declares the SAME rail_subscription_id as
+	// still-dunning at the provider (DunningEvidence.ScheduleLive, no explicit
+	// cancel evidence) far beyond the dunning window.
+	//
+	// This USED to land a terminal cancel + the deferred NMI vault delete off
+	// "roster_past_due_beyond_window". That is precisely the go-live blocker:
+	// on NMI the rebill retries forever and the next_billing_date stays wedged
+	// while it fails, so this shape describes every dunning customer in an
+	// imported legacy book — and the delete is irreversible. With no certainty
+	// (no non-retryable decline, no exhausted dunning) the row now PARKS as
+	// `unknown` with its access intact, and a per-subscription probe resolves
+	// it on real evidence.
 	var subIncrID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if err := appDB.Qx(ctx).QueryRow(ctx,
@@ -367,7 +344,8 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 	asOf2 := asOf.Add(40 * day) // 30d past paidIncr — beyond DefaultDunningWindow (14d)
 	restalled := DeclaredBilling{
-		AsOf: asOf2,
+		AsOf:       asOf2,
+		DefaultPSP: defaultNMIPSP,
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "incremental-restalled", Customer: cIncr, Price: price, Rail: "nmi",
 			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
@@ -383,31 +361,52 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		r := load(ctx, "sub-incr-"+sfx)
-		require.Equal(t, "cancelled", r.status)
-		require.Equal(t, "expired", r.cancelType)
-		require.NotNil(t, r.endedAt)
-		require.True(t, r.endedAt.Equal(asOf2), "ended_at = the NEW import's AsOf, not the first")
-		require.NotNil(t, r.deletionScheduledAt, "NMI terminal cancel with remote possibly still alive arms the deferred-delete marker (#737 Task 1)")
-		require.True(t, r.deletionScheduledAt.Equal(asOf2))
+		require.Equal(t, "unknown", r.status, "a still-retrying schedule parks for verification; it is not terminated")
+		require.Nil(t, r.endedAt, "no terminal end without certainty")
+		require.Nil(t, r.deletionScheduledAt, "the irreversible NMI vault delete must NOT be armed off a stale date")
 
-		// The import enqueues the real nmi_delete_subscription ledger intent
-		// inline (no reliance on the boot marker sweep).
-		var intentStatus, intentOrigin string
+		var intents int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, origin FROM openrails.rail_intents
-			 WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, subIncrID).
-			Scan(&intentStatus, &intentOrigin))
-		require.Equal(t, "pending", intentStatus)
-		require.Equal(t, "user", intentOrigin)
+			`SELECT count(*) FROM openrails.rail_intents
+			  WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, subIncrID).Scan(&intents))
+		require.Zero(t, intents, "no provider delete may be enqueued without certainty")
 
 		var revokedAt *time.Time
-		var revokeReason *string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT revoked_at, revoke_reason FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
-			subIncrID).Scan(&revokedAt, &revokeReason))
-		require.NotNil(t, revokedAt, "entitlement window closed on terminal cancel")
-		require.NotNil(t, revokeReason)
-		require.Equal(t, "dunning_failed", *revokeReason)
+			`SELECT revoked_at FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
+			subIncrID).Scan(&revokedAt))
+		require.Nil(t, revokedAt, "entitlements are never lost to our own malfunction")
+		return nil
+	}))
+
+	// 11) #821: the certainty leg still works. Re-declare the SAME row with an
+	// explicit provider-side termination and the terminal cancel lands — the
+	// fix removes the fabricated path, not the ability to converge a genuinely
+	// dead subscription.
+	asOf3 := asOf2.Add(day)
+	terminated := DeclaredBilling{
+		AsOf:       asOf3,
+		DefaultPSP: defaultNMIPSP,
+		Subscriptions: []DeclaredSubscription{{
+			SourceID: "incremental-terminated", Customer: cIncr, Price: price, Rail: "nmi",
+			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
+			Cancel: CancelEvidence{Kind: "provider_terminated", At: asOf3},
+		}},
+	}
+	res5, err := ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: terminated,
+	})
+	require.NoError(t, err)
+	require.Empty(t, res5.Blocked, "no blocks expected: %v", res5.Reasons)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		r := load(ctx, "sub-incr-"+sfx)
+		require.Equal(t, "cancelled", r.status, "provider-confirmed dead IS certainty")
+		var revokedAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT revoked_at FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
+			subIncrID).Scan(&revokedAt))
+		require.NotNil(t, revokedAt, "entitlement window closed on a PROVEN terminal cancel")
 		return nil
 	}))
 }

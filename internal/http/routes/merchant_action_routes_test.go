@@ -75,6 +75,30 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantPaymentProvidersRead,
 		},
 		{
+			// or#288: the routing dry run reads PSP state, so it rides the
+			// payment-providers READ grant even though it is a POST.
+			name:   "checkout routing dry run",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/payment-providers/routing/dry-run",
+			perm:   controlplane.PermMerchantPaymentProvidersRead,
+		},
+		{
+			// or#878 delinquency reads. Pinned here alongside the or#288 dry
+			// run because the route-surface golden only proves a route EXISTS —
+			// it says nothing about what guards it. A new read route silently
+			// mounted ungated would pass that snapshot.
+			name:   "merchant delinquency roster",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/delinquency",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
+			name:   "customer delinquency state",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/delinquency",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
 			name:   "payment providers write",
 			method: http.MethodPut,
 			path:   "/billing/v1/merchant/payment-providers/stripe",

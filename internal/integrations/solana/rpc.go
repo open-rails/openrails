@@ -396,3 +396,9 @@ func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicK
 
 	return accounts, nil
 }
+
+// PrimaryCredentialFingerprint exposes the armed-credential fingerprint of the
+// primary endpoint (#SEC-17) — the credential itself is never in GetEndpoint().
+func (c *RPCClient) PrimaryCredentialFingerprint() string {
+	return c.fallback.PrimaryCredentialFingerprint()
+}

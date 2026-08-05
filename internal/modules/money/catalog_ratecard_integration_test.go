@@ -82,8 +82,7 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 		Dimensions: map[string]int64{"seconds": 10_000 * 3600},
 		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1"},
 		Amount:     0,
-		Source:     "ratecard-test",
-		SourceID:   uuid.NewString(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-test", uuid.NewString()),
 		OccurredAt: occurred,
 	})
 	require.NoError(t, err)
@@ -94,8 +93,7 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 		EventType:  "bandwidth.transfer",
 		Dimensions: map[string]int64{"bytes": 3 * 1024 * 1024 * 1024},
 		Amount:     0,
-		Source:     "ratecard-test",
-		SourceID:   uuid.NewString(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("bandwidth.transfer"), "ratecard-test", uuid.NewString()),
 		OccurredAt: occurred,
 	})
 	require.NoError(t, err)
@@ -113,7 +111,7 @@ FROM openrails.invoice_items
 WHERE customer_id = $1
   AND invoice_id = $2
   AND status = 'invoiced'
-  AND source_id LIKE 'metered:%:period:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
+  AND source_id LIKE 'metered_rating:metered:%:period:%'`, payer.UUID(), inv.ID).Scan(&itemCount, &itemTotal))
 	require.Equal(t, 2, itemCount)
 	require.Equal(t, inv.AmountDue, itemTotal)
 }
@@ -175,10 +173,19 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.Equal(t, unit, quote.Unit)
 	require.NotNil(t, quote.ExpiresAt)
 
-	quote, trx, err := svc.DepositCatalogCreditPurchase(ctx, payer, payer.UUID().String(), money.CatalogCreditPurchaseQuoteInput{
-		ProductKey:  productKey,
-		SpendMicros: 50_000_000,
-	}, "checkout_"+uuid.NewString())
+	// or#896: delivery is the LIVE deposit path (the one POST
+	// /v1/service/credits/deposit drives) fed by the quote — there is no second
+	// catalog-specific money writer.
+	sourceID := "checkout_" + uuid.NewString()
+	trx, err := svc.Deposit(ctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    payer.UUID().String(),
+		Currency:   quote.Unit,
+		Amount:     quote.TotalCredits,
+		Source:     "credit_purchase",
+		SourceID:   &sourceID,
+		ExpiresAt:  quote.ExpiresAt,
+	})
 	require.NoError(t, err)
 	require.Equal(t, quote.TotalCredits, trx.Amount)
 	require.Equal(t, unit, trx.Currency)
@@ -187,10 +194,17 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.NoError(t, err)
 	require.Equal(t, quote.TotalCredits, bal.Balance)
 
-	_, _, err = svc.DepositCatalogCreditPurchase(ctx, payer, payer.UUID().String(), money.CatalogCreditPurchaseQuoteInput{
-		ProductKey:  productKey,
-		SpendMicros: 50_000_000,
-	}, derefString(trx.SourceID))
+	// Same payment source id = same deposit: a replayed settlement never
+	// double-credits the quoted lot.
+	_, err = svc.Deposit(ctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    payer.UUID().String(),
+		Currency:   quote.Unit,
+		Amount:     quote.TotalCredits,
+		Source:     "credit_purchase",
+		SourceID:   trx.SourceID,
+		ExpiresAt:  quote.ExpiresAt,
+	})
 	require.NoError(t, err)
 	bal, err = svc.GetBalanceForCustomer(ctx, payer, unit)
 	require.NoError(t, err)
@@ -240,7 +254,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', '{
 		EventType:  "droplet.usage",
 		Dimensions: map[string]int64{"seconds": 100 * 3600}, // 100h: under the cap AND under cell.included
 		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1"},
-		Source:     "ratecard-selfallow", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-selfallow", uuid.NewString()), OccurredAt: time.Now(),
 	})
 	require.NoError(t, err)
 
@@ -291,9 +305,63 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.Equal(t, int64(50_000_000), quote.PaidAmount)
 }
 
-func derefString(s *string) string {
-	if s == nil {
-		return ""
+// or#823 money-boundary pin: the ONE rounding knob a credit purchase actually
+// reads is per_unit.round, carried in the offer's `price` jsonb. Two offers
+// differing in nothing else must quote different micros for the same credits,
+// at the exact values below — otherwise the mode is decorative and the doctrine
+// that a declared knob is read has no proof. (The retired top-level
+// catalog_credit_purchase_prices.round column is dropped in 0002; it was never
+// selected here.)
+func TestCatalogCreditPurchase_PerUnitRoundModeChangesTheQuote(t *testing.T) {
+	svc, pool, _, _, ctx := moneyInEnv(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+
+	_, err := pool.Exec(ctx, `
+INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
+VALUES (uuidv7(), $1, 'image-credit', 0, true)
+ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit)
+VALUES ($1, 'image-credit', 'image-credit')
+ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", merchantID, "image-credit")
+	})
+
+	// 1000 credits at 10_000 micros / 3 = 3_333_333.33 micros — a quantity whose
+	// exact cost is not an integer, so the mode is the only thing that can decide
+	// the last micro.
+	for _, c := range []struct {
+		mode string
+		want int64
+	}{
+		{"up", 3_333_334},
+		{"down", 3_333_333},
+		{"half_up", 3_333_333},
+	} {
+		productID := uuid.New()
+		productKey := "image-credit-topup-" + uuid.NewString()
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+			_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		})
+		_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Topup', $3)`, productID, productKey, merchantID)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `
+INSERT INTO openrails.catalog_credit_purchase_prices (merchant_id, product_id, ordinal, credit_key, currency, price)
+VALUES ($1, $2, 1, 'image-credit', 'USD', $3::jsonb)`, merchantID, productID,
+			`{"model":"per_unit","per_unit":{"unit_amount":10000,"divide_by":3,"round":"`+c.mode+`"}}`)
+		require.NoError(t, err)
+
+		quote, err := svc.QuoteCatalogCreditPurchase(ctx, money.CatalogCreditPurchaseQuoteInput{
+			ProductKey: productKey,
+			Credits:    1_000,
+		})
+		require.NoError(t, err, "round %q", c.mode)
+		require.Equal(t, int64(1_000), quote.TotalCredits, "round %q", c.mode)
+		require.Equal(t, c.want, quote.PaidAmount, "round %q quoted the wrong micros", c.mode)
 	}
-	return *s
 }
+

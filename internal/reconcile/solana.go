@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,6 +184,9 @@ type SolanaFetcher struct {
 	MerchantWallet string
 	// SignatureLimit bounds the per-subscription signature listing (default 50).
 	SignatureLimit int
+	// mintDecimalsCache memoizes on-chain mint decimals for this fetcher's
+	// lifetime (#817). Mint decimals are immutable, so caching cannot go stale.
+	mintDecimalsCache map[string]int
 	// WalletScanPageSize / WalletScanCap bound the wallet signature walk
 	// (defaults 200 / 1000 signatures per window).
 	WalletScanPageSize int
@@ -459,7 +463,7 @@ func (f *SolanaFetcher) applyPlanAndFiat(ctx context.Context, sub *RemoteSubscri
 		amountBase = plan.Amount
 	}
 	if plan != nil && amountBase > 0 {
-		if cents, ok := solanaFiatCents(plan.Mint.String(), amountBase); ok {
+		if cents, ok := f.solanaFiatCentsForMint(ctx, plan.Mint.String(), amountBase); ok {
 			sub.AmountCents = cents
 			sub.Currency = "USD"
 		} else {
@@ -673,7 +677,7 @@ func (f *SolanaFetcher) fetchSignatures(ctx context.Context, ref SolanaSubscript
 			if class.Transfer != nil {
 				raw["amount_base_units"] = class.Transfer.Amount
 				raw["mint"] = class.Transfer.Mint.String()
-				if cents, ok := solanaFiatCents(class.Transfer.Mint.String(), class.Transfer.Amount); ok {
+				if cents, ok := f.solanaFiatCentsForMint(ctx, class.Transfer.Mint.String(), class.Transfer.Amount); ok {
 					txn.AmountCents = cents
 					txn.Currency = "USD"
 				} else {
@@ -1071,7 +1075,7 @@ func (f *SolanaFetcher) buildWalletCandidate(ctx context.Context, sig solanaint.
 	}
 
 	if c.hasMoney && c.transfer.Mint != "" {
-		if cents, ok := solanaFiatCents(c.transfer.Mint, c.transfer.BaseUnits); ok {
+		if cents, ok := f.solanaFiatCentsForMint(ctx, c.transfer.Mint, c.transfer.BaseUnits); ok {
 			txn.AmountCents = cents
 			txn.Currency = "USD"
 		} else {
@@ -1314,38 +1318,66 @@ func distinctUUIDs(ids []uuid.UUID) []uuid.UUID {
 	return out
 }
 
-// microUSDMints holds the mints the repo token registry declares as USD-pegged
-// stablecoins with 6 decimals — for exactly these, base units ARE
-// micro-dollars. Built by joining the stablecoin registry (the trust anchor:
-// KnownStablecoinByMint) with the declared token configs (the decimals
-// source); nothing is assumed for undeclared mints. Devnet mints fall out by
-// construction (they are not in the canonical stablecoin registry), so devnet
-// amounts stay unnormalized — devnet money is fake.
-var microUSDMints = buildMicroUSDMints()
-
-func buildMicroUSDMints() map[string]struct{} {
-	out := make(map[string]struct{})
-	for _, reg := range []map[string]config.TokenConfig{
-		solanatokens.DefaultSupportedTokens(),
-		solanatokens.DefaultDevnetTokens(),
-	} {
-		for _, tok := range reg {
-			if sc, ok := solanatokens.KnownStablecoinByMint(tok.Mint); ok && sc.Peg == "usd" && tok.Decimals == 6 {
-				out[tok.Mint] = struct{}{}
-			}
-		}
+// mintDecimals reads a mint's ON-CHAIN base-unit precision (#817), memoized for
+// the fetcher's lifetime. Safe to cache: `decimals` is written once by
+// InitializeMint and is immutable thereafter.
+func (f *SolanaFetcher) mintDecimals(ctx context.Context, mint string) (int, bool) {
+	mint = strings.TrimSpace(mint)
+	if mint == "" || f.RPC == nil {
+		return 0, false
 	}
-	return out
+	if d, ok := f.mintDecimalsCache[mint]; ok {
+		return d, true
+	}
+	pk, err := solanago.PublicKeyFromBase58(mint)
+	if err != nil {
+		return 0, false
+	}
+	d, err := solanaint.ReadMintDecimals(ctx, f.RPC, pk)
+	if err != nil {
+		return 0, false
+	}
+	if f.mintDecimalsCache == nil {
+		f.mintDecimalsCache = make(map[string]int)
+	}
+	f.mintDecimalsCache[mint] = d
+	return d, true
+}
+
+// isUSDStablecoinMint reports whether the mint is a canonical USD-pegged
+// stablecoin (the trust anchor: KnownStablecoinByMint). Devnet mints fall out by
+// construction — they are not in the registry — so devnet amounts stay
+// unnormalized. Devnet money is fake.
+func isUSDStablecoinMint(mint string) bool {
+	sc, ok := solanatokens.KnownStablecoinByMint(mint)
+	return ok && sc.Peg == "usd"
 }
 
 // solanaFiatCents converts mint base units to integer cents (the fetchers'
-// shared AmountCents unit) when the mint is a registry-declared USD stablecoin
-// with 6 decimals (base units are micro-dollars; 10_000 micros = 1 cent) AND
-// the value is exactly cent-representable. Sub-cent precision is never rounded
-// (money doctrine) — the caller keeps base units in Raw instead.
-func solanaFiatCents(mint string, baseUnits uint64) (int64, bool) {
-	if _, ok := microUSDMints[mint]; !ok || baseUnits%10_000 != 0 {
+// shared AmountCents unit) when the mint is a registry USD stablecoin AND the
+// value is exactly cent-representable at the mint's ON-CHAIN decimals (#817 —
+// this used to assume 6). Sub-cent precision is never rounded (money doctrine)
+// — the caller keeps base units in Raw instead.
+func solanaFiatCents(mint string, decimals int, baseUnits uint64) (int64, bool) {
+	if !isUSDStablecoinMint(mint) || decimals < 2 || decimals > config.MaxTokenDecimals {
 		return 0, false
 	}
-	return int64(baseUnits / 10_000), true // #nosec G115 -- uint64/10_000 always fits int64 (max ~1.8e15 < MaxInt64)
+	perCent := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals-2)), nil)
+	cents, rem := new(big.Int).QuoRem(new(big.Int).SetUint64(baseUnits), perCent, new(big.Int))
+	if rem.Sign() != 0 || !cents.IsInt64() {
+		return 0, false
+	}
+	return cents.Int64(), true
+}
+
+// solanaFiatCentsForMint resolves the mint's on-chain decimals and normalizes.
+func (f *SolanaFetcher) solanaFiatCentsForMint(ctx context.Context, mint string, baseUnits uint64) (int64, bool) {
+	if !isUSDStablecoinMint(mint) {
+		return 0, false
+	}
+	decimals, ok := f.mintDecimals(ctx, mint)
+	if !ok {
+		return 0, false
+	}
+	return solanaFiatCents(mint, decimals, baseUnits)
 }

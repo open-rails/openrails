@@ -26,7 +26,7 @@ import (
 
 // #788 end-to-end pins for the merchant-scoped CCBill webhook leg: the
 // dispatcher builds its CCBill client PER MERCHANT at dispatch time from the
-// armed rail state (rail_merchant_accounts + scoped secrets) — the SAME
+// armed rail state (psps + scoped secrets) — the SAME
 // resolution seam regardless of whether MODE 1 (manifest) or MODE 2 (API)
 // armed it — and an unarmed rail fails closed.
 
@@ -37,14 +37,20 @@ const ccbillWebhookTestPriceMicros = 9_990_000 // $9.99
 func sandboxModeConfig(dsn string, source string) *config.Config {
 	return &config.Config{
 		Env: "dev",
-		// Sandbox posture: the CCBill IP allowlist bypass engages (no live
-		// ccbill accounts exist for these merchants) — same as hentai0's
-		// compose suite.
+		// Sandbox posture + an EXPLICIT loopback allowlist entry. SEC-19 replaced
+		// the old implicit "test_mode accepts any IP" bypass: the extra CIDR is a
+		// declared credential, honored only under sandbox posture and only while
+		// the PSP catalog proves no live CCBill PSP exists. httptest posts from
+		// loopback, so the harness must declare it — same as hentai0's compose
+		// suite and internal/http's merchant-webhook suite.
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		MerchantSource:           source,
-		ProviderWriteMode:        config.ProviderWriteModeFull,
-		DB:                       &config.DBConfig{URL: dsn},
+		// or#893: merchant_source=api declares where secrets live. MODE 1 never
+		// consults it, so db is inert there and honest in MODE 2.
+		SecretBackend:     config.SecretBackendDB,
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		DB:                &config.DBConfig{URL: dsn},
 	}
 }
 
@@ -151,9 +157,13 @@ func postCCBillMerchantWebhook(t *testing.T, serverURL, slug string, payload map
 	return resp.StatusCode, string(raw)
 }
 
-func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, dsn string, mid merchant.ID, railSubID string) {
+// assertCCBillSubscriptionActive reads under the MERCHANT's own scope. The
+// default integration handle is the RLS-enforcing openrails_app role, so an
+// unpinned read of any merchant-owned table matches zero rows and reports the
+// webhook as having written nothing.
+func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, mid merchant.ID, railSubID string) {
 	t.Helper()
-	appDB := dbtest.OpenAppDB(t, dsn)
+	appDB := dbtest.OpenMerchantDB(t, mid.UUID())
 	var status string
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
 		`SELECT status FROM openrails.subscriptions WHERE merchant_id = $1 AND rail = 'ccbill' AND rail_subscription_id = $2`,
@@ -161,9 +171,12 @@ func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, dsn strin
 	require.Equal(t, "active", status)
 }
 
-func cleanupCCBillWebhookMerchant(t *testing.T, dsn string, mid merchant.ID) {
+// cleanupCCBillWebhookMerchant deletes under the merchant's own scope — an
+// unpinned DELETE matches zero rows under RLS and leaks every fixture row into
+// the shared database without erroring.
+func cleanupCCBillWebhookMerchant(t *testing.T, mid merchant.ID) {
 	t.Helper()
-	appDB := dbtest.OpenAppDB(t, dsn)
+	appDB := dbtest.OpenMerchantDB(t, mid.UUID())
 	t.Cleanup(func() {
 		pool := appDB.Pool()
 		for _, stmt := range []string{
@@ -208,15 +221,14 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 		PSPs: map[string]embed.PSPConfig{
 			"ccbill": {
 				"ccbill": {
-					Environment: "test",
-					AccountID:   ccbillAccount,
-					Secrets:     map[string]string{"salt": "test-salt-" + slug},
+					AccountID: ccbillAccount,
+					Secrets:   map[string]string{"salt": "test-salt-" + slug},
 				},
 			},
 		},
 	})
 	require.NoError(t, err)
-	cleanupCCBillWebhookMerchant(t, dsn, id)
+	cleanupCCBillWebhookMerchant(t, id)
 
 	flexID, formName := seedCCBillWebhookCatalog(t, ctx, cfg, slug)
 	username := "ccbill_e2e_" + uuid.NewString()[:8]
@@ -253,10 +265,10 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"status":"accepted"`)
 
-	assertCCBillSubscriptionActive(t, ctx, dsn, id, subID)
+	assertCCBillSubscriptionActive(t, ctx, id, subID)
 
 	// The reservation loop closes: the checkout session flips to succeeded.
-	appDB := dbtest.OpenAppDB(t, dsn)
+	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var sessionStatus string
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
 		`SELECT status FROM openrails.checkout_sessions WHERE merchant_id = $1`, id.UUID()).Scan(&sessionStatus))
@@ -283,7 +295,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	require.NoError(t, rt.Embedded().App().Runtime.EnsureMerchantsService(ctx))
-	cleanupCCBillWebhookMerchant(t, dsn, id)
+	cleanupCCBillWebhookMerchant(t, id)
 
 	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetCatalog},
@@ -295,7 +307,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	t.Cleanup(adminServer.Close)
 
 	// Layer A, MODE 2: arm the ccbill account over the management API.
-	payload := fmt.Sprintf(`{"environment":"test","account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, ccbillAccount, slug)
+	payload := fmt.Sprintf(`{"account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, ccbillAccount, slug)
 	req, err := http.NewRequest(http.MethodPut, adminServer.URL+"/v1/merchant/payment-providers/ccbill", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -321,7 +333,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 
 	// The published price must exist with its ccbill link before the webhook.
-	appDB := dbtest.OpenAppDB(t, dsn)
+	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var priceCount int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
 		`SELECT count(*) FROM openrails.prices WHERE merchant_id = $1 AND psp_links -> 'ccbill' ->> 'flex_id' = $2`,
@@ -347,7 +359,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"status":"accepted"`)
 
-	assertCCBillSubscriptionActive(t, ctx, dsn, id, subID)
+	assertCCBillSubscriptionActive(t, ctx, id, subID)
 }
 
 // TestCCBillWebhookUnarmedRailFailsClosed (#788): a merchant with NO armed
@@ -367,7 +379,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	// Merchant exists but declares NO rail accounts at all.
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
-	cleanupCCBillWebhookMerchant(t, dsn, id)
+	cleanupCCBillWebhookMerchant(t, id)
 
 	username := "ccbill_off_" + uuid.NewString()[:8]
 	seedProfileUser(t, ctx, dsn, username)
@@ -388,7 +400,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	require.NotContains(t, body, "accepted")
 
 	// Fail closed means NOTHING was processed.
-	appDB := dbtest.OpenAppDB(t, dsn)
+	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var n int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
 		`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id = $1`, id.UUID()).Scan(&n))

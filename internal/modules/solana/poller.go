@@ -520,11 +520,9 @@ func solanaStateUint64(state map[string]any, key string) uint64 {
 		if v > 0 {
 			return uint64(v)
 		}
-	case float64:
-		if v > 0 {
-			return uint64(v)
-		}
 	case string:
+		// MONEY-3: base-unit amounts round-trip through JSONB as decimal
+		// strings; a JSON number would come back as a lossy float64.
 		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
 			return parsed
 		}
@@ -615,7 +613,11 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 		refPtr = &ref
 	}
 	// #713: a present purchase memo must match the checkout session id
-	// (absence passes; uuid.Nil skips for non-session pendings).
+	// (uuid.Nil skips for non-session pendings). or#893 MemoPresenceOptional:
+	// the transfer-request transaction is built by the BUYER'S WALLET from the
+	// Solana Pay URL, and a wallet that drops the memo must not cost the buyer a
+	// payment that really settled — the memo is a discovery hint, never money
+	// truth. Only the transaction WE build is held to MemoRequired.
 	expectedMemo := uuid.Nil
 	if sid, err := uuid.Parse(strings.TrimSpace(pending.SessionID)); err == nil {
 		expectedMemo = sid
@@ -629,6 +631,7 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 		"",
 		refPtr,
 		expectedMemo,
+		solanarpc.MemoPresenceOptional,
 		solanaPaymentExpiryDeadline(pending),
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{

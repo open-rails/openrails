@@ -48,7 +48,7 @@ ISSUER_KEY_FILE=e2e/.state/issuer_key.pem go run .
 
 Verified against commit `fc3ebc41`; each has a precise pointer.
 
-1. **`openrails server` never loads the MODE-1 boot merchant manifest.**
+1. **`openrails run-server` never loads the MODE-1 boot merchant manifest.**
    `reconcileBootMerchantManifest` exists only in
    `internal/bootstrap/serverboot/serverboot.go:109` (used by the test
    harness); the shipped CLI path (`cmd/openrails/main.go:runServer` →
@@ -65,15 +65,13 @@ Verified against commit `fc3ebc41`; each has a precise pointer.
    docs/merchant-provisioning.md claims the push CLIs seed MODE-2 stores, see
    `cmd/openrails/bootstrap_apply.go:163`); NMI credentials are then seeded
    through `PUT /v1/merchant/payment-providers/nmi` into the MODE-2 DB store.
-2. **Checkout rejects PSP-key wire values.** `checkoutRailConfigured`
-   (`internal/http/handlers/checkout_session.go:133`) passes the wire `rail`
-   into `merchants.ActivePSPScope`, which resolves by rail KIND — so the
-   frozen PSP vocabulary (`mobius-sandbox`) 400s "unsupported rail" although
-   `checkout.resolveRailTarget`
-   (`internal/modules/checkout/merchant_rail_secrets.go:112`) explicitly
-   supports account keys. Repro: `POST /v1/me/checkout` with
-   `payment.rail="mobius-sandbox"` → 400; `"nmi"` → 200. **Workaround**: the
-   example sends the rail name (`NMI_RAIL`, default `nmi`).
+2. **Checkout rejects PSP-key wire values — FIXED (#848).** `checkoutRailUsable`
+   (`internal/http/handlers/checkout_session.go`) now resolves through
+   checkout's `resolveRailTarget`, which matches a declared PSP key first and
+   falls back to a rail kind only when that is unambiguous. The frozen PSP
+   vocabulary (`mobius-sandbox`) is accepted on the wire, and since #829 the
+   example no longer guesses it at all: `GET /v1/checkout-config` returns the
+   PSP key to send.
 3. **Docker image does not build.** The console stage crashes:
    `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN opts2.currentPnpmfiles is not iterable`
    (pnpm 11.0.0 + `verifyDepsBeforeRun: error` in `web/admin/pnpm-workspace.yaml`,

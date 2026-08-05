@@ -196,7 +196,7 @@ func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKe
 	// The checkout money path resolves the NMI client from MERCHANT SECRETS
 	// first (production posture); the suite seeds a placeholder key there, so
 	// overwrite it with the real sandbox key or every charge 401s at NMI.
-	secretName, err := merchants.PSPSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIRailMerchantAccountID(), "security_key")
+	secretName, err := merchants.PSPSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIPSPID(), "security_key")
 	require.NoError(t, err)
 	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
 	require.NoError(t, err)
@@ -290,17 +290,17 @@ func createNMISandboxVault(t *testing.T, client *nmi.NMIClient, securityKey stri
 		"test_mode":      {"enabled"},
 	})
 	require.Equalf(t, "1", out.Get("response"), "NMI add_customer should succeed: %s", out.Get("responsetext"))
-	vaultID := out.Get("customer_vault_id")
-	require.NotEmpty(t, vaultID, "NMI should return a customer_vault_id")
+	railCustomerRef := out.Get("customer_vault_id")
+	require.NotEmpty(t, railCustomerRef, "NMI should return a customer_vault_id")
 	t.Cleanup(func() {
 		postNMIForm(t, client.DirectPostURL, url.Values{
 			"customer_vault":    {"delete_customer"},
 			"security_key":      {securityKey},
-			"customer_vault_id": {vaultID},
+			"customer_vault_id": {railCustomerRef},
 			"test_mode":         {"enabled"},
 		})
 	})
-	return vaultID
+	return railCustomerRef
 }
 
 func verifyNMITransaction(t *testing.T, client *nmi.NMIClient, securityKey, txnID string, amountMicroUSD int64) {

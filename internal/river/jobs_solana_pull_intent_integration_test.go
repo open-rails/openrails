@@ -73,14 +73,18 @@ type solanaPullFixture struct {
 	crank   *smPresubmitCranker
 	chain   *fakeChain
 	row     *models.SolanaSubscription
+	pspID   uuid.UUID
 	ctx     context.Context
 }
 
 func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// The fixture stands in for the River worker: it seeds solana_subscriptions
+	// and drives the handler directly, so it must supply the app.merchant_id the
+	// worker supplies in production. An unpinned handle trips the FORCEd RLS
+	// WITH CHECK on solana_subscriptions.
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -97,12 +101,13 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "solpull-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 5000000, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 5000000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "solana")
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at,
-	         current_period_ends_at, started_at, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'solana', $4, $5, $6, $5, $7, $8)`,
-		subID, priceID, productID, "subpda-"+suffix, now.Add(-720*time.Hour), now, userID, tenantID)
+	         current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'active', 'solana', $4, $5, $6, $5, $7, $8, $9)`,
+		subID, priceID, productID, "subpda-"+suffix, now.Add(-720*time.Hour), now, userID, tenantID, pspID)
 
 	row := &models.SolanaSubscription{
 		ID:               uuid.New(),
@@ -141,8 +146,9 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	}
 	chain := &fakeChain{}
 	handler := NewSolanaPullIntentHandler(core, intents.NewStore(dbi), chain)
-	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler)}
-	return &solanaPullFixture{db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain, row: row, ctx: ctx}
+	// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler), Config: fullModeConfig()}
+	return &solanaPullFixture{db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain, row: row, pspID: pspID, ctx: ctx}
 }
 
 func (fx *solanaPullFixture) enqueueAndExecute(t *testing.T) (uuid.UUID, string) {
@@ -150,6 +156,7 @@ func (fx *solanaPullFixture) enqueueAndExecute(t *testing.T) (uuid.UUID, string)
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       string(models.RailSolana),
+		PspID:          fx.pspID,
 		IntentType:     TypeSolanaPull,
 		SubscriptionID: &fx.row.SubscriptionID,
 		Payload: SolanaPullPayload{

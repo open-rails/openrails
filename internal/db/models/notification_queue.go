@@ -23,6 +23,20 @@ const (
 	// One-off payment notifications
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // (8) Solana or other one-off purchase completed
 
+	// Invoice / arrears collection (or#828). The subscription analogue is
+	// premium_ended, which is wrong for an invoice: nothing was cancelled and
+	// no access was withdrawn — we stopped ATTEMPTING to collect, and the debt
+	// stands. data.reason is schedule_exhausted (we gave up) or
+	// non_recoverable (the issuer withdrew the mandate).
+	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
+
+	// Arrears delinquency (or#878). The TIME axis, not the card axis: the debt
+	// has outlived the merchant's grace window. Nothing is cancelled and no
+	// entitlement is withdrawn — OpenRails refuses new spend and tells the host,
+	// which owns whatever shutoff its product needs.
+	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"
+	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
+
 	// System notifications (1 type)
 	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
 
@@ -48,8 +62,7 @@ const (
 type NotificationQueue struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	// Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID             `json:"customer_id,omitempty"`
 	EventType  NotificationEventType `json:"event_type"`
 	Data       map[string]any        `json:"data,omitempty"`

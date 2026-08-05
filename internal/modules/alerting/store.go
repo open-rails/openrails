@@ -112,10 +112,12 @@ func (s *store) deleteRule(ctx context.Context, id uuid.UUID) (int64, error) {
 	return s.db.Gen(ctx).DeleteAlertRule(ctx, id)
 }
 
-func (s *store) markFired(ctx context.Context, id uuid.UUID, firedAt, evaluatedAt time.Time, value float64, dims map[string]string) error {
-	detail, _ := json.Marshal(map[string]any{"dimensions": dims})
+// markFired opens the active alert. The crossing DIMENSIONS ride the dispatched
+// alert, which is the surface an operator sees; or#823 dropped the last_detail
+// column that also stored them, because nothing ever read it back.
+func (s *store) markFired(ctx context.Context, id uuid.UUID, firedAt, evaluatedAt time.Time, value float64) error {
 	return s.db.Gen(ctx).MarkAlertRuleFired(ctx, gen.MarkAlertRuleFiredParams{
-		ID: id, FiredAt: firedAt, EvaluatedAt: evaluatedAt, Value: &value, Detail: detail,
+		ID: id, FiredAt: firedAt, EvaluatedAt: evaluatedAt, Value: &value,
 	})
 }
 
@@ -132,10 +134,26 @@ func (s *store) touchEvaluated(ctx context.Context, id uuid.UUID, evaluatedAt ti
 }
 
 // listArmedMerchants returns every merchant with at least one enabled rule.
-// CROSS-MERCHANT: runs on the base pool (GenGlobal), the same posture as the
-// #358 provider-intent executor sweeps.
+// CROSS-MERCHANT via migration 0021's SECURITY DEFINER reader (or#861) — a
+// base-pool SELECT could not answer this: no GUC means alert_rules' RLS matches
+// nothing, so the evaluator had never run. Ids only; each merchant's rules are
+// then read under its own merchant scope.
 func (s *store) listArmedMerchants(ctx context.Context) ([]uuid.UUID, error) {
-	return s.db.GenGlobal().ListArmedAlertMerchants(ctx)
+	rows, err := s.db.GenDirectory().ListArmedAlertMerchants(ctx)
+	return derefMerchantIDs(rows), err
+}
+
+// derefMerchantIDs drops the pointer indirection sqlc emits for a
+// set-returning function's column. The definer bodies select a NOT NULL
+// column, so a nil is impossible; it is skipped rather than dereferenced.
+func derefMerchantIDs(rows []*uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, id := range rows {
+		if id != nil {
+			out = append(out, *id)
+		}
+	}
+	return out
 }
 
 // --- webhooks ----------------------------------------------------------------
@@ -250,9 +268,11 @@ func (s *store) markFindingNotified(ctx context.Context, id uuid.UUID, at time.T
 
 // listArmedFindingsDigestMerchants: merchants with at least one undigested
 // low-severity requires_review finding — the digest sweep's work set.
-// CROSS-MERCHANT (base pool), same posture as listArmedMerchants.
+// CROSS-MERCHANT via 0021's SECURITY DEFINER reader, same as listArmedMerchants
+// and for the same reason (or#861).
 func (s *store) listArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
-	return s.db.GenGlobal().ListArmedFindingsDigestMerchants(ctx)
+	rows, err := s.db.GenDirectory().ListArmedFindingsDigestMerchants(ctx)
+	return derefMerchantIDs(rows), err
 }
 
 func (s *store) getFindingDigestWatermark(ctx context.Context) (*time.Time, error) {

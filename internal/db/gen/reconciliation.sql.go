@@ -45,7 +45,9 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $3 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $3
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AdminIgnoreReconciliationFindingParams struct {
@@ -164,7 +166,9 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $4 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $4
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AdminResolveReconciliationFindingParams struct {
@@ -198,7 +202,9 @@ SET operator_notes = CASE
         ELSE operator_notes || E'\n' || $1::text
     END,
     updated_at = now()
-WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
+WHERE id = $2
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review')
 `
 
 type AppendReconciliationFindingNotesParams struct {
@@ -260,22 +266,38 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE evidence->>'provider' = $1
-  AND status IN ('reconcile_required', 'requires_review')
-  AND last_seen_run <> $2
-  AND finding_type = ANY ($3::text[])
+WHERE ctid IN (
+    SELECT f.ctid FROM openrails.reconciliation_findings f
+    WHERE f.merchant_id = $1::uuid
+      AND f.evidence->>'provider' = $2
+      AND f.status IN ('reconcile_required', 'requires_review')
+      AND f.last_seen_run <> $3
+      AND f.finding_type = ANY ($4::text[])
+    LIMIT $5::int
+)
 `
 
 type AutoResolveVanishedReconciliationFindingsParams struct {
+	MerchantID   uuid.UUID
 	Provider     *string
 	RunID        *uuid.UUID
 	FindingTypes []string
+	RowLimit     int32
 }
 
 // Findings of the given state-roster types absent from the just-completed run
 // covering their provider "vanished on their own" (design decision 1).
+// or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
+// no merchant predicate at all — a long transaction on a big backlog, and a
+// cross-merchant write the moment it ran on a BYPASSRLS connection.
 func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings, arg.Provider, arg.RunID, arg.FindingTypes)
+	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings,
+		arg.MerchantID,
+		arg.Provider,
+		arg.RunID,
+		arg.FindingTypes,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -389,6 +411,7 @@ SELECT COUNT(*)::bigint AS pressure_count,
        COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $2::uuid
+  AND s.deleted_at IS NULL
   AND s.status = 'unknown'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < $1::timestamptz
@@ -563,9 +586,18 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id()
 `
 
+// SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+// merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
+// below EXECUTES cancel/refund/revoke/grant against whatever the finding
+// names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
+// deployment connected as a superuser/BYPASSRLS role let merchant A's owner
+// address merchant B's finding. openrails.current_merchant_id() is the same
+// expression the merchant_isolation policy uses, so under the enforcing role
+// behaviour is unchanged; under a bypassing one the scope still holds.
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, getReconciliationFinding, id)
 	var i OpenrailsReconciliationFinding
@@ -794,6 +826,7 @@ CROSS JOIN LATERAL (
 ) missing
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > $3::timestamptz
@@ -869,21 +902,23 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 }
 
 const listArmedFindingsDigestMerchants = `-- name: ListArmedFindingsDigestMerchants :many
-SELECT DISTINCT merchant_id FROM openrails.reconciliation_findings
-WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
+SELECT merchant_id FROM openrails.armed_findings_digest_merchant_ids()
 `
 
-// #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
-// low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
-func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]uuid.UUID, error) {
+// #787: CROSS-MERCHANT armed-merchant scan for the low-severity findings
+// digest, mirroring ListArmedAlertMerchants — including the fix. It ran on the
+// base pool, which carries no app.merchant_id, so reconciliation_findings' RLS
+// matched nothing and the digest had never run (or#861). Now through migration
+// 0021's SECURITY DEFINER reader; ids only, digest content stays per-merchant.
+func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedFindingsDigestMerchants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -900,7 +935,8 @@ SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.status IN ('cancelled', 'expired', 'failed')
+  AND s.deleted_at IS NULL
+  AND s.status = 'cancelled'
   AND EXISTS (
       SELECT 1 FROM openrails.entitlements e
       WHERE e.merchant_id = s.merchant_id
@@ -911,13 +947,15 @@ WHERE s.merchant_id = $1::uuid
         AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
              OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
-ORDER BY s.id
+ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+LIMIT $4::int
 `
 
 type ListDeadSubsWithLiveEntitlementsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListDeadSubsWithLiveEntitlementsRow struct {
@@ -951,8 +989,15 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 //	terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
 //
 // customer_id nullable: NULL = merchant-wide sweep.
+// or#837: LONGEST-DEAD first, capped — the overrun that has been granting
+// unentitled access the longest is the one a truncated pass must repair.
 func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg ListDeadSubsWithLiveEntitlementsParams) ([]ListDeadSubsWithLiveEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -981,6 +1026,7 @@ const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscription
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND deleted_at IS NULL
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)
@@ -1017,18 +1063,20 @@ func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListD
 
 const listLapsedSubscriptionsWithEvidence = `-- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail,
-       (s.payment_method_id IS NOT NULL)::bool AS vaulted,
+       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
        (s.current_period_starts_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_starts_at
        ))::bool AS payment_opened_period,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_ends_at
        ))::bool AS renewal_payment_after_end,
@@ -1036,11 +1084,12 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
+              AND w.psp_id = s.psp_id
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
+  AND s.deleted_at IS NULL
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND (
         (s.status = 'active' AND s.current_period_ends_at IS NOT NULL
@@ -1048,20 +1097,22 @@ WHERE s.merchant_id = $1::uuid
      OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
          AND s.grace_ends_at < $3::timestamptz AND s.next_retry_at IS NULL)
       )
-ORDER BY s.current_period_ends_at
+ORDER BY s.current_period_ends_at, s.id
+LIMIT $4::int
 `
 
 type ListLapsedSubscriptionsWithEvidenceParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListLapsedSubscriptionsWithEvidenceRow struct {
 	ID                          uuid.UUID
 	Status                      OpenrailsSubscriptionStatus
 	Rail                        string
-	Vaulted                     bool
+	HasPaymentMethod            bool
 	RailSubscriptionID          string
 	CurrentPeriodEndsAt         *time.Time
 	GraceEndsAt                 *time.Time
@@ -1085,8 +1136,17 @@ type ListLapsedSubscriptionsWithEvidenceRow struct {
 //	                           (billing DID happen; the advance path owns it)
 //	watermark_newer_than_period_end — provider truth synced since the lapse
 //	                           and saw no renewal (ownership)
+//
+// or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
+// gets a BOUNDED pass that drains from the front instead of one scan whose
+// size is the book; the transitions it applies remove rows from the cohort.
 func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg ListLapsedSubscriptionsWithEvidenceParams) ([]ListLapsedSubscriptionsWithEvidenceRow, error) {
-	rows, err := q.db.Query(ctx, listLapsedSubscriptionsWithEvidence, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listLapsedSubscriptionsWithEvidence,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1098,7 +1158,7 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 			&i.ID,
 			&i.Status,
 			&i.Rail,
-			&i.Vaulted,
+			&i.HasPaymentMethod,
 			&i.RailSubscriptionID,
 			&i.CurrentPeriodEndsAt,
 			&i.GraceEndsAt,
@@ -1311,21 +1371,30 @@ const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :m
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND deleted_at IS NULL
   AND status = 'pending'
   AND created_at < $3::timestamptz
-ORDER BY created_at
+ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListStalePendingSubscriptionsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
 // #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 // never confirmed within the threshold (cutoff = now - pendingStaleAfter).
+// or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
 func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStalePendingSubscriptions, arg.MerchantID, arg.CustomerID, arg.Cutoff)
+	rows, err := q.db.Query(ctx, listStalePendingSubscriptions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Cutoff,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1360,9 +1429,9 @@ SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        END::text AS cause
 FROM openrails.entitlements e
 LEFT JOIN openrails.subscriptions s
-       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
+       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN openrails.payments pay
-       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
+       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
 LEFT JOIN openrails.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = $1::uuid
@@ -1398,17 +1467,19 @@ WHERE e.merchant_id = $1::uuid
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'subscription'
-          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND s.status = 'cancelled'
           AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
-ORDER BY e.id
+ORDER BY e.start_at, e.id
+LIMIT $4::int
 `
 
 type ListUnjustifiedEntitlementWindowsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListUnjustifiedEntitlementWindowsRow struct {
@@ -1459,8 +1530,15 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 // grouped by status comparing end_at against GREATEST(current_period_ends_at,
 // ended_at). This query is the union of both, restricted to proven-dead
 // sources. customer_id nullable: NULL = merchant-wide sweep.
+// or#837: oldest window first, capped. Surface-only findings, so truncation
+// delays an operator decision rather than losing one.
 func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg ListUnjustifiedEntitlementWindowsParams) ([]ListUnjustifiedEntitlementWindowsRow, error) {
-	rows, err := q.db.Query(ctx, listUnjustifiedEntitlementWindows, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listUnjustifiedEntitlementWindows,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1498,6 +1576,7 @@ const listUnknownSubscriptions = `-- name: ListUnknownSubscriptions :many
 SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND deleted_at IS NULL
   AND status = 'unknown'
   AND ($3::text IS NULL OR rail = $3::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
@@ -1667,7 +1746,8 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
+    money_movement
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -1675,7 +1755,9 @@ INSERT INTO openrails.payments (
     $6,
     'completed', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10, $11
+    $10, $11::uuid,
+    -- or#827: the row mirrors a charge the rail actually settled.
+    'rail'
 )
 ON CONFLICT DO NOTHING
 `
@@ -1778,30 +1860,31 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
+SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY ($1::text[])
-  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
+  AND psp_id = $2::uuid
 `
 
 type ReconcileListPaymentMethodsByRailsParams struct {
 	Rails []string
-	PspID *uuid.UUID
+	PspID uuid.UUID
 }
 
 type ReconcileListPaymentMethodsByRailsRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Rail       string
-	VaultID    string
-	LastFour   *string
-	CardType   *string
-	ExpiryDate *string
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Rail            string
+	RailCustomerRef string
+	LastFour        *string
+	CardType        *string
+	ExpiryDate      *string
 }
 
-// Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
-// here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
+// rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
+// the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
+// for HashiCorp Vault, and the column already carries the right name.
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.PspID)
 	if err != nil {
@@ -1815,7 +1898,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 			&i.ID,
 			&i.CustomerID,
 			&i.Rail,
-			&i.VaultID,
+			&i.RailCustomerRef,
 			&i.LastFour,
 			&i.CardType,
 			&i.ExpiryDate,
@@ -1835,14 +1918,15 @@ SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
 WHERE rail::text = ANY ($1::text[])
+  AND deleted_at IS NULL
   AND transaction_id = ANY ($2::text[])
-  AND ($3::uuid IS NULL OR psp_id = $3::uuid)
+  AND psp_id = $3::uuid
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
 	Rails          []string
 	TransactionIds []string
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 }
 
 type ReconcileListPaymentsByTransactionIDsRow struct {
@@ -1978,12 +2062,13 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE rail = ANY ($1::text[])
-  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
+  AND deleted_at IS NULL
+  AND psp_id = $2::uuid
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
 	Rails []string
-	PspID *uuid.UUID
+	PspID uuid.UUID
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
@@ -2058,7 +2143,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 const reconcileMarkPaymentRefunded = `-- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
 SET status = 'refunded'
-WHERE id = $1 AND status <> 'refunded'
+WHERE id = $1 AND status <> 'refunded' AND deleted_at IS NULL
 `
 
 func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -2081,15 +2166,19 @@ SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $6::timestamptz,
        $7::timestamptz,
        COALESCE($8::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, $9, $10
+       p.entitlements_spec, p.credits_spec, $9, $10::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.rail_subscription_id = $4
+        AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
-        AND ($10::uuid IS NULL OR s.psp_id = $10::uuid)
+        -- or#893: every writer resolves a PSP now, including the declared
+        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
+        -- provider subscription id is only unique within a gateway account.
+        AND s.psp_id = $10::uuid
   )
 RETURNING id, entitlements_spec_snapshot
 `
@@ -2104,7 +2193,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 	PeriodEndsAt       *time.Time
 	StartedAt          *time.Time
 	CustomerID         uuid.UUID
-	PspID              *uuid.UUID
+	PspID              uuid.UUID
 	PriceID            uuid.UUID
 	Rails              []string
 }
@@ -2158,7 +2247,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind
+    customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     $1::uuid,
     $2, $3::text,
@@ -2167,7 +2256,9 @@ INSERT INTO openrails.payments (
     'completed', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $11, $12, 'refund'
+    -- or#827: a refund is real (negative) money movement at the rail; the
+    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    $11, $12::uuid, 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING
 `
@@ -2213,7 +2304,7 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
 UPDATE openrails.subscriptions
 SET next_retry_at = $1::timestamptz, updated_at = now()
-WHERE id = $2 AND status = 'past_due' AND next_retry_at IS NULL
+WHERE id = $2 AND status = 'past_due' AND next_retry_at IS NULL AND deleted_at IS NULL
 `
 
 type SetSubscriptionNextRetryParams struct {
@@ -2361,23 +2452,21 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 const upsertReconciliationState = `-- name: UpsertReconciliationState :one
 
 INSERT INTO openrails.reconciliation_state (
-    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+    merchant_id, source_domain, fully_reconciled, updated_at
 ) VALUES (
     $1::uuid, $2::text,
-    $3::boolean, $4::timestamptz, now()
+    $3::boolean, now()
 )
 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     fully_reconciled = EXCLUDED.fully_reconciled,
-    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
     updated_at = now()
-RETURNING id, merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+RETURNING id, merchant_id, source_domain, fully_reconciled, updated_at
 `
 
 type UpsertReconciliationStateParams struct {
 	MerchantID      uuid.UUID
 	SourceDomain    string
 	FullyReconciled bool
-	LastFullPullAt  *time.Time
 }
 
 // #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
@@ -2387,22 +2476,16 @@ type UpsertReconciliationStateParams struct {
 // configured provider account whose rail could hold that domain's sources.
 // `grants` is admin/local-sourced, so no pull ever proves it — it stays a
 // manual/bulk-import decision. The flag is a ratchet: never auto-unset.
-// Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
-// last_full_pull_at after a completed authoritative pull/import for that domain.
+// Mark a source domain's reconciliation watermark: pass fully_reconciled=true
+// after a completed authoritative pull/import for that domain.
 func (q *Queries) UpsertReconciliationState(ctx context.Context, arg UpsertReconciliationStateParams) (OpenrailsReconciliationState, error) {
-	row := q.db.QueryRow(ctx, upsertReconciliationState,
-		arg.MerchantID,
-		arg.SourceDomain,
-		arg.FullyReconciled,
-		arg.LastFullPullAt,
-	)
+	row := q.db.QueryRow(ctx, upsertReconciliationState, arg.MerchantID, arg.SourceDomain, arg.FullyReconciled)
 	var i OpenrailsReconciliationState
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
 		&i.SourceDomain,
 		&i.FullyReconciled,
-		&i.LastFullPullAt,
 		&i.UpdatedAt,
 	)
 	return i, err

@@ -39,23 +39,20 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 		// Two armed NMI PSPs: the rail kind is ambiguous, the keys are exact.
 		"mobius-sandbox": {
 			"nmi": {
-				Environment: "live",
-				AccountID:   fmt.Sprintf("gw-a-%d", nano),
-				Secrets:     map[string]string{"security_key": "sk-a-" + slug},
+				AccountID: fmt.Sprintf("gw-a-%d", nano),
+				Secrets:   map[string]string{"security_key": "sk-a-" + slug},
 			},
 		},
 		"paykings": {
 			"nmi": {
-				Environment: "live",
-				AccountID:   fmt.Sprintf("gw-b-%d", nano),
-				Secrets:     map[string]string{"security_key": "sk-b-" + slug},
+				AccountID: fmt.Sprintf("gw-b-%d", nano),
+				Secrets:   map[string]string{"security_key": "sk-b-" + slug},
 			},
 		},
 		// One armed CCBill PSP: the bare rail kind stays unambiguous.
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   fmt.Sprintf("94%04d-0000", nano%10_000),
+				AccountID: fmt.Sprintf("94%04d-0000", nano%10_000),
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,

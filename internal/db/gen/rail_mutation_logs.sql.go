@@ -46,6 +46,7 @@ INSERT INTO openrails.rail_mutation_logs (
     merchant_id,
     rail,
     psp_id,
+    custodian_id,
     rail_intent_id,
     intent_type,
     idempotency_key,
@@ -54,7 +55,7 @@ INSERT INTO openrails.rail_mutation_logs (
     reason,
     evidence
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 `
 
@@ -62,6 +63,7 @@ type InsertRailMutationLogParams struct {
 	MerchantID     uuid.UUID
 	Rail           string
 	PspID          *uuid.UUID
+	CustodianID    *uuid.UUID
 	RailIntentID   *uuid.UUID
 	IntentType     *string
 	IdempotencyKey *string
@@ -76,6 +78,7 @@ func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutat
 		arg.MerchantID,
 		arg.Rail,
 		arg.PspID,
+		arg.CustodianID,
 		arg.RailIntentID,
 		arg.IntentType,
 		arg.IdempotencyKey,
@@ -89,7 +92,7 @@ func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutat
 
 const listRailMutationLogs = `-- name: ListRailMutationLogs :many
 
-SELECT id, merchant_id, rail, psp_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at FROM openrails.rail_mutation_logs
+SELECT id, merchant_id, rail, psp_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at, custodian_id FROM openrails.rail_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
@@ -139,6 +142,7 @@ func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutation
 			&i.Reason,
 			&i.Evidence,
 			&i.CreatedAt,
+			&i.CustodianID,
 		); err != nil {
 			return nil, err
 		}

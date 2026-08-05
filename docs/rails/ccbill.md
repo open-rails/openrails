@@ -1,5 +1,9 @@
 # CCBill
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md). Read it before relying on
+> CCBill refunds — that wire is modeled, not verified.
+
 CCBill is a hosted-checkout payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own
@@ -38,7 +42,6 @@ secret-store prefix `psps/…`):
 psps:
   ccbill:               # PSP key — reserved gateway, must be "ccbill"
     ccbill:             # rail
-      environment: live # or "test"
       # clientAccnum-clientSubacc, dash-joined:
       account_id: "999999-0000"
       secrets:
@@ -130,8 +133,8 @@ non-retryable. Events are deduplicated by transaction id / payload hash.
 
 ### Sandbox testing
 
-Set the global `test_mode: sandbox` (and typically `environment: test` on the
-PSP entry). Sandbox posture routes FlexForm URLs to
+Set the global `test_mode: sandbox` — it is the only environment switch (#882).
+Sandbox posture routes FlexForm URLs to
 `https://sandbox-api.ccbill.com/wap-frontflex/flexforms/...` instead of
 `api.ccbill.com`. To post webhooks from a local harness, declare its source
 explicitly, e.g. `ccbill_webhook_ip_allowlist: ["127.0.0.1/32"]` — sandbox

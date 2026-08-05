@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -99,8 +100,10 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	if params.PspID == uuid.Nil {
+		if params.PspID, err = db.RequirePSPID(ctx); err != nil {
+			return fmt.Errorf("create subscription %s/%s: %w", s.Rail, s.RailSubscriptionID, err)
+		}
 	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
@@ -440,25 +443,6 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetSubscriptionsByRailAndUserID(ctx context.Context, userID string, rail models.Rail) ([]models.Subscription, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListSubscriptionsByCustomerRail(ctx, gen.ListSubscriptionsByCustomerRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return nil, err
-	}
-	subs, err := r.manyWithDetails(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	return derefSubs(subs), nil
-}
-
 func (r *SubscriptionRepo) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByRail(ctx, rail)
 	if err != nil {
@@ -630,13 +614,21 @@ func derefSubs(subs []*models.Subscription) []models.Subscription {
 	return out
 }
 
+// DueDunningBatch bounds ONE merchant's dunning pass (or#837). Each returned
+// row can charge a card and terminate a subscription, so an uncapped list was
+// an unbounded burst of provider calls in a single job. Most-overdue first (the
+// query's order), and the claim lease means the remainder is simply the next
+// pass's head — nothing is skipped, only paced.
+const DueDunningBatch = 500
+
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
 // rails whose next retry is due (Price + PaymentMethod relations
-// attached) — the dunning worker's work list.
+// attached) — the dunning worker's work list, capped at DueDunningBatch.
 func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time) ([]models.Subscription, error) {
 	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
-		Rails: rails,
-		Now:   now,
+		Rails:    rails,
+		Now:      now,
+		RowLimit: DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err

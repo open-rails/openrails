@@ -7,7 +7,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // Issue #208 declarative-provider primitives.
@@ -52,9 +52,14 @@ var errPendingManualLink = errors.New("provider requires a manual link")
 // (find-or-create inside Attach, AutoCreate) when catalog provider writes are
 // blocked by the operating mode (mode=limited/readonly, #346). The dispatcher
 // converts it to pending_manual_link — the price still applies locally and the
-// provider slot converges on a later push-catalog once writes are allowed.
+// provider slot converges on a later push-merchant-catalog once writes are allowed.
 // Verification reads always run.
 var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (mode=limited/readonly)")
+
+// ErrTrialUnsupportedOnRail refuses a `trial:` first phase declared against a
+// rail that cannot execute one (or#896). Exported so the HTTP layer answers
+// 400 (a declaration the operator must fix), never 500.
+var ErrTrialUnsupportedOnRail = errors.New("trial first phase is not supported on this rail")
 
 // remoteWritesDisabledMessage is the pending_manual_link message used when the
 // operating mode (not a missing capability) deferred the provider write.
@@ -182,18 +187,6 @@ func sortedAdapterNames(adapters map[string]providerAdapter) []string {
 	return names
 }
 
-// priceCycleToken renders the provider-cadence component of a price content key.
-// A recurring price (cycle > 0) renders the day count for day-granularity
-// providers; a one-time price (nil or
-// 0 cycle) renders the literal "onetime". This keeps the key unambiguous and
-// human-readable while still distinguishing one_time from recurring.
-func priceCycleToken(billingCycleDays *int) string {
-	if billingCycleDays != nil && *billingCycleDays > 0 {
-		return strconv.Itoa(*billingCycleDays)
-	}
-	return "onetime"
-}
-
 // openRailsPriceContentKey is the content key derived from a price's FINANCIAL
 // SUBSTANCE — the product's stable key plus the immutable money terms
 // (currency, unit amount, provider cadence). It is NOT derived from any row UUID,
@@ -304,6 +297,26 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 				name, strings.Join(sortedAdapterNames(adapters), ", "))
 		}
 		targets = append(targets, t)
+	}
+
+	// or#896: a `trial:` first phase is only executable where the rail has a
+	// first-phase concept (rails.SupportsCatalogTrial). NMI's add_subscription
+	// and Solana's on-chain plan carry one price for every period, so a trial
+	// declared against them used to be accepted and DROPPED — the subscriber
+	// was charged full price immediately. Refuse the declaration instead; the
+	// price never reaches the DB and the operator sees the limitation named.
+	if req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
+		for _, t := range targets {
+			if railreg.SupportsCatalogTrial(models.Rail(t.rail)) {
+				continue
+			}
+			return nil, nil, nil, fmt.Errorf(
+				"%w: price declares a trial first phase, but PSP %q is on rail %s, which cannot execute one: "+
+					"%s subscriptions bill one amount every period, so the trial would be silently dropped and "+
+					"the subscriber charged the full amount immediately. Remove `trial:` from this price, or "+
+					"declare it only on a PSP whose rail supports trials (stripe, ccbill)",
+				ErrTrialUnsupportedOnRail, t.declared, t.rail, t.rail)
+		}
 	}
 
 	// The price substance (product key + immutable money terms) is the same for the

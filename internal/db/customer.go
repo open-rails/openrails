@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -24,6 +26,14 @@ var systemCustomerNamespace = uuid.MustParse("00000000-0000-0000-0000-0000000000
 func SystemCustomerID(merchantID uuid.UUID) uuid.UUID {
 	return uuidutil.DeterministicID(systemCustomerNamespace, merchantID.String())
 }
+
+// ErrCustomerOwnedByAnotherMerchant signals that a customer id already belongs
+// to a DIFFERENT merchant. customers.id is globally unique while customer rows
+// are merchant-isolated (#889), so a foreign id must be refused loudly: silently
+// re-pointing it (privileged upsert) or silently no-op'ing (ON CONFLICT DO
+// NOTHING, which then lets the caller's row FK into another merchant's customer,
+// because FK checks bypass RLS) is cross-merchant corruption that logs success.
+var ErrCustomerOwnedByAnotherMerchant = errors.New("customer id is already owned by another merchant")
 
 // errNonUUIDSubject builds the rejection for non-UUID payable identities.
 // OpenRails is UUID-only (#364): there is no legacy issuer, no generated row
@@ -60,11 +70,25 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 		}
 		tenantID = tid.UUID()
 	}
-	return gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+	id, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
 		MerchantID: tenantID,
 		Subject:    &userID,
 	})
+	if err != nil {
+		return uuid.Nil, customerOwnershipError(err, uid, tenantID)
+	}
+	return id, nil
+}
+
+// customerOwnershipError names the cross-merchant claim behind an empty upsert
+// result: the guarded ON CONFLICT matches no row exactly when the id belongs to
+// another merchant (#889).
+func customerOwnershipError(err error, id, merchantID uuid.UUID) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: customer %s under merchant %s", ErrCustomerOwnedByAnotherMerchant, id, merchantID)
+	}
+	return err
 }
 
 // ResolveCustomerID derives the payable merchant subject id for a userID
@@ -91,6 +115,12 @@ func ResolveCustomerID(userID string) (uuid.UUID, error) {
 // repeat a no-op. A zero id is a no-op (the caller must set model.CustomerID
 // before Create).
 func EnsureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
+	return EnsureCustomerRowQ(ctx, gen.New(qx), tenantID, tsid)
+}
+
+// EnsureCustomerRowQ is EnsureCustomerRow for callers already holding a
+// *gen.Queries bound to their transaction.
+func EnsureCustomerRowQ(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
 	}
@@ -102,9 +132,23 @@ func EnsureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsi
 		tenantID = tid.UUID()
 	}
 	subject := tsid.String()
-	return gen.New(qx).EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
+	_, err := q.EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
 		ID:         tsid,
 		MerchantID: tenantID,
 		Subject:    &subject,
 	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	// No row back means either a foreign owner or a race: ON CONFLICT DO NOTHING
+	// returns nothing for a row this statement's snapshot cannot see, including
+	// one a concurrent first-touch committed after the snapshot was taken. A
+	// locking re-read settles it — it waits out the other writer and sees the
+	// committed row (#889).
+	if _, lerr := q.LockCustomerForMerchant(ctx, gen.LockCustomerForMerchantParams{
+		ID: tsid, MerchantID: tenantID,
+	}); lerr != nil {
+		return customerOwnershipError(lerr, tsid, tenantID)
+	}
+	return nil
 }

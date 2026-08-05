@@ -23,7 +23,7 @@ func TestNotificationEmailSweep_NoEmailServiceLeavesRowsUndelivered(t *testing.T
 	dbi := dbtest.OpenAppDB(t, dsn)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := dbtest.WithTestMerchant(context.Background())
-	dbtest.EnsureTestMerchant(baseCtx, t, dbi.Pool())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
 	notifID := uuid.New()
 	var customer uuid.UUID

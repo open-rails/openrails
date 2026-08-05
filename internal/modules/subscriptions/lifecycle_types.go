@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
 type CreateMembershipParams struct {
@@ -107,16 +108,46 @@ type FailMembershipParams struct {
 	SubscriptionID *uuid.UUID
 	FailureReason  *string
 	FailureCode    *string
-	// Terminal forces immediate cancellation (entitlements revoked, no further
-	// retries) regardless of the retry count, without incrementing it — no charge
-	// was attempted. Used when the dunning window has expired: a months-stale
-	// rebill must be downgraded, never retried.
+	// Terminal requests immediate cancellation (entitlements revoked, no further
+	// retries) regardless of the retry count, without incrementing it. It is a
+	// REQUEST, not a command: TerminalCertainty must name the evidence, or the
+	// row parks as `unknown` instead (#839).
 	Terminal bool
-	// HardDecline, when true, forces immediate cancellation with no further retry
-	// scheduling regardless of dunning mode. Set by dunning when the rail
-	// returns a permanent decline (stolen card, do-not-honor, account closed,
-	// expired card, pickup card). See collection.ClassifyNMIDecline.
-	HardDecline bool
+	// Decline (or#870) is the three-way meaning of the rail's decline code, from
+	// the ONE classifier collection.ClassifyDecline. The zero value
+	// (DeclineRetry) is the safe default for every caller that has no code:
+	//
+	//   DeclineRetry            keep the dunning schedule
+	//   DeclineFixPaymentMethod stop charging, KEEP the subscription and its
+	//                           entitlements, notify the customer to update the
+	//                           card. Never cancels, never revokes.
+	//   DeclineNonRecoverable   terminal: cancel the schedule at the rail. Still
+	//                           gated on TerminalCertainty + TerminalBlocked.
+	//
+	// No value of this field ever deletes a stored payment method.
+	Decline collection.DeclineOutcome
+	// TerminalCertainty (#821/#839/#840) names the evidence leg that justifies a
+	// terminal outcome — one of the collection.Certainty* constants. A terminal
+	// cancel revokes entitlements AND queues the irreversible cancellation of the
+	// recurring SCHEDULE at the rail — never the customer's stored payment
+	// method (or#870: nothing on this path can delete one) — so it requires
+	// certainty: provider truth, a non-retryable decline,
+	// or genuinely exhausted dunning ATTEMPTS. A date comparison, a lapsed
+	// window, and the absence of one of our own rows are NOT evidence. Empty ⇒
+	// FailMembership refuses to terminate and parks the row as `unknown`, access
+	// intact, for the provider-verification plane to resolve.
+	TerminalCertainty string
+	// AttemptRecorded marks that a REAL charge attempt underlies this failure and
+	// was recorded as a payments row by the CALLER (RecordFailedAttempt records
+	// it here instead; either satisfies this). It is what lets schedule
+	// exhaustion count as a certainty leg (#840): attempts we never made — because
+	// our own data was missing — can never exhaust anything.
+	AttemptRecorded bool
+	// TerminalBlocked (#836), when non-empty, is the operator kill-switch reason
+	// that forbids destructive outcomes for this merchant. It overrides any
+	// certainty: the row parks instead of cancelling, and no provider delete is
+	// queued. Callers set it from destructive.Gate.Check.
+	TerminalBlocked string
 	// RecordFailedAttempt writes a status='failed' payments row for this decline
 	// in the same tx (#733: attempt_kind=renewal, failure_code verbatim +
 	// normalized failure_reason). Callers set it when a real charge attempt was

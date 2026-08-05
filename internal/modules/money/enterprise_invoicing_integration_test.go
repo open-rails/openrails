@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -75,7 +76,7 @@ func TestEnterpriseInvoicing_PayerRateCardOverride(t *testing.T) {
 		_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 			Payer: &pp, Invoker: pp.UUID().String(), Currency: cur, EventType: eventType,
 			Dimensions: map[string]int64{"mib_seconds": quantity},
-			Amount:     0, Source: "th798-test", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+			Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-test", uuid.NewString()), OccurredAt: time.Now(),
 		})
 		require.NoError(t, err)
 	}
@@ -128,7 +129,7 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 
 	// Saved payment method on file — the send_invoice skip below must be the
 	// collection_method, not a missing method.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
@@ -279,9 +280,13 @@ func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *tes
 }
 
 func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *testing.T) {
-	svc, pool, _, _, ctx := moneyInEnv(t)
+	svc, _, _, _, ctx := moneyInEnv(t)
 	foreignMerchantID := uuid.New()
 	foreignPayer := identity.CustomerIDFromString(uuid.NewString())
+	// The fixture is deliberately ANOTHER merchant's — the whole point is that the
+	// service refuses it — so seeding it is one of the few genuinely privileged
+	// cases. No merchant-pinned connection can write another merchant's rows.
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", foreignPayer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", foreignMerchantID)
@@ -300,9 +305,9 @@ func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *
 
 	profile := money.CustomerInvoiceProfile{CollectionMethod: money.CollectionChargeAutomatically}
 	created, err := svc.EnsureCustomerInvoiceProfile(ctx, foreignPayer, profile)
-	require.ErrorContains(t, err, "payer belongs to another merchant")
+	require.ErrorIs(t, err, db.ErrCustomerOwnedByAnotherMerchant)
 	require.False(t, created)
-	require.ErrorContains(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), "payer belongs to another merchant")
+	require.ErrorIs(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), db.ErrCustomerOwnedByAnotherMerchant)
 }
 
 // TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals pins the #798
@@ -346,7 +351,7 @@ func TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals(t *testing.T) {
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: payer.UUID().String(), Currency: cur, EventType: eventType,
 		Dimensions: map[string]int64{"mib_seconds": 3 * gbMonthDivisor},
-		Amount:     0, Source: "th798-past", SourceID: uuid.NewString(), OccurredAt: time.Now().AddDate(0, 0, -20),
+		Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-past", uuid.NewString()), OccurredAt: time.Now().AddDate(0, 0, -20),
 	})
 	require.NoError(t, err)
 
@@ -392,7 +397,7 @@ func TestEnterpriseInvoicing_SweepUsageFeedsPendingChargesAndExposure(t *testing
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: payer.UUID().String(), Currency: cur, EventType: eventType,
 		Dimensions: map[string]int64{"mib_seconds": 2 * gbMonthDivisor},
-		Amount:     0, Source: "th798-sweep", SourceID: uuid.NewString(), OccurredAt: time.Now(),
+		Amount:     0, Key: money.MustIdempotencyKey(money.UsageOperation(eventType), "th798-sweep", uuid.NewString()), OccurredAt: time.Now(),
 	})
 	require.NoError(t, err)
 

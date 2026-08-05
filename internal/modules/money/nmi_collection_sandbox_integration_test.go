@@ -61,17 +61,17 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// Customer Vault from the standard test card. In production the vault id arrives
 	// via Collect.js tokenization; here the shared helper creates it server-to-
 	// server with the test PAN so the collection path has a real, chargeable handle.
-	vaultID := createNMISandboxVault(t, client)
-	t.Logf("NMI sandbox customer vault created: %s", vaultID)
+	railCustomerRef := createNMISandboxVault(t, client)
+	t.Logf("NMI sandbox customer vault created: %s", railCustomerRef)
 	t.Cleanup(func() {
-		if derr := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: vaultID}); derr != nil {
+		if derr := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: railCustomerRef}); derr != nil {
 			t.Logf("sandbox vault cleanup (non-fatal): %v", derr)
 		}
 	})
 
 	// The payment method OpenRails will collect against: rail=mobius (NMI-backed),
 	// rail_customer_ref = the sandbox vault id.
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailNMI), vaultID)
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
 
 	// Build the owed OpenRails invoice from real arrears state. owed is in ledger
 	// internal units (1e4 per cent). Randomize within the simulator's approving

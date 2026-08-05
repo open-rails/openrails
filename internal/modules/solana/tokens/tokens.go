@@ -23,50 +23,66 @@ const (
 	// Hermes feed registry on 2026-06-11:
 	//   https://hermes.pyth.network/v2/price_feeds?query=USDG
 	PythFeedUSDGUSD = "daa58c6a3ce7d4b9c46c32a6e646012c17c4a2b24c08dd8c5e476118b855a7da"
+	// USDT (Tether) — Crypto.USDT/USD. Verified against Pyth's Hermes feed
+	// registry on 2026-08-04:
+	//   https://hermes.pyth.network/v2/price_feeds?query=USDT
+	// (note the near-namesakes USDT0/USDTB/OUSDT in that response — this is the
+	// "TETHER / US DOLLAR" entry).
+	PythFeedUSDTUSD = "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b"
 )
 
 func DefaultPythPriceFeeds() map[string]string {
 	return map[string]string{
 		"SOL":   PythFeedSOLUSD,
 		"USDC":  PythFeedUSDCUSD,
+		"USDT":  PythFeedUSDTUSD,
 		"PYUSD": PythFeedPYUSDUSD,
 		"USD1":  PythFeedUSD1USD,
 		"USDG":  PythFeedUSDGUSD,
 	}
 }
 
+// DefaultSupportedTokens is the MAINNET half of the built-in mint registry
+// (or#881). It is the source of truth for a well-known token's on-chain
+// identity: a merchant SELECTS a symbol and never re-types a mint, because a
+// mint a merchant can type is a mint they can get wrong — and a wrong mint here
+// means accepting payment in a different token than the one being priced.
+//
+// Every address below was verified against the chain on 2026-08-04 (owner
+// program + decimals via getAccountInfo on mainnet-beta); registry_test.go pins
+// the decimals through the mint reader.
 func DefaultSupportedTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
 		"SOL": {
-			Name:     "Solana",
-			Mint:     "So11111111111111111111111111111111111111112",
-			Decimals: 9,
+			Name: "Solana",
+			Mint: "So11111111111111111111111111111111111111112",
 		},
 		"USDC": {
-			Name:     "USD Coin",
-			Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-			Decimals: 6,
+			Name: "USD Coin",
+			Mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		},
+		// Tether USD — plain SPL Token mint (Tokenkeg), no extensions.
+		"USDT": {
+			Name: "Tether USD",
+			Mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
 		},
 		"PYUSD": {
-			Name:     "PayPal USD",
-			Mint:     "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-			Decimals: 6,
+			Name: "PayPal USD",
+			Mint: "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
 		},
 		// USD1 (World Liberty Financial USD) — plain SPL Token mint, no
 		// extensions, so it is recurring-eligible (verified by mint inspection,
 		// like USDC). Mainnet only; no devnet mint exists.
 		"USD1": {
-			Name:     "World Liberty Financial USD",
-			Mint:     "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
-			Decimals: 6,
+			Name: "World Liberty Financial USD",
+			Mint: "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
 		},
 		// USDG (Global Dollar, Paxos) is a Token-2022 mint with extensions the
 		// Subscriptions program rejects, so it is supported for ONE-OFF purchases
 		// only (NOT recurring). Mainnet only.
 		"USDG": {
-			Name:     "Global Dollar",
-			Mint:     "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
-			Decimals: 6,
+			Name: "Global Dollar",
+			Mint: "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
 		},
 	}
 }
@@ -95,6 +111,9 @@ type StablecoinInfo struct {
 // Mint lookups are the trust anchor: parity is only ever granted to a mint in
 // this registry, so a custom token merely NAMED like a stablecoin cannot buy a
 // $1.00 quote for an arbitrary mint.
+// Mints here MUST agree with the mainnet registry above for every shared symbol
+// (registry_test.go asserts it); EURC is deliberately listed without a registry
+// entry — it is a known peg, not an accepted token.
 var knownStablecoins = []StablecoinInfo{
 	{Symbol: "USDC", Mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", Peg: "usd"},
 	{Symbol: "USDT", Mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", Peg: "usd"},
@@ -201,26 +220,30 @@ func IsFeedlessStablecoin(symbol string) bool {
 	return strings.TrimSpace(DefaultPythPriceFeeds()[normalized]) == ""
 }
 
+// DefaultDevnetTokens is the DEVNET half of the registry. Devnet mints are
+// per-deployment artefacts, not canonical addresses, so only the three with a
+// stable, widely-used devnet deployment are pinned here. A registry symbol with
+// no devnet entry (USDT/USD1/USDG) is simply not selectable under test_mode;
+// see ResolveDeclared for the ad-hoc-token escape hatch.
 func DefaultDevnetTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
 		"SOL": {
-			Name:     "Solana",
-			Mint:     "So11111111111111111111111111111111111111112",
-			Decimals: 9,
+			Name: "Solana",
+			Mint: "So11111111111111111111111111111111111111112",
 		},
 		"USDC": {
-			Name:     "USD Coin (Devnet)",
-			Mint:     "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-			Decimals: 6,
+			Name: "USD Coin (Devnet)",
+			Mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 		},
 		"PYUSD": {
-			Name:     "PayPal USD (Devnet)",
-			Mint:     "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
-			Decimals: 6,
+			Name: "PayPal USD (Devnet)",
+			Mint: "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
 		},
 	}
 }
 
+// ForNetwork returns the built-in registry for a network. The returned map is a
+// fresh copy per call, so callers may mutate it.
 func ForNetwork(network string) map[string]config.TokenConfig {
 	switch strings.ToLower(network) {
 	case "devnet":

@@ -24,10 +24,9 @@ import (
 // unique index cannot see across those keys, so without this helper a
 // backfill-then-converge ordering inserts a duplicate row.
 func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -58,7 +57,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              2900,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -75,6 +74,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 
 	paymentSvc := payments.NewPaymentService(dbi)
 	svc := &StripeConvergeService{PaymentService: paymentSvc}
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 
 	// Reconcile-backfill row: keyed by CHARGE id, invoice id only in metadata.
 	const chargeID = "ch_dedup_1"
@@ -84,11 +84,13 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		CustomerID:    tenantSubjectID,
 		PriceID:       priceID,
 		Rail:          models.RailStripe,
+		PspID:         &pspID,
 		TransactionID: chargeID,
 		Amount:        2900,
 		ListAmount:    2900,
-		Currency:      "usd",
+		Currency:      "USD",
 		Status:        payments.PaymentStatusCompletedValue,
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   now,
 		CreatedAt:     now,
 		Metadata: map[string]any{
@@ -128,10 +130,11 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		CustomerID:    tenantSubjectID,
 		PriceID:       priceID,
 		Rail:          models.RailStripe,
+		PspID:         &pspID,
 		TransactionID: "failed:in_dedup_2",
 		Amount:        2900,
 		ListAmount:    2900,
-		Currency:      "usd",
+		Currency:      "USD",
 		Status:        payments.PaymentStatusFailedValue,
 		PurchasedAt:   now,
 		CreatedAt:     now,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -13,18 +14,22 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// BasisTheoryWebhookHandler folds Basis Theory vault events (#795) into
+// BasisTheoryWebhookHandler folds Basis Theory custody events (#795) into
 // instrument state. Signature verification (RSA-PSS vs the CDN key) happens at
 // HTTP ingestion — like Stripe — so Apply trusts the ingestion-set flag.
 //
-// Doctrine: vault-side instrument problems PARK the instrument
+// The event SOURCE is the custodian, not a rail (or#879): Basis Theory holds
+// the card, NMI charges it, and only the custodian emits these events.
+//
+// Doctrine: custody-side instrument problems PARK the instrument
 // (cancellation-last-resort) — charges fail loudly and the operator is
 // notified; nothing is terminally cancelled and nothing rail-side is deleted.
 type BasisTheoryWebhookHandler struct{}
 
-func (BasisTheoryWebhookHandler) Rail() string { return string(models.RailVaultedCard) }
+func (BasisTheoryWebhookHandler) Rail() string { return string(models.EventSourceBasisTheory) }
 
 func (h BasisTheoryWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
@@ -45,7 +50,7 @@ func (h BasisTheoryWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent,
 		return WebhookEvent{}, fmt.Errorf("parse basistheory webhook: %w", err)
 	}
 	out := WebhookEvent{
-		Rail:    string(models.RailVaultedCard),
+		Rail:    string(models.EventSourceBasisTheory),
 		Type:    mapBasisTheoryEventType(evt.Type),
 		RawType: evt.Type,
 		RailRef: evt.ID,
@@ -79,8 +84,8 @@ func (h BasisTheoryWebhookHandler) Apply(ctx context.Context, d *WebhookDispatch
 	if strings.TrimSpace(evt.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory webhook has no event id"))
 	}
-	svc := &basisTheoryWebhookService{d: d, accountID: msg.PspID}
-	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.RailVaultedCard, msg.Payload, func(ctx context.Context) error {
+	svc := &basisTheoryWebhookService{d: d, accountID: msg.CustodianAccountID}
+	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.EventSourceBasisTheory, msg.Payload, func(ctx context.Context) error {
 		return svc.apply(ctx, evt)
 	})
 }
@@ -90,22 +95,25 @@ type basisTheoryWebhookService struct {
 	accountID string
 }
 
-// btClient arms the merchant's BT client from the resolved rail state (#788).
+// btClient arms the merchant's BT client from the resolved CUSTODIAN (or#880).
+// accountID is the custodian's own tenant id — the identity the event carries.
+// It deliberately does not go through a PSP: one custodian may back several,
+// and a token/network-token event is about the instrument, not a gateway.
 func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.Client, error) {
 	if s.d.RailConfigs == nil {
-		return nil, fmt.Errorf("basistheory webhook rejected: rail resolution is not configured")
+		return nil, fmt.Errorf("basistheory webhook rejected: custodian resolution is not configured")
 	}
-	rc, err := s.d.RailConfigs.RailConfig(ctx, string(models.RailVaultedCard), s.accountID)
+	cc, err := s.d.RailConfigs.CustodianConfig(ctx, models.CustodianBasisTheory, s.accountID)
 	if err != nil {
 		return nil, err
 	}
-	if rc.VaultedCard == nil {
-		return nil, fmt.Errorf("vaulted_card account resolved without credentials")
+	if cc == nil || cc.Custodian != models.CustodianBasisTheory {
+		return nil, fmt.Errorf("custodian tenant %s is not declared as basis_theory", s.accountID)
 	}
 	return basistheory.New(basistheory.Config{
-		APIKey:        rc.VaultedCard.APIKey,
-		BaseURL:       rc.VaultedCard.APIBaseURL,
-		WebhookKeyURL: rc.VaultedCard.WebhookKeyURL,
+		APIKey:        cc.APIKey,
+		BaseURL:       cc.APIBaseURL,
+		WebhookKeyURL: cc.WebhookKeyURL,
 		ReadOnly:      s.d.Config != nil && s.d.Config.IsProviderReadOnly(),
 	})
 }
@@ -137,7 +145,7 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 	}
 }
 
-// parkInstrumentFromTokenEvent: the vault-side credential is GONE (deleted or
+// parkInstrumentFromTokenEvent: the custody-side credential is GONE (deleted or
 // expired). Park — never terminal-cancel, never delete (cancellation-last-
 // resort): subscriptions keep their access posture and the operator decides.
 func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Context, evt basistheory.Event) error {
@@ -146,18 +154,18 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s event carries no token id", evt.Type))
 	}
 	reason := "bt_" + strings.ReplaceAll(evt.Type, ".", "_") // bt_token_deleted | bt_token_expired
-	rows, err := s.gen(ctx).ParkPaymentMethodByRailMethodRef(ctx, gen.ParkPaymentMethodByRailMethodRefParams{
-		Rail:          string(models.RailVaultedCard),
+	rows, err := s.gen(ctx).ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
+		Custodian:     models.CustodianBasisTheory,
 		RailMethodRef: data.Token.ID,
 		ParkReason:    reason,
 	})
 	if err != nil {
-		return fmt.Errorf("park vaulted_card instrument for %s: %w", evt.Type, err)
+		return fmt.Errorf("park custodian-held instrument for %s: %w", evt.Type, err)
 	}
 	if rows > 0 {
 		// Operator-visible: a parked instrument means renewals on it will fail
 		// loudly until re-collection (#657 cutover) or vault repair.
-		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — vault token gone; operator action required (never auto-cancelled)")
+		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-cancelled)")
 	}
 	return nil
 }
@@ -180,13 +188,13 @@ func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Conte
 		}
 		return fmt.Errorf("basistheory token.updated: fetch token: %w", err)
 	}
-	_, err = s.gen(ctx).RefreshVaultedCardMetadata(ctx, gen.RefreshVaultedCardMetadataParams{
-		Rail:             string(models.RailVaultedCard),
-		RailMethodRef:    token.ID,
-		LastFour:         cardLast4(token.Card),
-		CardType:         cardBrand(token.Card),
-		ExpiryDate:       cardExpiry(token.Card),
-		VaultFingerprint: token.Fingerprint,
+	_, err = s.gen(ctx).RefreshCustodianCardMetadata(ctx, gen.RefreshCustodianCardMetadataParams{
+		Custodian:     models.CustodianBasisTheory,
+		RailMethodRef: token.ID,
+		LastFour:      cardLast4(token.Card),
+		CardType:      cardBrand(token.Card),
+		ExpiryDate:    cardExpiry(token.Card),
+		Fingerprint:   token.Fingerprint,
 	})
 	if err != nil {
 		return fmt.Errorf("basistheory token.updated: refresh instrument: %w", err)
@@ -204,7 +212,7 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 		return nil // conversion events without a token id carry nothing to reconcile
 	}
 	_, err := s.gen(ctx).GetPaymentMethodByRailMethodRef(ctx, gen.GetPaymentMethodByRailMethodRefParams{
-		Rail:          string(models.RailVaultedCard),
+		Rail:          string(models.RailNMI),
 		RailMethodRef: data.Token.ID,
 	})
 	if err == nil {
@@ -244,7 +252,7 @@ func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, 
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s: no status resolvable for network token %s", evt.Type, data.NetworkToken.ID))
 	}
 	if _, err := s.gen(ctx).SetNetworkTokenStatusByNetworkTokenID(ctx, gen.SetNetworkTokenStatusByNetworkTokenIDParams{
-		Rail:               string(models.RailVaultedCard),
+		Custodian:          models.CustodianBasisTheory,
 		NetworkTokenID:     data.NetworkToken.ID,
 		NetworkTokenStatus: status,
 	}); err != nil {
@@ -284,23 +292,77 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("basistheory account updater: results for job %s: %w", jobID, err)
 	}
-	return s.FoldAccountUpdaterRows(ctx, rows)
+	stats, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+	if err != nil {
+		return err
+	}
+	// or#795: the same job may have been submitted by the batch runner, which
+	// holds a durable row for it. Whoever ingests first closes it; the other
+	// side then finds nothing open and re-submits nothing.
+	return CloseAccountUpdaterBatch(ctx, s.gen(ctx), jobID, stats)
 }
 
 // FoldAccountUpdaterRows applies parsed AU result rows. Exported for the
 // integration test to drive the fold without a live BT job.
 func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, rows []basistheory.AccountUpdaterResultRow) error {
-	q := s.gen(ctx)
+	_, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+	return err
+}
+
+// AccountUpdaterFoldStats reports what one fold did. ResultCounts holds the
+// VERBATIM wire codes (#651) — including ones this build does not recognize —
+// and is what the durable batch row records.
+type AccountUpdaterFoldStats struct {
+	Rows int
+	// Adopted: instruments the network refreshed. or#872: this is the number
+	// that proves the updater pays for itself — cards recovered before dunning.
+	Adopted      int
+	Rotated      int
+	Parked       int
+	ResultCounts map[string]int
+}
+
+// FoldAccountUpdaterResults applies parsed account-updater result rows through
+// the EXISTING single writer for each outcome: RotateCustodianMethodRef for the
+// UPD_ family (which also clears the park — or#872) and
+// ParkPaymentMethodByMethodRef for the two "stop and look" outcomes. There is
+// deliberately no second update path: the batch runner (or#795) and the
+// account-updater.job.completed webhook both land here.
+//
+// Doctrine: nothing is ever deleted and nothing is terminally cancelled. A
+// closed account or a contact-cardholder answer PARKS the instrument (or#870
+// bucket 2) so charges fail loudly and an operator decides.
+func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
+	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
+	park := func(token, reason, why string) error {
+		n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
+			Custodian:     models.CustodianBasisTheory,
+			RailMethodRef: token,
+			ParkReason:    reason,
+		})
+		if err != nil {
+			return fmt.Errorf("account updater: park %s: %w", token, err)
+		}
+		if n > 0 {
+			stats.Parked++
+			log.WithContext(ctx).WithFields(log.Fields{
+				"bt_token_id": token, "park_reason": reason,
+			}).Error("basistheory account updater: instrument PARKED — " + why + "; operator action required (never auto-cancelled)")
+		}
+		return nil
+	}
 	for _, row := range rows {
-		switch row.ResultCode {
-		case basistheory.AUUpdatedPAN, basistheory.AUUpdatedExpDate:
+		code := strings.TrimSpace(row.ResultCode)
+		stats.ResultCounts[code]++
+		switch basistheory.ClassifyAccountUpdaterResult(code) {
+		case basistheory.AUOutcomeUpdated:
 			newRef := strings.TrimSpace(row.NewToken)
 			if newRef == "" {
 				// In-place update (dedup): metadata refresh only, same token id.
 				newRef = row.Token
 			}
-			n, err := q.RotateVaultedCardMethodRef(ctx, gen.RotateVaultedCardMethodRefParams{
-				Rail:           string(models.RailVaultedCard),
+			n, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{
+				Custodian:      models.CustodianBasisTheory,
 				OldMethodRef:   row.Token,
 				NewMethodRef:   newRef,
 				NewFingerprint: row.NewFingerprint,
@@ -309,34 +371,65 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 				NewExpiryDate:  auExpiry(row.NewExpirationMonth, row.NewExpirationYear),
 			})
 			if err != nil {
-				return fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
-			}
-			if n > 0 && newRef != row.Token {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": row.ResultCode,
-				}).Info("basistheory account updater: instrument rail_method_ref rotated")
-			}
-		case basistheory.AUClosedAccount:
-			n, err := q.ParkPaymentMethodByRailMethodRef(ctx, gen.ParkPaymentMethodByRailMethodRefParams{
-				Rail:          string(models.RailVaultedCard),
-				RailMethodRef: row.Token,
-				ParkReason:    "bt_au_closed_account",
-			})
-			if err != nil {
-				return fmt.Errorf("account updater: park %s: %w", row.Token, err)
+				return stats, fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
 			}
 			if n > 0 {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"bt_token_id": row.Token,
-				}).Error("basistheory account updater: instrument PARKED — closed account; operator action required (never auto-cancelled)")
+				stats.Adopted++
+				if newRef != row.Token {
+					stats.Rotated++
+					log.WithContext(ctx).WithFields(log.Fields{
+						"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": code,
+					}).Info("basistheory account updater: instrument rail_method_ref rotated")
+				}
 			}
-		case basistheory.AUNoUpdate, "":
-			// Recorded verbatim by the vault; nothing to fold.
+		case basistheory.AUOutcomeClosed:
+			if err := park(row.Token, "bt_au_closed_account", "closed account"); err != nil {
+				return stats, err
+			}
+		case basistheory.AUOutcomeContactCardholder:
+			if err := park(row.Token, "bt_au_contact_cardholder", "the network will not answer without the cardholder"); err != nil {
+				return stats, err
+			}
+		case basistheory.AUOutcomeNoChange:
+			// Recorded verbatim above; no evidence, no action.
 		default:
 			log.WithContext(ctx).WithFields(log.Fields{
-				"bt_token_id": row.Token, "result_code": row.ResultCode,
+				"bt_token_id": row.Token, "result_code": code,
 			}).Warn("basistheory account updater: unrecognized result code recorded verbatim; no fold")
 		}
+	}
+	if stats.Adopted > 0 || stats.Parked > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"rows": stats.Rows, "adopted": stats.Adopted, "rotated": stats.Rotated, "parked": stats.Parked,
+		}).Info("basistheory account updater: fold complete")
+	}
+	return stats, nil
+}
+
+// CloseAccountUpdaterBatch marks the durable batch (or#795) that carried this
+// job as completed and records the verbatim result tally. A job with no local
+// batch row — an operator-created job, or one whose row was already closed by
+// the other ingestion path — is a no-op, never an error.
+func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string, stats AccountUpdaterFoldStats) error {
+	jobRef = strings.TrimSpace(jobRef)
+	if jobRef == "" {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	counts, err := json.Marshal(stats.ResultCounts)
+	if err != nil {
+		return fmt.Errorf("account updater: encode result counts: %w", err)
+	}
+	if _, err := q.CompleteAccountUpdaterBatchByJobRef(ctx, gen.CompleteAccountUpdaterBatchByJobRefParams{
+		MerchantID:   mid.UUID(),
+		JobRef:       jobRef,
+		ResultCounts: counts,
+		CompletedAt:  time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("account updater: close batch for job %s: %w", jobRef, err)
 	}
 	return nil
 }

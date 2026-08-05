@@ -3,11 +3,11 @@ package money
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -20,11 +20,10 @@ type AuthorizeHoldInput struct {
 	Invoker         string // canonical: 'apiKey:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency        string
 	EstimatedAmount int64
-	// Source + SourceID are the durable provenance/idempotency coordinates used
-	// later when the admitted request is captured. SourceID is the caller's
-	// request_id.
-	Source   string
-	SourceID string
+	// Key is the coordinate the admitted request will be CAPTURED at, so the
+	// hold and its capture are the same idempotency coordinate by construction
+	// (operation=capture, source=<admit namespace>, source_id=<request_id>).
+	Key IdempotencyKey
 	// ExpiresAt bounds the Redis hold's lifetime; this package only validates it.
 	ExpiresAt time.Time
 }
@@ -59,16 +58,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 	if in.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
-	in.Source = strings.TrimSpace(in.Source)
-	in.SourceID = strings.TrimSpace(in.SourceID)
-	if in.Source == "" || in.SourceID == "" {
-		return nil, fmt.Errorf("source and source_id (request_id) required")
+	if err := in.Key.RequireOperation(OpCapture); err != nil {
+		return nil, err
 	}
 	if in.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("expires_at required")
 	}
 	cur := normalizeCurrency(in.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 
@@ -103,8 +100,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 
 		// Account-capacity gate. Prepaid accounts gate on available balance.
 		// Arrears accounts gate on prepaid availability plus remaining credit line:
-		// credit_limit_amount - invoice-derived exposure. A zero credit line means
-		// no arrears capacity; prepaid balance can still admit work.
+		// credit_limit_amount - LEDGER-measured outstanding owed (or#878 ruling /
+		// or#897). This subtracted an invoice-derived exposure, which is the
+		// second substrate that ruling removed.
+		//
+		// NOTE (or#897 finding): AuthorizeAndHold has no production caller — the
+		// live admission path is admission.Admitter.Admit -> payerCapacity ->
+		// GetAdmissionCapacity -> the Redis spendgate. Policy enforcement belongs
+		// there, not here.
 		accountCapacity := available
 		exposure := int64(0)
 		switch {
@@ -117,7 +120,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			}
 		default:
 			var eerr error
-			exposure, eerr = txSvc.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+			exposure, eerr = txSvc.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
 			if eerr != nil {
 				return eerr
 			}

@@ -21,9 +21,8 @@ import (
 // own local cancel (user cancel + ccbill_cancel_subscription intent) must be a
 // NO-OP: no cancel provenance overwrite, no double revoke, no re-notification.
 func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -42,15 +41,16 @@ func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccwh-prod-"+uuid.NewString()[:8], tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 9990000, 'usd', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	// The post-#696 user-cancel shape: cancelled with USER provenance, paid
 	// runway preserved, access window already bounded at the period end.
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "ccbill")
 	exec(`INSERT INTO openrails.subscriptions
-	        (id, price_id, product_id, status, rail, rail_subscription_id,
+	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         cancelled_at, cancel_type, cancel_feedback, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'cancelled', 'ccbill', $4, $5, $6, $5, $7, 'user', 'too pricey', $8, $9)`,
-		subID, priceID, productID, ccbillSubID,
+	      VALUES ($1, $2, $3, 'cancelled', 'ccbill', $4, $5, $6, $7, $6, $8, 'user', 'too pricey', $9, $10)`,
+		subID, priceID, productID, pspID, ccbillSubID,
 		now.Add(-10*24*time.Hour), periodEnd, cancelledAt, custID, tenantID)
 	entID := uuid.New()
 	exec(`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)

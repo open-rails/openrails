@@ -140,12 +140,12 @@ func TestRLSPosture_Reporting(t *testing.T) {
 	_, err := super.Pool().Exec(ctx, rlsSetupDDL)
 	require.NoError(t, err)
 
-	// The superuser BYPASSES RLS -> posture is non-enforcing, and a required
-	// posture must fail.
+	// The superuser BYPASSES RLS -> posture is non-enforcing, and the gate must
+	// fail (unconditionally — there is no environment argument, or#782).
 	superPosture, err := super.CheckRLSPosture(ctx)
 	require.NoError(t, err)
 	require.False(t, superPosture.Enforcing, "superuser must report non-enforcing")
-	require.Error(t, super.EnforceRLSPosture(ctx, true))
+	require.Error(t, super.EnforceRLSPosture(ctx))
 
 	// As openrails_app: RLS ENFORCES.
 	app := newDBRetry(t, appDSN)
@@ -153,5 +153,5 @@ func TestRLSPosture_Reporting(t *testing.T) {
 	appPosture, err := app.CheckRLSPosture(ctx)
 	require.NoError(t, err)
 	require.True(t, appPosture.Enforcing, "openrails_app must report enforcing")
-	require.NoError(t, app.EnforceRLSPosture(ctx, true))
+	require.NoError(t, app.EnforceRLSPosture(ctx))
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -52,7 +53,7 @@ func (suite *TestContainerSuite) InsertProduct(ctx context.Context, p *models.Pr
 		require.NoError(suite.t, err, "Failed to resolve merchant for product")
 		p.MerchantID = tid.UUID()
 	}
-	require.NoError(suite.t, catalog.NewProductService(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert product")
+	require.NoError(suite.t, catalog.NewProductService(suite.FixtureDB()).Create(ctx, p), "Failed to insert product")
 }
 
 func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Price) {
@@ -66,22 +67,60 @@ func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Pric
 		require.NoError(suite.t, err, "Failed to resolve merchant for price")
 		p.MerchantID = tid.UUID()
 	}
-	require.NoError(suite.t, catalog.NewPriceService(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert price")
+	require.NoError(suite.t, catalog.NewPriceService(suite.FixtureDB()).Create(ctx, p), "Failed to insert price")
+}
+
+// PinPSP puts the suite in the shape every production caller of these repos
+// arrives in (or#893): the routed PSP pinned on ctx, and its psps row present.
+// Checkout's stampPSP, the intent runner and the webhook plane all do this
+// before any provider-bound row is written; off-rail channels are exempt and
+// pass through untouched.
+func (suite *TestContainerSuite) PinPSP(ctx context.Context, rail string) context.Context {
+	suite.t.Helper()
+	if rail == "" || models.IsOffRailChannel(rail) {
+		return ctx
+	}
+	if db.PSPIDFromContext(ctx) != uuid.Nil {
+		return ctx
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+		tid, err = merchant.Require(ctx)
+		require.NoError(suite.t, err, "Failed to resolve merchant for PSP")
+	}
+	// Use the suite's OWN armed account for the rail (seedPSP*
+	// wires real credentials against it) — routing to a second, credential-less
+	// PSP would make the merchant multi-account and change which one new work
+	// resolves to. Only seed one if the rail has none.
+	var psp uuid.UUID
+	err = suite.FixtureDB().Pool().QueryRow(ctx,
+		`SELECT id FROM openrails.psps
+		  WHERE merchant_id = $1 AND rail = lower($2) AND archived = false
+		  ORDER BY created_at DESC, id DESC LIMIT 1`,
+		tid.UUID(), rail).Scan(&psp)
+	if err != nil {
+		psp = dbtest.EnsureTestPSP(ctx, suite.t, suite.FixtureDB().Pool(), tid.UUID(), rail)
+	}
+	return db.WithPSPID(ctx, psp)
 }
 
 func (suite *TestContainerSuite) InsertSubscription(ctx context.Context, s *models.Subscription) {
 	suite.t.Helper()
-	require.NoError(suite.t, subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).Create(ctx, s), "Failed to insert subscription")
+	ctx = suite.PinPSP(ctx, string(s.Rail))
+	require.NoError(suite.t, subscriptions.NewSubscriptionRepo(suite.FixtureDB()).Create(ctx, s), "Failed to insert subscription")
 }
 
 func (suite *TestContainerSuite) InsertPaymentMethod(ctx context.Context, pm *models.PaymentMethod) {
 	suite.t.Helper()
-	require.NoError(suite.t, paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB).Create(ctx, pm), "Failed to insert payment method")
+	ctx = suite.PinPSP(ctx, string(pm.Rail))
+	require.NoError(suite.t, paymentmethods.NewPaymentMethodRepo(suite.FixtureDB()).Create(ctx, pm), "Failed to insert payment method")
 }
 
 func (suite *TestContainerSuite) InsertPayment(ctx context.Context, p *models.Payment) {
 	suite.t.Helper()
-	require.NoError(suite.t, payments.NewPaymentRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert payment")
+	ctx = suite.PinPSP(ctx, string(p.Rail))
+	require.NoError(suite.t, payments.NewPaymentRepo(suite.FixtureDB()).Create(ctx, p), "Failed to insert payment")
 }
 
 func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *models.Entitlement) {
@@ -93,7 +132,7 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 	if _, err := merchant.Require(ctx); err != nil {
 		ctx = dbtest.WithTestMerchant(ctx)
 	}
-	require.NoError(suite.t, entitlements.NewEntitlementService(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
+	require.NoError(suite.t, entitlements.NewEntitlementService(suite.FixtureDB()).Insert(ctx, e), "Failed to insert entitlement")
 }
 
 func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *models.NotificationQueue) {
@@ -101,7 +140,7 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 	if _, err := merchant.Require(ctx); err != nil {
 		ctx = dbtest.WithTestMerchant(ctx)
 	}
-	require.NoError(suite.t, subscriptions.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
+	require.NoError(suite.t, subscriptions.NewNotificationQueueRepo(suite.FixtureDB()).Create(ctx, n), "Failed to insert notification")
 }
 
 // insertMoneyCreditLot seeds a credit lot — a #514 credit grant — and
@@ -141,7 +180,7 @@ func (suite *TestContainerSuite) lotRemaining(ctx context.Context, merchantID, l
 // GetPaymentByID loads a payment by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUID) *models.Payment {
 	suite.t.Helper()
-	p, err := payments.NewPaymentRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment %s", id)
 	return p
 }
@@ -150,7 +189,7 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 // fails the test when missing.
 func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := payments.NewPaymentRepo(suite.App.Runtime.DB).GetByTransactionID(ctx, rail, transactionID)
+	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByTransactionID(ctx, rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }
@@ -158,7 +197,7 @@ func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, ra
 // GetPaymentMethod loads a payment method by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.UUID) *models.PaymentMethod {
 	suite.t.Helper()
-	pm, err := paymentmethods.NewPaymentMethodRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	pm, err := paymentmethods.NewPaymentMethodRepo(suite.FixtureDB()).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment method %s", id)
 	return pm
 }
@@ -224,7 +263,7 @@ func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *mode
 	}
 	require.NoError(suite.t, err, "Failed to look up subscription by rail id %s", railSubID)
 
-	sub, err := subscriptions.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	sub, err := subscriptions.NewSubscriptionRepo(suite.FixtureDB()).GetByID(ctx, id)
 	if err != nil {
 		return nil
 	}

@@ -503,9 +503,11 @@ function PriceRow({
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
-          {Object.entries(price.providers ?? {}).map(([rail, state]) => (
+          {/* psp_links is keyed by PSP key ("mobius"), not by rail — the rail
+              is recorded inside the entry (or#812). */}
+          {Object.entries(price.providers ?? {}).map(([psp, state]) => (
             <Badge
-              key={rail}
+              key={psp}
               variant="secondary"
               className={
                 state.status === "linked"
@@ -514,7 +516,7 @@ function PriceRow({
               }
               title={state.message}
             >
-              {rail}: {state.status}
+              {psp}: {state.status}
             </Badge>
           ))}
         </span>

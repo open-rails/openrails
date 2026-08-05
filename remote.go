@@ -594,24 +594,16 @@ func customerIDString(payer *CustomerID) string {
 	return payer.UUID().String()
 }
 
-// errorEnvelope mirrors the standalone error response
-// (pkg/api.SimpleErrorResponse): {"error":{"type","code","message"}}. Some
-// legacy paths also emit top-level {code,message,error}.
+// errorEnvelope is THE OpenRails error response (pkg/api.ErrorResponse):
+// {"error":{"type","code","message"}}. or#893 deleted the second, top-level
+// {code,message} shape this used to also accept — one representation, and a
+// body that isn't this one is a foreign payload, not a dialect.
 type errorEnvelope struct {
 	Error *struct {
 		Type    string `json:"type"`
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-func isErrorEnvelope(raw []byte) bool {
-	var probe struct {
-		Error json.RawMessage `json:"error"`
-	}
-	return json.Unmarshal(raw, &probe) == nil && len(probe.Error) > 0
 }
 
 // statusErrorFromBody maps a non-2xx response onto the canonical StatusError
@@ -619,13 +611,8 @@ func isErrorEnvelope(raw []byte) bool {
 func statusErrorFromBody(status int, raw []byte) error {
 	var code, message string
 	var env errorEnvelope
-	if err := json.Unmarshal(raw, &env); err == nil {
-		switch {
-		case env.Error != nil:
-			code, message = env.Error.Code, env.Error.Message
-		case env.Code != "" || env.Message != "":
-			code, message = env.Code, env.Message
-		}
+	if err := json.Unmarshal(raw, &env); err == nil && env.Error != nil {
+		code, message = env.Error.Code, env.Error.Message
 	}
 	if code == "" && message == "" {
 		// No recognized error envelope: the body is an opaque/foreign payload

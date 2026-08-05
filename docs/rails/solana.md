@@ -1,5 +1,8 @@
 # Solana rail — merchant setup
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md).
+
 Solana is the self-custody rail: there is no third-party PSP account. You receive
 funds directly into a wallet you control, and OpenRails signs recurring pulls with
 a merchant key you provide. One-time payments use Solana Pay; recurring
@@ -13,7 +16,7 @@ subscriptions use the official on-chain Subscriptions Delegation Program
 - **A signer for subscription pulls.** OpenRails must be able to sign
   `transfer_subscription` transactions each billing period. Two modes:
   - `local_keypair` — you provide the wallet's base58 private key as the
-    provider-account secret `private_key`. It is held in the merchant secret
+    PSP secret `private_key`. It is held in the merchant secret
     store and loaded into memory only to sign.
   - `vault_transit` — the key lives in HashiCorp Vault Transit under the named
     key; OpenRails sends the serialized transaction message to Vault for signing
@@ -26,37 +29,69 @@ subscriptions use the official on-chain Subscriptions Delegation Program
 ### PSP manifest entry
 
 Declared under `merchants.<slug>.psps.<key>.solana`. Unlike other rails,
-`account_id` is **not** declared — the provider-account identity is always
+`account_id` is **not** declared — the PSP identity is always
 derived from the signer's public key (a declared value is ignored with a warning).
 
 ```yaml
 psps:
   solana:
     solana:
-      environment: live          # assertion cross-checked against test_mode; omit to derive
       signer: { mode: local_keypair }
       settings:
         # Optional destination wallet; defaults to the signer public key.
         recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
         rpc_provider: helius     # helius | public; empty defaults to helius
         rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-        tokens:                  # accepted tokens: SYMBOL -> { name, mint, decimals }
-                                 # decimals is REQUIRED (the mint's base-unit precision);
-                                 # it scales every charge, so omitting it is rejected.
-          SOL:  { name: Solana,   mint: So11111111111111111111111111111111111111112, decimals: 9 }
-          USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
+        # tokens is OPTIONAL and IS the accepted set; omit it to accept USDC only.
+        tokens:
+          USDC: {}               # built-in symbol: SELECTED, mint from the registry.
+                                 # Declaring `mint:` here is an ERROR.
+          MYTK: { name: My Token, mint: replace-with-spl-mint-address }
+                                 # custom symbol: `mint:` is REQUIRED.
+                                 # `decimals:` is rejected on both — read on-chain.
       secrets:
         private_key: replace-with-base58-private-key   # local_keypair mode only
 
   # Alternative: Vault Transit signer — no private_key secret at all.
   solana-vault:
     solana:
-      environment: live
       signer: { mode: vault_transit, key: openrails-solana-<slug> }
 ```
 
 `settings` keys are strictly validated: a typo'd key fails the manifest push
 loudly. Known keys: `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet`.
+
+#### Accepted tokens
+
+OpenRails ships a built-in mint registry, and it is the source of truth for a
+well-known token's on-chain identity:
+
+| network | built-in symbols |
+|---|---|
+| mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
+| devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD` |
+
+The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
+accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
+two. Declare nothing and you accept **USDC only** — the one token present on
+every network that is also recurring-eligible, so a zero-configuration merchant
+can take one-off payments and rebill. `GET /v1/solana/tokens` advertises exactly
+this set, never more.
+
+- **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
+  Declaring `mint:` is an error *even when the address is correct*: a mint you
+  can type is a mint you can mistype, and a wrong mint accepts payment in a
+  different token than the one you priced.
+- **Custom symbol** — `mint:` is required; there the mint *is* the token's
+  identity.
+- **`decimals`** — never configurable (#817): read from the SPL mint on-chain.
+- **Under `test_mode`** the devnet column applies. Devnet mints are
+  per-deployment artefacts with no canonical address, so a built-in symbol with
+  no devnet entry (`USDT`, `USD1`, `USDG`) is simply not built-in there —
+  declare it like any other ad-hoc devnet token, with an explicit `mint:`.
+
+A misdeclared token set is fail-closed: the manifest push is rejected, and a PSP
+whose stored settings are misdeclared does not arm.
 
 ### One-time payments (buyer's view)
 
@@ -137,8 +172,8 @@ and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
 ### Devnet testing
 
 The network is derived structurally from the deployment's `test_mode`:
-sandbox → **devnet**, live → mainnet. There is no independent network knob;
-`environment: test` on the account is only an assertion cross-checked at boot.
+sandbox → **devnet**, live → mainnet. There is no independent network knob, and
+a PSP declares no environment of its own (#882).
 
 To exercise the flows on devnet:
 

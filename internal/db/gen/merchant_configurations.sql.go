@@ -13,7 +13,7 @@ import (
 )
 
 const getMerchantConfiguration = `-- name: GetMerchantConfiguration :one
-SELECT merchant_id, config, config_version, created_at, updated_at FROM openrails.merchant_configurations
+SELECT merchant_id, config, created_at, updated_at FROM openrails.merchant_configurations
 WHERE merchant_id = $1
 LIMIT 1
 `
@@ -24,7 +24,6 @@ func (q *Queries) GetMerchantConfiguration(ctx context.Context, merchantID uuid.
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Config,
-		&i.ConfigVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -33,11 +32,10 @@ func (q *Queries) GetMerchantConfiguration(ctx context.Context, merchantID uuid.
 
 const upsertMerchantConfiguration = `-- name: UpsertMerchantConfiguration :exec
 INSERT INTO openrails.merchant_configurations (
-    merchant_id, config, config_version, created_at, updated_at
-) VALUES ($1, $2, 1, $3, $4)
+    merchant_id, config, created_at, updated_at
+) VALUES ($1, $2, $3, $4)
 ON CONFLICT (merchant_id) DO UPDATE SET
     config = EXCLUDED.config,
-    config_version = openrails.merchant_configurations.config_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 

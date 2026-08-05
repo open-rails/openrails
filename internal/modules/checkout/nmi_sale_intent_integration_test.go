@@ -132,8 +132,7 @@ type saleIntentFixture struct {
 
 func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -170,13 +169,15 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		),
 		// #788: the scoped resolver is the ONLY NMI client source.
 		ResolveNMIClient: func(context.Context, string) (*nmi.NMIClient, error) { return client, nil },
-		// VaultService carries the DB handle finalize persists the #297
+		// RailPaymentMethodService carries the DB handle finalize persists the #297
 		// stored-credential anchor through.
-		VaultService: &paymentmethods.VaultService{DB: dbi},
+		RailPaymentMethodService: &paymentmethods.RailPaymentMethodService{DB: dbi},
 	}
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewNMISaleIntentHandler(saleService)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	return &saleIntentFixture{
 		db: dbi, runner: runner, gateway: gateway,
@@ -195,11 +196,13 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 
 func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMISale,
 		PriceID:        &fx.priceID,
+		PspID:          pspID,
 		Payload:        fx.payload,
 		IdempotencyKey: NMISaleIdempotencyKey(key),
 		NextAttemptAt:  time.Now().UTC(),
@@ -269,7 +272,7 @@ func TestNMISaleIntent_DeclineIsTerminal(t *testing.T) {
 		"nmi_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType, &attemptKind))
 	require.Equal(t, "transaction_was_declined_by_processor", failureCode) // NMI 200, verbatim localization id
 	require.Equal(t, payments.FailureCardDeclined, failureReason)
-	require.Equal(t, "provider_vault", tokenType)
+	require.Equal(t, "psp_token", tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
 }
 

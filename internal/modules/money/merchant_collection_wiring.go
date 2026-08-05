@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -16,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/vaultedcard"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -96,7 +97,7 @@ func (b *MerchantCollectionAdapterBuilder) testMode() bool {
 	return b.Config != nil && b.Config.IsTestMode()
 }
 
-// environment is the deployment's provider-account environment (#681).
+// environment is the deployment's PSP environment (#681).
 func (b *MerchantCollectionAdapterBuilder) environment() string {
 	return config.ExpectedProviderEnvironment(b.testMode())
 }
@@ -108,12 +109,11 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	}
 	rail := normalizeRail(method.Rail)
 	isStripe := rail == string(models.RailStripe)
-	isVaultedCard := rail == string(models.RailVaultedCard)
-	if !isStripe && !isVaultedCard && !rails.IsNMI(models.Rail(rail)) {
+	if !isStripe && !rails.IsNMI(models.Rail(rail)) {
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
 	mid := merchant.ID(method.MerchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.PspID)
+	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, &method.PspID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -124,8 +124,11 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	switch {
 	case isStripe:
 		adapter, err = b.stripeAdapter(ctx, svc, mid, scope)
-	case isVaultedCard:
-		adapter, err = b.vaultedCardAdapter(ctx, svc, mid, scope)
+	case method.Custodian == models.CustodianBasisTheory:
+		// or#879: same rail, same gateway, different transport — the card is
+		// held by the custodian, so the charge goes through its proxy. The
+		// INSTRUMENT decides this, not the rail.
+		adapter, err = b.custodianProxyAdapter(ctx, svc, mid, scope)
 	default:
 		adapter, err = b.nmiAdapter(ctx, svc, mid, scope)
 	}
@@ -143,16 +146,20 @@ func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc
 	if stamped != nil {
 		row, err := b.DB.Gen(ctx).GetPSP(ctx, *stamped)
 		if err != nil {
-			return merchants.PSPScope{}, false, fmt.Errorf("load stamped provider account: %w", err)
+			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
-			return merchants.PSPScope{}, false, fmt.Errorf("stamped provider account %s is on rail %s, not %s", row.ID, row.Rail, rail)
+			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", row.ID, row.Rail, rail)
 		}
 		return merchants.PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
+			// or#880: the custody reference travels with the stamped account —
+			// a renewal on a custodian-held card must arm the SAME vault the
+			// original sale did, not whatever the merchant declares today.
+			CustodianID: row.CustodianID,
 		}, true, nil
 	}
-	return svc.PullRailMerchantAccountScope(ctx, mid, rail, b.environment())
+	return svc.PullPSPScope(ctx, mid, rail, b.environment())
 }
 
 // ResolveNMIClient arms the store-scoped NMI client for one charge (#727 —
@@ -187,10 +194,10 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 // provider READ: for NMI-family rails it arms the store-scoped client and
 // asks the Query API for a successful sale carrying the wire order reference
 // — the same probe the manual-rebill intent verifier trusts for its
-// no-double-charge invariant. vaulted_card charges settle on the LINKED NMI
-// gateway account, so the read arms that gateway's client. Rails without a
-// usable read (Stripe relies on its own request idempotency and cannot park
-// ambiguous mid-transport) report Supported=false.
+// no-double-charge invariant. Custodian-proxied charges settle on the SAME NMI
+// gateway account (or#879), so one branch covers both transports. Rails
+// without a usable read (Stripe relies on its own request idempotency and
+// cannot park ambiguous mid-transport) report Supported=false.
 func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, wireOrderRef string) (CollectionVerifyResult, error) {
 	if b == nil {
 		return CollectionVerifyResult{}, nil
@@ -200,45 +207,17 @@ func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Co
 		return CollectionVerifyResult{}, nil
 	}
 	rail := normalizeRail(method.Rail)
-	var client *nmi.NMIClient
-	switch {
-	case rails.IsNMI(models.Rail(rail)):
-		c, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, method.PspID)
-		if err != nil {
-			return CollectionVerifyResult{}, err
-		}
-		if !ok {
-			return CollectionVerifyResult{}, nil
-		}
-		client = c
-	case rail == string(models.RailVaultedCard):
-		mid := merchant.ID(method.MerchantID)
-		scope, ok, err := b.resolveScope(ctx, svc, mid, rail, method.PspID)
-		if err != nil {
-			return CollectionVerifyResult{}, err
-		}
-		if !ok {
-			return CollectionVerifyResult{}, nil
-		}
-		settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
-		if err != nil {
-			return CollectionVerifyResult{}, fmt.Errorf("vaulted_card account %s: %w", scope.AccountID, err)
-		}
-		gwScope, ok, err := svc.PSPScopeByAccountID(ctx, mid, string(models.RailNMI), settings.GatewayAccount)
-		if err != nil {
-			return CollectionVerifyResult{}, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
-		}
-		if !ok {
-			return CollectionVerifyResult{}, nil
-		}
-		client, err = b.nmiClient(ctx, svc, mid, gwScope)
-		if err != nil {
-			return CollectionVerifyResult{}, err
-		}
-	default:
+	if !rails.IsNMI(models.Rail(rail)) {
 		return CollectionVerifyResult{}, nil
 	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(wireOrderRef)
+	client, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
+	if err != nil {
+		return CollectionVerifyResult{}, err
+	}
+	if !ok {
+		return CollectionVerifyResult{}, nil
+	}
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, wireOrderRef)
 	if err != nil {
 		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", wireOrderRef, err)
 	}
@@ -257,10 +236,9 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 		// from the scope this adapter was armed for.
 		Rails: railresolve.FixedSet{
 			string(models.RailStripe): {
-				Rail:        models.RailStripe,
-				AccountID:   scope.AccountID,
-				Environment: scope.Environment,
-				Stripe:      &config.StripeRailConfig{SecretKey: secretKey},
+				Rail:      models.RailStripe,
+				AccountID: scope.AccountID,
+				Stripe:    &config.StripeRailConfig{SecretKey: secretKey},
 			},
 		},
 	}
@@ -270,26 +248,27 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 	return NewStripeCollectionAdapter(b.DB, service), nil
 }
 
-// vaultedCardAdapter arms the #795 BT-proxy collection adapter: the private
-// app key from the vaulted_card account's secrets, destination creds from the
-// LINKED NMI gateway account (settings.gateway_account — one source of truth).
-func (b *MerchantCollectionAdapterBuilder) vaultedCardAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
-	apiKey, err := b.requireSecret(ctx, svc, mid, scope, "api_key")
+// custodianProxyAdapter arms the #795 detokenizing-proxy collection adapter:
+// the custodian's private app key and THIS PSP's own gateway security key. The
+// gateway half is the PSP's (or#879 folded the old cross-account pointer away);
+// the custodial half is the referenced custodian's (or#880), so several PSPs
+// charging the same vault share ONE credential rather than a copy each.
+func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+	if scope.CustodianID == nil {
+		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP references none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
+	}
+	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
-	if err != nil {
-		return nil, fmt.Errorf("vaulted_card account %s: %w", scope.AccountID, err)
-	}
-	gwScope, ok, err := svc.PSPScopeByAccountID(ctx, mid, string(models.RailNMI), settings.GatewayAccount)
-	if err != nil {
-		return nil, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
-	}
 	if !ok {
-		return nil, fmt.Errorf("vaulted_card account %s: gateway account %q is not declared on rail nmi", scope.AccountID, settings.GatewayAccount)
+		return nil, fmt.Errorf("psp %s/%s: %w (%s)", scope.Rail, scope.AccountID, merchants.ErrCustodianNotDeclared, *scope.CustodianID)
 	}
-	gatewayKey, err := b.requireSecret(ctx, svc, mid, gwScope, "security_key")
+	apiKey, err := b.requireCustodianSecret(ctx, svc, mid, custodian, custodians.SecretAPIKey)
+	if err != nil {
+		return nil, err
+	}
+	gatewayKey, err := b.requireSecret(ctx, svc, mid, scope, "security_key")
 	if err != nil {
 		return nil, err
 	}
@@ -301,8 +280,8 @@ func (b *MerchantCollectionAdapterBuilder) vaultedCardAdapter(ctx context.Contex
 	if err != nil {
 		return nil, fmt.Errorf("build store-armed BT client: %w", err)
 	}
-	gw := vaultedcard.GatewayConfig{SecurityKey: gatewayKey, DirectPostURL: b.Endpoints.NMIDirectPostURL}
-	return NewVaultedCardCollectionAdapter(vaultedcard.New(bt, gw)), nil
+	gw := nmiproxy.GatewayConfig{SecurityKey: gatewayKey, DirectPostURL: b.Endpoints.NMIDirectPostURL}
+	return NewCustodianProxyCollectionAdapter(nmiproxy.New(bt, gw)), nil
 }
 
 func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
@@ -349,11 +328,12 @@ func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merc
 	if svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	// or#812: honour the PSP row's rotation version floor.
+	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := svc.Secrets().Get(ctx, mid, name)
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
 	if errors.Is(err, merchants.ErrSecretNotFound) {
 		return "", false, nil
 	}
@@ -377,6 +357,31 @@ func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, sv
 	}
 	if !found {
 		return "", fmt.Errorf("merchant %s rail %s: secret %s missing (#725: a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
+	}
+	return value, nil
+}
+
+// requireCustodianSecret is the custody sibling: the credential is scoped to
+// the CUSTODIAN's identity, not to the PSP that happens to charge through it.
+func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, custodian merchants.CustodianScope, key string) (string, error) {
+	// or#812: same versioned read as every other provider credential.
+	ref, err := custodian.SecretRef(key)
+	if err != nil {
+		return "", err
+	}
+	if svc == nil || svc.Secrets() == nil {
+		return "", fmt.Errorf("merchant %s custodian %s: secret store is not armed", mid.String(), custodian.Key)
+	}
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
+	if errors.Is(err, merchants.ErrSecretNotFound) {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s missing (#725: a declared custodian never falls back to boot rails)", mid.String(), custodian.Key, ref.Name)
+	}
+	if err != nil {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s backend failed: %w", mid.String(), custodian.Key, ref.Name, err)
+	}
+	value := strings.TrimSpace(sec.Value)
+	if value == "" {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s is empty", mid.String(), custodian.Key, ref.Name)
 	}
 	return value, nil
 }

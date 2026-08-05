@@ -17,8 +17,7 @@ import (
 
 func TestSyncCatalogSidecars_PersistsRateCardsAndCreditPurchases(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
@@ -104,8 +103,7 @@ WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 // reference it).
 func TestSyncCatalogSidecars_AutoDefinesCustomCreditTypes(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
@@ -164,10 +162,17 @@ VALUES ($1, $2, 'Gem Top-up', $3)`, productID, productKey, merchantID)
 	require.Equal(t, qualifiedUnit, quote.Unit)
 	require.Equal(t, int64(1_000), quote.TotalCredits)
 
-	_, trx, err := moneySvc.DepositCatalogCreditPurchase(ctx, payer, payerID.String(), money.CatalogCreditPurchaseQuoteInput{
-		ProductKey:  productKey,
-		SpendMicros: 10_000_000,
-	}, "checkout_"+uuid.NewString())
+	// or#896: the quote prices it; the live deposit path delivers it.
+	sourceID := "checkout_" + uuid.NewString()
+	trx, err := moneySvc.Deposit(ctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    payerID.String(),
+		Currency:   quote.Unit,
+		Amount:     quote.TotalCredits,
+		Source:     "credit_purchase",
+		SourceID:   &sourceID,
+		ExpiresAt:  quote.ExpiresAt,
+	})
 	require.NoError(t, err)
 	require.Equal(t, qualifiedUnit, trx.Currency)
 	bal, err := moneySvc.GetBalanceForCustomer(ctx, payer, qualifiedUnit)

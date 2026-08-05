@@ -102,7 +102,9 @@ func TestCCBillWebhookUnprovenLiveProbeFailsClosed(t *testing.T) {
 		apply func(*testing.T)
 	}{
 		{"probe proves nothing (RLS-silent empty read)", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, nil) }},
-		{"probe errors", func(t *testing.T) { stubCCBillLiveProbe(t, merchants.LiveRailUnknown, errors.New("catalog unavailable")) }},
+		{"probe errors", func(t *testing.T) {
+			stubCCBillLiveProbe(t, merchants.LiveRailUnknown, errors.New("catalog unavailable"))
+		}},
 		{"probe errors but still claims absent", func(t *testing.T) {
 			stubCCBillLiveProbe(t, merchants.LiveRailAbsent, errors.New("catalog unavailable"))
 		}},
@@ -155,7 +157,7 @@ func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 
 // #697: the composite CCBill account identity is dash-joined
 // (clientAccnum-clientSubacc), matching CCBill's own convention and the declared
-// rail_merchant_accounts.account_id format.
+// psps.account_id format.
 func TestCCBillWebhookAccountIDIsDashJoined(t *testing.T) {
 	require.Equal(t, "900000-0000",
 		ccbillWebhookAccountID([]byte(`{"clientAccnum":"900000","clientSubacc":"0000"}`)))

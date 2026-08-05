@@ -10,6 +10,7 @@ package merchants
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -17,58 +18,21 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Canonical per-merchant secret names. The store namespaces values by
-// (merchant id, name); these are the well-known names OpenRails reads at request
-// time. A managed (Vault-backed) deployment keeps the SAME names but resolves
-// them to a merchant-scoped Vault path.
-const (
-	// SecretStripeSecretKey is the merchant's Stripe API secret key (BYO or Connect).
-	SecretStripeSecretKey = "stripe/secret_key"
-	// SecretStripeWebhookSigning is the merchant's Stripe webhook signing secret,
-	// used to verify inbound webhooks AFTER merchant resolution.
-	SecretStripeWebhookSigning = "stripe/webhook_signing_secret"
-	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
-	// Destination signing secret (a single endpoint may receive both).
-	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
-	// SecretNMISecurityKey is the legacy broad NMI security-key secret.
-	SecretNMISecurityKey = "nmi/mobius/security_key"
-	// SecretNMITokenizationURL overrides the Collect.js script URL for a
-	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
-	SecretNMITokenizationURL = "nmi/mobius/tokenization_url"
-	// SecretNMIWebhookSigning is the merchant's NMI webhook signing
-	// secret, used to verify inbound webhooks after merchant/provider resolution.
-	SecretNMIWebhookSigning = "nmi/mobius/webhook_signing_secret"
-)
-
-// SecretDefinition describes one OpenRails-owned merchant secret. It is the
-// canonical registry used by status APIs, docs, validation, and runbooks.
-type SecretDefinition struct {
-	Name              string `json:"name"`
-	Rail              string `json:"rail"`
-	Purpose           string `json:"purpose"`
-	DisplayLabel      string `json:"display_label"`
-	ManualVault       bool   `json:"manual_vault"`
-	MerchantWritable  bool   `json:"merchant_writable"`
-	Validation        string `json:"validation"`
-	PlaintextReadable bool   `json:"plaintext_readable"`
-}
-
-var merchantSecretRegistry = []SecretDefinition{
-	{Name: SecretStripeSecretKey, Rail: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
-	{Name: SecretStripeWebhookSigning, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretStripeWebhookSigningThin, Rail: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretNMISecurityKey, Rail: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretNMITokenizationURL, Rail: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
-	{Name: SecretNMIWebhookSigning, Rail: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-}
+// A merchant secret has exactly ONE spelling: the PSP-scoped name
+// `psps/<rail>/<environment>/<account_id>/<key>` built by PSPSecretName. The
+// flat `<rail>/<purpose>` names (stripe/secret_key, nmi/mobius/security_key, …)
+// were retired in #884 — they were write-only surface, read only on a
+// `pool == nil` branch that no production construction can reach, and they baked
+// a PSP key ("mobius") into names presented as rail-generic.
 
 // PSPSecretName returns the canonical secret-store name for a
-// provider-account-owned credential. The merchant id still namespaces the store;
+// PSP-owned credential. The merchant id still namespaces the store;
 // this path adds provider identity so one merchant can rotate or run multiple
 // accounts of the same provider without credential collisions.
 func PSPSecretName(rail, environment, accountID, key string) (string, error) {
@@ -80,13 +44,13 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 		return "", err
 	}
 	if rail == "" {
-		return "", fmt.Errorf("provider account secret requires rail")
+		return "", fmt.Errorf("PSP secret requires rail")
 	}
 	if environment == "" {
-		return "", fmt.Errorf("provider account secret environment must be live or test")
+		return "", fmt.Errorf("PSP secret environment must be live or test")
 	}
 	if accountID == "" {
-		return "", fmt.Errorf("provider account secret requires account id")
+		return "", fmt.Errorf("PSP secret requires account id")
 	}
 	// The prefix is part of the DURABLE canonical secret-name shape (persisted
 	// in the merchant-secret store, including HashiCorp Vault KV paths).
@@ -96,7 +60,60 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	return path.Join("psps", rail, environment, url.PathEscape(accountID), key), nil
 }
 
-// ParsePSPSecretName parses a provider-account-scoped secret name.
+// CustodianSecretName is the custody sibling of PSPSecretName (or#880):
+// `custodians/<kind>/<environment>/<account_id>/<key>`. It scopes by the
+// custodian's IDENTITY — not by the merchant's nickname for it — for the same
+// reason PSPSecretName does (#884): a stored name must survive a re-key of the
+// manifest, and one identity must address one credential set.
+func CustodianSecretName(kind, environment, accountID, key string) (string, error) {
+	d, err := custodians.Require(kind)
+	if err != nil {
+		return "", err
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	accountID = strings.TrimSpace(accountID)
+	slotName := strings.ToLower(strings.TrimSpace(key))
+	if _, ok := d.Secret(slotName); !ok {
+		return "", fmt.Errorf("unknown custodian secret %s.%s", d.Kind, key)
+	}
+	if environment == "" {
+		return "", fmt.Errorf("custodian secret environment must be live or test")
+	}
+	if accountID == "" {
+		return "", fmt.Errorf("custodian secret requires account id")
+	}
+	// Same durability contract as the psps/ prefix: this string is persisted
+	// in every secret backend, including Vault KV paths. Never float it.
+	return path.Join("custodians", d.Kind, environment, url.PathEscape(accountID), slotName), nil
+}
+
+// ParseCustodianSecretName parses a custodian-scoped secret name.
+func ParseCustodianSecretName(name string) (kind, environment, accountID, key string, ok bool, err error) {
+	name = cleanSecretName(name)
+	parts := strings.Split(name, "/")
+	if len(parts) != 5 || parts[0] != "custodians" {
+		return "", "", "", "", false, nil
+	}
+	d, derr := custodians.Require(parts[1])
+	if derr != nil {
+		return "", "", "", "", true, derr
+	}
+	environment = normalizeProviderSecretEnvironment(parts[2])
+	accountID, err = url.PathUnescape(parts[3])
+	if err != nil {
+		return "", "", "", "", true, fmt.Errorf("invalid custodian account id escape: %w", err)
+	}
+	key = strings.ToLower(strings.TrimSpace(parts[4]))
+	if _, known := d.Secret(key); !known {
+		return "", "", "", "", true, fmt.Errorf("unknown custodian secret %s.%s", d.Kind, parts[4])
+	}
+	if environment == "" || strings.TrimSpace(accountID) == "" {
+		return "", "", "", "", true, fmt.Errorf("invalid custodian secret name %q", name)
+	}
+	return d.Kind, environment, accountID, key, true, nil
+}
+
+// ParsePSPSecretName parses a PSP-scoped secret name.
 func ParsePSPSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
 	name = cleanSecretName(name)
 	parts := strings.Split(name, "/")
@@ -107,23 +124,32 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 	environment = normalizeProviderSecretEnvironment(parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
-		return "", "", "", "", true, fmt.Errorf("invalid provider account id escape: %w", err)
+		return "", "", "", "", true, fmt.Errorf("invalid PSP id escape: %w", err)
 	}
 	key, err = NormalizePSPSecretKey(rail, parts[4])
 	if err != nil {
 		return "", "", "", "", true, err
 	}
 	if rail == "" || environment == "" || strings.TrimSpace(accountID) == "" {
-		return "", "", "", "", true, fmt.Errorf("invalid provider account secret name %q", name)
+		return "", "", "", "", true, fmt.Errorf("invalid PSP secret name %q", name)
 	}
 	return rail, environment, accountID, key, true, nil
 }
 
 // SecretWritable reports whether a merchant operator may write the secret name.
+// Only PSP-scoped and custodian-scoped names qualify (#884/or#880): a retired
+// flat name parses as unscoped and is refused.
 func SecretWritable(name string) bool {
-	name = cleanSecretName(name)
-	if def, ok := SecretDefinitionFor(name); ok {
-		return def.MerchantWritable
+	if kind, _, _, key, ok, err := ParseCustodianSecretName(name); ok {
+		if err != nil {
+			return false
+		}
+		d, derr := custodians.Require(kind)
+		if derr != nil {
+			return false
+		}
+		slot, known := d.Secret(key)
+		return known && slot.MerchantWritable
 	}
 	rail, _, _, key, ok, err := ParsePSPSecretName(name)
 	if !ok || err != nil {
@@ -136,7 +162,7 @@ func SecretWritable(name string) bool {
 }
 
 // NormalizePSPSecretKey canonicalizes manifest/admin secret keys for
-// a provider account against the rail's registry-declared slots (#669). It
+// a PSP against the rail's registry-declared slots (#669). It
 // deliberately returns key fragments, not legacy broad merchant secret names.
 func NormalizePSPSecretKey(rail, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
@@ -144,7 +170,7 @@ func NormalizePSPSecretKey(rail, key string) (string, error) {
 	if k, ok := rails.CredentialKeyFor(models.Rail(rail), key); ok {
 		return k.Name, nil
 	}
-	return "", fmt.Errorf("unknown provider account secret %s.%s", rail, key)
+	return "", fmt.Errorf("unknown PSP secret %s.%s", rail, key)
 }
 
 func normalizeProviderSecretType(rail string) string {
@@ -164,23 +190,22 @@ func normalizeProviderSecretEnvironment(environment string) string {
 	}
 }
 
-// SecretDefinitionFor returns a registry entry by stable secret name.
-func SecretDefinitionFor(name string) (SecretDefinition, bool) {
-	name = cleanSecretName(name)
-	for _, d := range merchantSecretRegistry {
-		if d.Name == name {
-			return d, true
-		}
-	}
-	return SecretDefinition{}, false
-}
-
-// MerchantSecretStatus is the read-only dashboard/admin view of a merchant secret.
-// It never contains plaintext.
+// MerchantSecretStatus is the read-only dashboard/admin view of one merchant
+// secret slot. It never contains plaintext. The advertised slots come from the
+// rail credential registry (#884) — the same source the money path reads with.
 type MerchantSecretStatus struct {
-	SecretDefinition
-	Configured bool `json:"configured"`
-	Version    int  `json:"version,omitempty"`
+	Name string `json:"name"`
+	// Rail is the gateway kind for a PSP-scoped credential; "" for a
+	// custodian-scoped one (or#880 — custody is not a rail).
+	Rail string `json:"rail"`
+	// Custodian is the vendor kind for a custodian-scoped credential; "" for a
+	// PSP-scoped one. Exactly one of Rail/Custodian is set.
+	Custodian        string `json:"custodian,omitempty"`
+	Key              string `json:"key"`
+	DisplayLabel     string `json:"display_label"`
+	MerchantWritable bool   `json:"merchant_writable"`
+	Configured       bool   `json:"configured"`
+	Version          int    `json:"version,omitempty"`
 }
 
 // ErrSecretNotFound is returned by a MerchantSecretStore when no secret exists for
@@ -220,13 +245,56 @@ type MerchantSecretReader interface {
 	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
 }
 
+// VersionedSecretReader is the cross-node ROTATION CUTOVER contract (or#812).
+//
+// A read-through secret cache is per-process, so a credential rotated on node A
+// stays cached on node B until B's entry expires — up to DefaultSecretCacheTTL
+// of a retired credential still being presented to a gateway. The fix is a
+// versioned read: the PSP row (shared DB, re-read live on every credential
+// resolution) records the Secret.Version each credential reached at its last
+// rotation, and a reader that holds an OLDER version must go back to the
+// backend instead of answering from cache.
+//
+// Only the caching wrapper needs to implement this; ReadSecretRef degrades to
+// a plain Get for uncached stores, which are already never stale.
+type VersionedSecretReader interface {
+	GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error)
+}
+
+// SecretRef names a credential AND the version floor a reader must satisfy for
+// it. MinVersion 0 means "no floor recorded" — the pre-rotation state, and the
+// state of every secret written outside the provider-config API.
+type SecretRef struct {
+	Name       string
+	MinVersion int
+}
+
+// ReadSecretRef reads ref through reader, honouring the version floor when the
+// reader can. Every provider-credential read goes through here so the cutover
+// rule lives in exactly one place.
+func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant.ID, ref SecretRef) (Secret, error) {
+	if reader == nil {
+		return Secret{}, errors.New("merchants: no secret store configured")
+	}
+	if versioned, ok := reader.(VersionedSecretReader); ok && ref.MinVersion > 0 {
+		return versioned.GetAtLeastVersion(ctx, id, ref.Name, ref.MinVersion)
+	}
+	return reader.Get(ctx, id, ref.Name)
+}
+
 // PSPSecretResolver resolves the canonical secret name for the
-// active provider account a merchant should use.
+// active PSP a merchant should use.
 type PSPSecretResolver interface {
 	ActivePSPSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
 }
 
-// PSPScope is the configured provider account selected for a
+// PSPSecretRefResolver is PSPSecretResolver plus the rotation version floor —
+// the form every credential read should use (or#812).
+type PSPSecretRefResolver interface {
+	ActivePSPSecretRef(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (SecretRef, bool, error)
+}
+
+// PSPScope is the configured PSP selected for a
 // merchant rail/environment.
 type PSPScope struct {
 	ID          uuid.UUID
@@ -237,9 +305,60 @@ type PSPScope struct {
 	// payment-provider vocabulary catalog links and checkout use.
 	Key      string
 	Settings map[string]any
+	// CustodianID references the custodian holding the instruments charged
+	// through this PSP (or#880). nil = the PSP holds its own.
+	CustodianID *uuid.UUID
+	// CredentialVersions is the rotation watermark per credential key
+	// (or#812): the Secret.Version each credential reached the last time it
+	// was rotated through the provider-config API. Absent/zero = no floor.
+	CredentialVersions map[string]int
 }
 
-// PSPScopeResolver resolves the selected provider account without
+// SecretRef returns the scoped secret name for key together with the rotation
+// version floor recorded on this PSP row.
+func (s PSPScope) SecretRef(key string) (SecretRef, error) {
+	name, err := PSPSecretName(s.Rail, s.Environment, s.AccountID, key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	return SecretRef{Name: name, MinVersion: s.CredentialVersions[NormalizeCredentialVersionKey(key)]}, nil
+}
+
+// PSPSecretRef builds a scoped SecretRef straight from a PSP row's identity and
+// its evidence document — for the paths that hold the raw row rather than a
+// resolved PSPScope.
+func PSPSecretRef(rail, environment, accountID string, evidence []byte, key string) (SecretRef, error) {
+	name, err := PSPSecretName(rail, environment, accountID, key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	return SecretRef{Name: name, MinVersion: CredentialVersions(evidence)[NormalizeCredentialVersionKey(key)]}, nil
+}
+
+// CredentialVersions reads the or#812 rotation watermarks out of a PSP row's
+// evidence document.
+func CredentialVersions(evidence []byte) map[string]int {
+	if len(evidence) == 0 {
+		return nil
+	}
+	var doc struct {
+		CredentialVersions map[string]int `json:"credential_versions"`
+	}
+	if json.Unmarshal(evidence, &doc) != nil {
+		return nil
+	}
+	return doc.CredentialVersions
+}
+
+// NormalizeCredentialVersionKey is the canonical form credential-version keys
+// are recorded under: lowercase, trimmed. It deliberately does NOT go through
+// NormalizePSPSecretKey (which rejects unknown keys) — a version floor for a
+// key this build does not recognise is still worth honouring.
+func NormalizeCredentialVersionKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
+}
+
+// PSPScopeResolver resolves the selected PSP without
 // requiring a particular secret key.
 type PSPScopeResolver interface {
 	ActivePSPScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (PSPScope, bool, error)
@@ -256,6 +375,14 @@ type PSPKeyResolver interface {
 // checkout's unambiguous rail-kind fallback (#848).
 type PSPRailScopesResolver interface {
 	ActivePSPScopesForRail(ctx context.Context, merchantID merchant.ID, rail, environment string) ([]PSPScope, error)
+}
+
+// ArchivedPSPKeyResolver reports whether a key names an ARCHIVED account
+// (or#288). Routing needs it to tell "you retired this PSP" (not_armed) from
+// "no such PSP was ever declared" (unknown_selector) — two very different
+// answers to "why didn't my checkout go there".
+type ArchivedPSPKeyResolver interface {
+	PSPKeyArchived(ctx context.Context, merchantID merchant.ID, key, environment string) (bool, error)
 }
 
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
@@ -296,6 +423,20 @@ func validateSecretRef(merchantID merchant.ID, name string) error {
 	return nil
 }
 
+// cleanSecretName normalises a secret name. It REJECTS (by returning "") a
+// name containing a path-traversal segment: every caller allowlists the name
+// and accountID is PathEscaped, so this is not reachable today — but the
+// function's output is joined into a Vault path, and a guard that only trims
+// slashes is one refactor away from being the hole (SEC-24 item 6).
 func cleanSecretName(name string) string {
-	return strings.Trim(strings.TrimSpace(name), "/")
+	cleaned := strings.Trim(strings.TrimSpace(name), "/")
+	if cleaned == "." || cleaned == ".." {
+		return ""
+	}
+	for _, seg := range strings.Split(cleaned, "/") {
+		if seg == ".." || seg == "." {
+			return ""
+		}
+	}
+	return cleaned
 }

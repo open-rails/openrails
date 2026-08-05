@@ -15,13 +15,14 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
 // checkout money paths. Static rail config remains available only when no
-// provider-account resolver is configured; once scoped provider accounts are in
+// PSP resolver is configured; once scoped PSPs are in
 // use, missing scoped secrets fail closed instead of falling back across
 // accounts.
 func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
@@ -34,7 +35,7 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretR
 	}
 }
 
-func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *CheckoutService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -42,6 +43,14 @@ func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchant
 }
 
 func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (string, bool, error) {
+	return s.merchantSecretRef(ctx, merchants.SecretRef{Name: name})
+}
+
+// merchantSecretRef is the single credential read for checkout money paths. It
+// carries the or#812 rotation version floor, so a credential rotated on ANOTHER
+// node is picked up on the next charge instead of after a cache TTL of
+// presenting a retired key to the gateway.
+func (s *CheckoutService) merchantSecretRef(ctx context.Context, ref merchants.SecretRef) (string, bool, error) {
 	if s == nil || s.MerchantSecrets == nil {
 		return "", false, nil
 	}
@@ -49,7 +58,7 @@ func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (stri
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := s.MerchantSecrets.Get(ctx, tid, name)
+	sec, err := merchants.ReadSecretRef(ctx, s.MerchantSecrets, tid, ref)
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretNotFound) {
 			return "", false, nil
@@ -71,6 +80,13 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, envi
 	if err != nil {
 		return "", false, err
 	}
+	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
+		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, environment, key)
+		if err != nil || !found {
+			return "", found, err
+		}
+		return s.merchantSecretRef(ctx, ref)
+	}
 	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, environment, key)
 	if err != nil || !ok {
 		return "", ok, err
@@ -82,7 +98,7 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
-// pspEnvironment is the environment provider-account rows carry in
+// pspEnvironment is the environment PSP rows carry in
 // this deployment: test under test_mode, live otherwise (#641).
 func (s *CheckoutService) pspEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
@@ -173,7 +189,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 		scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
 		switch {
 		case err != nil:
-			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: PSP resolution failed; proceeding rail-scoped")
 		case len(scopes) == 1:
 			adopt(scopes[0])
 		case len(scopes) > 1:
@@ -193,7 +209,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
 		scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: PSP resolution failed; proceeding rail-scoped")
 		} else if found {
 			adopt(scope)
 		}
@@ -218,31 +234,35 @@ func (s *CheckoutService) CheckoutRailUsable(ctx context.Context, selector strin
 	return nil
 }
 
-// ResolvePSPID resolves the provider account for new work on
-// the given provider/rail name for provenance stamping. Returns nil when no resolver
-// is wired or nothing is armed — provenance is only ever stamped with a REAL
-// resolved account, never invented. Resolution failures are logged and
-// swallowed: stamping is metadata and must not block a sale.
-func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) *uuid.UUID {
+// ResolvePSPID resolves the PSP for new work on the given provider/rail name
+// for provenance stamping. Returns uuid.Nil when no resolver is wired or
+// nothing is armed — provenance is only ever stamped with a REAL resolved
+// account, never invented. or#893: the CALLER decides what an unresolved PSP
+// means; every provider-bound write now refuses one.
+func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) uuid.UUID {
 	if s == nil || s.ProviderSecrets == nil {
-		return nil
+		return uuid.Nil
 	}
 	target, err := s.resolveRailTarget(ctx, name)
-	if err != nil || target.Scope == nil || target.Scope.ID == uuid.Nil {
+	if err != nil || target.Scope == nil {
+		return uuid.Nil
+	}
+	return target.Scope.ID
+}
+
+// railSource exposes the merchant rail plane for routing (checkoutRailTargets).
+func (s *CheckoutService) railSource() railresolve.Source {
+	if s == nil {
 		return nil
 	}
-	id := target.Scope.ID
-	return &id
+	return s.Rails
 }
 
 // stampPSP pins resolved account provenance into ctx so the
 // payment / subscription / payment-method writes downstream of this checkout
 // flow stamp psp_id (#704).
 func (s *CheckoutService) stampPSP(ctx context.Context, name string) context.Context {
-	if id := s.ResolvePSPID(ctx, name); id != nil {
-		return db.WithPSPID(ctx, *id)
-	}
-	return ctx
+	return db.WithPSPID(ctx, s.ResolvePSPID(ctx, name))
 }
 
 // resolveNMIClient arms the ctx merchant's NMI client for the given provider
@@ -264,17 +284,18 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	}
 	var value string
 	if target.Scope != nil {
-		// Pinned to the resolved account's own secret.
-		name, err := merchants.PSPSecretName(target.Scope.Rail, target.Scope.Environment, target.Scope.AccountID, "security_key")
+		// Pinned to the resolved account's own secret, at or above the rotation
+		// version floor that account's PSP row records (or#812).
+		ref, err := target.Scope.SecretRef("security_key")
 		if err != nil {
 			return nil, err
 		}
-		v, ok, err := s.merchantSecret(ctx, name)
+		v, ok, err := s.merchantSecretRef(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 		}
 		value = v
 	} else {
@@ -284,7 +305,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 		}
 		value = v
 	}
@@ -319,7 +340,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
 	scopeResolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver)
 	if !ok {
-		return nil, errors.New("missing scoped merchant CCBill provider account resolver")
+		return nil, errors.New("missing scoped merchant CCBill PSP resolver")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -334,7 +355,7 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, err
 	}
 	if !ok {
-		return nil, errors.New("missing scoped merchant CCBill provider account")
+		return nil, errors.New("missing scoped merchant CCBill PSP")
 	}
 	cfg := &config.CCBillConfig{}
 	if base != nil {
@@ -369,4 +390,34 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
 	}
 	return cfg, nil
+}
+
+// custodianHeld reports whether the resolved PSP's instruments are held by a
+// third-party custodian (or#879/or#880) — the axis that decides which charge
+// transport a checkout takes, orthogonal to the rail that charges. It is a
+// plain reference check now: the PSP row either points at a custodians row or
+// it does not, so there is no parse here to be ambiguous about.
+func custodianHeld(target railTarget) bool {
+	return target.Scope != nil && target.Scope.CustodianID != nil
+}
+
+// pspKeyArchived reports whether selector names a declared-but-archived PSP
+// (or#288). Best-effort by design: it only refines a skip CLASS in the routing
+// trace, never a routing outcome, so a resolver that cannot answer leaves the
+// class as-is rather than failing the checkout.
+func (s *CheckoutService) pspKeyArchived(ctx context.Context, selector string) bool {
+	resolver, ok := s.ProviderSecrets.(merchants.ArchivedPSPKeyResolver)
+	if !ok {
+		return false
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false
+	}
+	archived, err := resolver.PSPKeyArchived(ctx, tid, selector, s.pspEnvironment())
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Debug("checkout routing: archived-PSP lookup failed")
+		return false
+	}
+	return archived
 }

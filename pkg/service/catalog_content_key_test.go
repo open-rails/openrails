@@ -188,10 +188,10 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 // currency divergence between the local OpenRails price and the Stripe price.
 func TestDiffPriceFieldsAmountDrift(t *testing.T) {
 	now := time.Now().UTC()
-	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "usd"}
+	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "USD"}
 
 	// Amount diverges only.
-	sp := catalog.StripePrice{ID: "price_1", UnitAmount: 2000, Currency: "usd", Active: true}
+	sp := catalog.StripePrice{ID: "price_1", UnitAmount: 2000, Currency: "USD", Active: true}
 	events := diffPriceFields(local, sp, now)
 	if got := fieldSet(events); !got["unit_amount"] {
 		t.Fatalf("expected unit_amount drift, got fields %v", got)
@@ -200,7 +200,7 @@ func TestDiffPriceFieldsAmountDrift(t *testing.T) {
 	}
 
 	// Currency diverges only.
-	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 1000, Currency: "eur", Active: true}
+	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 1000, Currency: "EUR", Active: true}
 	events = diffPriceFields(local, sp, now)
 	if got := fieldSet(events); !got["currency"] {
 		t.Fatalf("expected currency drift, got fields %v", got)
@@ -209,7 +209,7 @@ func TestDiffPriceFieldsAmountDrift(t *testing.T) {
 	}
 
 	// Both diverge.
-	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 2500, Currency: "gbp", Active: true}
+	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 2500, Currency: "GBP", Active: true}
 	events = diffPriceFields(local, sp, now)
 	got := fieldSet(events)
 	if !got["unit_amount"] || !got["currency"] {

@@ -155,4 +155,3 @@ func workerHealthAlertIdempotencyKey(row gen.OpenrailsWorkerHealth, reason strin
 		lastAlertedAt,
 	).String()
 }
-

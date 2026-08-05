@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,7 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -27,9 +30,14 @@ type serviceAdmitRequest struct {
 	Resource        string `json:"resource"`
 	Currency        string `json:"currency"`
 	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id"`
-	Source          string `json:"source"`
-	ExpiresAt       *int64 `json:"expires_at"`
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it. Zero means the request adds no ongoing rate, which
+	// leaves an accrual_rate_cap payer gated on what is already running.
+	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
+	RequestID               string `json:"request_id"`
+	Source                  string `json:"source"`
+	ExpiresAt               *int64 `json:"expires_at"`
 	// Roles are the invoker's immutable role UUIDs (#473) — each (subject, role)
 	// budget-scope policy gates this request's spend.
 	Roles []uuid.UUID `json:"roles"`
@@ -45,9 +53,11 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
-		Source:          req.Source,
-		SourceID:        req.RequestID,
-		Roles:           req.Roles,
+
+		AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour,
+		Source:                  req.Source,
+		SourceID:                req.RequestID,
+		Roles:                   req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
@@ -176,7 +186,7 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	if err := money.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -345,10 +355,28 @@ type serviceMerchantSettingsRequest struct {
 	// RepriceNoticeWindowDays (#781): the minimum advance-notice window (in
 	// days) a subscription price INCREASE's effective_at must give existing
 	// subscribers. Unset ⇒ subscriptions.DefaultRepriceNoticeWindowDays (30).
-	RepriceNoticeWindowDays           *int                                  `json:"reprice_notice_window_days,omitempty"`
-	TrustLevelSchedules               []serviceMerchantTrustLevelSchedule   `json:"trust_level_schedules,omitempty"`
-	TrustLevelSpendLimits             []billingservice.PayerSpendLimitInput `json:"trust_level_spend_limits,omitempty"`
-	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
+	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878): the delinquency
+	// policy. Grace unset ⇒ delinquency.DefaultGraceDays (14); the floor unset ⇒
+	// derived from monthly_floor.
+	ArrearsGraceDays        *int   `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
+	// CheckoutRouting (or#288): the processor-routing policy. Omitted preserves
+	// the stored policy; present replaces it whole (an empty array clears it
+	// back to the built-in default order).
+	CheckoutRouting     *[]models.CheckoutRoutingRule       `json:"checkout_routing,omitempty"`
+	TrustLevelSchedules []serviceMerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
+	// policies, then the rungs that decide who gets which. Declared policies are
+	// applied before bindings so a binding can name one from the same document.
+	BillingPolicies                   []billingservice.BillingPolicyInput        `json:"billing_policies,omitempty"`
+	BillingPolicyBindings             []billingservice.BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
+	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow              `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+
+	// RetiredTrustLevelSpendLimits keeps the retired `trust_level_spend_limits`
+	// key BOUND ONLY so a caller that still sends it is told what replaced it
+	// (or#897 hard cut). A silently-ignored spend cap is a cap nobody enforced.
+	RetiredTrustLevelSpendLimits []json.RawMessage `json:"trust_level_spend_limits,omitempty"`
 }
 
 type serviceMerchantTrustLevelSchedule struct {
@@ -376,6 +404,16 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
 		return
 	}
+	policies, err := svc.ListBillingPolicies(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		return
+	}
+	bindings, err := svc.ListBillingPolicyBindings(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		return
+	}
 	r.SuccessJSON(serviceMerchantSettingsRequest{
 		Profile:                           merchantProfileResponsePtr(cfg.Profile),
 		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
@@ -383,22 +421,50 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
 		AlertEmail:                        cfg.AlertEmail,
 		RepriceNoticeWindowDays:           cfg.RepriceNoticeWindowDays,
+		ArrearsGraceDays:                  cfg.ArrearsGraceDays,
+		ArrearsDelinquencyFloor:           cfg.ArrearsDelinquencyFloor,
+		CheckoutRouting:                   cfg.CheckoutRouting,
+		BillingPolicies:                   policies,
+		BillingPolicyBindings:             bindings,
 		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
 	})
 }
 
 // ServiceSetMerchantSettings installs the merchant-owned admission policy in
-// one document: profile, trust-level schedules, trust-level spend policies, and
-// delegated-invoker wasted-spend limits.
+// one document: profile, trust-level schedules, billing policies + bindings,
+// and delegated-invoker wasted-spend limits.
 func ServiceSetMerchantSettings(r *httprequest.Request) {
 	var req serviceMerchantSettingsRequest
 	if !r.BindJSON(&req) {
+		return
+	}
+	if len(req.RetiredTrustLevelSpendLimits) > 0 {
+		r.ErrorJSON(http.StatusBadRequest, "trust_level_spend_limits was replaced by billing_policies + billing_policy_bindings (or#897): declare a named policy with kind outstanding_cap or window_spend_cap, then bind it to a tier or customer")
 		return
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
+	}
+
+	// or#288: a malformed routing policy is a client error, not a server one.
+	// Run the SAME normalizer the service will run, so the caller gets the
+	// exact reason instead of a bare 500.
+	if req.CheckoutRouting != nil {
+		if _, err := merchantconfig.NormalizeCheckoutRouting(*req.CheckoutRouting); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	// Same contract for billing policies: validate the WHOLE document through the
+	// shared normalizer before writing any of it, so a bad third policy cannot
+	// leave the first two installed.
+	for _, policy := range req.BillingPolicies {
+		if _, _, err := billingservice.ValidateBillingPolicy(policy); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendLimits))
@@ -417,6 +483,9 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		AlertEmail:                         req.AlertEmail,
 		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
+		ArrearsGraceDays:                   req.ArrearsGraceDays,
+		ArrearsDelinquencyFloor:            req.ArrearsDelinquencyFloor,
+		CheckoutRouting:                    req.CheckoutRouting,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")
@@ -428,7 +497,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		if !ok {
 			return
 		}
-		if err := money.ValidateCurrency(currency); err != nil {
+		if err := moneyutil.ValidateCurrency(currency); err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -437,9 +506,21 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 			return
 		}
 	}
-	for _, policy := range req.TrustLevelSpendLimits {
-		if err := svc.SetPayerSpendLimits(r.Request.Context(), billingidentity.CustomerID{}, policy); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set trust-level policy failed")
+	// Policies first: a binding in the same document may name one of them, and
+	// the bindings FK refuses a name that does not exist yet.
+	for _, policy := range req.BillingPolicies {
+		if err := svc.SetBillingPolicy(r.Request.Context(), policy); err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "set billing policy failed")
+			return
+		}
+	}
+	for _, binding := range req.BillingPolicyBindings {
+		if err := svc.BindBillingPolicy(r.Request.Context(), binding); err != nil {
+			if errors.Is(err, billingservice.ErrInvalidBillingPolicy) {
+				r.ErrorJSON(http.StatusBadRequest, err.Error())
+				return
+			}
+			r.ErrorJSON(http.StatusInternalServerError, "bind billing policy failed")
 			return
 		}
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,7 +60,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: %q
 `, slug, slug, gatewayID))
 }
@@ -111,30 +111,47 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 	return rt, id
 }
 
+// inMerchantScope runs fn on a connection whose app.merchant_id is pinned for the
+// duration of ONE transaction — the read shape production uses. The pin is
+// transaction-local on purpose: a session-level set_config would ride the pooled
+// connection back out and silently scope somebody else's query.
+func inMerchantScope(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID, fn func(tx pgx.Tx)) {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	_, err = tx.Exec(ctx, "SELECT set_config('app.merchant_id', $1, true)", id.UUID().String())
+	require.NoError(t, err)
+	fn(tx)
+}
+
 func activePriceAmounts(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID) []int64 {
 	t.Helper()
-	conn, err := pool.Acquire(ctx)
-	require.NoError(t, err)
-	defer conn.Release()
-	_, err = conn.Exec(ctx, "SELECT set_config('app.merchant_id', $1, false)", id.UUID().String())
-	require.NoError(t, err)
-	rows, err := conn.Query(ctx, `SELECT amount FROM openrails.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
-	require.NoError(t, err)
-	defer rows.Close()
 	var out []int64
-	for rows.Next() {
-		var amount int64
-		require.NoError(t, rows.Scan(&amount))
-		out = append(out, amount)
-	}
-	require.NoError(t, rows.Err())
+	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
+		rows, err := tx.Query(ctx, `SELECT amount FROM openrails.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		for rows.Next() {
+			var amount int64
+			require.NoError(t, rows.Scan(&amount))
+			out = append(out, amount)
+		}
+		require.NoError(t, rows.Err())
+	})
 	return out
 }
 
+// merchantSecretRowCount counts under the merchant's OWN scope. openrails.merchant_secrets
+// is RLS-forced, so an unpinned count on the openrails_app role is always 0 — which
+// would make MODE 1's "wrote no secret" assertion vacuous and MODE 2's "persisted a
+// secret" assertion impossible.
 func merchantSecretRowCount(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id merchant.ID) int {
 	t.Helper()
 	var n int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+	})
 	return n
 }
 
@@ -177,7 +194,7 @@ func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, i
 		return err
 	}
 	require.True(t, ok, "declared+seeded NMI account must resolve a client")
-	_, err = client.RunSale(nmi.SaleParams{
+	_, err = client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID: "vault-manifest-mode",
 		Amount:          moneyutil.Cents(500),
 		Currency:        "USD",
@@ -261,12 +278,20 @@ func TestManifestMode_Loop(t *testing.T) {
 		Reason:      "#723 conformance",
 	})
 	require.NoError(t, err)
-	ents, err := svc.ListActiveEntitlements(mctx, userID, time.Now().UTC())
-	require.NoError(t, err)
+	// The read runs inside a merchant-scoped connection because it is a plain
+	// RLS-scoped SELECT (no MerchantTx of its own): in production the HTTP layer
+	// pins it, and this test stands in for that layer. Without the pin it reads
+	// the base pool and the openrails_app role answers with an empty list.
+	var ents []string
+	require.NoError(t, runtime.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		var err error
+		ents, err = svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
+		return err
+	}))
 	require.Contains(t, ents, "pro-access")
 
 	// Runtime writes against the plane are refused: rotation is file+reboot.
-	_, err = runtime.Merchants.Secrets().Put(mctx, id, "rail_merchant_accounts/nmi/live/"+gatewayID+"/security_key", "sneaky")
+	_, err = runtime.Merchants.Secrets().Put(mctx, id, "psps/nmi/live/"+gatewayID+"/security_key", "sneaky")
 	require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
 
 	// ---- Rotate: new secret value in the file, new price in the catalog.
@@ -353,7 +378,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	}
 
 	// Provider-config writes.
-	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"environment":"live","account_id":"acct_x"}`))
+	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`))
 	assertManifestDriven(do(http.MethodDelete, "/v1/merchant/payment-providers/stripe", ""))
 	// Catalog mutations — including plan-only publish (documented: the plan is
 	// computed at boot from the YAML; the CLI dry-run remains available).
@@ -379,6 +404,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		Env:               "dev",
 		TestMode:          config.CredentialPostureLive,
 		MerchantSource:    config.MerchantSourceAPI,
+		SecretBackend:     config.SecretBackendDB,
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
 	}
@@ -410,7 +436,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	payload := fmt.Sprintf(`{"environment":"live","account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
+	payload := fmt.Sprintf(`{"account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
 	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/merchant/payment-providers/stripe", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -433,6 +459,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 		Env:            "dev",
 		TestMode:       config.CredentialPostureLive,
 		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
 		DB:             &config.DBConfig{URL: dsn},
 	}
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
@@ -442,7 +469,7 @@ func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
 	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
-			"mobius": {"nmi": {Environment: "live", AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
+			"mobius": {"nmi": {AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
 		},
 	})
 	require.Error(t, err)
@@ -590,8 +617,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	rt, id := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,
@@ -645,8 +671,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	rt, _ := bootManifestRuntimeWithRailAccounts(t, ctx, dsn, slug, map[string]embed.PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   ccbillAccount,
+				AccountID: ccbillAccount,
 				Secrets: map[string]string{
 					"datalink_username": "dl-user-" + slug,
 					"datalink_password": "dl-pass-" + slug,

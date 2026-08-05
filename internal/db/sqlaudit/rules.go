@@ -63,7 +63,7 @@ func boundingCols(s *Structure, cat *Catalog) []string {
 		}
 	}
 	for c := range s.AnyParams {
-		if c != "merchant_id" && cat.capsRowCount(c, s.Relations) {
+		if c != "merchant_id" && cat.capsRowCount(c, s, s.Relations) {
 			out = append(out, c)
 		}
 	}

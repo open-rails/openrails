@@ -17,6 +17,7 @@ GET /readyz
 GET /v1/capabilities
 GET /v1/captcha/client.js
 GET /v1/captcha/status
+GET /v1/checkout-config
 GET /v1/checkout/{id}
 GET /v1/checkout/{id}/solana-pay
 GET /v1/customers/{customer_id}/balance
@@ -46,6 +47,7 @@ GET /v1/me/transactions
 GET /v1/me/usage
 GET /v1/merchant/alerts/rules
 GET /v1/merchant/alerts/templates
+GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
@@ -60,10 +62,12 @@ GET /v1/merchant/credit-limit
 GET /v1/merchant/credits/balance
 GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
+GET /v1/merchant/customers/{customer_id}/delinquency
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods
 GET /v1/merchant/customers/{customer_id}/payments
 GET /v1/merchant/dashboard
+GET /v1/merchant/delinquency
 GET /v1/merchant/entitlements/{entitlement}/customers
 GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
@@ -91,6 +95,7 @@ GET /v1/merchant/webhooks
 GET /v1/merchant/worker-health
 GET /v1/platform/merchants
 GET /v1/platform/merchants/{id}
+GET /v1/platform/worker-health
 GET /v1/prices
 GET /v1/products
 GET /v1/solana/config
@@ -149,6 +154,7 @@ POST /v1/merchant/findings/{id}/resolve
 POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
+POST /v1/merchant/payment-providers/routing/dry-run
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/plan-migrations
 POST /v1/merchant/plan-migrations/preview
@@ -163,8 +169,6 @@ POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
 POST /v1/merchant/wasted-spend
 POST /v1/merchant/webhooks
-POST /v1/merchants/{merchant}/webhooks/{provider}
-POST /v1/merchants/{merchant}/webhooks/{provider}/{account_id}
 POST /v1/platform/merchants/{id}/restore
 POST /v1/solana/recurring/enroll
 POST /v1/webhooks/{provider}
@@ -176,6 +180,7 @@ PUT /v1/customers/{customer_id}/spend-delegations:upsert
 PUT /v1/me/payment-methods/{id}
 PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method
+PUT /v1/merchant/api-host
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}/spend-delegations
 PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert

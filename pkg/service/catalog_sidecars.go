@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -26,7 +26,6 @@ type CatalogUsageLimitSpec struct {
 
 type CatalogMeterSpec struct {
 	Key           string            `json:"key"`
-	Kind          string            `json:"kind,omitempty"`
 	EventType     string            `json:"event_type,omitempty"`
 	ValueProperty string            `json:"value_property,omitempty"`
 	Aggregation   string            `json:"aggregation,omitempty"`
@@ -68,7 +67,6 @@ type CatalogCreditPurchasePriceSpec struct {
 	PSPs       []string        `json:"psps,omitempty"`
 	InputMin   int64           `json:"input_min,omitempty"`
 	InputMax   int64           `json:"input_max,omitempty"`
-	Round      string          `json:"round,omitempty"`
 	Price      json.RawMessage `json:"price"`
 }
 
@@ -159,17 +157,16 @@ func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []C
 			return fmt.Errorf("marshal meter %q group_by: %w", key, err)
 		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, kind, event_type, value_property, aggregation, unit, group_by)
-VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8::jsonb)
+INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7::jsonb)
 ON CONFLICT (merchant_id, key) DO UPDATE
-SET kind = EXCLUDED.kind,
-    event_type = EXCLUDED.event_type,
+SET event_type = EXCLUDED.event_type,
     value_property = EXCLUDED.value_property,
     aggregation = EXCLUDED.aggregation,
     unit = EXCLUDED.unit,
     group_by = EXCLUDED.group_by,
     updated_at = now()`,
-			merchantID, key, strings.TrimSpace(meter.Kind), strings.TrimSpace(meter.EventType), strings.TrimSpace(meter.ValueProperty),
+			merchantID, key, strings.TrimSpace(meter.EventType), strings.TrimSpace(meter.ValueProperty),
 			strings.TrimSpace(meter.Aggregation), strings.TrimSpace(meter.Unit), string(groupBy)); err != nil {
 			return fmt.Errorf("upsert meter %q: %w", key, err)
 		}
@@ -259,7 +256,7 @@ func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID
 			return fmt.Errorf("credit balance %q unit %q is qualified with slug %q, not this merchant's %q", balanceKey, unit, slug, merchantSlug)
 		}
 		name = qualified
-	} else if _, builtin := money.CurrencyScale(unit); builtin {
+	} else if _, builtin := moneyutil.CurrencyScale(unit); builtin {
 		return nil
 	}
 	if name == "" || strings.ContainsAny(name, "/ ") {
@@ -293,10 +290,10 @@ func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_purchase_prices
-    (merchant_id, product_id, ordinal, credit_key, currency, rails, input_min, input_max, round, price)
-VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, NULLIF($9, ''), $10::jsonb)`,
+    (merchant_id, product_id, ordinal, credit_key, currency, rails, input_min, input_max, price)
+VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9::jsonb)`,
 			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.CreditKey), strings.TrimSpace(spec.Currency),
-			providers, spec.InputMin, spec.InputMax, strings.TrimSpace(spec.Round), string(spec.Price)); err != nil {
+			providers, spec.InputMin, spec.InputMax, string(spec.Price)); err != nil {
 			return fmt.Errorf("insert credit purchase %q #%d: %w", spec.ProductKey, spec.Ordinal, err)
 		}
 	}

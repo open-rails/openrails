@@ -27,8 +27,7 @@ type archiveFixture struct {
 
 func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	// The archive intents reference TestMerchant (rail_intents +
 	// rail_mutation_logs FK into openrails.merchants), so the merchant
 	// row must exist.
@@ -54,6 +53,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
+		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
@@ -133,6 +133,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	params := EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
+		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
@@ -178,7 +179,7 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 		productID, "join-prod-"+uuid.NewString()[:8], tenantID)
 	require.NoError(t, err)
 	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, psp_links, merchant_id)
-	      VALUES ($1, $2, 900, 'usd', 720, true, $3, $4)`, priceID, productID,
+	      VALUES ($1, $2, 900, 'USD', 720, true, $3, $4)`, priceID, productID,
 		[]byte(`{"stripe": {"rail": "stripe", "price_id": "`+objectID+`"}}`), tenantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {

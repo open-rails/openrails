@@ -35,7 +35,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -53,7 +53,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
@@ -61,8 +61,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailNMI),
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
@@ -76,6 +78,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:              pspID,
 		RailSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -109,6 +112,9 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
+	// No Config on purpose: these two tests call processSubscription with
+	// materialize=true, which only ENQUEUES the rebill intent (Store.Enqueue) —
+	// or#865's origin x mode gate never runs, so there is no mode to state.
 	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -119,27 +125,38 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	// Same shape as the production Work loop: the pass runs on a merchant-scoped
+	// connection, so both the read and the enqueue carry the GUC. On the bare
+	// context subscriptions' FORCEd RLS matched merchant_id = NULL and GetByID
+	// returned "no rows in result set" for a row that exists.
+	var outcome dunningOutcome
+	var sub *models.Subscription
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		var e error
+		sub, e = subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(mctx, subID)
+		if e != nil {
+			return e
+		}
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
 	// The decision is on the ledger: pending, system-origin, window-bounded.
-	// (#592 ripped out the #365/#518 provider-account binding/identity resolution,
-	// so the materialized intent carries no psp_id.)
+	// (or#893: psp_id is now total provenance — the materialized intent carries
+	// the subscription's own PSP, stamped from sub.PspID at enqueue.)
 	var status, origin, intentType string
-	var providerAccountID *uuid.UUID
+	var gotPSPID uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT status, origin, intent_type, psp_id, expires_at
 		 FROM openrails.rail_intents WHERE subscription_id = $1`, subID).
-		Scan(&status, &origin, &intentType, &providerAccountID, &expiresAt))
+		Scan(&status, &origin, &intentType, &gotPSPID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
 	assert.Equal(t, intents.TypeManualRebill, intentType)
-	require.Nil(t, providerAccountID, "#592 ripped out provider-account binding; materialized intents carry none")
+	assert.Equal(t, pspID, gotPSPID, "or#893: the materialized intent carries the subscription's PSP")
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 
 	// No lifecycle movement, and the forensic retry fields are untouched
@@ -153,7 +170,10 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
-	outcome = worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -161,16 +181,23 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, 1, intentCount)
 }
 
-// TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally (#366): the
-// window-expired path is LOCAL convergence (cancel + downgrade, no charge)
-// and applies under materialize exactly as under full mode.
-func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) {
+// TestDunningWorker_MaterializeStalenessParksLocally (#366 + #839): the
+// stale-window path is LOCAL convergence and applies under materialize exactly
+// as under full mode — but since #839 that convergence is a PARK, not a cancel.
+// Limited mode used to be documented as "local window-expiry cancellations
+// apply"; there is no longer any local terminal cancellation on this path to
+// apply, in any mode. The charge is still skipped: a months-stale rebill is
+// never fired by a catch-up run.
+func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// RLS-enforcing harness: this fixture seeds and asserts on ONE merchant's
+	// own rows, so it uses the merchant-pinned pool rather than a raw one.
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
-	dbtest.EnsureTestMerchant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t,
+		dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
@@ -185,13 +212,14 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	// Months-stale: the legacy-migration shape. Window for 30-day cycle is
 	// ~2 weeks; 90 days is far past it.
 	periodEnd := now.Add(-90 * 24 * time.Hour)
@@ -200,6 +228,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_wexp_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -229,6 +258,9 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
+	// No Config on purpose: these two tests call processSubscription with
+	// materialize=true, which only ENQUEUES the rebill intent (Store.Enqueue) —
+	// or#865's origin x mode gate never runs, so there is no mode to state.
 	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -239,15 +271,28 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	// Same shape as the production Work loop: the pass runs on a merchant-scoped
+	// connection, so both the read and the lifecycle writes carry the GUC.
+	var outcome dunningOutcome
+	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
+		sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(mctx, subID)
+		if err != nil {
+			return err
+		}
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		return nil
+	}))
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)
 	assert.Zero(t, nmiMutations.Load(), "window expiry never charges")
 
 	var subStatus string
+	var cancelledAt *time.Time
+	var deletionScheduledAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
-	assert.NotEqual(t, string(models.StatusPastDue), subStatus, "stale subscription must be cancelled, not left premium")
+		`SELECT status, cancelled_at, deletion_scheduled_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		Scan(&subStatus, &cancelledAt, &deletionScheduledAt))
+	assert.Equal(t, string(models.StatusUnknown), subStatus,
+		"a stale subscription parks for provider verification; staleness is a clock reading, not a death certificate (#839)")
+	assert.Nil(t, cancelledAt, "no local terminal cancellation on the staleness path, in any mode")
+	assert.Nil(t, deletionScheduledAt, "and therefore no irreversible NMI vault delete is ever queued for it")
 }

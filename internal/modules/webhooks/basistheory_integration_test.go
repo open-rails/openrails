@@ -21,7 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -44,8 +46,7 @@ type btWebhookFixture struct {
 
 func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -68,16 +69,18 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	t.Cleanup(fx.btAPI.Close)
 
 	now := time.Now().UTC().Truncate(time.Second)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   fx.methodID,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           fx.customerID,
-		Rail:                 string(models.RailVaultedCard),
+		Rail:                 string(models.RailNMI),
+		PspID:                pspID,
 		RailMethodRef:        fx.tokenID,
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
-		VaultProvider:        "basis_theory",
-		VaultFingerprint:     "fp_" + uuid.NewString()[:10],
+		Custodian:            models.CustodianBasisTheory,
+		Fingerprint:          "fp_" + uuid.NewString()[:10],
 		NetworkTokenID:       fx.ntID,
 		NetworkTokenStatus:   "active",
 		NetworkTokenPar:      "par_x",
@@ -91,21 +94,25 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", fx.methodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'vaulted_card'")
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'basis_theory'")
 	})
 
+	btCustodian := &config.CustodianConfig{
+		Key:        "bt",
+		Custodian:  models.CustodianBasisTheory,
+		AccountID:  "tnt_test",
+		APIKey:     "key_private_test",
+		APIBaseURL: fx.btAPI.URL,
+	}
 	fx.dispatcher = &WebhookDispatcher{
 		DB:                   dbi,
-		DeduplicationService: NewDeduplicationService(idempotency.NewIdempotencyService(nil), dbi),
+		DeduplicationService: mustDedupService(t, replaycache.NewStore(nil), dbi),
+		// or#880: the custodian's client is armed off the CUSTODIAN the event's
+		// tenant id resolves to — not off a PSP. Two PSPs share one custodian
+		// here, which is exactly the case that had no answer before.
 		RailConfigs: railresolve.FixedSet{
-			"bt": {
-				Rail:      models.RailVaultedCard,
-				AccountID: "tnt_test",
-				VaultedCard: &config.VaultedCardRailConfig{
-					APIKey:     "key_private_test",
-					APIBaseURL: fx.btAPI.URL,
-				},
-			},
+			"mobius-bt":        {Rail: models.RailNMI, AccountID: "579145", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_test"}, Custody: btCustodian},
+			"mobius-bt-backup": {Rail: models.RailNMI, AccountID: "579146", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_backup"}, Custody: btCustodian},
 		},
 	}
 	return fx
@@ -124,12 +131,14 @@ func (fx *btWebhookFixture) deliver(t *testing.T, eventID, eventType string, dat
 	require.NoError(t, err)
 	verified := true
 	return fx.dispatcher.Process(fx.ctx, &WebhookMessage{
-		Rail:           string(models.RailVaultedCard),
+		Rail:           string(models.EventSourceBasisTheory),
 		EventID:        eventID,
 		EventType:      eventType,
 		Payload:        payload,
 		SignatureValid: &verified,
 		ReceivedAt:     time.Now(),
+		// or#880: a custody event routes by the CUSTODIAN's own tenant id.
+		CustodianAccountID: "tnt_test",
 	})
 }
 
@@ -206,7 +215,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		row := fx.methodRow(t)
 		require.Equal(t, newToken, row.RailMethodRef, "rail_method_ref rotates to new_token")
-		require.Equal(t, "fp_rotated", row.VaultFingerprint)
+		require.Equal(t, "fp_rotated", row.Fingerprint)
 		require.Equal(t, "4444", *row.LastFour)
 		require.Equal(t, "mastercard", *row.CardType)
 		require.Equal(t, "07/33", *row.ExpiryDate)
@@ -220,7 +229,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 		}}))
 		after := fx.methodRow(t)
 		require.Equal(t, before.RailMethodRef, after.RailMethodRef)
-		require.Equal(t, before.VaultFingerprint, after.VaultFingerprint)
+		require.Equal(t, before.Fingerprint, after.Fingerprint)
 	})
 
 	t.Run("WRN_CLOSED_ACCOUNT parks", func(t *testing.T) {
@@ -232,11 +241,64 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 	})
 }
 
+// or#872 — DO NOT FIGHT THE ACCOUNT UPDATER.
+//
+// The sequence that used to strand a customer: the card expires, the custodian
+// emits token.expired, we PARK the instrument (correct — charges must fail
+// loudly, never cancel). Then the network reissues the card and the account
+// updater returns UPD_EXP_DATE for the same token. Before this fix the fold
+// refreshed the expiry but left park_reason set, so
+// custodian_proxy_collection.ChargeCustodianProxy and invoice recovery kept
+// refusing the instrument FOREVER — the engine overruling the very recovery the
+// updater exists to deliver, and the customer lands in dunning anyway.
+//
+// The updater's word is the newest evidence about the credential, so an UPD_*
+// row clears the park.
+func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *testing.T) {
+	fx := newBTWebhookFixture(t)
+	svc := &basisTheoryWebhookService{d: fx.dispatcher}
+
+	// 1. The card expires at the custodian: parked, never cancelled.
+	require.NoError(t, fx.deliver(t, "evt_"+uuid.NewString(), basistheory.EventTokenExpired,
+		map[string]any{"token": map[string]any{"id": fx.tokenID, "type": "card"}}))
+	parked := fx.methodRow(t)
+	require.Equal(t, "bt_token_expired", parked.ParkReason)
+	require.NotNil(t, parked.ParkedAt)
+	// The PRODUCTION collection guard refuses it — this is the state that,
+	// left alone, outlives the network's own repair.
+	collect := money.NewCustodianProxyCollectionAdapter(&nmiproxy.Charger{})
+	_, err := collect.ChargeSavedMethod(fx.ctx, parked, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	require.ErrorContains(t, err, "is parked")
+
+	// 2. The network reissues the card; the AU job reports the new expiry
+	//    IN PLACE (no new token — the dedup path).
+	require.NoError(t, svc.FoldAccountUpdaterRows(fx.ctx, []basistheory.AccountUpdaterResultRow{{
+		Token:              fx.tokenID,
+		NewExpirationMonth: "9",
+		NewExpirationYear:  "2034",
+		NewLast4:           "1111",
+		ResultCode:         basistheory.AUUpdatedExpDate,
+	}}))
+
+	row := fx.methodRow(t)
+	require.Equal(t, "09/34", *row.ExpiryDate, "the provider's refreshed expiry is truth")
+	require.Equal(t, fx.tokenID, row.RailMethodRef, "an in-place update keeps the token the customer's card maps to")
+	require.Empty(t, row.ParkReason, "the updater recovered the card; the park must not outlive it")
+	require.Nil(t, row.ParkedAt)
+	require.Equal(t, "pan_proxy", row.ChargeVia)
+
+	// And the production guard no longer refuses it: the recovered card can
+	// bill again, so this customer never reaches or#870 bucket 2.
+	_, err = collect.ChargeSavedMethod(fx.ctx, row, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	require.Error(t, err) // the fake charger has no gateway; what matters is WHY
+	require.NotContains(t, err.Error(), "is parked", "an updater-recovered instrument is billable again")
+}
+
 func TestBasisTheoryWebhook_UnverifiedIsRejectedNonRetryable(t *testing.T) {
 	fx := newBTWebhookFixture(t)
 	payload, _ := json.Marshal(map[string]any{"id": "evt_x", "type": basistheory.EventTokenDeleted})
 	err := fx.dispatcher.Process(fx.ctx, &WebhookMessage{
-		Rail:      string(models.RailVaultedCard),
+		Rail:      string(models.EventSourceBasisTheory),
 		EventID:   "evt_x",
 		EventType: basistheory.EventTokenDeleted,
 		Payload:   payload,

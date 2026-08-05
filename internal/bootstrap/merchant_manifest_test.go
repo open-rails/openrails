@@ -10,6 +10,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
+	"github.com/open-rails/openrails/internal/db/models"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +27,7 @@ func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)    { ret
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
 	// host-app remote_application (registered as owner of its permission-group),
-	// provider accounts + secrets, and profile. No auth/users/groups section.
+	// PSPs + secrets, and profile. No auth/users/groups section.
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
@@ -41,13 +44,11 @@ merchants:
     psps:
       stripe:
         stripe:
-          environment: test
           account_id: acct_test_123
           secrets:
             secret_key: sk_test_123
       mobius:
         nmi:
-          environment: live
           account_id: mobius-profile-id
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -101,46 +102,69 @@ func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	// account_id identity, lifecycle, and explicit signer/destination split for
 	// Solana.
 	accts := m.PSPs
-	require.Len(t, accts, 9)
-	type key struct{ name, env string }
-	byName := map[key]ProviderRailAccountConfig{}
+	require.Len(t, accts, 10)
+	byName := map[string]ProviderRailAccountConfig{}
 	byRail := map[string]string{}
 	for name, account := range accts {
 		require.Len(t, account, 1)
 		for rail, cfg := range account {
-			byName[key{name, cfg.Environment}] = cfg
+			// #882: the example declares no `environment:` — it is derived.
+			require.Empty(t, cfg.LegacyEnvironment)
+			byName[name] = cfg
 			byRail[name] = rail
 		}
 	}
-	// NMI gateway "mobius": live gateway-id + its sandbox.
+	// NMI gateway "mobius" plus a second account on the same rail.
 	require.Equal(t, "nmi", byRail["mobius"])
-	require.Equal(t, "1234567", byName[key{"mobius", "live"}].AccountID)
-	require.False(t, byName[key{"mobius", "live"}].Archived)
-	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName[key{"mobius", "live"}].Settings["tokenization_key"])
-	require.Equal(t, "7654321", byName[key{"mobius-sandbox", "test"}].AccountID)
+	require.Equal(t, "1234567", byName["mobius"].AccountID)
+	require.False(t, byName["mobius"].Archived)
+	require.Equal(t, "replace-with-live-nmi-tokenization-key", byName["mobius"].Settings["tokenization_key"])
+	require.Equal(t, "7654321", byName["mobius-sandbox"].AccountID)
 
-	// #795 vaulted_card: BT tenant identity + linked NMI gateway settings; the
-	// private app key is the only custodial secret.
-	require.Equal(t, "vaulted_card", byRail["bt-vault"])
-	require.Equal(t, "replace-with-bt-tenant-id", byName[key{"bt-vault", "test"}].AccountID)
-	require.Equal(t, "7654321", byName[key{"bt-vault", "test"}].Settings["gateway_account"])
-	require.Equal(t, "replace-with-bt-private-application-key", byName[key{"bt-vault", "test"}].Secrets["api_key"])
+	// or#879/or#880 custody: NMI PSPs whose cards are held by Basis Theory. The
+	// rail is nmi (it always was); the custodian is declared ONCE and both
+	// gateways reference it by key.
+	require.Equal(t, "nmi", byRail["mobius-bt"])
+	require.Equal(t, "7654322", byName["mobius-bt"].AccountID)
+	require.Equal(t, "bt", byName["mobius-bt"].Custodian)
+	require.Equal(t, "bt", byName["mobius-bt-backup"].Custodian)
+	require.Empty(t, byName["mobius-bt"].Settings, "custody is a reference now — nothing custodial belongs in PSP settings")
+
+	// The custodian block itself: one entry, keyed by vendor kind, carrying the
+	// tenant identity, the public checkout key and the ONE custodial secret.
+	require.Len(t, m.Custodians, 1)
+	btKinds := m.Custodians["bt"]
+	require.Len(t, btKinds, 1)
+	bt, ok := btKinds[models.CustodianBasisTheory]
+	require.True(t, ok, "the custodian entry is keyed by its vendor kind")
+	require.Equal(t, "replace-with-bt-tenant-id", bt.AccountID)
+	require.Equal(t, "replace-with-bt-public-application-key", bt.Settings[custodians.SettingPublicAPIKey])
+	require.Equal(t, "replace-with-bt-private-application-key", bt.Secrets[custodians.SecretAPIKey])
+	require.NoError(t, config.ValidateCustodianEntry(config.CustodianEntry{
+		Key: "bt", Kind: models.CustodianBasisTheory, AccountID: bt.AccountID,
+		Settings: bt.Settings, SecretKeys: []string{custodians.SecretAPIKey},
+	}))
 	// A second NMI gateway (paykings) is archived/drain-only in the example.
-	require.True(t, byName[key{"paykings", "live"}].Archived)
-	// Stripe live + test side by side.
-	require.Equal(t, "acct_1AbCdEfGhIjKlMnOp", byName[key{"stripe", "live"}].AccountID)
-	require.Equal(t, "acct_1ZyXwVuTsRqPoNmL", byName[key{"stripe-sandbox", "test"}].AccountID)
+	require.True(t, byName["paykings"].Archived)
+	// Two Stripe accounts side by side.
+	require.Equal(t, "acct_1AbCdEfGhIjKlMnOp", byName["stripe"].AccountID)
+	require.Equal(t, "acct_1ZyXwVuTsRqPoNmL", byName["stripe-sandbox"].AccountID)
 	// CCBill — one account.
-	require.Equal(t, "999999-0000", byName[key{"ccbill", "live"}].AccountID)
+	require.Equal(t, "999999-0000", byName["ccbill"].AccountID)
 
 	// #711: the example's solana settings block carries the runtime knobs and
 	// passes the strict push-time validation.
-	solanaSettings := byName[key{"solana", "live"}].Settings
+	solanaSettings := byName["solana"].Settings
 	require.NoError(t, config.ValidateSolanaAccountSettings(solanaSettings))
 	parsed, err := config.ParseSolanaAccountSettings(solanaSettings)
 	require.NoError(t, err)
 	require.Equal(t, "helius", parsed.RPCProvider)
-	require.Equal(t, 6, parsed.Tokens["USDC"].Decimals)
+	// or#881: the example declares NO tokens. The curated registry already
+	// carries USDC (and decimals come from the chain, #817), so re-typing a
+	// canonical mint here would be a money-path paste error, not documentation.
+	require.Empty(t, parsed.Tokens)
+	require.Equal(t, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		solanatokens.DefaultSupportedTokens()["USDC"].Mint)
 }
 
 func TestExampleAuthKitAuthorityManifestParses(t *testing.T) {
@@ -166,13 +190,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 
 	// A declared account_id is IGNORED (warned), never an error — derived from the key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", exampleAccountID, ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
+		Signer: &PSPSignerConfig{Mode: "local_keypair"},
 	}, secrets, nil)
 	require.NoError(t, err)
 	require.Equal(t, exampleAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
 
 	_, _, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, secrets, fakeTransit{pub: pub})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot also set secrets.private_key")
@@ -181,13 +205,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	require.NoError(t, err)
 	// vault_transit with a declared account_id: ignored (warned); derives from the Transit key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, accountID, gotAccountID, "declared account_id ignored; derived from the Transit key")
 
 	got, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
@@ -284,6 +308,16 @@ merchants:
 			want: "profile.logo_url",
 		},
 		{
+			name: "api_host with scheme rejected (#850)",
+			body: base("    api_host: https://api.cozy.art\n"),
+			want: "api_host",
+		},
+		{
+			name: "api_host with path rejected (#850)",
+			body: base("    api_host: api.cozy.art/v1\n"),
+			want: "api_host",
+		},
+		{
 			name: "renamed key rail_merchant_accounts rejected with pointer (#698)",
 			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
 			want: "merchants.cozy-art.rail_merchant_accounts was renamed to psps",
@@ -294,39 +328,41 @@ merchants:
 			want: "merchants.cozy-art.provider_accounts was renamed to psps",
 		},
 		{
-			name: "provider account routing removed",
+			name: "PSP routing removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
 			want: "unknown field \"routing\"",
 		},
 		{
-			name: "provider account mode removed",
+			name: "PSP mode removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
 			want: "unknown field \"mode\"",
 		},
 		{
-			name: "provider account role removed",
+			name: "PSP role removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
 			want: "unknown field \"role\"",
 		},
 		{
-			name: "invalid provider account environment",
-			body: base("    psps:\n      stripe:\n        stripe:\n          environment: moon\n          account_id: acct_test_123\n"),
-			want: "environment must be live or test",
+			// #882: environment is derived from test_mode, never declared —
+			// even a value that would have AGREED is refused.
+			name: "declared psp environment is retired",
+			body: base("    psps:\n      stripe:\n        stripe:\n          environment: live\n          account_id: acct_test_123\n"),
+			want: "psps.stripe.stripe.environment was removed (#882)",
 		},
 		{
-			name: "solana network is not a provider-account knob",
+			name: "solana network is not a PSP knob",
 			body: base("    psps:\n      solana:\n        solana:\n          network: devnet\n"),
 			want: "unknown field \"network\"",
 		},
 		{
 			name: "invalid provider secret alias",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
-			want: "unknown provider account secret",
+			want: "unknown PSP secret",
 		},
 		{
 			name: "nmi tokenization key is a setting",
 			body: base("    psps:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
-			want: "unknown provider account secret",
+			want: "unknown PSP secret",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -337,9 +373,8 @@ merchants:
 	}
 }
 
-// The dump emits the renamed `psps:` key and round-trips through the
-// strict parser. The DB table / secret-name prefix keep `rail_merchant_accounts`
-// on purpose — only the config surface is short.
+// The dump emits the canonical `psps:` key and round-trips through the strict
+// parser. The retired key is rejected, never emitted.
 func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 	encoded, err := MarshalMerchantManifest(&BillingConfig{
 		Version: 1,
@@ -347,7 +382,7 @@ func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 			"cozy-art": {
 				DisplayName: "Cozy Art",
 				PSPs: map[string]PSPConfig{
-					"stripe": {"stripe": {Environment: "test", AccountID: "acct_test_123"}},
+					"stripe": {"stripe": {AccountID: "acct_test_123"}},
 				},
 			},
 		},
@@ -372,7 +407,7 @@ func TestParseMerchantConfigManifestSolanaAccountIDIgnored(t *testing.T) {
 	_, err := ParseMerchantConfigManifest([]byte(withAccountID))
 	require.NoError(t, err, "declared solana account_id is ignored, not a parse error")
 
-	noSigner := base("    psps:\n      solana:\n        solana:\n          environment: live\n")
+	noSigner := base("    psps:\n      solana:\n        solana:\n          archived: false\n")
 	_, err = ParseMerchantConfigManifest([]byte(noSigner))
 	require.ErrorContains(t, err, "requires a signer", "solana with no signer has no key to derive account_id from")
 }

@@ -162,7 +162,6 @@ catalogs:
             allowance:
               accrue_from: droplet-runtime
               cap: 28d
-              pool: customer
             price:
               model: per_unit
               currency: usd
@@ -196,7 +195,7 @@ catalogs:
               flat:
                 amount: 5_000_000
           - meter: spaces-storage
-            allowance: { included: 250, unit: gib_month, pool: customer }
+            allowance: { included: 250 }
             price:
               model: per_unit
               currency: usd
@@ -205,7 +204,7 @@ catalogs:
                 divide_by: 2_592_000
                 round: down
           - meter: spaces-egress
-            allowance: { included: 1_024, unit: gib, pool: customer }
+            allowance: { included: 1_024 }
             price:
               model: per_unit
               currency: usd
@@ -360,7 +359,6 @@ catalogs:
             psps: [stripe]
             input_min: 5_000_000
             input_max: 500_000_000
-            round: down
             model: tiered
             tiered:
               mode: graduated

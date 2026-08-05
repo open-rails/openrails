@@ -59,6 +59,3 @@ UPDATE openrails.products SET
     archived = $5,
     updated_at = sqlc.arg(updated_at)
 WHERE id = $1;
-
--- name: DeleteProduct :execrows
-DELETE FROM openrails.products WHERE id = $1;

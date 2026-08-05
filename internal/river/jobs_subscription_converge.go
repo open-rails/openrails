@@ -142,13 +142,6 @@ type SubscriptionConvergeWorker struct {
 
 func (SubscriptionConvergeWorker) Kind() string { return KindSubscriptionConverge }
 
-func (w *SubscriptionConvergeWorker) now() time.Time {
-	if w.Clock != nil {
-		return w.Clock.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
 func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[SubscriptionConvergeArgs]) error {
 	args := job.Args
 	if w.DB == nil {

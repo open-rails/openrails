@@ -37,8 +37,10 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		return err
 	}
 	pspID := m.PspID
-	if pspID == nil {
-		pspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	if pspID == uuid.Nil {
+		if pspID, err = db.RequirePSPID(ctx); err != nil {
+			return fmt.Errorf("create payment method %s/%s: %w", m.Rail, m.RailCustomerRef, err)
+		}
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,
@@ -56,8 +58,8 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		Metadata:             meta,
 		CreatedAt:            m.CreatedAt,
 		UpdatedAt:            m.UpdatedAt,
-		VaultProvider:        m.VaultProvider,
-		VaultFingerprint:     m.VaultFingerprint,
+		Custodian:            m.Custodian, // "" -> DB default 'psp'
+		Fingerprint:          m.Fingerprint,
 		NetworkTokenID:       m.NetworkTokenID,
 		NetworkTokenStatus:   m.NetworkTokenStatus,
 		NetworkTokenPar:      m.NetworkTokenPAR,

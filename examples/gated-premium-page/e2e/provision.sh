@@ -6,7 +6,7 @@
 #   NMI_SANDBOX_SECURITY_KEY  NMI_TOKENIZATION_KEY  [NMI_WEBHOOK_SIGNING_SECRET]
 #
 # What it does (and why it deviates from the README's MODE-1 story — the
-# shipped `openrails server` never loads /etc/openrails/merchants.yaml at boot,
+# shipped `openrails run-server` never loads /etc/openrails/merchants.yaml at boot,
 # see E2E.md "Engine bugs"):
 #   1. builds the demo + mintadmin, generates the issuer keypair
 #   2. writes throwaway merchants/catalog manifests + a compose override

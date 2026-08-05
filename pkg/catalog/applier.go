@@ -21,9 +21,6 @@ type Applier interface {
 
 	ListPricesByProduct(ctx context.Context, productID uuid.UUID, activeOnly bool) ([]billingservice.CatalogPrice, error)
 	CreatePrice(ctx context.Context, req billingservice.CreatePriceRequest) (*billingservice.CatalogPrice, error)
-	// UpdatePrice converges declared PSP link/config values onto an existing
-	// price (#745 settlement-token rotation and the like).
-	UpdatePrice(ctx context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error)
 	ActivatePrice(ctx context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error)
 	DeactivatePrice(ctx context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error)
 	// SetPriceKey relabels a price's #774 key in place (a plain rename — never

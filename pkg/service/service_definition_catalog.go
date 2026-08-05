@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -80,13 +81,12 @@ const (
 // ProviderState is the uniform per-provider response surface. Replaces the
 // pre-#208 stripe-specific StripeRailState.
 type ProviderState struct {
-	Status       ProviderStatus    `json:"status"`
-	IDs          map[string]string `json:"ids,omitempty"`
-	LookupKey    string            `json:"lookup_key,omitempty"`
-	LastSyncedAt *time.Time        `json:"last_synced_at,omitempty"`
-	SyncStatus   SyncStatus        `json:"sync_status,omitempty"`
-	Drift        []DriftField      `json:"drift,omitempty"`
-	Message      string            `json:"message,omitempty"`
+	Status     ProviderStatus    `json:"status"`
+	IDs        map[string]string `json:"ids,omitempty"`
+	LookupKey  string            `json:"lookup_key,omitempty"`
+	SyncStatus SyncStatus        `json:"sync_status,omitempty"`
+	Drift      []DriftField      `json:"drift,omitempty"`
+	Message    string            `json:"message,omitempty"`
 }
 
 // DriftField describes a single divergent field discovered by verify/reconcile.
@@ -490,7 +490,10 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	req.Currency = strings.TrimSpace(req.Currency)
+	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
+	// is case-insensitive, so without this a caller-supplied "usd" validated
+	// fine and then failed the prices_currency_shape CHECK at INSERT.
+	req.Currency = money.NormalizeCurrency(req.Currency)
 	if req.UnitAmount < 0 {
 		return nil, fmt.Errorf("unit_amount must be non-negative")
 	}
@@ -520,7 +523,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 			return nil, fmt.Errorf("trial pricing requires auto_renew")
 		}
 	}
-	if err := money.ValidateCurrency(req.Currency); err != nil {
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, err
 	}
 	req.Currency = strings.ToLower(req.Currency)

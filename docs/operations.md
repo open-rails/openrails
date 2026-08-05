@@ -47,6 +47,8 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-merchant-catalog [--file] [mutation flags]` | terraform-style catalog apply (OpenRails rows + provider objects) |
 | `dump-merchant-config --slug [--out] [--include-secrets]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
+| `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
+| `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 
 The `push-*` commands push declared file state outward; `pull-provider` moves
@@ -173,10 +175,26 @@ armed fails closed: its intents park (never execute against a different
 account) until the credentials return or the intent expires/supersedes.
 Rules:
 
-- **Rotating a credential within the SAME provider account**: replace the
+- **Rotating a credential within the SAME PSP**: replace the
   secret under the same PSP row — intents arm with the new value
-  transparently.
-- **Moving to a DIFFERENT provider account**: never repoint an existing PSP
+  transparently. `PUT /v1/merchant/payment-providers/{rail}` (and the console's
+  **Rotate** action) is atomic in the way that matters:
+  - the **new** credential is live-probed against the provider *before*
+    anything is written (NMI and CCBill today). A probe failure fails the whole
+    request — no secret is stored, no watermark moves, and the **old credential
+    keeps serving**, unchanged, everywhere.
+  - a committed rotation is **deployment-wide at the next read**, not
+    per-node. Each node fronts the secret backend with an in-process TTL cache,
+    so the rotation records the credential's new secret version on the shared
+    PSP row (`evidence.credential_versions`, surfaced as
+    `credentials.<key>.rotation_version`). Every credential resolution already
+    re-reads that row, and no node may answer from a cache entry below the
+    recorded version — so a retired credential cannot be presented after the
+    rotation commits, on any node, without waiting out a TTL. Restarts and
+    manual cache flushes are not part of the procedure.
+  - omit a credential from the request to leave it (and its watermark) alone;
+    re-submitting an identical value is a no-op, not a rotation.
+- **Moving to a DIFFERENT PSP**: never repoint an existing PSP
   row's credentials (OpenRails cannot detect the swap — the declared
   `account_id` would silently lie). Declare a NEW `psps` entry and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
@@ -186,6 +204,29 @@ Rules:
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
 
+### Custodians (or#880)
+
+`openrails.custodians` is the same kind of catalog, one axis over: a row is
+one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
+today). A PSP references it by `psps.custodian_id`, so one custodian can back
+several gateways — its tenant id and its private application key exist once,
+not once per PSP.
+
+Custodial credentials are scoped by the custodian's own identity,
+`custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
+credentials are scoped by theirs, and are read through the same rotation
+version floor (or#812) — recorded on `custodians.credential_versions` rather
+than on a PSP's evidence document. Rotation and archival follow the PSP rules
+above verbatim: rotate in place under the same row; to move to a different
+custodian account, declare a NEW one and archive the old one for drain — an
+instrument the old custodian holds is never re-vaulted or destroyed
+(or#870/or#655).
+
+Inbound custodian webhooks route by `(kind, environment, account_id)` through
+the `custodian_owner_by_identity` directory function. They resolve the
+CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
+which of several referencing PSPs it belongs to has no answer.
+
 ## Provider Pull (#107, #511)
 
 Manual-only — **never scheduled**. It never writes to a provider.
@@ -193,17 +234,124 @@ Manual-only — **never scheduled**. It never writes to a provider.
 ```
 openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--provider-account=<uuid>]
                         [--since=… --until=…] [--manifest=…] [--format table|json]
-                        [--log-dir=…] [--insert] [--overwrite] [--prune]
+                        [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
 openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
+openrails prune list    --merchant=<slug> [--limit=N] [--format table|json]
+openrails converge list --merchant=<slug> [--limit=N] [--format table|json]
+openrails undo-run      --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
 ```
 
 A bare `pull-provider` pulls provider truth, diffs, logs what it WOULD
 change, and persists nothing; the mutation flags follow the standard contract
-(`--prune` deletes eligible local subscriptions/payments attributed to the
+(`--prune` retires eligible local subscriptions/payments attributed to the
 pulled PSP that are absent from the provider source). `--rail` is repeatable
 (default: every configured rail); `--merchant` is required; `--manifest` arms
 mode-1 credentials from a merchant manifest. After a mutating pull the engine
 runs a one-shot `Converge(merchant)`.
+
+### `--prune` is reversible, and refuses uncertainty
+
+A prune acts on ABSENCE — "the provider did not list this row" — the weakest
+evidence there is. So it is built to be undone and hard to fire by accident:
+
+- **Nothing is deleted.** Eligible rows are soft-deleted (`deleted_at`) and
+  stamped with a destructive-run id. They vanish from every live read; the data
+  stays.
+- **`--prune` alone is a plan.** It reports what it would retire and writes
+  nothing. Applying needs `--expect-rows N`, and N must equal the number the
+  plan reported — an operator who miscounts is stopped, not obeyed.
+- **An empty provider roster refuses outright.** A successful-but-empty pull is
+  indistinguishable from a misdeclared `account_id`, a credential rotated onto a
+  sibling sub-account, or a provider incident. It never means "prune everything".
+- **Grant-entangled rows are skipped**, as before: retraction goes through
+  convergence, never removal.
+
+### An enforcing pull is reversible too
+
+`--prune` retires rows; an **enforcing** pull (mutation flags set) overwrites
+them — the measured incident is a bad NMI roster cancelling 40/40 subscriptions,
+which changed `status`, `ended_at`, `cancelled_at`, the grace/retry schedule and
+the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
+cannot undo that, so an enforcing pass records what it is about to overwrite:
+
+- it opens a `destructive_runs` record — merchant-scoped, PSP-bound when the pass
+  is account-bound, carrying the coverage proof that authorised it;
+- it captures a **before-image** of each subscription (and of the entitlement
+  windows the transition closes) *before* writing. If the capture fails, the
+  transition is not applied;
+- it stamps the provider intents it queues with the run id.
+
+A pass with no way to record its undo refuses to run rather than doing
+irreversible damage.
+
+### Reversing a destructive run
+
+One verb reverses any of them. A prune destroys rows and reverses by clearing
+tombstones; an enforcing pass destroys row VALUES and reverses from the captured
+before-images — but `undo-run` reads the kind from the ledger and dispatches, so
+nobody can reverse the wrong way round and be told it worked.
+
+```
+openrails prune list --merchant=<slug>            # or `converge list`: find the run id
+openrails undo-run   --merchant=<slug> --run=<id>                        # PLAN — changes nothing
+openrails undo-run   --merchant=<slug> --run=<id> --apply --expect-rows=N
+openrails pull-provider --merchant=<slug>          # advisory: review findings, then re-arm
+```
+
+**Dry run is the default.** With no `--apply` the command prints what it would
+restore, the provider writes it would supersede, the ones that already fired and
+cannot be undone, plus the coverage proof that every live provider row is
+PSP-attributed (or#893 — a non-zero count refuses the undo outright).
+Applying additionally requires `--expect-rows` to match that plan: an undo is
+itself a mass mutation of the live book, at the worst possible moment to be
+wrong.
+
+**Scope is a property of the run, not a flag.** The ledger row carries the
+merchant and — when the pass was account-bound — the PSP, and every restore
+predicate is keyed on the run id inside a merchant-scoped connection. Reversing
+one PSP's bad run cannot reach a sibling PSP's book, and cannot reach another
+merchant at all. There is no widening knob.
+
+An apply runs five steps in a fixed order:
+
+1. **Quiesce** — clears the merchant's first-enforce arming and trips its
+   destructive stop, so nothing re-cancels what is about to be restored.
+2. **Supersede the unfired intents FIRST**, before any row is restored. This is
+   the only step racing a live actor: the intent runner may claim a queued NMI
+   vault delete at any moment, and `superseded` is an ordinary forward status, so
+   neutralising a queued provider write is a lifecycle transition, not a rewrite
+   of the intent log. Only `pending`/`failed_retryable` count as unfired.
+3. **Restore** the rows, in one transaction with step 2 — a reversal that
+   superseded the intents but failed to restore the rows would leave the operator
+   worse off than before.
+4. **Invalidate and re-derive.** The entitlement windows the run closed are
+   soft-deleted, never replayed, and `Converge` rebuilds them from the
+   append-only grant log the rollback never touched. The proven source-domain
+   flags are reset to unproven, because the post-rollback book is definitionally
+   incomplete and a stale `true` would license a mass retraction against it.
+5. **Report** — rows restored, intents superseded, and what could NOT be undone.
+
+What it never does: restore an entitlement directly (a restored effect can
+silently disagree with its grant; a re-derived one cannot), touch the ledger,
+grants, status transitions, or the intent/webhook/findings logs, resurrect a row
+some other run deliberately removed, or count a provider write that already fired
+as undone. Those are reported as **irreversible divergence**, with the
+provider-side consequence spelled out per intent type ("the NMI vault entry is
+gone; the customer must re-enter a card"); an `in_flight` or
+`unknown_needs_verify` intent is reported as **ambiguous** and left to its
+executor's lease. Resubscribe and card re-entry are operator and customer work,
+never an automatic provider re-write.
+
+Some kinds are refused by name rather than half-reversed: a `merchant_delete`
+run hard-DELETEs append-only rows nothing local restores (recovery there is a
+cluster PITR or a snapshot taken beforehand), and a kind that exists in the
+ledger but has not been made reversible yet says so instead of marking itself
+reversed.
+
+The final pull is not optional. A rollback restores local state to before the
+run while the provider has moved on; `rollback → pull → converge` is the
+complete operation, and the pull runs **advisory** until an operator reviews the
+findings and re-arms enforcement by hand.
 
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows
@@ -389,7 +537,7 @@ up. "start" = RunOnStart.
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
-| Convergence sweep (+ start) · auto-top-up · alert evaluation · findings digest | 15 min |
+| Convergence sweep (+ start) · auto-top-up · alert evaluation · findings digest · arrears delinquency evaluation | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
@@ -462,8 +610,8 @@ verdict refuses from cache without re-probing (a crash loop costs one
 declined auth total), a fresh `simulated` verdict skips the probe, a rotated
 key or stale verdict re-probes, and cache failures degrade to probing.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
-rail-credential validation (the live-key refusal, plus each PSP's declared
-`environment` cross-checked against `test_mode`), not the environment string.
+rail-credential validation (the live-key refusal and the NMI live-gateway
+probe, which ask the credential itself), not the environment string.
 
 ### Cutover: booting against production credentials
 
@@ -494,6 +642,96 @@ never back-billed: dunning past the staleness window cancels instead of
 charging, and a Solana subscription that skipped whole periods gets exactly
 one pull anchored at the pull moment.
 
+## The destructive-action kill switch (#836) and first-enforce gate (#835)
+
+`provider_write_mode` is a boot setting: changing it needs a deploy. The kill
+switch is the runtime brake — a single DB row, read at the top of every
+destructive plane (converge sweep, provider refresh, intent executor), so one
+`UPDATE` halts every node at its next gate check.
+
+**It ships OFF.** A fresh deployment converges nothing destructive — no local
+cancellation, no entitlement revocation, no provider delete — until an operator
+arms it. That is deliberate: the first pass against an imported legacy book is
+exactly when a bad roster does the most damage.
+
+### Stop everything, now
+
+```sql
+UPDATE openrails.destructive_action_switch SET enabled = false,
+       updated_by = 'you', reason = 'incident: mass cancellation observed';
+```
+
+No restart, no deploy, no scaling workers to zero. In-flight destructive intents
+**park** (they are not failed), so flipping it back resumes them where they
+stopped.
+
+### Confirm it stopped
+
+```sql
+-- 1. the switch itself
+SELECT enabled, updated_by, reason, updated_at FROM openrails.destructive_action_switch;
+
+-- 2. nothing has been cancelled since the flip
+SELECT count(*) FROM openrails.subscriptions
+ WHERE cancelled_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+
+-- 3. no entitlement has been revoked since the flip
+SELECT count(*) FROM openrails.entitlements
+ WHERE revoked_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+
+-- 4. destructive provider intents are parked, not executing
+SELECT status, count(*) FROM openrails.rail_intents
+ WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
+```
+
+Worker logs name the gate explicitly: `destructive actions gated — instance kill
+switch is OFF`.
+
+### Arming a merchant (the #835 first-enforce gate)
+
+A merchant with no `openrails.merchant_destructive_policy` row — or one with
+`enforce_armed_at IS NULL` — pulls in **advisory** mode: findings are persisted,
+nothing is mutated, no source domain is proven, and `first_pull_completed_at` is
+stamped so you know the survey is ready.
+
+```sql
+-- what did the first pull find?
+SELECT finding_type, status, count(*) FROM openrails.reconciliation_findings
+ WHERE merchant_id = :merchant GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- happy with it? arm the merchant for enforcing pulls
+INSERT INTO openrails.merchant_destructive_policy
+       (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
+VALUES (:merchant, true, now(), 'you', 'reviewed first-pull findings')
+ON CONFLICT (merchant_id) DO UPDATE
+   SET enforce_armed_at = now(), destructive_actions_enabled = true;
+
+-- and the instance switch (once, per deployment)
+UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'you';
+```
+
+Both halves must be on: the instance switch gates the fleet, the merchant row
+gates one merchant. Disabling either stops that merchant.
+
+### Cancellation caps (#837)
+
+Independently of the switch, one pass may cancel at most
+`min(25, max(3, 5% of the merchant's live linked book))` subscriptions. Over
+that, **none** are applied, the merchant's pass halts, and a
+`pull.cancellation.capped` finding lands in the review queue. It is all-or-
+nothing on purpose: a pass that wants to cancel 850 customers is not a pass that
+should cancel the first 25 of them.
+
+```sql
+SELECT subject_key, recommended_action, updated_at
+  FROM openrails.reconciliation_findings
+ WHERE finding_type = 'pull.cancellation.capped' AND status = 'requires_review';
+```
+
+Investigate the roster before clearing it. The usual causes are a misdeclared
+`psps.account_id`, a credential rotated onto a sibling sub-account, or a
+provider incident returning a short page — never 850 customers all leaving.
+
 ## Per-merchant API hosts (#734) + browser CORS (#765)
 
 Public multi-merchant deployments (one engine serving several merchants) give
@@ -515,14 +753,14 @@ engine-wide policy**, not a per-merchant setting.
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
   it — the host does.
-- **Webhook surfaces**: three shapes, all verifying with the resolved
-  merchant/account's own signing secret. Canonical provider-only:
-  `/v1/webhooks/:provider` (NMI/CCBill — payloads carry account identity) and
-  `/v1/webhooks/:provider/:account_id` (Stripe / multi-account rails).
-  Merchant-scoped alias:
-  `/v1/merchants/:merchant/webhooks/:provider[/:account_id]`. Host-routed
+- **Webhook surfaces**: all verify with the resolved merchant/account's own
+  signing secret, and `:rail` is always the gateway kind, never a PSP key.
+  Standalone: `/v1/webhooks/:rail` (NMI/CCBill — payloads carry account
+  identity) and `/v1/webhooks/:rail/:account_id` (Stripe / multi-account
+  rails). Embedded: `/billing/v1/merchants/:merchant/webhooks/:rail[/:account_id]`,
+  the host's pinned merchant named by slug. Host-routed
   (`RegisterHostWebhookRoutes`, mounted when a host resolver is attached):
-  `/webhooks/:provider[/:account_id]`, merchant resolved from the Host header.
+  `/webhooks/:rail[/:account_id]`, merchant resolved from the Host header.
 - **Consistency with token issuers**: a JWT minted for merchant A's issuer is
   rejected when presented against merchant B's Host, even though the token
   verifies — Host-merchant must equal issuer-merchant on every

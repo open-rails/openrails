@@ -34,18 +34,24 @@ func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg Acknowle
 
 const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM openrails.payment_settlement_events
- WHERE merchant_id = $1
-   AND delivered_at IS NOT NULL
-   AND delivered_at < $2::timestamptz
+ WHERE ctid IN (
+    SELECT pse.ctid FROM openrails.payment_settlement_events pse
+     WHERE pse.merchant_id = $1::uuid
+       AND pse.delivered_at IS NOT NULL
+       AND pse.delivered_at < $2::timestamptz
+     LIMIT $3::int
+)
 `
 
 type DeleteDeliveredPaymentSettlementsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
+// or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, arg DeleteDeliveredPaymentSettlementsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, arg.MerchantID, arg.Cutoff)
+	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

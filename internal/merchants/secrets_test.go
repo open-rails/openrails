@@ -20,10 +20,10 @@ func TestMemSecretStore_RoundTripPerMerchant(t *testing.T) {
 	}
 
 	// Put for merchant A, then Get round-trips.
-	if _, err := store.Put(ctx, a, SecretStripeSecretKey, "sk_a"); err != nil {
+	if _, err := store.Put(ctx, a, "psps/stripe/live/acct_884_test/secret_key", "sk_a"); err != nil {
 		t.Fatalf("put A: %v", err)
 	}
-	got, err := store.Get(ctx, a, SecretStripeSecretKey)
+	got, err := store.Get(ctx, a, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatalf("get A: %v", err)
 	}
@@ -32,16 +32,16 @@ func TestMemSecretStore_RoundTripPerMerchant(t *testing.T) {
 	}
 
 	// Merchant B does NOT see merchant A's secret (namespacing).
-	if _, err := store.Get(ctx, b, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := store.Get(ctx, b, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("get B before put = %v, want ErrSecretNotFound", err)
 	}
 
 	// Put for merchant B with a DIFFERENT value; A's value is unchanged.
-	if _, err := store.Put(ctx, b, SecretStripeSecretKey, "sk_b"); err != nil {
+	if _, err := store.Put(ctx, b, "psps/stripe/live/acct_884_test/secret_key", "sk_b"); err != nil {
 		t.Fatalf("put B: %v", err)
 	}
-	gotA, _ := store.Get(ctx, a, SecretStripeSecretKey)
-	gotB, _ := store.Get(ctx, b, SecretStripeSecretKey)
+	gotA, _ := store.Get(ctx, a, "psps/stripe/live/acct_884_test/secret_key")
+	gotB, _ := store.Get(ctx, b, "psps/stripe/live/acct_884_test/secret_key")
 	if gotA.Value != "sk_a" || gotB.Value != "sk_b" {
 		t.Fatalf("cross-merchant leak: A=%q B=%q", gotA.Value, gotB.Value)
 	}
@@ -52,17 +52,17 @@ func TestMemSecretStore_RotationVersioning(t *testing.T) {
 	store := NewMemorySecretStore()
 	id := dbtest.TestMerchantID
 
-	v1, _ := store.Put(ctx, id, SecretStripeWebhookSigning, "whsec_1")
+	v1, _ := store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_1")
 	if v1.Version != 1 {
 		t.Fatalf("first put version = %d, want 1", v1.Version)
 	}
 	// Same value = idempotent no-op rotation (version unchanged).
-	v1again, _ := store.Put(ctx, id, SecretStripeWebhookSigning, "whsec_1")
+	v1again, _ := store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_1")
 	if v1again.Version != 1 {
 		t.Fatalf("idempotent put version = %d, want 1", v1again.Version)
 	}
 	// New value bumps version.
-	v2, _ := store.Put(ctx, id, SecretStripeWebhookSigning, "whsec_2")
+	v2, _ := store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_2")
 	if v2.Version != 2 {
 		t.Fatalf("rotated put version = %d, want 2", v2.Version)
 	}
@@ -73,8 +73,8 @@ func TestMemSecretStore_DeleteAndList(t *testing.T) {
 	store := NewMemorySecretStore()
 	id := dbtest.TestMerchantID
 
-	_, _ = store.Put(ctx, id, SecretStripeSecretKey, "sk")
-	_, _ = store.Put(ctx, id, SecretStripeWebhookSigning, "wh")
+	_, _ = store.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk")
+	_, _ = store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "wh")
 
 	names, err := store.List(ctx, id)
 	if err != nil {
@@ -85,13 +85,13 @@ func TestMemSecretStore_DeleteAndList(t *testing.T) {
 	}
 
 	// Delete is idempotent.
-	if err := store.Delete(ctx, id, SecretStripeSecretKey); err != nil {
+	if err := store.Delete(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := store.Delete(ctx, id, SecretStripeSecretKey); err != nil {
+	if err := store.Delete(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); err != nil {
 		t.Fatalf("delete (idempotent): %v", err)
 	}
-	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("get after delete = %v, want ErrSecretNotFound", err)
 	}
 }
@@ -99,10 +99,10 @@ func TestMemSecretStore_DeleteAndList(t *testing.T) {
 func TestMemSecretStore_ZeroMerchantRejected(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
-	if _, err := store.Get(ctx, merchant.ID{}, SecretStripeSecretKey); err == nil {
+	if _, err := store.Get(ctx, merchant.ID{}, "psps/stripe/live/acct_884_test/secret_key"); err == nil {
 		t.Fatal("get with zero merchant should error")
 	}
-	if _, err := store.Put(ctx, merchant.ID{}, SecretStripeSecretKey, "x"); err == nil {
+	if _, err := store.Put(ctx, merchant.ID{}, "psps/stripe/live/acct_884_test/secret_key", "x"); err == nil {
 		t.Fatal("put with zero merchant should error")
 	}
 }
@@ -113,7 +113,7 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	sec, err := svc.PutCredential(ctx, id, SecretStripeWebhookSigning, "whsec_123")
+	sec, err := svc.PutCredential(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_123")
 	if err != nil {
 		t.Fatalf("put credential: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 	}
 	found := false
 	for _, st := range statuses {
-		if st.Name != SecretStripeWebhookSigning {
+		if st.Name != "psps/stripe/live/acct_884_test/webhook_signing_secret" {
 			continue
 		}
 		found = true
@@ -136,13 +136,13 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("status for %s not found", SecretStripeWebhookSigning)
+		t.Fatalf("status for %s not found", "psps/stripe/live/acct_884_test/webhook_signing_secret")
 	}
 
-	if err := svc.DeleteCredential(ctx, id, SecretStripeWebhookSigning); err != nil {
+	if err := svc.DeleteCredential(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret"); err != nil {
 		t.Fatalf("delete credential: %v", err)
 	}
-	if _, err := store.Get(ctx, id, SecretStripeWebhookSigning); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("get after delete = %v, want ErrSecretNotFound", err)
 	}
 }
@@ -154,7 +154,7 @@ func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
 	svc := &Service{secrets: store}
 
 	called := false
-	err := svc.ValidateCredential(ctx, id, SecretStripeSecretKey, "sk_test_123", func(context.Context, string) error {
+	err := svc.ValidateCredential(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_test_123", func(context.Context, string) error {
 		called = true
 		return nil
 	})
@@ -164,7 +164,7 @@ func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
 	if !called {
 		t.Fatal("stripe tester was not called")
 	}
-	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("validate-only saved secret: %v", err)
 	}
 }
@@ -176,15 +176,33 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, "unknown/provider_key", "secret"); err == nil {
 		t.Fatal("unknown secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretStripeSecretKey, "not-stripe"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key", "not-stripe"); err == nil {
 		t.Fatal("invalid Stripe secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretNMITokenizationURL, "http://example.test/Collect.js"); err == nil {
-		t.Fatal("invalid NMI tokenization URL should be rejected")
+	// #884: the retired flat names are not a second spelling of a credential —
+	// a write to one is refused like any unknown name.
+	for _, retired := range []string{
+		"stripe/secret_key",
+		"stripe/webhook_signing_secret",
+		"stripe/webhook_signing_secret_thin",
+		"stripe/webhook_signing_secret_previous",
+		"nmi/mobius/security_key",
+		"nmi/mobius/tokenization_url",
+		"nmi/mobius/webhook_signing_secret",
+	} {
+		if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, retired, "whatever"); err == nil {
+			t.Fatalf("retired flat secret name %q must be rejected", retired)
+		}
+		if SecretWritable(retired) {
+			t.Fatalf("retired flat secret name %q must not be writable", retired)
+		}
+		if err := svc.DeleteCredential(ctx, dbtest.TestMerchantID, retired); err == nil {
+			t.Fatalf("retired flat secret name %q must not be deletable", retired)
+		}
 	}
 }
 
-func TestRailMerchantAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
+func TestPSPSecretNameRejectsNMITokenizationKey(t *testing.T) {
 	if _, err := PSPSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
 		t.Fatal("NMI tokenization_key is public provider settings, not a secret")
 	}
@@ -196,7 +214,7 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	// #630/#641: the loader takes the RAIL ("nmi"), not a provider-account name
+	// #630/#641: the loader takes the RAIL ("nmi"), not a PSP name
 	// like "mobius".
 	cfg, err := svc.LoadNMITokenizationConfig(ctx, id, "nmi")
 	if err != nil {
@@ -207,7 +225,7 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	}
 
 	// Broad merchant-level NMI secrets are no longer runtime credential sources;
-	// the loader needs a rail_merchant_accounts row so it can read provider
+	// the loader needs a psps row so it can read provider
 	// settings.
 }
 
@@ -248,10 +266,10 @@ func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	store := NewVaultSecretStore("secret", nil, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}) // no live client
 	id := dbtest.TestMerchantID
-	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrVaultNotConfigured) {
+	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrVaultNotConfigured) {
 		t.Fatalf("stub Get = %v, want ErrVaultNotConfigured", err)
 	}
-	if _, err := store.Put(ctx, id, SecretStripeSecretKey, "x"); !errors.Is(err, ErrVaultNotConfigured) {
+	if _, err := store.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "x"); !errors.Is(err, ErrVaultNotConfigured) {
 		t.Fatalf("stub Put = %v, want ErrVaultNotConfigured", err)
 	}
 }
@@ -262,10 +280,10 @@ func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 	store := NewVaultSecretStore("secret", fake, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): "cozy-art"})
 	id := dbtest.TestMerchantID
 
-	if _, err := store.Put(ctx, id, SecretStripeSecretKey, "sk_live"); err != nil {
+	if _, err := store.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_live"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	got, err := store.Get(ctx, id, SecretStripeSecretKey)
+	got, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -277,7 +295,7 @@ func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 		t.Fatalf("expected one vault path, got %d", len(fake.data))
 	}
 	for p := range fake.data {
-		if want := "secret/openrails/merchants/cozy-art/" + SecretStripeSecretKey; p != want {
+		if want := "secret/openrails/merchants/cozy-art/" + "psps/stripe/live/acct_884_test/secret_key"; p != want {
 			t.Fatalf("vault path = %q, want %q", p, want)
 		}
 	}

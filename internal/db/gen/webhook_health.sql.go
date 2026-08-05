@@ -17,6 +17,7 @@ SELECT s.rail, count(*) AS billable
 FROM openrails.subscriptions s
 JOIN openrails.prices pr ON pr.id = s.price_id
 WHERE pr.auto_renew
+  AND s.deleted_at IS NULL
   AND s.status IN ('pending','active','past_due','unknown')
   AND s.cancelled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
@@ -58,18 +59,11 @@ func (q *Queries) ListWebhookExpectedRails(ctx context.Context) ([]ListWebhookEx
 
 const recordWebhookAccepted = `-- name: RecordWebhookAccepted :exec
 
-WITH health AS (
-    INSERT INTO openrails.webhook_health (merchant_id, rail, last_accepted_at, accepted_count)
-    VALUES ($1::uuid, $2::text, $3::timestamptz, 1)
-    ON CONFLICT (merchant_id, rail) DO UPDATE SET
-        last_accepted_at = EXCLUDED.last_accepted_at,
-        accepted_count = openrails.webhook_health.accepted_count + 1,
-        updated_at = now()
-)
-INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, accepted)
-VALUES ($1::uuid, $2::text, date_trunc('day', $3::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 1)
-ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
-    accepted = openrails.webhook_health_daily.accepted + 1
+INSERT INTO openrails.webhook_health (merchant_id, rail, last_accepted_at)
+VALUES ($1::uuid, $2::text, $3::timestamptz)
+ON CONFLICT (merchant_id, rail) DO UPDATE SET
+    last_accepted_at = EXCLUDED.last_accepted_at,
+    updated_at = now()
 `
 
 type RecordWebhookAcceptedParams struct {
@@ -80,7 +74,9 @@ type RecordWebhookAcceptedParams struct {
 
 // #786 webhook-health recording. All statements run merchant-scoped (MerchantTx
 // or a pinned merchant connection); INSERTs pass merchant_id for RLS WITH CHECK.
-// Verified-accepted webhook: stamp the silence watermark + bump counters.
+// Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
+// this used to bump were dropped in or#823 — a monotonic total answers no
+// windowed question, which is what webhook_health_daily is for.
 func (q *Queries) RecordWebhookAccepted(ctx context.Context, arg RecordWebhookAcceptedParams) error {
 	_, err := q.db.Exec(ctx, recordWebhookAccepted, arg.MerchantID, arg.Rail, arg.At)
 	return err
@@ -89,9 +85,7 @@ func (q *Queries) RecordWebhookAccepted(ctx context.Context, arg RecordWebhookAc
 const recordWebhookDrift = `-- name: RecordWebhookDrift :execrows
 WITH gate AS (
     UPDATE openrails.webhook_health
-    SET last_drift_at = $1::timestamptz,
-        drift_count = drift_count + $2::bigint,
-        updated_at = now()
+    SET updated_at = now()
     WHERE merchant_id = $3::uuid
       AND rail = $4::text
       AND last_pull_at IS NOT NULL
@@ -132,11 +126,9 @@ func (q *Queries) RecordWebhookDrift(ctx context.Context, arg RecordWebhookDrift
 
 const recordWebhookRejected = `-- name: RecordWebhookRejected :exec
 WITH health AS (
-    INSERT INTO openrails.webhook_health (merchant_id, rail, last_rejected_at, rejected_count)
-    VALUES ($1::uuid, $2::text, $3::timestamptz, 1)
+    INSERT INTO openrails.webhook_health (merchant_id, rail)
+    VALUES ($1::uuid, $2::text)
     ON CONFLICT (merchant_id, rail) DO UPDATE SET
-        last_rejected_at = EXCLUDED.last_rejected_at,
-        rejected_count = openrails.webhook_health.rejected_count + 1,
         updated_at = now()
 )
 INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, rejected)
@@ -151,8 +143,10 @@ type RecordWebhookRejectedParams struct {
 	At         time.Time
 }
 
-// Failed signature verification: bump reject counters. NEVER touches
-// last_accepted_at — rejects must not look like liveness.
+// Failed signature verification: bump the daily reject bucket. NEVER touches
+// last_accepted_at — rejects must not look like liveness. The snapshot row is
+// still upserted so a rail that has ONLY ever rejected still has a created_at
+// for the silence age to measure from.
 func (q *Queries) RecordWebhookRejected(ctx context.Context, arg RecordWebhookRejectedParams) error {
 	_, err := q.db.Exec(ctx, recordWebhookRejected, arg.MerchantID, arg.Rail, arg.At)
 	return err

@@ -325,7 +325,8 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 		if g.Amount == nil || g.Currency == nil {
 			return fmt.Errorf("grants: credit grant %s missing amount/currency", g.ID)
 		}
-		if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount, "grant", g.ID.String(), g.ID); err != nil {
+		if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount,
+			ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: g.ID.String()}, g.ID); err != nil {
 			return fmt.Errorf("grants: materialize credit deposit: %w", err)
 		}
 		return nil
@@ -368,11 +369,6 @@ func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.Openra
 		if exists {
 			continue
 		}
-		sourceID := g.ID
-		if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
-			sourceID = parsed
-		}
-		productKey := spec.ProductKey
 		grantID := g.ID
 		if err := l.q.CreateProductUsageLimitBinding(ctx, gen.CreateProductUsageLimitBindingParams{
 			ID:            uuidutil.NewV7(),
@@ -381,13 +377,9 @@ func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.Openra
 			UsageLimitKey: spec.UsageLimitKey,
 			Measure:       spec.Measure,
 			Windows:       spec.Windows,
-			SourceType:    g.SourceType,
-			SourceID:      &sourceID,
-			ProductKey:    &productKey,
 			GrantID:       &grantID,
 			StartsAt:      g.StartsAt,
 			EndsAt:        g.EndsAt,
-			PolicyVersion: 1,
 		}); err != nil {
 			return fmt.Errorf("grants: materialize usage-limit binding %q: %w", spec.UsageLimitKey, err)
 		}
@@ -509,10 +501,11 @@ func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.OpenrailsGrant
 	if err != nil {
 		return err
 	}
-	src, sid, lot, c := "grant_revoke", g.ID.String(), g.ID, g.CustomerID
+	lot, c := g.ID, g.CustomerID
 	_, err = l.money.Apply(ctx, ledger.Transfer{
-		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: "credit_revoke",
-		Source: &src, SourceID: &sid, GrantID: &lot, Customer: &c,
+		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: ledger.CreditRevoke,
+		Coord:   ledger.Coord{Operation: ledger.OpCreditRevoke, Source: "grant_revoke", SourceID: g.ID.String()},
+		GrantID: &lot, Customer: &c,
 	})
 	return err
 }

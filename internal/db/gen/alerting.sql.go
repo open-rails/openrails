@@ -54,7 +54,7 @@ const createAlertRule = `-- name: CreateAlertRule :one
 
 INSERT INTO openrails.alert_rules (merchant_id, name, template, params, severity, channels, enabled)
 VALUES ($7::uuid, $1, $2, $3, $4, $5, $6)
-RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, last_detail, created_at, updated_at
+RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at
 `
 
 type CreateAlertRuleParams struct {
@@ -98,7 +98,6 @@ func (q *Queries) CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams
 		&i.ClearedAt,
 		&i.LastEvaluatedAt,
 		&i.LastValue,
-		&i.LastDetail,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -216,7 +215,7 @@ func (q *Queries) DeleteMerchantWebhook(ctx context.Context, id uuid.UUID) (int6
 }
 
 const getAlertRule = `-- name: GetAlertRule :one
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, last_detail, created_at, updated_at FROM openrails.alert_rules WHERE id = $1
+SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules WHERE id = $1
 `
 
 func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (OpenrailsAlertRule, error) {
@@ -235,7 +234,6 @@ func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (OpenrailsAler
 		&i.ClearedAt,
 		&i.LastEvaluatedAt,
 		&i.LastValue,
-		&i.LastDetail,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -263,7 +261,7 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (Openrai
 }
 
 const listAlertRules = `-- name: ListAlertRules :many
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, last_detail, created_at, updated_at FROM openrails.alert_rules ORDER BY created_at DESC, id
+SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules ORDER BY created_at DESC, id
 `
 
 func (q *Queries) ListAlertRules(ctx context.Context) ([]OpenrailsAlertRule, error) {
@@ -288,7 +286,6 @@ func (q *Queries) ListAlertRules(ctx context.Context) ([]OpenrailsAlertRule, err
 			&i.ClearedAt,
 			&i.LastEvaluatedAt,
 			&i.LastValue,
-			&i.LastDetail,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -303,20 +300,25 @@ func (q *Queries) ListAlertRules(ctx context.Context) ([]OpenrailsAlertRule, err
 }
 
 const listArmedAlertMerchants = `-- name: ListArmedAlertMerchants :many
-SELECT DISTINCT merchant_id FROM openrails.alert_rules WHERE enabled
+SELECT merchant_id FROM openrails.armed_alert_merchant_ids()
 `
 
-// CROSS-MERCHANT (base pool / GenGlobal): the evaluator scheduler's armed-merchant
-// selection. Same base-pool posture as the #358 intent executor sweeps.
-func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]uuid.UUID, error) {
+// CROSS-MERCHANT: the evaluator scheduler's armed-merchant selection, through
+// migration 0021's SECURITY DEFINER reader (or#861). It used to be a base-pool
+// `SELECT DISTINCT merchant_id FROM alert_rules` — but the base pool is not
+// privileged, it is the same openrails_app role with no app.merchant_id, so
+// alert_rules' FORCEd RLS matched `merchant_id = NULL` and this returned NO
+// MERCHANTS: the alert evaluator had never run in production. Ids only; the
+// rules themselves are still read per-merchant under MerchantTx.
+func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listArmedAlertMerchants)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -329,7 +331,7 @@ func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]uuid.UUID, err
 }
 
 const listEnabledAlertRules = `-- name: ListEnabledAlertRules :many
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, last_detail, created_at, updated_at FROM openrails.alert_rules WHERE enabled ORDER BY created_at, id
+SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules WHERE enabled ORDER BY created_at, id
 `
 
 // Evaluator's per-merchant rule set (RLS-scoped; partial index backs it).
@@ -355,7 +357,6 @@ func (q *Queries) ListEnabledAlertRules(ctx context.Context) ([]OpenrailsAlertRu
 			&i.ClearedAt,
 			&i.LastEvaluatedAt,
 			&i.LastValue,
-			&i.LastDetail,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -479,7 +480,6 @@ SET fired_at = $2::timestamptz,
     cleared_at = NULL,
     last_evaluated_at = $3::timestamptz,
     last_value = $4,
-    last_detail = $5,
     updated_at = now()
 WHERE id = $1
 `
@@ -489,17 +489,15 @@ type MarkAlertRuleFiredParams struct {
 	FiredAt     time.Time
 	EvaluatedAt time.Time
 	Value       *float64
-	Detail      []byte
 }
 
-// Edge transition: open a new active alert. Records the crossing value/detail.
+// Edge transition: open a new active alert. Records the crossing value.
 func (q *Queries) MarkAlertRuleFired(ctx context.Context, arg MarkAlertRuleFiredParams) error {
 	_, err := q.db.Exec(ctx, markAlertRuleFired,
 		arg.ID,
 		arg.FiredAt,
 		arg.EvaluatedAt,
 		arg.Value,
-		arg.Detail,
 	)
 	return err
 }
@@ -543,7 +541,7 @@ const updateAlertRule = `-- name: UpdateAlertRule :one
 UPDATE openrails.alert_rules
 SET name = $2, params = $3, severity = $4, channels = $5, enabled = $6, updated_at = now()
 WHERE id = $1
-RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, last_detail, created_at, updated_at
+RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at
 `
 
 type UpdateAlertRuleParams struct {
@@ -579,7 +577,6 @@ func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams
 		&i.ClearedAt,
 		&i.LastEvaluatedAt,
 		&i.LastValue,
-		&i.LastDetail,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

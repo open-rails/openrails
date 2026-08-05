@@ -110,7 +110,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		Signature:        strings.TrimSpace(req.Signature),
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 	r.SuccessJSON(sub)
@@ -170,7 +170,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 
 	res, err := svc.Prepare(r.Request.Context(), subscriptionID)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -249,7 +249,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 
 	svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
 	if err := svc.Confirm(r.Request.Context(), subscriptionID, req.Signature); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -367,6 +367,11 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 		return nil, http.StatusBadRequest, "tier change must stay within the same tier group"
 	}
+	// #820: same FX refusal as CheckoutService.TierChange — never prorate across
+	// a currency boundary.
+	if err := checkout.RequireSameCurrency(checkout.PriceAmountOf(oldPrice), checkout.PriceAmountOf(newPrice)); err != nil {
+		return nil, http.StatusBadRequest, err.Error()
+	}
 
 	// Direction: higher TierRank => upgrade (charge prorated now), lower =>
 	// downgrade (deferred, no charge) — same rule as CheckoutService.TierChange.
@@ -384,22 +389,27 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		// Model-B prorated first charge (new_full - old_unused) in micros, then
 		// micros -> base units at the token's CONFIGURED decimals (#817), $1 peg
 		// (depeg failsafe inside).
-		firstChargeMicros, _ := checkout.CalculateModelBUpgradeCharge(
-			oldPrice.Amount,
-			newPrice.Amount,
+		firstChargeMicros, _, err := checkout.CalculateModelBUpgradeCharge(
+			checkout.PriceAmountOf(oldPrice),
+			checkout.PriceAmountOf(newPrice),
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			nowOrDefault(r),
 		)
-		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err.Error()
+			return nil, http.StatusBadRequest, err.Error()
+		}
+		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
+		if err != nil {
+			status, msg := solanaClientError(err, http.StatusInternalServerError)
+			return nil, status, msg
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
 			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err.Error()
+			status, msg := solanaClientError(err, http.StatusInternalServerError)
+			return nil, status, msg
 		}
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the
@@ -503,7 +513,7 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -565,7 +575,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 
@@ -611,7 +621,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		OldPeriodEndsAt:      resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
 

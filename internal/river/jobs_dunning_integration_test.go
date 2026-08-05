@@ -33,7 +33,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
@@ -83,7 +83,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:           productID,
 		Archived:            false,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
 		CreatedAt:           now,
@@ -93,7 +93,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		Archived:            false,
 		AccessDurationHours: &billingDays32,
@@ -105,10 +105,12 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailNMI,
+		PspID:                pspID,
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
@@ -121,6 +123,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           paymentMethod.CustomerID,
 		Rail:                 string(paymentMethod.Rail),
+		PspID:                pspID,
 		RailCustomerRef:      paymentMethod.RailCustomerRef,
 		RailMethodRef:        paymentMethod.RailMethodRef,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
@@ -141,6 +144,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		PriceID:               priceID,
 		Status:                models.StatusPastDue,
 		Rail:                  models.RailNMI,
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart,
@@ -160,6 +164,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(sub.Status),
 		Rail:                  string(sub.Rail),
+		PspID:                 pspID,
 		RailSubscriptionID:    sub.RailSubscriptionID,
 		PaymentMethodID:       sub.PaymentMethodID,
 		CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt,
@@ -201,6 +206,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	worker := &DunningWorker{
 		DB:          dbi,
 		NMIResolver: fakeDunningNMIResolver{client: client},
+		// or#865: the worker's self-assembled intent Runner parks every intent
+		// when no mode is stated — this fixture drives real rebills, so it
+		// says "full".
+		Config: fullModeConfig(),
 	}
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -211,16 +220,29 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
+	// Same shape as the production Work loop: a merchant in the Go context is
+	// not enough — the pass must run on a merchant-scoped CONNECTION, or every
+	// read the charge path makes matches merchant_id = NULL under the FORCEd RLS
+	// and the outcome silently comes back as "nothing to do".
 	mctx := dbtest.WithTestMerchant(ctx)
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, false))
+	var outcome dunningOutcome
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		return nil
+	}))
+	require.Equal(t, dunningOutcomeSucceeded, outcome)
 
 	// The successful rebill granted the renewal's 100 USD credit lot exactly once.
 	// Post-#512/#514 a credit grant materializes a SINGLE ledger deposit and the
 	// balance is DERIVED (the old money_transactions 'deposit'/'subscription_renewal'
 	// row is now a ledger_transfers deposit). Balance read through the money service
 	// is schema-rewritten; a double grant would read 200.
-	bal, err := moneySvc.GetBalanceForCustomer(mctx, identity.CustomerID(tenantSubjectID), "USD")
-	require.NoError(t, err)
+	var bal *models.MoneyBalance
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		var e error
+		bal, e = moneySvc.GetBalanceForCustomer(sctx, identity.CustomerID(tenantSubjectID), "USD")
+		return e
+	}))
 	require.Equal(t, int64(100), bal.Balance, "renewal granted the 100 USD credit lot exactly once")
 }
 
@@ -236,7 +258,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
@@ -262,7 +284,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived: false, AccessDurationHours: &billingHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -270,8 +292,10 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 
 	billingID := "bill_" + uuid.New().String()
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -285,6 +309,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: "nmi",
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
@@ -302,9 +327,9 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.rail_intents
-		  (rail, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
-		VALUES ('nmi', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
-		intents.TypeManualRebill, subID, payloadJSON,
+		  (rail, psp_id, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
+		VALUES ('nmi', $1, $2, $3, $4, $5, 'succeeded', 'system', now(), $6, $7)`,
+		pspID, intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "nmi", orderRef, 0),
 		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
@@ -336,7 +361,9 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 
-	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}}
+	// or#865: the worker's self-assembled intent Runner parks every intent when
+	// no mode is stated — this fixture drives real rebills, so it says "full".
+	worker := &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -346,15 +373,24 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
-	require.NoError(t, err)
-
-	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, false)
+	// Same shape as the production Work loop: read AND repair on a
+	// merchant-scoped connection. On the bare context subscriptions' FORCEd RLS
+	// matched merchant_id = NULL, so GetByID returned "no rows in result set".
+	mctx := dbtest.WithTestMerchant(ctx)
+	var outcome dunningOutcome
+	var refreshed gen.OpenrailsSubscription
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(sctx, subID)
+		if err != nil {
+			return err
+		}
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		refreshed, err = dbi.Gen(sctx).GetSubscriptionByID(sctx, subID)
+		return err
+	}))
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 
-	refreshed, err := dbi.Gen(ctx).GetSubscriptionByID(ctx, subID)
-	require.NoError(t, err)
 	assert.Equal(t, string(models.StatusActive), string(refreshed.Status), "lifecycle repaired from the ledger")
 	require.NotNil(t, refreshed.CurrentPeriodEndsAt)
 	assert.True(t, refreshed.CurrentPeriodEndsAt.After(periodEnd))

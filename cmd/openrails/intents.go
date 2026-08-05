@@ -56,25 +56,25 @@ func newIntentsCmd() *cobra.Command {
 
 func newIntentsLogCmd() *cobra.Command {
 	var (
-		provider        string
-		intent          string
-		providerAccount string
-		phase           string
-		format          string
-		merchant        string
-		limit           int
+		provider string
+		intent   string
+		psp      string
+		phase    string
+		format   string
+		merchant string
+		limit    int
 	)
 	cmd := &cobra.Command{
 		Use:   "intents-log",
 		Short: "List provider mutation attempts/results (#533)",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsMutationLog(c, provider, intent, providerAccount, phase, format, merchant, limit)
+			return runIntentsMutationLog(c, provider, intent, psp, phase, format, merchant, limit)
 		},
 	}
 	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
-	cmd.Flags().StringVar(&providerAccount, "provider-account", "", "Provider account id filter")
+	cmd.Flags().StringVar(&psp, "provider-account", "", "PSP id filter")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
@@ -231,10 +231,8 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			if row.LastFailureReason != nil {
 				reason = *row.LastFailureReason
 			}
-			account := ""
-			if row.PspID != nil {
-				account = row.PspID.String()
-			}
+			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
+			account := intentAddress(row.PspID, row.CustodianID)
 			if row.Status == intents.StatusPending {
 				byMode[executesUnder(row.Origin)]++
 			}
@@ -254,7 +252,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 	})
 }
 
-func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccountID, phase, format, merchantSlug string, limit int) error {
+func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase, format, merchantSlug string, limit int) error {
 	var providerFilter *string
 	if p := strings.ToLower(strings.TrimSpace(provider)); p != "" {
 		providerFilter = &p
@@ -268,7 +266,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		intentFilter = &id
 	}
 	var accountFilter *uuid.UUID
-	if raw := strings.TrimSpace(providerAccountID); raw != "" {
+	if raw := strings.TrimSpace(pspID); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
 			return fmt.Errorf("invalid --provider-account %q: %w", raw, err)
@@ -352,10 +350,8 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
 		for _, row := range rows {
-			account := ""
-			if row.PspID != nil {
-				account = row.PspID.String()
-			}
+			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
+			account := intentAddress(row.PspID, row.CustodianID)
 			intent := ""
 			if row.RailIntentID != nil {
 				intent = row.RailIntentID.String()
@@ -378,13 +374,9 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 
 func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, database *db.DB) error) error {
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	if cfg == nil || cfg.DB == nil {
-		return fmt.Errorf("config not loaded")
-	}
-
-	database, err := db.NewDB(cfg.DB)
+	database, err := openCLIDB(cmd.Context(), cfg)
 	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
+		return err
 	}
 	defer func() {
 		_ = database.Close()
@@ -398,4 +390,15 @@ func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx cont
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return fn(ctx, database)
 	})
+}
+
+// intentAddress renders whichever account an intent or mutation log names.
+func intentAddress(psp, custodian *uuid.UUID) string {
+	if psp != nil {
+		return psp.String()
+	}
+	if custodian != nil {
+		return "custodian:" + custodian.String()
+	}
+	return ""
 }

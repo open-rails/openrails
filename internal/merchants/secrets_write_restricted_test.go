@@ -66,10 +66,10 @@ func TestWriteRestrictedSecretStoreAllowsOtherSecrets(t *testing.T) {
 	})
 
 	const value = "sk_test_123"
-	if _, err := store.Put(context.Background(), dbtest.TestMerchantID, SecretStripeSecretKey, value); err != nil {
+	if _, err := store.Put(context.Background(), dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key", value); err != nil {
 		t.Fatalf("put unrestricted secret: %v", err)
 	}
-	got, err := store.Get(context.Background(), dbtest.TestMerchantID, SecretStripeSecretKey)
+	got, err := store.Get(context.Background(), dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if err != nil {
 		t.Fatalf("get unrestricted secret: %v", err)
 	}

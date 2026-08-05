@@ -45,7 +45,7 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-bridge-"+uuid.NewString(), "Metered Bridge Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
 	rateMicros := int64(500_000)
@@ -54,7 +54,7 @@ func TestFinalizeInvoice_RatesReportedUsageFromCatalogSidecar(t *testing.T) {
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
-    'currency', 'usd',
+    'currency', 'USD',
     'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)
@@ -78,8 +78,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: us},
 			Amount:     0,
-			Source:     "test-usage",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "test-usage", uuid.NewString()),
 			OccurredAt: occurred.Add(time.Duration(i) * time.Second),
 		})
 		require.NoError(t, err)
@@ -109,7 +108,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 		  AND source_type = 'owed_accrual'
 		  AND status = 'invoiced'
 		  AND source_id = $3
-	`, payer.UUID(), inv.ID, "metered:"+meterKey+":"+periodSourceID).Scan(&invoicedCount, &invoicedAmount))
+	`, payer.UUID(), inv.ID, string(money.OpMeteredRating)+":metered:"+meterKey+":"+periodSourceID).Scan(&invoicedCount, &invoicedAmount))
 	require.Equal(t, 1, invoicedCount)
 	require.Equal(t, expected, invoicedAmount)
 
@@ -127,6 +126,6 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 		WHERE customer_id = $1
 		  AND source_type = 'owed_accrual'
 		  AND source_id = $2
-	`, payer.UUID(), "metered:"+meterKey+":"+periodSourceID).Scan(&afterCount))
+	`, payer.UUID(), string(money.OpMeteredRating)+":metered:"+meterKey+":"+periodSourceID).Scan(&afterCount))
 	require.Equal(t, 1, afterCount)
 }

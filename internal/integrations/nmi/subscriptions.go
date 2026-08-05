@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -97,7 +98,7 @@ type ManualRebillResponse struct {
 // no documented start_date for plan-linked subscriptions and returns no
 // first-charge transaction, so porting it would split one atomic money op
 // into two non-atomic ones.
-func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSubscriptionResponse, error) {
+func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data RecurringPaymentData) (*AddSubscriptionResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -155,7 +156,7 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 	// it for a recurring-agreement StoredCredential is idempotent.
 	data.StoredCredential.ApplyToForm(values)
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +181,7 @@ func (c *NMIClient) AddRecurringSubscription(data RecurringPaymentData) (*AddSub
 // (#663): PATCH /v5/subscriptions/{id} is documented but the live gateway
 // answers E_ROUTE_NOT_FOUND (verified 2026-07-01) — subscription updates have
 // no working v5 route.
-func (c *NMIClient) UpdateRecurringSubscription(subscriptionID, planAmount string, planPayments int) (string, error) {
+func (c *NMIClient) UpdateRecurringSubscription(ctx context.Context, subscriptionID, planAmount string, planPayments int) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err
 	}
@@ -196,7 +197,7 @@ func (c *NMIClient) UpdateRecurringSubscription(subscriptionID, planAmount strin
 		"plan_payments":   {fmt.Sprintf("%d", planPayments)},
 	}
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return "", err
 	}
@@ -215,7 +216,7 @@ func (c *NMIClient) UpdateRecurringSubscription(subscriptionID, planAmount strin
 // UpdateSubscriptionPaymentSource stays on classic Direct Post DELIBERATELY
 // (#663): the v5 subscription-update route does not exist on the live gateway
 // (see UpdateRecurringSubscription).
-func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaultID string) error {
+func (c *NMIClient) UpdateSubscriptionPaymentSource(ctx context.Context, subscriptionID, customerVaultID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -233,7 +234,7 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaul
 		"customer_vault_id": {customerVaultID},
 	}
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return err
 	}
@@ -257,7 +258,7 @@ var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (mode=rea
 // DeleteRecurringSubscription cancels a subscription via
 // DELETE /v5/subscriptions/{id}. A 404 surfaces as ErrV5NotFound — callers on
 // the certainty path treat "already gone" explicitly, never silently.
-func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
+func (c *NMIClient) DeleteRecurringSubscription(ctx context.Context, subscriptionID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -265,7 +266,7 @@ func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
 	if subID == "" {
 		return errors.New("subscriptionID is required")
 	}
-	if err := c.sendV5Request(http.MethodDelete, "/subscriptions/"+url.PathEscape(subID), nil, nil); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodDelete, "/subscriptions/"+url.PathEscape(subID), nil, nil); err != nil {
 		return fmt.Errorf("failed to delete subscription: %w", err)
 	}
 	return nil
@@ -274,7 +275,7 @@ func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
 // AttemptManualRebill stays on classic Direct Post DELIBERATELY (#663):
 // recurring=rebill_subscription (charge the subscription NOW, against its own
 // schedule state) has no v5 equivalent of any kind.
-func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebillResponse, error) {
+func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebillParams) (*ManualRebillResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 	}
@@ -303,7 +304,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 	}
 	params.StoredCredential.ApplyToForm(values)
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return &ManualRebillResponse{Success: false, ErrorMessage: fmt.Sprintf("request failed: %s", err.Error())}, err
 	}
@@ -334,7 +335,7 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 // wire boundary. dayFrequency is the billing interval in days; planPayments is
 // the total number of payments (0 = bill forever). Frequency and payments are
 // immutable once a plan is created.
-func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents moneyutil.Cents, dayFrequency, planPayments int) error {
+func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, dayFrequency, planPayments int) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -355,7 +356,7 @@ func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents mo
 		PlanPayments: planPayments,
 		DayFrequency: dayFrequency,
 	}
-	if err := c.sendV5Request(http.MethodPost, "/plans", body, nil); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodPost, "/plans", body, nil); err != nil {
 		return fmt.Errorf("failed to add recurring plan: %w", err)
 	}
 	return nil
@@ -366,7 +367,7 @@ func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents mo
 // gateway (verified 2026-07-01). NMI only permits the plan name and amount to
 // change; frequency and payment count are immutable once a plan exists.
 // planAmountCents is converted from cents to a dollar string for NMI.
-func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents moneyutil.Cents) error {
+func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -388,7 +389,7 @@ func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents m
 		values.Set("plan_name", name)
 	}
 
-	response, err := c.sendDirectRequest(values)
+	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return err
 	}
@@ -423,8 +424,8 @@ type RecurringPlanDetail struct {
 
 // GetRecurringPlanByID performs a strongly-consistent lookup of a single
 // recurring plan by its operator-chosen plan_id.
-func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string, amountCents int64, err error) {
-	detail, err := c.GetRecurringPlanDetailByID(planID)
+func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID string) (found bool, name string, amountCents int64, err error) {
+	detail, err := c.GetRecurringPlanDetailByID(ctx, planID)
 	if err != nil {
 		return false, "", 0, err
 	}
@@ -434,7 +435,7 @@ func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string
 // GetRecurringPlanDetailByID fetches one plan via GET /v5/plans/{id} so
 // callers validating an operator-supplied link can confirm the linked plan
 // matches the OpenRails price's money terms, not just that it exists.
-func (c *NMIClient) GetRecurringPlanDetailByID(planID string) (RecurringPlanDetail, error) {
+func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID string) (RecurringPlanDetail, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return RecurringPlanDetail{}, err
 	}
@@ -444,7 +445,7 @@ func (c *NMIClient) GetRecurringPlanDetailByID(planID string) (RecurringPlanDeta
 	}
 
 	var plan V5Plan
-	err := c.sendV5Request(http.MethodGet, "/plans/"+url.PathEscape(trimmed), nil, &plan)
+	err := c.sendV5Request(ctx, http.MethodGet, "/plans/"+url.PathEscape(trimmed), nil, &plan)
 	if errors.Is(err, ErrV5NotFound) {
 		return RecurringPlanDetail{}, nil
 	}
@@ -465,7 +466,7 @@ func (c *NMIClient) GetRecurringPlanDetailByID(planID string) (RecurringPlanDeta
 // (#663): v5 payments has no list/search endpoint (only GET by known id), and
 // v4's transaction report requires a partner-portal key. This is the bulk
 // reconcile pull and the order-id evidence probes' read path.
-func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
+func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err
 	}
@@ -496,5 +497,5 @@ func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
 		values.Set("result_limit", fmt.Sprintf("%d", filter.ResultLimit))
 	}
 
-	return c.sendQueryRequest(values)
+	return c.sendQueryRequest(ctx, values)
 }

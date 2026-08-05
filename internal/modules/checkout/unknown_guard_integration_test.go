@@ -25,9 +25,8 @@ import (
 // A different product is allowed; once the sub resolves terminal (cancelled),
 // checkout is allowed again.
 func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -48,17 +47,18 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
 		      VALUES ($1,$2,$2,$3,$4,'{}'::jsonb,$5)`, prod, "ug-"+key+"-"+sfx, group, rank, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
-		      VALUES ($1,$2,5000000,'usd',720,true,$3)`, price, prod, merchantID)
+		      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
 		return prod, price
 	}
 
 	prodA, priceA := seedRecurringProduct("a", &tierGroup, 1) // the unknown sub's product
 	prodB, priceB := seedRecurringProduct("b", &tierGroup, 2) // same tier-group, other tier
 	prodC, priceC := seedRecurringProduct("c", nil, 0)        // unrelated product, no group
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	unknownSub := uuid.New()
-	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-	      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$7,$8)`,
-		unknownSub, merchantID, cust, prodA, priceA, "ug-sub-"+sfx, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour))
+	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+	      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$8,$8,$9)`,
+		unknownSub, merchantID, cust, prodA, priceA, pspID, "ug-sub-"+sfx, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour))
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, unknownSub)

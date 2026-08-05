@@ -64,7 +64,7 @@ func customerPath(suffix string) string {
 
 func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -87,8 +87,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		Invoker:    customerPayer.UUID().String(),
 		Currency:   currency,
 		Amount:     deposit,
-		Source:     "test_customer_prepay",
-		SourceID:   &depositID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_customer_prepay", depositID.String()),
 	})
 	require.NoError(t, err)
 
@@ -215,7 +214,7 @@ func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 // second invoker is independently metered (per-invoker, not pooled — #563).
 func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	customerPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
 
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -229,8 +228,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 		Invoker:    customerPayer.UUID().String(),
 		Currency:   money.DefaultCurrency,
 		Amount:     1_000_000_000,
-		Source:     "test_customer_prepay",
-		SourceID:   &depositID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_customer_prepay", depositID.String()),
 	})
 	require.NoError(t, err)
 
@@ -261,7 +259,7 @@ func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
 		money.NewMoneyService(suite.App.Runtime.DB),
 		spendgate.New(suite.RedisClient),
 		admission.NewSpendgatePolicyLoader(
-			admission.NewPayerSpendLimitStore(suite.App.Runtime.DB),
+			admission.NewBillingPolicyStore(suite.App.Runtime.DB),
 			admission.NewInvokerSpendLimitStore(suite.App.Runtime.DB),
 			nil,
 		),

@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,19 +40,19 @@ func cleanupDedupMark(t *testing.T, ctx context.Context, dbi *db.DB, eventID str
 // the event — the Postgres truth row backstops the flushed cache.
 func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	rdb, rctx := dbtest.SharedRedisClient(t)
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyServiceWithTTL(rdb, time.Hour)
+	idem := replaycache.NewStoreWithTTL(rdb, time.Hour)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_flush_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
 	applies := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(context.Context) error { applies++; return nil })
 	}
 
@@ -70,30 +70,31 @@ func TestWebhookDedupSurvivesRedisFlush(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.TestEvent", eventID)
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, replaycache.StatusSuccess, rec.Status)
 }
 
 // Two replicas with NO shared Redis (independent per-process memStores) but
 // one Postgres: the second replica's delivery must not reapply.
 func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idemA := idempotency.NewIdempotencyService(nil)
+	idemA := replaycache.NewStore(nil)
 	defer idemA.Close()
-	idemB := idempotency.NewIdempotencyService(nil)
+	idemB := replaycache.NewStore(nil)
 	defer idemB.Close()
-	replicaA := NewDeduplicationService(idemA, dbi)
-	replicaB := NewDeduplicationService(idemB, dbi)
+	replicaA, errreplicaA := NewDeduplicationService(idemA, dbi)
+	require.NoError(t, errreplicaA)
+	replicaB, errreplicaB := NewDeduplicationService(idemB, dbi)
+	require.NoError(t, errreplicaB)
 
 	eventID := "evt_replicas_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
 	applies := 0
 	handler := func(context.Context) error { applies++; return nil }
 
-	require.NoError(t, replicaA.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI, nil, handler))
-	require.NoError(t, replicaB.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI, nil, handler))
+	require.NoError(t, replicaA.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI.EventSource(), nil, handler))
+	require.NoError(t, replicaB.ProcessWebhook(ctx, eventID, "TestEvent", models.RailNMI.EventSource(), nil, handler))
 	require.Equal(t, 1, applies, "exactly one replica may apply the delivery")
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.nmi.TestEvent", eventID))
 }
@@ -102,13 +103,13 @@ func TestWebhookDedupTwoReplicasNoSharedRedis(t *testing.T) {
 // mark, no cache entry. Redelivery must RUN the (replay-safe, #675) handler and
 // converge — final state correct, effect applied once, mark recorded.
 func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_crash_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
@@ -129,13 +130,13 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 	require.Equal(t, 0, dedupMarkRows(t, ctx, dbi, "webhook.stripe.TestEvent", eventID))
 
 	// Redelivery: handler runs again (no mark), effect converges, mark lands.
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe, nil, handler))
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe.EventSource(), nil, handler))
 	require.Equal(t, 2, runs, "post-crash redelivery must run the handler")
 	require.Equal(t, 1, effects[eventID], "replay-safe effect applied exactly once")
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.stripe.TestEvent", eventID))
 
 	// Further redeliveries are skipped outright.
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe, nil, handler))
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailStripe.EventSource(), nil, handler))
 	require.Equal(t, 2, runs)
 }
 
@@ -143,13 +144,13 @@ func TestWebhookDedupCrashBeforeMarkConverges(t *testing.T) {
 // commits atomically with the effects — a rollback takes the mark with it, and
 // a commit makes the wrapper's verify-or-write a no-op.
 func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_intx_" + uuid.NewString()
 	op := "webhook.ccbill.TestEvent"
@@ -157,7 +158,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 
 	// Effects tx rolls back AFTER writing the mark: the mark must be gone too.
 	boom := errors.New("boom")
-	err := svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	err := svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(ctx context.Context) error {
 			return dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				if err := MarkWebhookProcessedInTx(ctx, tx); err != nil {
@@ -172,7 +173,7 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 	// Success: mark written inside the effect tx; wrapper verify is a no-op.
 	runs := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(ctx context.Context) error {
 				runs++
 				return dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -191,18 +192,18 @@ func TestWebhookDedupInTxMarkAtomicity(t *testing.T) {
 // Without a merchant on ctx there is no Postgres truth row — dedup degrades to
 // the Redis/memory layer with a warning instead of failing the webhook.
 func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := context.Background() // deliberately no merchant
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_nomerchant_" + uuid.NewString()
 	applies := 0
 	deliver := func() error {
-		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+		return svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 			func(context.Context) error { applies++; return nil })
 	}
 	require.NoError(t, deliver())
@@ -214,18 +215,18 @@ func TestWebhookDedupNoMerchantFallsBackToRedisOnly(t *testing.T) {
 // Non-retryable failures are terminally handled: the truth row is written, so
 // even a cache flush cannot resurrect the futile retries.
 func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	idem := idempotency.NewIdempotencyService(nil)
+	idem := replaycache.NewStore(nil)
 	defer idem.Close()
-	svc := NewDeduplicationService(idem, dbi)
+	svc, errsvc := NewDeduplicationService(idem, dbi)
+	require.NoError(t, errsvc)
 
 	eventID := "evt_nonretry_" + uuid.NewString()
 	cleanupDedupMark(t, ctx, dbi, eventID)
 	attempts := 0
-	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	require.NoError(t, svc.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error {
 			attempts++
 			return MarkWebhookErrorNonRetryable(fmt.Errorf("bad payload"))
@@ -234,10 +235,11 @@ func TestWebhookDedupNonRetryableWritesTruth(t *testing.T) {
 	require.Equal(t, 1, dedupMarkRows(t, ctx, dbi, "webhook.ccbill.TestEvent", eventID))
 
 	// Fresh replica (empty memStore = post-flush): still skipped via Postgres.
-	idem2 := idempotency.NewIdempotencyService(nil)
+	idem2 := replaycache.NewStore(nil)
 	defer idem2.Close()
-	svc2 := NewDeduplicationService(idem2, dbi)
-	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill, nil,
+	svc2, errsvc2 := NewDeduplicationService(idem2, dbi)
+	require.NoError(t, errsvc2)
+	require.NoError(t, svc2.ProcessWebhook(ctx, eventID, "TestEvent", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error { attempts++; return nil }))
 	require.Equal(t, 1, attempts)
 }

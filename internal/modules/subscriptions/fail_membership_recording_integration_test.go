@@ -3,13 +3,11 @@
 package subscriptions
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 // #733: a declined renewal routed through FailMembership durably records a
@@ -18,7 +16,7 @@ import (
 // active->past_due hop in the SAME transaction.
 func TestFailMembership_RecordsFailedAttemptAndTransition(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := failopenCtx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	code := "202"

@@ -15,10 +15,10 @@ import (
 // Subscriptions and the vault roster read the v5 JSON API; the transaction
 // search stays on query.php (#663: v5 payments has no list/search).
 type nmiQueryClient interface {
-	ListSubscriptionsPage(cursor string, perPage int) (nmi.SubscriptionPage, error)
-	GetSubscription(subscriptionID string) (nmi.V5Subscription, bool, error)
-	ListCustomersPage(cursor string, perPage int, id string) (nmi.CustomerPage, error)
-	SearchTransactions(filter nmi.QueryFilter) (string, error)
+	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
+	GetSubscription(ctx context.Context, subscriptionID string) (nmi.V5Subscription, bool, error)
+	ListCustomersPage(ctx context.Context, cursor string, perPage int, id string) (nmi.CustomerPage, error)
+	SearchTransactions(ctx context.Context, filter nmi.QueryFilter) (string, error)
 }
 
 // NMIFetcher pulls NMI state:
@@ -78,18 +78,25 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 	}
 
 	// Vault first: the subscription mapping joins email/name from it.
-	vault, identity, err := f.fetchVault(ctx, params)
+	vault, identity, err := f.fetchPaymentMethods(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("nmi customer roster: %w", err)
 	}
-	snap.VaultEntries = vault
+	snap.PaymentMethods = vault
 
 	subs, err := f.fetchSubscriptions(ctx, params, identity)
 	if err != nil {
 		return nil, fmt.Errorf("nmi subscription roster: %w", err)
 	}
 	snap.Subscriptions = subs
-	if params.SubscriptionID == "" {
+	// #842: "exhaustive" is an ABSENCE PROOF — it authorizes cancelling every
+	// local subscription missing from this list. A successful-but-empty
+	// GET /v5/subscriptions is indistinguishable from a complete roster of an
+	// empty gateway: a misdeclared account_id, a credential rotated onto a
+	// sibling sub-account, or an incident returning an empty first page with
+	// has_more=false all look exactly like "this merchant has no subscribers".
+	// So a roster only proves absence when it actually returned rows.
+	if params.SubscriptionID == "" && len(subs) > 0 {
 		snap.Coverage.SubscriptionsExhaustive = true
 	}
 
@@ -108,19 +115,19 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 
 // --- GET /v5/subscriptions ---
 
-// nmiVaultIdentity is the email/name joined onto subscriptions by vault id.
-type nmiVaultIdentity struct {
+// nmiCustomerIdentity is the email/name joined onto subscriptions by vault id.
+type nmiCustomerIdentity struct {
 	Email    string
 	Username string
 }
 
-func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiVaultIdentity) ([]RemoteSubscription, error) {
+func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiCustomerIdentity) ([]RemoteSubscription, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	var subs []nmi.V5Subscription
 	if params.SubscriptionID != "" {
-		sub, found, err := f.Client.GetSubscription(params.SubscriptionID)
+		sub, found, err := f.Client.GetSubscription(ctx, params.SubscriptionID)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +140,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		cursor := ""
 		seenCursor := map[string]bool{}
 		for {
-			page, err := f.Client.ListSubscriptionsPage(cursor, nmiV5PageLimit)
+			page, err := f.Client.ListSubscriptionsPage(ctx, cursor, nmiV5PageLimit)
 			if err != nil {
 				return nil, err
 			}
@@ -153,17 +160,17 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	out := make([]RemoteSubscription, 0, len(subs))
 	for _, s := range subs {
-		vaultID := strings.TrimSpace(s.CustomerVaultID)
+		railCustomerRef := strings.TrimSpace(s.CustomerVaultID)
 		sub := RemoteSubscription{
 			RailSubscriptionID: strings.TrimSpace(s.ID),
 			// NMI declares no per-subscription status (see fetcher doc);
 			// RawStatus stays empty on purpose.
 			Status:     SubscriptionStatusUnknown,
-			CustomerID: vaultID,
+			CustomerID: railCustomerRef,
 			Currency:   "", // the subscription resource does not echo currency
 			Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
 		}
-		if who, ok := identity[vaultID]; ok {
+		if who, ok := identity[railCustomerRef]; ok {
 			sub.Email = who.Email
 			sub.Username = who.Username
 		}
@@ -253,7 +260,7 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	seenFirst := map[string]bool{}
 	for page := 1; ; page++ {
 		filter.PageNumber = page
-		raw, err := f.Client.SearchTransactions(filter)
+		raw, err := f.Client.SearchTransactions(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -354,7 +361,7 @@ func normalizeNMIAction(actionType string) (TransactionType, bool) {
 
 // --- GET /v5/customers ---
 
-func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]RemoteVaultEntry, map[string]nmiVaultIdentity, error) {
+func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams) ([]RemotePaymentMethod, map[string]nmiCustomerIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -362,7 +369,7 @@ func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]Remo
 	cursor := ""
 	seenCursor := map[string]bool{}
 	for {
-		page, err := f.Client.ListCustomersPage(cursor, nmiV5PageLimit, params.CustomerID)
+		page, err := f.Client.ListCustomersPage(ctx, cursor, nmiV5PageLimit, params.CustomerID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -378,18 +385,18 @@ func (f *NMIFetcher) fetchVault(ctx context.Context, params FetchParams) ([]Remo
 		cursor = next
 	}
 
-	out := make([]RemoteVaultEntry, 0, len(customers))
-	identity := make(map[string]nmiVaultIdentity, len(customers))
+	out := make([]RemotePaymentMethod, 0, len(customers))
+	identity := make(map[string]nmiCustomerIdentity, len(customers))
 	for _, c := range customers {
-		entry := RemoteVaultEntry{
-			CustomerVaultID: strings.TrimSpace(c.ID),
+		entry := RemotePaymentMethod{
+			RailCustomerRef: strings.TrimSpace(c.ID),
 			Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),
 		}
 		if billing := c.PrimaryBilling(); billing != nil {
 			entry.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
 			entry.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
 			entry.Email = strings.TrimSpace(billing.Email)
-			identity[entry.CustomerVaultID] = nmiVaultIdentity{
+			identity[entry.RailCustomerRef] = nmiCustomerIdentity{
 				Email:    entry.Email,
 				Username: strings.TrimSpace(strings.TrimSpace(billing.FirstName) + " " + strings.TrimSpace(billing.LastName)),
 			}

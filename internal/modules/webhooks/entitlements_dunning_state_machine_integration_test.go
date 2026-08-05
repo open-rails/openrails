@@ -26,10 +26,9 @@ import (
 // the paid-through FACT (period end + a bounded per-period grant), never the
 // window.
 func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -68,7 +67,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -77,6 +76,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -85,6 +85,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,

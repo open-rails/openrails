@@ -4,21 +4,22 @@
 INSERT INTO openrails.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, rail_fields, rail_state,
+    subscription_id, metadata, rail_fields, rail_state, routing_reason,
     psp_id, created_at, updated_at
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7,
     sqlc.arg(currency),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
-    sqlc.narg(rail_fields), sqlc.narg(rail_state),
-    sqlc.narg(psp_id),
+    sqlc.narg(rail_fields), sqlc.narg(rail_state), sqlc.narg(routing_reason),
+    sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 
 -- name: GetCheckoutSessionByID :one
-SELECT * FROM openrails.checkout_sessions WHERE id = $1;
+SELECT * FROM openrails.checkout_sessions WHERE id = $1
+  AND deleted_at IS NULL;
 
 -- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
@@ -37,9 +38,10 @@ UPDATE openrails.checkout_sessions SET
     metadata = sqlc.narg(metadata),
     rail_fields = sqlc.narg(rail_fields),
     rail_state = sqlc.narg(rail_state),
-    psp_id = sqlc.narg(psp_id),
+    psp_id = sqlc.arg(psp_id)::uuid,
     updated_at = sqlc.arg(updated_at)
-WHERE id = $1;
+WHERE id = $1
+  AND deleted_at IS NULL;
 
 -- name: BindSolanaCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
@@ -50,11 +52,13 @@ WHERE id = $1
   AND rail = 'solana'
   AND status = 'requires_action'
   AND (reference IS NULL OR reference = sqlc.arg(reference))
-  AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = sqlc.arg(payer)::text);
+  AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = sqlc.arg(payer)::text)
+  AND deleted_at IS NULL;
 
 -- name: GetCheckoutSessionByReference :one
 SELECT * FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
+  AND cs.deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetLatestOpenCheckoutSession :one
@@ -64,14 +68,26 @@ WHERE cs.customer_id = $1
   AND cs.rail = $3
   AND cs.status IN ('created', 'requires_action')
   AND (cs.expires_at IS NULL OR cs.expires_at > sqlc.arg(now)::timestamptz)
+  AND cs.deleted_at IS NULL
 ORDER BY cs.created_at DESC
 LIMIT 1;
 
+-- Retention sweep (or#877 B4): one pass per merchant off the directory walk,
+-- with the merchant predicate written out so it stays scoped on a BYPASSRLS
+-- connection too.
+-- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)
-WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
-  AND status IN ('created', 'requires_action');
+WHERE deleted_at IS NULL
+  AND ctid IN (
+    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
+      AND cs.status IN ('created', 'requires_action')
+      AND cs.deleted_at IS NULL
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
 -- checkout sessions for a scope. Detection (read-only) for the Convergence Engine.
@@ -81,6 +97,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 ORDER BY expires_at;
 
 -- name: ExpireCheckoutSessionByID :execrows
@@ -88,4 +105,5 @@ ORDER BY expires_at;
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND status IN ('created', 'requires_action');
+  AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL;

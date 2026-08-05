@@ -18,12 +18,17 @@ import (
 
 // MockNMIServer simulates the NMI Direct Post API for testing
 type MockNMIServer struct {
-	Server            *httptest.Server
-	RequestCount      int32
-	LastRequest       map[string][]string
-	ResponseOverride  string
-	ShouldFail        bool
-	FailReason        string
+	Server           *httptest.Server
+	RequestCount     int32
+	LastRequest      map[string][]string
+	ResponseOverride string
+	ShouldFail       bool
+	FailReason       string
+	// FailCode is the NMI response_code the decline carries. It decides the
+	// or#870 bucket: the default 300 is a RETRYABLE decline (bucket 1, never
+	// terminal); 261 "Stop All Recurring Payments" is the hard mandate
+	// withdrawal (bucket 3) that can terminate on an armed deployment.
+	FailCode          string
 	IDPrefix          string
 	VaultIDCounter    int32
 	SubscriptionIDGen int32
@@ -69,7 +74,11 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		if failReason == "" {
 			failReason = "DECLINE"
 		}
-		response = fmt.Sprintf("response=2&responsetext=%s&response_code=300", failReason)
+		failCode := strings.TrimSpace(m.FailCode)
+		if failCode == "" {
+			failCode = "300"
+		}
+		response = fmt.Sprintf("response=2&responsetext=%s&response_code=%s", failReason, failCode)
 	} else if r.Form.Get("report_type") == "profile" {
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
@@ -77,8 +86,8 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if customerVault == "add_customer" {
 		// Create customer vault response
-		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
-		response = fmt.Sprintf("response=1&responsetext=SUCCESS&customer_vault_id=%s", vaultID)
+		railCustomerRef := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
+		response = fmt.Sprintf("response=1&responsetext=SUCCESS&customer_vault_id=%s", railCustomerRef)
 	} else if customerVault == "update_customer" {
 		response = "response=1&responsetext=SUCCESS"
 	} else if customerVault == "delete_customer" {
@@ -132,8 +141,8 @@ func (m *MockNMIServer) handleV5(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `{"type":"validationError","error_code":"E_VALIDATION","message":"%s"}`, m.FailReason)
 			return
 		}
-		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
-		fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}`, vaultID)
+		railCustomerRef := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
+		fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}`, railCustomerRef)
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/customers/"):
 		_, _ = w.Write([]byte(`{"object":"customer","id":"` + strings.TrimPrefix(r.URL.Path, "/customers/") + `"}`))
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/customers/"):

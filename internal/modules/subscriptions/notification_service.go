@@ -55,26 +55,6 @@ func (s *NotificationService) GetByUserID(ctx context.Context, userID string) ([
 	return s.repo.GetByUserID(ctx, userID)
 }
 
-func (s *NotificationService) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	return s.repo.GetUnseenByUserID(ctx, userID)
-}
-
-func (s *NotificationService) GetByEventType(ctx context.Context, eventType models.NotificationEventType) ([]*models.NotificationQueue, error) {
-	return s.repo.GetByEventType(ctx, eventType)
-}
-
-func (s *NotificationService) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
-	return s.repo.CountByUserAndEventSince(ctx, userID, eventType, since)
-}
-
-func (s *NotificationService) GetUsersWithPendingDigest(ctx context.Context, since time.Time) ([]string, error) {
-	return s.repo.GetUsersWithPendingDigest(ctx, since)
-}
-
-func (s *NotificationService) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
-	return s.repo.GetPendingDigestForUser(ctx, userID, since, limit)
-}
-
 func (s *NotificationService) MarkAsSeen(ctx context.Context, id uuid.UUID) error {
 	return s.repo.MarkAsSeen(ctx, id)
 }
@@ -236,8 +216,8 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		log.WithContext(ctx).Debug("payment method auto-updated - no email sent")
 		return nil
 	case models.NotificationPaymentMethodUpdateRequired:
-		log.WithContext(ctx).Debug("payment method update required - no specific email template")
-		return nil
+		// or#870 bucket 2: charging stopped, access retained, customer must act.
+		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
 	case models.NotificationSystemAlert:
 		log.WithContext(ctx).Debug("system alert - no user email sent")
 		return nil

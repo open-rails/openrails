@@ -42,8 +42,7 @@ type Subscription struct {
 	// writing on this subscription's behalf.
 	MerchantID uuid.UUID `json:"merchant_id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	// Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	ProductID  uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
 	PriceID    uuid.UUID `json:"price_id"`   // Required for all subscriptions
@@ -63,8 +62,8 @@ type Subscription struct {
 	// Payment rail information
 	Rail               Rail   `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
-	// PspID is the provider account that owns this subscription (#641).
-	PspID           *uuid.UUID `json:"psp_id,omitempty"`
+	// PspID is the PSP that owns this subscription (#641).
+	PspID           uuid.UUID  `json:"psp_id"`
 	UserEmail       *string    `json:"user_email,omitempty"`
 	PaymentMethodID *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
 

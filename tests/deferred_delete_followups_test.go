@@ -27,7 +27,7 @@ import (
 // the subscription, across all statuses.
 func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, status string, nextAttemptAt time.Time) {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(MAX(status), ''),
@@ -44,7 +44,7 @@ func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.U
 // row).
 func countLiveNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) int {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	var count int
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM openrails.rail_intents
@@ -90,7 +90,7 @@ func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.Deferred
 // (#358), so NMI stops retrying the dead subscription.
 func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -119,6 +119,9 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	})
 	require.NoError(t, err)
 
@@ -145,7 +148,12 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	if updated.DeletionScheduledAt == nil {
 		assert.Equal(t, intents.StatusSucceeded, status, "marker may only be cleared by a succeeded delete intent")
 	} else {
-		assert.WithinDuration(t, time.Now(), *updated.DeletionScheduledAt, time.Minute)
+		// or#842: an AUTOMATED terminal cancel defers its irreversible rail-side
+		// delete by SystemDeleteCoolingOff. This fixture's period already ended,
+		// so there is no known future rebill to clamp against — the full window
+		// applies.
+		assert.WithinDuration(t, time.Now().Add(subscriptions.SystemDeleteCoolingOff),
+			*updated.DeletionScheduledAt, time.Minute)
 	}
 }
 
@@ -155,7 +163,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 // invoked exactly once after commit with the subscription's user and ~now.
 func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -185,17 +193,24 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	updated := suite.GetSubscription(sub.ID)
 	require.Equal(t, models.StatusCancelled, updated.Status)
 	require.NotNil(t, updated.DeletionScheduledAt, "durable deletion marker must persist with the cancellation")
-	assert.WithinDuration(t, time.Now(), *updated.DeletionScheduledAt, time.Minute)
+	// or#842: the marker and the scheduled run both sit a cooling-off window out,
+	// not at `now` — this fixture's period already ended, so nothing clamps it.
+	coolOff := time.Now().Add(subscriptions.SystemDeleteCoolingOff)
+	assert.WithinDuration(t, coolOff, *updated.DeletionScheduledAt, time.Minute)
 
 	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled")
 	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 	assert.Equal(t, updated.CustomerID.String(), recorder.scheduled[0].UserID)
-	assert.WithinDuration(t, time.Now(), recorder.scheduled[0].RunAt, time.Minute)
+	assert.WithinDuration(t, coolOff, recorder.scheduled[0].RunAt, time.Minute,
+		"the marker and the scheduler must agree on when the delete becomes due")
 }
 
 // TestFailMembershipLimitedModeQueuesDeleteButGatesExecution verifies the #345 gate:
@@ -204,7 +219,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 // is set (the remote subscription is left for reconciliation).
 func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -237,6 +252,9 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	// #679 queue-always: limited mode no longer suppresses RECORDING the
@@ -252,11 +270,16 @@ func TestFailMembershipLimitedModeQueuesDeleteButGatesExecution(t *testing.T) {
 	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 }
 
-// TestDunningWorkerWindowExpirySchedulesDeferredDelete closes the #344 tail:
-// the dunning worker's terminal cancellations route the rail-side
-// delete through the shared deferred scheduler (no inline delete), so window
-// expiry persists the durable marker and schedules exactly one delete.
-func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
+// TestDunningWorkerStalenessSchedulesNoDelete is the #839 inversion of the old
+// window-expiry test. Staleness used to be a terminal cancellation that queued
+// the rail-side delete through the shared deferred scheduler; it is now a PARK.
+// A 60-day-stale row is exactly the legacy-import shape the old code destroyed
+// on sight, with no charge and no provider evidence — the clock is not a death
+// certificate. The #344 routing (terminal cancels go through the deferred
+// scheduler, never an inline delete) is still pinned, by the sibling
+// TestFailMembershipDunningExhaustionSchedulesNMIDelete, on real exhausted
+// dunning where a terminal outcome is actually earned.
+func TestDunningWorkerStalenessSchedulesNoDelete(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
@@ -293,16 +316,15 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	updated := suite.GetSubscription(sub.ID)
-	require.Equal(t, models.StatusCancelled, updated.Status)
-	require.NotNil(t, updated.DeletionScheduledAt, "terminal window-expiry cancel must persist the deferred-delete marker")
+	require.Equal(t, models.StatusUnknown, updated.Status,
+		"a stale rebill parks for provider verification; it is never cancelled on a date comparison (#839)")
+	require.Nil(t, updated.CancelledAt, "cancellation is a last resort and nothing here justified it")
+	require.Nil(t, updated.DeletionScheduledAt, "no deferred-delete marker may be persisted for a merely stale row")
 
-	var scheduledForSub []scheduledDelete
 	for _, scheduled := range recorder.scheduled {
-		if scheduled.SubscriptionID == sub.ID {
-			scheduledForSub = append(scheduledForSub, scheduled)
-		}
+		require.NotEqual(t, sub.ID, scheduled.SubscriptionID,
+			"an NMI vault delete is irreversible; staleness alone must never queue one")
 	}
-	require.Len(t, scheduledForSub, 1, "exactly one deferred delete scheduled for this subscription (no inline delete)")
 }
 
 // TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes covers the
@@ -311,7 +333,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 // minus the safety margin), and the resume worker supersedes it.
 func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -360,8 +382,10 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 	}
-	require.NoError(t, resumeWorker.Work(ctx, &river.Job[riverjobs.ResumeSubscriptionArgs]{
-		Args: riverjobs.ResumeSubscriptionArgs{UserID: userID, SubscriptionID: sub.ID},
+	require.NoError(t, resumeWorker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
+		Args: riverjobs.ResumeSubscriptionArgs{
+			MerchantID: dbtest.TestMerchantID.UUID(), UserID: userID, SubscriptionID: sub.ID,
+		},
 	}))
 
 	resumed := suite.GetSubscription(sub.ID)
@@ -372,4 +396,46 @@ func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 	require.Equal(t, 1, count)
 	assert.Equal(t, intents.StatusSuperseded, status, "resume supersedes the pending delete intent")
 	assert.Zero(t, countLiveNMIDeleteIntents(t, suite, sub.ID))
+}
+
+// TestResumeWorkerRefusesToSilentlyDropAUserRequestedResume is or#877 B7's
+// standing guard. The defect was never "the resume failed" — it was that the
+// worker could not SEE its own subscription on the bare job context, took the
+// not-found branch, logged at INFO and returned nil. River recorded a completed
+// job, the user stayed cancelled, and nothing above INFO said so.
+//
+// A resume is user-requested work. Not doing it is an error, whatever the
+// reason: an unresolvable merchant and an invisible subscription both surface.
+func TestResumeWorkerRefusesToSilentlyDropAUserRequestedResume(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	rt := suite.App.Runtime
+
+	worker := &riverjobs.ResumeSubscriptionWorker{
+		DB:                           rt.DB,
+		Config:                       rt.Config,
+		EntitlementService:           rt.EntitlementService,
+		SubscriptionService:          rt.SubscriptionService,
+		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
+	}
+
+	t.Run("a subscription it cannot see is an error, not a success", func(t *testing.T) {
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
+			Args: riverjobs.ResumeSubscriptionArgs{
+				MerchantID:     dbtest.TestMerchantID.UUID(),
+				UserID:         uuid.New().String(),
+				SubscriptionID: uuid.New(),
+			},
+		})
+		require.Error(t, err, "an invisible subscription must not be reported as a completed resume")
+	})
+
+	t.Run("no merchant on the job args is an error", func(t *testing.T) {
+		err := worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.ResumeSubscriptionArgs]{
+			Args: riverjobs.ResumeSubscriptionArgs{
+				UserID:         uuid.New().String(),
+				SubscriptionID: uuid.New(),
+			},
+		})
+		require.Error(t, err, "a River job carries no ambient merchant; the worker must refuse rather than read nothing")
+	})
 }

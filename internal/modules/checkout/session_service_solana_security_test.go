@@ -9,11 +9,30 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
+
+	solanago "github.com/gagliardetto/solana-go"
 )
+
+// fakeMintReader serves a synthetic, initialized 6-decimal SPL mint for any
+// address. Decimals come from the chain now (#817), so a checkout test must arm
+// a reader or every solana quote fails closed before it computes anything.
+type fakeMintReader struct{}
+
+func (fakeMintReader) GetAccountData(context.Context, solanago.PublicKey) ([]byte, error) {
+	blob := make([]byte, solanaint.MintAccountSize)
+	blob[44] = 6
+	blob[45] = 1
+	return blob, nil
+}
+
+func testSolanaMintDecimals() solanamodule.MintDecimalsSource {
+	return solanamodule.NewMintDecimals(fakeMintReader{})
+}
 
 func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *testing.T) {
 	t.Parallel()
@@ -21,6 +40,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -28,7 +48,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     1000,
-		Currency:   "eur",
+		Currency:   "EUR",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -47,6 +67,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -54,7 +75,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     0,
-		Currency:   "usd",
+		Currency:   "USD",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -73,6 +94,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -82,7 +104,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 		PriceID:    uuid.New(),
 		Amount:     1000,
-		Currency:   "usd",
+		Currency:   "USD",
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",
@@ -104,6 +126,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
 		rails:                    testSolanaCheckoutRails(),
+		solanaMints:              testSolanaMintDecimals(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -117,7 +140,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 			PriceID:    uuid.New(),
 			Amount:     1000,
-			Currency:   "usd",
+			Currency:   "USD",
 			Reference:  &ref,
 			RailState: map[string]any{
 				"token_symbol": "USDC",
@@ -141,7 +164,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
 			PriceID:    uuid.New(),
 			Amount:     1000,
-			Currency:   "usd",
+			Currency:   "USD",
 			RailState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -167,11 +190,14 @@ func TestIsSolanaTransferRequestFlow(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "empty session defaults to transfer request",
+			// or#893: no missing-flow default. Every Solana session records its
+			// flow at creation, so an absent one is a session this code path did
+			// not write — the transfer-request finalize must not claim it.
+			name: "missing flow is not transfer request",
 			session: &models.CheckoutSession{
 				RailState: map[string]any{},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "explicit transfer request",
@@ -264,7 +290,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 		CustomerID: tenantSubjectID,
 		PriceID:    priceID,
 		Amount:     10000,
-		Currency:   "usd",
+		Currency:   "USD",
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",
@@ -285,7 +311,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	require.Equal(t, devnetUSDCMint, req.TokenMint)
 	require.Equal(t, testRecipientWallet, req.Recipient)
 	require.Equal(t, int64(10000), req.Amount)
-	require.Equal(t, "usd", req.Currency)
+	require.Equal(t, "USD", req.Currency)
 
 	session.RailState["token_amount"] = uint64(1_000_000)
 	req, err = solanaBuildRequestFromSession(session, "payer_wallet", "USDC")
@@ -313,8 +339,7 @@ func testSolanaCheckoutRails() railresolve.FixedSet {
 				Network: "devnet",
 				Tokens: map[string]config.TokenConfig{
 					"USDC": {
-						Mint:     devnetUSDCMint,
-						Decimals: 6,
+						Mint: devnetUSDCMint,
 					},
 				},
 			},
@@ -328,11 +353,11 @@ func (s *stubSolanaTransactionService) BuildPaymentTransactionFromQuote(ctx cont
 	return nil, nil
 }
 
-func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
+func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanaint.PurchaseMemoPolicy, processedNotAfter *time.Time) error {
 	return nil
 }
 
-type stubCheckoutExecutor struct{}
+type stubCheckoutExecutor struct{ stubRailTargets }
 
 func (s *stubCheckoutExecutor) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
 	return nil, nil

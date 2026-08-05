@@ -41,9 +41,9 @@ func TestSolanaAdapter_AutoCreateRecurringDefaultsToUSDC(t *testing.T) {
 	days := 30
 	plan := recurring.NewPlanServiceWithReader(
 		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
-		nil,
+		mintReaderStub{mint: usdcMint, decimals: 6},
 		"mainnet",
-		map[string]config.TokenConfig{"USDC": {Mint: usdcMint, Decimals: 6}},
+		map[string]config.TokenConfig{"USDC": {Mint: usdcMint}},
 	)
 	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
@@ -159,8 +159,8 @@ func TestResolveSolanaTokenFromMint(t *testing.T) {
 		nil,
 		"mainnet",
 		map[string]config.TokenConfig{
-			"USDC": {Mint: usdcMint, Decimals: 6},
-			"USD1": {Mint: usd1Mint, Decimals: 6},
+			"USDC": {Mint: usdcMint},
+			"USD1": {Mint: usd1Mint},
 		},
 	)
 
@@ -182,9 +182,9 @@ func TestSolanaAdapter_RemoteWritesDisabledDefersPublish(t *testing.T) {
 	days := 30
 	plan := recurring.NewPlanServiceWithReader(
 		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
-		nil,
+		mintReaderStub{mint: usdcMint, decimals: 6},
 		"mainnet",
-		map[string]config.TokenConfig{"USDC": {Mint: usdcMint, Decimals: 6}},
+		map[string]config.TokenConfig{"USDC": {Mint: usdcMint}},
 	)
 	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))

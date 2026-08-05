@@ -53,6 +53,7 @@ FROM (
     FROM openrails.payments p
     WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       AND p.rail = ANY(sqlc.arg(rails)::text[])
+      AND p.deleted_at IS NULL
       AND p.status = 'failed'
 ) ev
 WHERE (sqlc.narg(since)::timestamptz IS NULL OR ev.occurred_at >= sqlc.narg(since)::timestamptz)

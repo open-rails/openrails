@@ -54,6 +54,10 @@ type fakeNMIGateway struct {
 	refundCalls  atomic.Int64
 	deleteCalls  atomic.Int64
 	subDeleted   atomic.Bool
+	// deleteFails makes DELETE answer a transport-level failure — the
+	// ambiguous outcome the delete intent must verify rather than assume
+	// (or#896).
+	deleteFails atomic.Bool
 }
 
 func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
@@ -71,6 +75,11 @@ func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
 			fmt.Fprint(w, `{"object":"subscription","id":"psid","delayed_condition":"active"}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/subscriptions/"):
 			f.deleteCalls.Add(1)
+			if f.deleteFails.Load() {
+				w.WriteHeader(http.StatusBadGateway)
+				fmt.Fprint(w, `{"type":"internalError","error_code":"E_INTERNAL","message":"delete failed"}`)
+				return
+			}
 			f.subDeleted.Store(true)
 			fmt.Fprint(w, `{}`)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund"):
@@ -111,14 +120,26 @@ type findingsFixture struct {
 	fake     *fakeNMIGateway
 	client   *nmi.NMIClient
 	rt       *app.Runtime
+	psps     map[string]uuid.UUID
+}
+
+// pspFor lazily materializes (and caches) a psp row for rail, so raw fixture
+// INSERTs can stamp the now-required psp_id (or#893).
+func (fx *findingsFixture) pspFor(rail string) uuid.UUID {
+	fx.t.Helper()
+	if id, ok := fx.psps[rail]; ok {
+		return id
+	}
+	id := dbtest.EnsureTestPSP(fx.ctx, fx.t, fx.dbi.Pool(), fx.merchant, rail)
+	fx.psps[rail] = id
+	return id
 }
 
 func newFindingsFixture(t *testing.T) *findingsFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
 	mid := uuid.New()
+	dbi := dbtest.OpenMerchantDB(t, mid)
+	pool := dbi.Pool()
 	ctx := merchant.WithID(context.Background(), merchant.ID(mid))
 	sfx := uuid.NewString()[:8]
 
@@ -126,6 +147,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		t: t, dbi: dbi, ctx: ctx, merchant: mid,
 		adminID: "admin-" + sfx,
 		product: uuid.New(), price: uuid.New(),
+		psps: map[string]uuid.UUID{},
 	}
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -133,10 +155,20 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		require.NoError(t, err)
 	}
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "findings-"+sfx)
+	// SEC-18: pin the request's merchant-scoped connection, exactly as
+	// MerchantDBConnMW does for /v1/merchant/findings/*. The by-id findings
+	// queries now carry `merchant_id = openrails.current_merchant_id()`, so a
+	// handler-level fixture that skips the middleware is no longer a faithful
+	// stand-in for the route.
+	pinned, release, err := dbi.WithMerchantConn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(release)
+	ctx = pinned
+	fx.ctx = ctx
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		fx.product, "findings-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 10000000, 'usd', 720, true, $3)`, fx.price, fx.product, mid)
+	      VALUES ($1, $2, 10000000, 'USD', 720, true, $3)`, fx.price, fx.product, mid)
 	custID, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid, Subject: nil})
 	require.NoError(t, err)
 	fx.customer = custID
@@ -217,9 +249,9 @@ func (fx *findingsFixture) seedActiveSubscriptionFor(productID, priceID uuid.UUI
 	now := time.Now().UTC()
 	fx.exec(`INSERT INTO openrails.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
-	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	        VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8)`,
-		subID, priceID, productID, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant)
+	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	        VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
+		subID, priceID, productID, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant, fx.pspFor("nmi"))
 	return subID
 }
 
@@ -232,7 +264,7 @@ func (fx *findingsFixture) seedSecondProduct() (productID, priceID uuid.UUID) {
 	fx.exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "findings-prod2-"+sfx, fx.merchant)
 	fx.exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	         VALUES ($1, $2, 10000000, 'usd', 8760, true, $3)`, priceID, productID, fx.merchant)
+	         VALUES ($1, $2, 10000000, 'USD', 8760, true, $3)`, priceID, productID, fx.merchant)
 	return productID, priceID
 }
 
@@ -240,9 +272,9 @@ func (fx *findingsFixture) seedCompletedPayment(txn string, subID *uuid.UUID) uu
 	fx.t.Helper()
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'usd', 'completed', $4, $5, $6)`,
-		payID, fx.price, txn, subID, fx.customer, fx.merchant)
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement, psp_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
+		payID, fx.price, txn, subID, fx.customer, fx.merchant, fx.pspFor("nmi"))
 	return payID
 }
 
@@ -330,7 +362,9 @@ func (fx *findingsFixture) list(query string) findingsListBody {
 
 func (fx *findingsFixture) findingRow(id uuid.UUID) gen.OpenrailsReconciliationFinding {
 	fx.t.Helper()
-	row, err := gen.New(fx.dbi.Pool()).GetReconciliationFinding(fx.ctx, id)
+	// Gen(ctx) rides the fixture's pinned merchant connection; the raw pool
+	// carries no app.merchant_id, and the by-id read is merchant-scoped (SEC-18).
+	row, err := fx.dbi.Gen(fx.ctx).GetReconciliationFinding(fx.ctx, id)
 	require.NoError(fx.t, err)
 	return row
 }
@@ -669,6 +703,7 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 			Provider:       "nmi",
 			IntentType:     intents.TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
+			PspID:          fx.pspFor("nmi"),
 			Payload:        intents.NMIDeletePayload{UserID: fx.customer.String(), RailSubscriptionID: fmt.Sprintf("spent-%d", i)},
 			IdempotencyKey: intents.NMIDeleteIdempotencyKey(subID),
 			NextAttemptAt:  now,
@@ -690,6 +725,7 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 		Provider:       "nmi",
 		IntentType:     intents.TypeNMIDeleteSubscription,
 		SubscriptionID: &subID,
+		PspID:          fx.pspFor("nmi"),
 		Payload:        intents.NMIDeletePayload{UserID: fx.customer.String(), RailSubscriptionID: psid},
 		IdempotencyKey: intents.NMIDeleteIdempotencyKey(subID),
 		NextAttemptAt:  now,

@@ -12,8 +12,13 @@ UPDATE openrails.payment_settlement_events
  WHERE merchant_id = sqlc.arg(merchant_id)
    AND id = sqlc.arg(id);
 
+-- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM openrails.payment_settlement_events
- WHERE merchant_id = sqlc.arg(merchant_id)
-   AND delivered_at IS NOT NULL
-   AND delivered_at < sqlc.arg(cutoff)::timestamptz;
+ WHERE ctid IN (
+    SELECT pse.ctid FROM openrails.payment_settlement_events pse
+     WHERE pse.merchant_id = sqlc.arg(merchant_id)::uuid
+       AND pse.delivered_at IS NOT NULL
+       AND pse.delivered_at < sqlc.arg(cutoff)::timestamptz
+     LIMIT sqlc.arg(row_limit)::int
+);

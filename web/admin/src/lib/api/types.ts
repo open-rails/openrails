@@ -201,6 +201,10 @@ export interface CatalogProduct {
   updated_at: string
 }
 
+// CatalogProviderState is one entry of prices.psp_links as the API projects it
+// (or#812): the map is keyed by PSP key ("mobius"), and `ids` is the stored
+// link entry verbatim — including `ids.rail`, the gateway the entry lives on.
+// sync_status is "unknown" until a live retrieve runs (GET price ?verify=true).
 export interface CatalogProviderState {
   status: "linked" | "pending_manual_link" | "sync_disabled" | "error"
   ids?: Record<string, string>
@@ -209,6 +213,39 @@ export interface CatalogProviderState {
   sync_status?: string
   drift?: { field: string; openrails_value: string; remote_value: string }[]
   message?: string
+}
+
+// CheckoutRoutingSkip mirrors the or#288 skip vocabulary
+// (internal/db/models/checkout_session.go). "" / absent = the candidate is
+// eligible.
+export type CheckoutRoutingSkip =
+  | "unknown_selector"
+  | "ambiguous_selector"
+  | "not_armed"
+  | "credentials_missing"
+  | "link_missing"
+  | "mode_unsupported"
+  | "service_unavailable"
+  | "resolve_failed"
+
+export interface CheckoutRoutingCandidate {
+  selector: string
+  rail?: string
+  skip?: CheckoutRoutingSkip
+}
+
+// CheckoutRoutingDecision is POST /merchant/payment-providers/routing/dry-run
+// (or#288): which PSP a checkout for this price would land on, and why every
+// other candidate did not. Read-only — it creates nothing.
+export interface CheckoutRoutingDecision {
+  object: "checkout_routing_decision"
+  policy: string
+  rule?: number
+  selected?: string
+  rail?: string
+  mode?: string
+  candidates: CheckoutRoutingCandidate[]
+  routing_reason?: unknown
 }
 
 export interface CatalogPrice {
@@ -418,9 +455,12 @@ export interface PaymentProviderConfig {
   drained: boolean
   open_obligations: number
   public_config?: Record<string, string>
+  // rotation_version (or#812) is the cross-node cutover watermark: the secret
+  // version this credential reached at its last rotation through this API.
+  // Absent/0 = never rotated here (manifest-armed, or pre-or#812).
   credentials: Record<
     string,
-    { configured: boolean; last_validated_at?: string }
+    { configured: boolean; last_validated_at?: string; rotation_version?: number }
   >
   first_seen_at: string
   last_validated_at?: string

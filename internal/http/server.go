@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -112,8 +112,7 @@ func (s *Server) recordBrowserRoute(pattern string) {
 	s.browserTierRoutes.Add(pattern)
 }
 
-// RouteTable returns every route pattern the standalone surface registered
-// ("GET /v1/me/balance", ServeMux syntax). Used by the route-surface test.
+// RouteTable returns the registered route surface (guard tests).
 func (s *Server) RouteTable() []string {
 	out := make([]string, len(s.routeTable))
 	copy(out, s.routeTable)
@@ -175,8 +174,8 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.PaymentMethodService == nil {
 		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
-	if deps.Runtime.VaultService == nil {
-		return nil, fmt.Errorf("server runtime vault service is required")
+	if deps.Runtime.RailPaymentMethodService == nil {
+		return nil, fmt.Errorf("server runtime payment method service is required")
 	}
 	if deps.Runtime.RailCustomerService == nil {
 		return nil, fmt.Errorf("server runtime rail customer service is required")
@@ -258,11 +257,11 @@ func New(deps Dependencies) (*Server, error) {
 			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
+				deps.Runtime.CheckoutService.SetPSPSecretResolver(tsvc)
 			}
-			if deps.Runtime.VaultService != nil {
-				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.VaultService.SetRailMerchantAccountSecretResolver(tsvc)
+			if deps.Runtime.RailPaymentMethodService != nil {
+				deps.Runtime.RailPaymentMethodService.SetMerchantSecretStore(secretStore)
+				deps.Runtime.RailPaymentMethodService.SetPSPSecretResolver(tsvc)
 			}
 		}
 
@@ -307,15 +306,16 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Canonical provider-only webhook surface (#650): /v1/webhooks/:provider for NMI/CCBill
 	// (their payloads carry account identity) and /v1/webhooks/:provider/:account_id for
-	// direct Stripe. The handler resolves the provider account from the payload/route, derives
+	// direct Stripe. The handler resolves the PSP from the payload/route, derives
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
 	s.registerWebhookRoutes(mux)
-	// Merchant-scoped webhook routing (issue #529): /v1/merchants/:merchant/webhooks/:provider
-	// resolves the merchant from the path slug, then loads THAT merchant's signing
-	// secret and verifies the signature AFTER merchant resolution. Kept as a transition alias
-	// alongside the canonical provider-only surface above (#650).
-	s.registerMerchantWebhookRoutes(mux)
+	// or#893: the merchant-scoped alias (/v1/merchants/:merchant/webhooks/...,
+	// #529) is NOT mounted here. It was a transition alias beside the canonical
+	// surface above; standalone resolves the merchant from PSP
+	// identity, so a URL slug is a second way to say the same thing. Embedded
+	// hosts still mount it — a pinned merchant has no payload-derived identity
+	// to resolve — via internal/http/embedhttp.
 
 	s.publicHandler = s.wrapPublicHandler(mux)
 
@@ -336,7 +336,7 @@ func (s *Server) trustedProxies() *iputil.TrustedProxies {
 // replay store (#579), nil-safe against a Server built without New() (some
 // unit tests construct &Server{} directly and call wrapPublicHandler, e.g.
 // routes_self_test.go).
-func (s *Server) httpIdempotencyService() *idempotency.IdempotencyService {
+func (s *Server) httpIdempotencyService() *replaycache.Store {
 	if s == nil || s.runtime == nil {
 		return nil
 	}
@@ -402,13 +402,3 @@ func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchan
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }
-
-// Close currently does not own underlying resources; callers should close the App.
-func (s *Server) Close(_ context.Context) error {
-	log.Info("Billing HTTP server shut down")
-	return nil
-}
-
-func (s *Server) Cfg() *config.Config {
-	return s.cfg
-}

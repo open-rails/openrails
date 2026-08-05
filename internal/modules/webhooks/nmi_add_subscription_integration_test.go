@@ -70,7 +70,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 	t.Helper()
 
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -163,6 +163,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 	periodStart := now.Add(-30 * 24 * time.Hour)
 	periodEnd := now.Add(5 * 24 * time.Hour)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	createParams := gen.CreateSubscriptionParams{
 		MerchantID:               dbtest.TestMerchantID.UUID(),
 		ID:                       f.subscriptionID,
@@ -172,6 +173,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 		EntitlementsSpecSnapshot: entitlementsSpecJSON,
 		Status:                   string(subStatus),
 		Rail:                     string(models.RailNMI),
+		PspID:                    pspID,
 		RailSubscriptionID:       f.providerSubID,
 		StartedAt:                now,
 		CreatedAt:                now,
@@ -226,7 +228,7 @@ func (f *nmiConvergeFixture) status(t *testing.T, ctx context.Context) string {
 // row, and grants the entitlement — fetch-sourced, never payload-sourced.
 // Duplicate wake-ups are no-ops.
 func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := f.dbi.Pool()
@@ -277,7 +279,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 // A pending signup with NO fetched charge attempt yet (settlement lag) parks
 // as retry-later; the subscription stays pending, nothing is fabricated.
 func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -290,7 +292,7 @@ func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
 // NMI v5 404 IS provider truth (cancelled records are deleted at NMI): the
 // REAL decider turns provider-confirmed-gone into a terminal cancel.
 func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -303,7 +305,7 @@ func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
 // Provider API down: the converge fails retryably and local state (access)
 // stays intact; a later converge against healthy truth proceeds.
 func TestNMIConvergeProviderDownParks(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
 	f := newNMIConvergeFixture(t, dsn, models.StatusActive)
 	ctx := dbtest.WithTestMerchant(context.Background())
 

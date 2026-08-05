@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -73,12 +74,12 @@ const (
 // ProbeTestMode determines whether this account is currently simulating
 // transactions (NMI Test Mode / sandbox). Call only when the operating mode
 // expects sandbox money; on a live account the probe costs one declined auth.
-func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
+func (c *NMIClient) ProbeTestMode(ctx context.Context) (TestModeProbeResult, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return ProbeIndeterminate, err
 	}
 
-	approved, txnID, gatewayErr, err := c.probeAuth(probeAmount())
+	approved, txnID, gatewayErr, err := c.probeAuth(ctx, probeAmount())
 	if err != nil {
 		return ProbeIndeterminate, err
 	}
@@ -90,7 +91,7 @@ func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
 	if !approved {
 		return ProbeLive, nil
 	}
-	c.voidProbe(txnID)
+	c.voidProbe(ctx, txnID)
 	return ProbeSimulated, nil
 }
 
@@ -107,7 +108,7 @@ func probeOrderIDSuffix() string {
 // transaction id (for voiding), the gateway error text when the gateway
 // rejected the REQUEST itself (v5 error envelope or response=3), and any
 // transport error.
-func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatewayErr string, err error) {
+func (c *NMIClient) probeAuth(ctx context.Context, amount string) (approved bool, txnID string, gatewayErr string, err error) {
 	amountCents, err := v5AmountToCents(amount)
 	if err != nil {
 		return false, "", "", fmt.Errorf("nmi test-mode probe amount %q: %w", amount, err)
@@ -118,7 +119,7 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 		OrderDetails:   &v5OrderDetails{ID: probeOrderIDPrefix + probeOrderIDSuffix()},
 	}
 	var txn v5Transaction
-	if v5Err := c.sendV5Request(http.MethodPost, "/payments/auth", req, &txn); v5Err != nil {
+	if v5Err := c.sendV5Request(ctx, http.MethodPost, "/payments/auth", req, &txn); v5Err != nil {
 		if errors.Is(v5Err, ErrProviderReadOnly) {
 			return false, "", "", v5Err
 		}
@@ -135,11 +136,11 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 // voidProbe best-effort voids an approved probe authorization. On a
 // simulating account the void is itself simulated; failures only get logged —
 // an unvoided test-card auth holds no real funds.
-func (c *NMIClient) voidProbe(txnID string) {
+func (c *NMIClient) voidProbe(ctx context.Context, txnID string) {
 	if strings.TrimSpace(txnID) == "" {
 		return
 	}
-	if err := c.Void(txnID); err != nil {
+	if err := c.Void(ctx, txnID); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"provider":       c.providerName,
 			"transaction_id": txnID,

@@ -38,6 +38,7 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	rsStale, rsGone := "rs-stale-"+sfx, "rs-gone-"+sfx
 	subStale, subGone := uuid.New(), uuid.New()
 	prices := map[uuid.UUID]uuid.UUID{}
+	psp := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		exec := func(sql string, args ...any) {
@@ -49,9 +50,9 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ud-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-			      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$7,$8)`, id, merchantID, cust, prod, price, railSub, start, periodEnd)
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+			      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$7,$8,$9)`, id, merchantID, cust, prod, price, railSub, start, periodEnd, psp.ID)
 		}
 		mk(subStale, rsStale)
 		mk(subGone, rsGone)
@@ -71,15 +72,17 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 	})
 
 	// NMI snapshot: rsGone is roster-confirmed cancelled; rsStale is absent from
-	// a NON-exhaustive roster but has a stale declined renewal → terminal cancel
-	// with the remote possibly still alive and retrying.
+	// a NON-exhaustive roster but carries a stale NON-RETRYABLE declined renewal
+	// (NMI 261, "stop all recurring payments") → terminal cancel with the remote
+	// possibly still alive and retrying. #821: the decline code is what makes
+	// this certainty — a soft decline here would park as `unknown` instead.
 	nmiSnap := &RemoteSnapshot{
 		Provider: ProviderNMI,
 		Subscriptions: []RemoteSubscription{
 			{RailSubscriptionID: rsGone, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-stale-" + sfx, SubscriptionID: rsStale, Type: TransactionTypeDecline, Success: false, DeclineCode: "261", AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}
 	fetchers := map[Provider]RailFetcher{

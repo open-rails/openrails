@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -52,7 +52,7 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 	var captchaCfg *config.CaptchaConfig
 	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
-	var httpIdempotency *idempotency.IdempotencyService
+	var httpIdempotency *replaycache.Store
 	if rt != nil {
 		rdb = rt.RedisClient
 		resolver = rt.TrustedProxies

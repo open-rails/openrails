@@ -141,7 +141,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 
 	// Money mover: any re-execution verifies by reading before sending again.
 	if intent.Attempts > 1 {
-		txnID, found, verr := client.FindSuccessfulSaleByOrderID(orderID)
+		txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 		if verr != nil {
 			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -150,7 +150,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		}
 	}
 
-	amountCents, err := moneyutil.MicrosToCentsExact(p.AmountMicros)
+	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {
 		return intents.Terminal("sale amount must be representable in whole cents: " + err.Error())
 	}
@@ -161,7 +161,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	if p.StoredCredentialRef != "" {
 		citContext = charge.OneTimeReuse(p.StoredCredentialRef)
 	}
-	saleResp, err := client.RunSale(nmi.SaleParams{
+	saleResp, err := client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  p.CustomerVaultID,
 		BillingID:        p.BillingID,
 		Amount:           moneyutil.Cents(amountCents),
@@ -178,8 +178,8 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 			// The charge may have landed; the verifier resolves via reads.
 			return intents.Ambiguous("sale outcome unknown: " + err.Error())
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// #796: a parsed checkout decline is a charge attempt — record the
 			// failed payments row (verbatim code) or approval_rate silently
 			// inflates. Idempotent per intent.
@@ -190,14 +190,14 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 				SyntheticTransactionID: "nmi_sale_declined:" + intent.ID.String(),
 				AmountMicros:           p.AmountMicros,
 				Currency:               p.Currency,
-				FailureCode:            nmidirect.FailureCode(vaultErr),
+				FailureCode:            nmidirect.FailureCode(pmErr),
 				AttemptKind:            payments.AttemptInitial,
-				TokenType:              charge.TokenTypeProviderVault,
+				TokenType:              charge.TokenTypePSPToken,
 			})
-			return intents.TerminalWithEvidence(vaultErr.Error(), map[string]any{
+			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
 				"declined":        true,
-				"response_code":   vaultErr.ResponseCode,
-				"localization_id": vaultErr.LocalizationID,
+				"response_code":   pmErr.ResponseCode,
+				"localization_id": pmErr.LocalizationID,
 			})
 		}
 		// Request-level rejection (validation, config): nothing was charged.
@@ -220,7 +220,7 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(orderID)
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}
@@ -254,7 +254,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 		Currency:      p.Currency,
 		Metadata:      metadata,
 		AttemptKind:   payments.AttemptInitial,
-		TokenType:     charge.TokenTypeProviderVault,
+		TokenType:     charge.TokenTypePSPToken,
 	})
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the
@@ -279,11 +279,11 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 // Best-effort by design: a miss just means the next successful charge
 // re-captures (the query is write-once either way).
 func (h *NMISaleIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISalePayload, transactionID string) {
-	if h.Sale == nil || h.Sale.VaultService == nil || h.Sale.VaultService.DB == nil {
+	if h.Sale == nil || h.Sale.RailPaymentMethodService == nil || h.Sale.RailPaymentMethodService.DB == nil {
 		log.WithContext(ctx).Warn("nmi sale finalize: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := h.Sale.VaultService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+	if _, err := h.Sale.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
 		MerchantID:      merchantID,
 		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
 		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),

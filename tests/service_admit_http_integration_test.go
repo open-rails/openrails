@@ -4,7 +4,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +28,7 @@ import (
 func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	require.NotNil(t, suite.App.Runtime.RedisClient, "admit needs Redis")
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	userID := uuid.NewString()
 	requestPrefix := uuid.NewString()

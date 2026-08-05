@@ -42,18 +42,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: NMI sandbox live tests
         env:
           NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
@@ -79,18 +70,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Live rail invoice collection tests
         env:
           OPENRAILS_LIVE_RAIL_TESTS: "1"
@@ -113,11 +95,11 @@ jobs:
   # tag that ran in NO suite. It self-skips without STRIPE_SECRET_KEY. The vet
   # step compiles the tag even when the secret is absent, so bit-rot in the
   # tagged file goes red here instead of rotting silently.
-  # KNOWN-RED until a one-line fix lands in the (currently fenced) file:
-  # stripe_model_b_integration_test.go:214 must become
-  #   {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}}
-  # (RailMerchantAccountConfig lost its flat SecretKey in the payment-provider
-  # restructure).
+  # The KNOWN-RED note that used to live here is resolved: the tagged file
+  # compiles on dev (`go vet -tags stripe_integration ./internal/modules/subscriptions/`).
+  # This job is what promotes the Stripe tier-change cells in
+  # docs/rails/certification-matrix.md off `modeled` — TODO(#268) asks for
+  # exactly this run to confirm the live proration amount.
   stripe-model-b:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -126,6 +108,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Compile stripe_integration tag
@@ -150,6 +133,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Start dev Vault (KV-v2 + Transit)

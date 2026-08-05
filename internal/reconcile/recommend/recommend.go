@@ -9,7 +9,10 @@
 // internal/reconcile and internal/reconcile/converge without cycles.
 package recommend
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Known actions. Params are plain JSON objects; ids travel as strings.
 const (
@@ -89,11 +92,33 @@ func FromEvidence(evidence map[string]any) (Recommendation, bool) {
 	if err != nil {
 		return Recommendation{}, false
 	}
+	// or#863: UseNumber, so a JSON amount literal arrives as an exact
+	// json.Number and not as a float64 that an executor would truncate.
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var rec Recommendation
-	if err := json.Unmarshal(b, &rec); err != nil || rec.Action == "" {
+	if err := dec.Decode(&rec); err != nil || rec.Action == "" {
 		return Recommendation{}, false
 	}
 	return rec, true
+}
+
+// DecodeParams decodes an operator-supplied params object with UseNumber, so
+// every numeric leaf is an exact json.Number. It is the ONLY sanctioned way to
+// turn a params JSON body into map[string]any: plain json.Unmarshal yields
+// float64, and a money amount that has been through a float64 is already a
+// different amount (MONEY-3).
+func DecodeParams(raw []byte) (map[string]any, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // --- Builders for the #690 detector emissions ---

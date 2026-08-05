@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/config"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 func TestIsRecurringStablecoinSymbol(t *testing.T) {
@@ -24,37 +25,35 @@ func TestIsRecurringStablecoinSymbol(t *testing.T) {
 }
 
 func TestResolveRecurringMint(t *testing.T) {
-	// USDC resolves on both networks with 6 decimals.
+	// USDC resolves on both networks. Decimals are NOT returned (#817) — they
+	// come from the mint on-chain.
 	for _, network := range []string{"mainnet", "devnet"} {
-		mint, decimals, err := ResolveRecurringMint("USDC", network)
+		mint, err := ResolveRecurringMint("USDC", network)
 		if err != nil {
 			t.Fatalf("ResolveRecurringMint(USDC, %s): %v", network, err)
 		}
 		if mint == "" {
 			t.Fatalf("ResolveRecurringMint(USDC, %s) returned empty mint", network)
 		}
-		if decimals != 6 {
-			t.Errorf("USDC decimals on %s = %d, want 6", network, decimals)
-		}
 	}
 
 	// USD1 resolves on mainnet (where its mint exists) but not devnet (mainnet-only).
-	if mint, dec, err := ResolveRecurringMint("USD1", "mainnet"); err != nil || mint == "" || dec != 6 {
-		t.Errorf("ResolveRecurringMint(USD1, mainnet) = (%q,%d,%v), want a 6-decimal mint", mint, dec, err)
+	if mint, err := ResolveRecurringMint("USD1", "mainnet"); err != nil || mint == "" {
+		t.Errorf("ResolveRecurringMint(USD1, mainnet) = (%q,%v), want a mint", mint, err)
 	}
-	if _, _, err := ResolveRecurringMint("USD1", "devnet"); err == nil {
+	if _, err := ResolveRecurringMint("USD1", "devnet"); err == nil {
 		t.Error("ResolveRecurringMint(USD1, devnet) should fail — USD1 has no devnet mint")
 	}
 
 	// Off-allowlist tokens fail closed even though they're supported for one-off.
 	for _, sym := range []string{"PYUSD", "USDG", "SOL"} {
-		if _, _, err := ResolveRecurringMint(sym, "mainnet"); err == nil {
+		if _, err := ResolveRecurringMint(sym, "mainnet"); err == nil {
 			t.Errorf("ResolveRecurringMint(%s) = nil error, want rejection", sym)
 		}
 	}
 
 	// The eligibility error is typed.
-	_, _, err := ResolveRecurringMint("PYUSD", "mainnet")
+	_, err := ResolveRecurringMint("PYUSD", "mainnet")
 	var typed ErrTokenNotRecurringEligible
 	if !errors.As(err, &typed) {
 		t.Errorf("expected ErrTokenNotRecurringEligible for PYUSD, got %T", err)
@@ -63,8 +62,8 @@ func TestResolveRecurringMint(t *testing.T) {
 
 func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
 	const configuredMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
-	mint, decimals, err := ResolveRecurringMintFromTokens("USDC", map[string]config.TokenConfig{
-		"USDC": {Mint: configuredMint, Decimals: 6},
+	mint, err := ResolveRecurringMintFromTokens("USDC", map[string]config.TokenConfig{
+		"USDC": {Mint: configuredMint},
 	})
 	if err != nil {
 		t.Fatalf("ResolveRecurringMintFromTokens: %v", err)
@@ -72,7 +71,14 @@ func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
 	if mint != configuredMint {
 		t.Fatalf("mint = %s, want configured mint %s", mint, configuredMint)
 	}
-	if decimals != 6 {
-		t.Fatalf("decimals = %d, want 6", decimals)
+}
+
+// or#881: a merchant who declares no tokens accepts tokens.DefaultAcceptedSymbol
+// alone. That default is only defensible if it can also REBILL — otherwise the
+// zero-configuration merchant silently loses subscriptions.
+func TestDefaultAcceptedSymbolIsRecurringEligible(t *testing.T) {
+	t.Parallel()
+	if !IsRecurringStablecoinSymbol(solanatokens.DefaultAcceptedSymbol) {
+		t.Fatalf("the zero-config accepted token %s must be recurring-eligible", solanatokens.DefaultAcceptedSymbol)
 	}
 }

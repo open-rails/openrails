@@ -7,13 +7,10 @@ package pricing
 // deps) so both sides import it without an import cycle.
 
 // Allowance models included units before overage. The simple form is a flat
-// `included` amount per period. The DO-bandwidth form accrues per active resource
-// of `accrue_from` (drawing each resource's matrix-cell `included`) and pools
-// across `pool`.
+// `included` amount per period. The accrual form draws each active resource's
+// matrix-cell `included` from the `accrue_from` meter, bounded by `cap`.
 type Allowance struct {
 	Included   int64  `json:"included,omitempty" yaml:"included,omitempty"`
-	Unit       string `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Pool       string `json:"pool,omitempty" yaml:"pool,omitempty"`
 	AccrueFrom string `json:"accrue_from,omitempty" yaml:"accrue_from,omitempty"`
 	Cap        string `json:"cap,omitempty" yaml:"cap,omitempty"`
 }

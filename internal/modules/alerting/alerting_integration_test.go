@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/metrics"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -65,7 +66,7 @@ func seedMerchant(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 	exec(t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid, slug)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		for _, tbl := range []string{"merchant_notifications", "alert_rules", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "rail_merchant_accounts", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs", "finding_digest_state"} {
+		for _, tbl := range []string{"merchant_notifications", "alert_rules", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "psps", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs", "finding_digest_state"} {
 			_, _ = pool.Exec(ctx, `DELETE FROM openrails.`+tbl+` WHERE merchant_id = $1`, mid)
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid)
@@ -83,12 +84,12 @@ func seedChargebackBase(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) (acctLa
 	acctLabel = "945280-0000"
 	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	exec(t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,'P',$3)`, prod, "k-"+uuid.NewString()[:8], mid)
-	exec(t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,10000000,'usd',$3)`, price, prod, mid)
+	exec(t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,10000000,'USD',$3)`, price, prod, mid)
 	exec(t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1,$2,'nmi',$3)`, acct, mid, acctLabel)
 	now := time.Now().UTC()
 	p1, p2 := uuid.New(), uuid.New()
 	ins := `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, attempt_kind, purchased_at, created_at)
-		VALUES ($1,$2,$3,$4,'nmi',$5,$6,10000000,10000000,'usd','completed','initial',$7,$7)`
+		VALUES ($1,$2,$3,$4,'nmi',$5,$6,10000000,10000000,'USD','completed','initial',$7,$7)`
 	exec(t, pool, ins, p1, mid, cust, price, acct, "tx-"+uuid.NewString()[:8], now.AddDate(0, 0, -3))
 	exec(t, pool, ins, p2, mid, cust, price, acct, "tx-"+uuid.NewString()[:8], now.AddDate(0, 0, -2))
 	return acctLabel, p1
@@ -102,7 +103,7 @@ func addChargeback(t *testing.T, pool *pgxpool.Pool, mid, refPay uuid.UUID) {
 	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	now := time.Now().UTC()
 	exec(t, pool, `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, refunded_payment_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, reversal_kind, purchased_at, created_at)
-		SELECT $1,$2,$3, price_id, $4, 'nmi', psp_id, $5, -10000000, 10000000, 'usd', 'completed', 'chargeback', $6, $6
+		SELECT $1,$2,$3, price_id, $4, 'nmi', psp_id, $5, -10000000, 10000000, 'USD', 'completed', 'chargeback', $6, $6
 		FROM openrails.payments WHERE id=$4`,
 		uuid.New(), mid, cust, refPay, "cb-"+uuid.NewString()[:8], now.AddDate(0, 0, -1))
 }
@@ -114,9 +115,12 @@ func removeChargebacks(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 
 func newService(appDB *db.DB, email alerting.EmailSender) *alerting.Service {
 	return alerting.NewService(alerting.Deps{
-		DB:             appDB,
-		Metrics:        metrics.NewService(appDB),
-		Email:          email,
+		DB:      appDB,
+		Metrics: metrics.NewService(appDB),
+		Email:   email,
+		// #SEC-21: the sinks under test are loopback httptest servers; the
+		// production policy (zero value) refuses those.
+		Outbound:       httpx.Policy{Allow: httpx.AllowLoopback},
 		WebhookBackoff: time.Millisecond,
 	})
 }
@@ -521,8 +525,8 @@ func TestNotificationsBell(t *testing.T) {
 func TestArmedMerchantSelection(t *testing.T) {
 	// Cross-merchant enumeration runs on the base pool (BYPASSRLS admin DSN),
 	// matching the deployment posture of the #358 intent executor sweeps.
-	appDB := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	cfg, err := pgxpool.ParseConfig(dbtest.SharedPostgresDSN(t))
+	appDB := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	cfg, err := pgxpool.ParseConfig(dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 	require.NoError(t, err)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)

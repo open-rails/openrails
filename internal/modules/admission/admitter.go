@@ -15,14 +15,17 @@
 package admission
 
 import (
+	"context"
+	"fmt"
+	"math"
 	"time"
 
-	"context"
-
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -42,11 +45,36 @@ const DenyDelegatedSpendNotAllowed = "delegated_spend_not_allowed"
 // DenyBudgetExceeded is the deny code when a spend-cap window blocks the request.
 const DenyBudgetExceeded = "budget_exceeded"
 
+// DenyOutstandingCap is the or#897 outstanding_cap refusal: LEDGER-measured
+// unpaid arrears have reached the payer's credit line. Distinct from
+// insufficient_credit (which is "this one request does not fit") and from
+// delinquent (the TIME axis) — this is "your debt is at the cap".
+const DenyOutstandingCap = "outstanding_cap_reached"
+
+// DenyAccrualRateCap is the or#897 accrual_rate_cap refusal: the payer's
+// MEASURED accrual rate plus the deployment it is asking to start would exceed
+// its declared micros/hour quota. Distinct from budget_exceeded (a window of
+// past spend is full) and from outstanding_cap_reached (debt at the line) —
+// this one is about how fast money would be burning from now on, and the only
+// fix is to run less, not to pay or to wait for a window to roll.
+const DenyAccrualRateCap = "accrual_rate_cap_reached"
+
+// DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
+// outlived the merchant's grace window. Deliberately DISTINCT from
+// insufficient_credit — "you are over your limit" and "you have an unpaid
+// invoice" call for different things from the customer, and a host that cannot
+// tell them apart cannot say anything useful to either.
+const DenyDelinquent = "delinquent_unpaid_invoice"
+
 // Admitter is the service-admit money gate.
 type Admitter struct {
 	money  *money.MoneyService
 	gate   *spendgate.Gate
 	loader *SpendgatePolicyLoader
+
+	// delinquency is the optional or#878 arrears delinquency gate; nil disables
+	// it (the amount cap still applies — the two axes are independent).
+	delinquency DelinquencyGate
 
 	// wasted is the optional $-valued delegated-invoker wasted-spend cutoff (#497);
 	// nil disables it. invokerWastedWindows is the flat per-invoker backstop.
@@ -56,11 +84,35 @@ type Admitter struct {
 	// denials is the optional #733 denial counter (Redis hourly aggregates);
 	// nil disables recording.
 	denials *DenialRecorder
+
+	// rates is the optional or#897 accrual-rate meter; nil makes an
+	// accrual_rate_cap policy unenforceable, so Admit refuses rather than
+	// silently admitting past a quota nobody is measuring.
+	rates *AccrualRateMeter
+}
+
+// WithAccrualRateMeter enables the or#897 accrual_rate_cap quota.
+func (a *Admitter) WithAccrualRateMeter(m *AccrualRateMeter) *Admitter {
+	a.rates = m
+	return a
 }
 
 // NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
 func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *SpendgatePolicyLoader) *Admitter {
 	return &Admitter{money: moneySvc, gate: gate, loader: loader}
+}
+
+// DelinquencyGate answers whether a payer's arrears debt has outlived the
+// merchant's grace window. An interface so admission depends on the QUESTION,
+// not on the delinquency module's storage.
+type DelinquencyGate interface {
+	IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error)
+}
+
+// WithDelinquency enables the or#878 arrears delinquency admit gate.
+func (a *Admitter) WithDelinquency(g DelinquencyGate) *Admitter {
+	a.delinquency = g
+	return a
 }
 
 // WithWastedSpend enables the delegated-invoker wasted-spend admit gate (#497).
@@ -93,9 +145,16 @@ type AdmitRequest struct {
 
 	Currency        string
 	EstimatedAmount int64
-	Source          string    // idempotency namespace (e.g. "usage")
-	SourceID        string    // idempotency id (request id) — the hold key
-	ExpiresAt       time.Time // hold expiry
+	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
+	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
+	// the host knows it, because only the host knows what it is about to deploy.
+	// Zero means "this request adds no ongoing rate", which is the right answer
+	// for one-shot work and leaves an accrual_rate_cap payer gated on what is
+	// already running.
+	AccrualRateDeltaPerHour int64
+	Source                  string    // idempotency namespace (e.g. "usage")
+	SourceID                string    // idempotency id (request id) — the hold key
+	ExpiresAt               time.Time // hold expiry
 }
 
 // AdmitDecision is the unified outcome.
@@ -108,6 +167,9 @@ type AdmitDecision struct {
 	// total in-flight reservation after this admit. StartCapacity = Available − Held.
 	AvailableAmount int64
 	HeldAmount      int64
+	// RetryAfterSeconds is when the blocking budget window next resets (0 unless
+	// a window was the binding gate). Hosts stamp it as the 429 Retry-After.
+	RetryAfterSeconds int64
 }
 
 // Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
@@ -154,10 +216,43 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
+	// or#878, the TIME axis. The amount cap below asks "can this payer afford
+	// one more request"; this asks "has this payer's existing debt outlived the
+	// merchant's grace window". A payer can pass either and fail the other, so
+	// both gates run and each has its own deny code.
+	//
+	// This is the ONE enforcement lever OpenRails is authoritative over, and for
+	// usage billing it is the meaningful cutoff: refusing new spend is what stops
+	// the bill growing. It revokes nothing and cancels nothing — whatever the
+	// host is already running is the host's to shut off, told by the durable
+	// delinquency signal.
+	//
+	// Fails OPEN by construction: the gate below only refuses on a recorded
+	// transition that a live re-read of the invoices still agrees with.
+	if a.delinquency != nil {
+		delinquent, derr := a.delinquency.IsDelinquent(ctx, req.CustomerID, req.Currency)
+		if derr != nil {
+			return AdmitDecision{}, derr
+		}
+		if delinquent {
+			a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelinquent)
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
+		}
+	}
+
 	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
 
-	// Cached cap windows (FX-normalized to the request currency).
-	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq)
+	// or#897: the merchant's bound billing policy is resolved FIRST, because its
+	// KIND decides whether prior debt reduces this payer's headroom at all. The
+	// merchant chose which policy binds to this payer; OpenRails measures and
+	// enforces it. Served from the process-local cache when warm.
+	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	if err != nil {
+		return AdmitDecision{}, err
+	}
+
+	// Cap windows (FX-normalized to the request currency).
+	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -171,9 +266,42 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// Unlocked balance + arrears credit line (the gate's affordability inputs).
 	// Phase H makes the settled balance an O(1) ledger account read, so this stays
 	// direct and avoids a staleness window.
-	available, creditLine, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
+	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
+	}
+
+	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
+	// because it is a different question: not "can this payer pay for one more
+	// request" but "would what it is about to deploy push it past the rate it is
+	// allowed to burn at". Measured from reported usage over the policy's
+	// lookback; the host supplies what it is about to add.
+	if resolved.Kind == models.BillingPolicyAccrualRateCap {
+		if a.rates == nil {
+			// Fail CLOSED, loudly. A quota with no meter behind it is not a
+			// relaxed quota, it is a lie: the merchant declared a ceiling and
+			// would never learn it was not enforced.
+			return AdmitDecision{}, fmt.Errorf("admission: policy %q is accrual_rate_cap but no accrual-rate meter is wired", resolved.Name)
+		}
+		measured, rerr := a.rates.MeasuredRatePerHour(ctx, req.CustomerID, req.Currency, resolved.RateWindow())
+		if rerr != nil {
+			return AdmitDecision{}, rerr
+		}
+		if measured+req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour {
+			a.recordDenial(ctx, merchantID, req.CustomerID, DenyAccrualRateCap)
+			return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
+		}
+	}
+
+	// or#897 outstanding cap: unpaid arrears have consumed the whole credit line,
+	// so nothing more may be spent on credit. Distinct from the affordability
+	// refusal below — a host must be able to tell "your debt is at the cap, pay
+	// it down" from "you are out of prepaid balance". A window_spend_cap payer
+	// never reaches this: its line does not move with debt, so there is no cap
+	// to reach and unpaid invoices are the delinquency gate's business.
+	if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
+		a.recordDenial(ctx, merchantID, req.CustomerID, DenyOutstandingCap)
+		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyOutstandingCap}, nil
 	}
 
 	dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
@@ -210,7 +338,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: code, AvailableAmount: available}, nil
 	default: // window blocked
 		a.recordDenial(ctx, merchantID, req.CustomerID, DenyBudgetExceeded)
-		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available}, nil
+		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available,
+			RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
 	}
 }
 
@@ -241,7 +370,7 @@ func holdTTL(expiresAt time.Time) time.Duration {
 // currency (cross-currency wasted policies are unsupported in one policy).
 func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
 	cur := money.NormalizeCurrency(requestCurrency)
-	if err := money.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
 	explicit := false
@@ -250,7 +379,7 @@ func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindo
 			continue
 		}
 		wc := money.NormalizeCurrency(w.Currency)
-		if err := money.ValidateCurrency(wc); err != nil {
+		if err := moneyutil.ValidateCurrency(wc); err != nil {
 			return "", err
 		}
 		if !explicit {

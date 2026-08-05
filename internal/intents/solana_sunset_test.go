@@ -229,7 +229,7 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 	cycle := 720
 	mkPrice := func(archived bool) *models.Price {
 		return &models.Price{
-			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "usd",
+			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "USD",
 			AccessDurationHours: &cycle, AutoRenew: true, Archived: archived,
 			PSPLinks: map[string]map[string]string{
 				string(models.RailSolana): {models.RailKeyRail: "solana", "plan_pda": fx.pda},

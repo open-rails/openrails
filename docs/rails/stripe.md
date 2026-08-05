@@ -1,5 +1,8 @@
 # Stripe
 
+> Which flows are supported on this rail, and how well each one is verified:
+> [rail certification matrix](certification-matrix.md).
+
 Connect a Stripe account to OpenRails as a PSP on the `stripe` rail. Stripe is a
 reserved gateway: the PSP name is `stripe` (a sandbox account is conventionally
 `stripe-sandbox`). Checkout uses Stripe-hosted pages — the browser is redirected to
@@ -28,7 +31,6 @@ merchants:
     psps:
       stripe:                    # PSP name (reserved gateway name)
         stripe:                  # rail block
-          environment: live      # assertion, cross-checked against test_mode (test|live)
           account_id: acct_XXXXXXXXXXXXXXXX
           secrets:
             secret_key: sk_live_...                # or rk_live_...
@@ -68,8 +70,28 @@ Signing-secret handling depends on the merchant source:
 
 The endpoint's `api_version` is pinned to the same single constant that stamps the
 `Stripe-Version` header on every outbound call, so inbound event shapes and outbound
-parsers can never drift apart. A version bump (or a lost secret) triggers a
-delete-and-recreate of the endpoint.
+parsers can never drift apart.
+
+**Version rollover.** Stripe's `api_version` is set at creation and cannot be
+updated, and the signing secret is returned only at creation — so a bump needs a new
+endpoint. It does not need an outage. OpenRails follows Stripe's own dual-endpoint
+migration: the successor is **created first**, the predecessor is stamped
+`metadata[openrails_superseded_at]` and **left enabled**, and the outgoing secret is
+retained as `webhook_signing_secret_previous` so anything already queued on the old
+endpoint still verifies. Both endpoints deliver during the overlap; duplicate events
+are deduplicated by event id. Nothing is deleted by the bump.
+
+Retiring the superseded endpoint is the only destructive step. It happens no sooner
+than 7 days after it was replaced, requires a live enabled endpoint at the current
+version, and is gated on the operator kill switch
+(`openrails.destructive_action_switch`), which is **off by default**. Until it runs,
+an operator finding (`consistency.stripe_webhook_endpoint`) names every superseded
+endpoint and when it becomes retireable; it auto-resolves once the rollover drains.
+
+A signing secret missing locally is treated as **unknown, never lost**: OpenRails
+first tries to repair the local record (a `psps` row whose `environment` or
+`account_id` changed moves the derived secret name), and only if that fails does it
+roll over. It never deletes a remote endpoint because of a local miss.
 
 ### Catalog sync
 
@@ -103,11 +125,12 @@ required for the hosted flow. Completion arrives via `checkout.session.completed
 
 ### Sandbox testing
 
-Set `test_mode: sandbox`, declare the PSP with `environment: test` and a test key
-(`sk_test_…` / `rk_test_…`). The live-key-under-sandbox boot refusal guarantees a
-sandbox deployment can never hold a credential that moves real money. Use Stripe's
-standard test cards. `test_mode` is orthogonal to the environment axis — a fully
-gated production-style deployment can legitimately run sandbox rails.
+Set `test_mode: sandbox` and declare the PSP with a test key (`sk_test_…` /
+`rk_test_…`); the PSP's environment follows `test_mode` and is not declarable
+(#882). The live-key-under-sandbox boot refusal guarantees a sandbox deployment
+can never hold a credential that moves real money. Use Stripe's standard test
+cards. `test_mode` is orthogonal to `env` — a fully gated production-style
+deployment can legitimately run sandbox rails.
 
 ### Read-only safety gate
 

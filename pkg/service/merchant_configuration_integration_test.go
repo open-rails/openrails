@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -26,13 +27,32 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
+// requireBoundBadSpendPolicy declares a billing policy carrying only the #497
+// wasted-spend grace window and binds it to one tier (or#897). Wasted-spend
+// grace is orthogonal to the capped quantity, so it rides on the neutral
+// outstanding_cap kind with no declared amount — the payer's own arrears limit
+// (none here) still governs.
+func requireBoundBadSpendPolicy(t *testing.T, svc *billingservice.Service, ctx context.Context, tier string, limit int64) {
+	t.Helper()
+	name := "grace_" + tier
+	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{
+		Name: name,
+		Kind: "outstanding_cap",
+		BadSpendWindows: []billingservice.SpendLimitWindowInput{
+			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: limit},
+		},
+	}))
+	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
+		PolicyName: name, Tier: tier,
+	}))
+}
+
 // wastedSvcEnv builds a Service wired with Redis (so Admit + ReportWastedSpend
 // run end-to-end) and a freshly seeded payer.
 func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)
@@ -55,6 +75,10 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 		EntitlementService: entitlements.NewEntitlementService(dbi),
 		FXProvider:         fx.NewMockProvider(map[string]float64{"eur": 2}),
 		Clock:              clockwork.NewRealClock(),
+		// Production always wires this (build_runtime), and or#897 made the cache
+		// invalidate on a policy/binding write — a suite that ran without it would
+		// never exercise the path a rebinding actually takes.
+		AdmissionPolicyCache: admission.NewPolicyCache(0),
 	}
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)
@@ -64,7 +88,8 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchant_configurations")
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payer_spend_limits WHERE customer_id IS NULL OR customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.billing_policy_bindings WHERE customer_id IS NULL OR customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.billing_policies")
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
 	})
@@ -87,7 +112,7 @@ func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.
 
 func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 	svc, _, _, ctxA := wastedSvcEnv(t)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
 
 	merchantB := merchant.ID(uuid.New())
 	_, err := pool.Exec(context.Background(), `
@@ -261,7 +286,7 @@ func TestMerchantConfiguration_InvalidJSONShapeReturnsError(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 	tid, err := merchant.Require(ctx)
 	require.NoError(t, err)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.merchant_configurations (merchant_id, config)
 		VALUES ($1, '{"delegated_invoker_wasted_spend_windows":[{"key":"bad","window_seconds":"oops","limit":1}]}'::jsonb)
@@ -287,7 +312,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	svc, ms, payerA, ctx := wastedSvcEnv(t)
 	payerB := identity.CustomerIDFromString(uuid.NewString())
 	payerBID := payerB.UUID()
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerBID)
@@ -341,13 +366,8 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 
 func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
-	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
-	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
-		TrustLevel: "free",
-		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{
-			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 1_000_000},
-		},
-	}))
+	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
+	requireBoundBadSpendPolicy(t, svc, ctx, "free", 1_000_000)
 
 	res, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: string(identity.InvokerTypePayer),
@@ -391,12 +411,7 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 
 func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
-	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
-		TrustLevel: "free",
-		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{
-			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 10_000_000},
-		},
-	}))
+	requireBoundBadSpendPolicy(t, svc, ctx, "free", 10_000_000)
 	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
 		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
 			{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},

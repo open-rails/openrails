@@ -21,6 +21,19 @@ type PlanMigrationRequest = subscriptions.PlanMigrationRequest
 // PlanMigrationResult re-exports the batch + per-subscription ledger result.
 type PlanMigrationResult = subscriptions.PlanMigrationResult
 
+// PlanMigrationOutcome re-exports one subscription's classification — a LEAF of
+// PlanMigrationResult. Re-exported (#814) because a host that could name the
+// root but not its leaves had to mirror them field-by-field, which drifts on
+// every upstream change.
+type PlanMigrationOutcome = subscriptions.PlanMigrationOutcome
+
+// RailCounts re-exports the per-rail capability summary in
+// PlanMigrationResult.ByRail.
+type RailCounts = subscriptions.RailCounts
+
+// PlanMigrationCancelResult re-exports CancelPlanMigration's result.
+type PlanMigrationCancelResult = subscriptions.PlanMigrationCancelResult
+
 func (s *Service) planMigrations() (*subscriptions.PlanMigrationService, error) {
 	if s.rt.PlanMigrationService == nil {
 		return nil, fmt.Errorf("billing service: plan migration service unavailable")
@@ -61,7 +74,7 @@ func (s *Service) GetPlanMigration(ctx context.Context, batchID uuid.UUID, limit
 // CancelPlanMigration cancels every still-scheduled row in the batch. The
 // result carries RailReleaseRequired + Warning when Stripe-side schedules
 // survive the cancel and must be released out of band.
-func (s *Service) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*subscriptions.PlanMigrationCancelResult, error) {
+func (s *Service) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*PlanMigrationCancelResult, error) {
 	pm, err := s.planMigrations()
 	if err != nil {
 		return nil, err

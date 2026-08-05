@@ -57,12 +57,32 @@ import (
 //     stay live through past_due AND unknown, revoked only by a proven
 //     terminal event (FailMembership's terminal cancel).
 func TestSubscriptionLifecycleSimulation(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	// The simulation drives module services and worker INTERNALS directly
+	// (processSubscription, Converge, CreditExpiryWorker) — it stands in for the
+	// layer that opens the merchant connection in production, so it must supply
+	// what that layer supplies. Proving a worker pins its own merchant is a
+	// different test's job (or#862); on an unpinned handle every seed write and
+	// every lifecycle read here hits the FORCEd RLS and the simulation asserts
+	// on nothing.
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	mctx := dbtest.WithTestMerchant(ctx)
+	// #836/#839: terminal collection outcomes are gated on the destructive kill
+	// switch, which ships OFF — a fresh deployment cancels nothing until an
+	// operator arms it. This simulation asserts what a live, REVIEWED deployment
+	// does, so it puts itself in that state.
+	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+		dbtest.ArmDestructiveActions(sctx, t, dbtest.TestMerchantID.UUID())
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
+			dbtest.DisarmDestructiveActions(sctx, t, dbi.Qx(sctx))
+			return nil
+		})
+	})
 
 	t.Run("happy_renewals", func(t *testing.T) {
 		testHappyRenewals(t, mctx, dbi)
@@ -107,7 +127,7 @@ type simSub struct {
 // parks as `unknown` instead of ever entering dunning.
 func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodStart time.Time, withInitialPayment bool, creditExpiryHours *int) simSub {
 	t.Helper()
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
 
 	grantLabel := "sim_credits_" + uuid.New().String()
@@ -140,16 +160,18 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 
 	cycleHours32 := int32(simCycleHours)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived: false, AccessDurationHours: &cycleHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	billingID := "bill_" + uuid.New().String()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails",
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -161,6 +183,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusActive), Rail: "nmi",
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_sim_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
@@ -176,13 +199,17 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 			PriceID:        priceID,
 			SubscriptionID: &subID,
 			Rail:           models.RailNMI,
-			TransactionID:  "txn_signup_" + uuid.New().String(),
-			Amount:         999,
-			ListAmount:     999,
-			Currency:       "usd",
-			Status:         payments.PaymentStatusCompletedValue,
-			PurchasedAt:    periodStart,
-			CreatedAt:      periodStart,
+			PspID:          &pspID,
+			// or#827: a completed positive charge must DECLARE where the money
+			// moved; the signup payment is a real rail settlement.
+			MoneyMovement: models.MoneyMovementRail,
+			TransactionID: "txn_signup_" + uuid.New().String(),
+			Amount:        999,
+			ListAmount:    999,
+			Currency:      "USD",
+			Status:        payments.PaymentStatusCompletedValue,
+			PurchasedAt:   periodStart,
+			CreatedAt:     periodStart,
 		}))
 	}
 
@@ -326,6 +353,10 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 	worker := &DunningWorker{
 		DB: dbi, Clock: clock,
 		NMIResolver: fakeDunningNMIResolver{client: client},
+		// or#865: the worker's self-assembled intent Runner parks every intent
+		// when no mode is stated — the simulation renews and dunns for real, so
+		// it says "full".
+		Config: fullModeConfig(),
 	}
 
 	engine := converge.NewConvergeEngine(dbi)
@@ -417,7 +448,7 @@ func (r *simRig) waitFor(t *testing.T, ctx context.Context, scope converge.Scope
 func creditGrantCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID) int {
 	t.Helper()
 	var n int
-	require.NoError(t, dbi.Pool().QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
 		"SELECT count(*) FROM openrails.grants WHERE source_id LIKE '%' || $1 || '%' AND kind = 'credit' AND event = 'grant'",
 		subID.String()).Scan(&n))
 	return n
@@ -426,7 +457,7 @@ func creditGrantCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.
 func paymentCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID, status string) int {
 	t.Helper()
 	var n int
-	require.NoError(t, dbi.Pool().QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
 		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND status = $2",
 		subID, status).Scan(&n))
 	return n

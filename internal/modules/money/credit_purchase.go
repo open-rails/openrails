@@ -1,3 +1,15 @@
+// Catalog credit-purchase pricing: quotes a variable top-up offer
+// (catalog_credit_purchase_prices) both ways — spend -> credits and
+// credits -> spend — against the declared charge model.
+//
+// or#896: this file deliberately stops at the QUOTE. The former
+// DepositCatalogCreditPurchase wrapper (quote-then-Deposit) had no production
+// caller on any rail and duplicated the live deposit path
+// (MoneyService.Deposit, reached by POST /v1/service/credits/deposit); a
+// checkout leg that could reach it does not exist — a top-up product's offers
+// are rate-priced rows in the sidecar table, never `prices` rows, so no
+// checkout session can name one. Delivery is the caller's Deposit call with
+// the quote's unit/amount/expiry, keyed on its own payment source id.
 package money
 
 import (
@@ -8,8 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
@@ -120,32 +131,6 @@ func (s *MoneyService) QuoteCatalogCreditPurchase(ctx context.Context, input Cat
 	}, nil
 }
 
-func (s *MoneyService) DepositCatalogCreditPurchase(ctx context.Context, payer identity.CustomerID, invoker string, input CatalogCreditPurchaseQuoteInput, sourceID string) (*CatalogCreditPurchaseQuote, *models.MoneyTransaction, error) {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil, nil, fmt.Errorf("source_id required")
-	}
-	quote, err := s.QuoteCatalogCreditPurchase(ctx, input)
-	if err != nil {
-		return nil, nil, err
-	}
-	desc := fmt.Sprintf("credit_purchase product=%s paid=%d base=%d bonus=%d total=%d", quote.ProductKey, quote.PaidAmount, quote.BaseCredits, quote.BonusCredits, quote.TotalCredits)
-	trx, err := s.Deposit(ctx, DepositParams{
-		CustomerID:  &payer,
-		Invoker:     invoker,
-		Currency:    quote.Unit,
-		Amount:      quote.TotalCredits,
-		Source:      "credit_purchase",
-		SourceID:    &sourceID,
-		ExpiresAt:   quote.ExpiresAt,
-		Description: &desc,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return quote, trx, nil
-}
-
 func (s *MoneyService) loadCatalogCreditPurchase(ctx context.Context, productKey, currency, provider string) (catalogCreditPurchaseRow, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -210,7 +195,7 @@ func (s *MoneyService) qualifyCatalogCreditUnit(ctx context.Context, unit string
 		return "", fmt.Errorf("credit purchase unit required")
 	}
 	if !IsQualifiedUnit(unit) {
-		if _, ok := CurrencyScale(unit); ok {
+		if _, ok := moneyutil.CurrencyScale(unit); ok {
 			return normalizeUnit(unit), nil
 		}
 		tid, err := merchant.Require(ctx)

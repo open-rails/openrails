@@ -18,12 +18,13 @@ type (
 	DeclaredPaymentMethod = billingimport.DeclaredPaymentMethod
 	PaymentMethodRef      = billingimport.PaymentMethodRef
 	CancelEvidence        = billingimport.CancelEvidence
-	DeclaredPayment       = billingimport.DeclaredPayment
-	DeclaredDunningEvent  = billingimport.DeclaredDunningEvent
 	DunningEvidence       = billingimport.DunningEvidence
 	DeclaredTransaction   = billingimport.DeclaredTransaction
 	DeclaredSubscription  = billingimport.DeclaredSubscription
 	DeclaredBilling       = billingimport.DeclaredBilling
+	// PSPRef names the PSP a declared row belongs to — by psps row id or by the
+	// merchant's manifest PSP key. Required attribution (or#893).
+	PSPRef = billingimport.PSPRef
 
 	// BillingImportOptions configures ImportBilling.
 	BillingImportOptions = billingimport.Options
@@ -32,6 +33,14 @@ type (
 )
 
 // ImportBilling lands a host-declared billing book — see billingimport.Import.
+// The host's pool passes the same RLS-posture gate `embedded.New` applies
+// (or#885): an import runs merchant-scoped writes, and under a privileged role
+// the merchant_isolation policies that make that scoping real are skipped.
 func ImportBilling(ctx context.Context, opts BillingImportOptions) (BillingImportResult, error) {
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	if err != nil {
+		return BillingImportResult{}, err
+	}
+	defer func() { _ = database.Close() }()
 	return billingimport.Import(ctx, opts)
 }

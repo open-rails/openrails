@@ -3,9 +3,11 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -53,6 +55,13 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 		Issuer:     issuerPtr,
 		Subject:    &subjectID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded upsert matches no row when the subject is already a
+		// customer of a DIFFERENT merchant (#889). One AuthKit instance can
+		// serve several merchants, so refuse instead of handing back an id the
+		// merchant does not own.
+		return uuid.Nil, fmt.Errorf("%w: subject %s under merchant %s", db.ErrCustomerOwnedByAnotherMerchant, subjectID, merchantID)
+	}
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -71,12 +80,19 @@ type MerchantForSubject struct {
 }
 
 // ListMerchantsForSubject returns the active merchants where subject has a
-// customer record, ordered by slug (openrails-saas #18). It runs on the
-// control-plane pool — the privileged, non-RLS role — so it reads across every
-// merchant scope in one query; the per-merchant openrails_app role could never
-// see another merchant's customers. subject is the stable AuthKit UUID subject
-// (matched against customers.subject, as TouchCustomer stores it). An empty
-// subject yields no rows rather than an error.
+// customer record, ordered by slug (openrails-saas #18). subject is the stable
+// AuthKit UUID subject (matched against customers.subject, as TouchCustomer
+// stores it). An empty subject yields no rows rather than an error.
+//
+// #824: this is a deliberately cross-merchant read — the hosted portal asks it
+// BEFORE a merchant is chosen — and it used to be a plain pool query commented
+// as running on "the privileged, non-RLS role". There is no such role: the
+// control plane shares the app's single pool and DSN, and a pool query carries
+// no app.merchant_id GUC, so under openrails_app the customers half of the join
+// matched nothing and the portal's merchant list was always EMPTY. The customers
+// lookup now goes through the SECURITY DEFINER directory function (migration
+// 0016); openrails.merchants is a global, policy-free table, so the rest is an
+// ordinary query.
 func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantForSubject, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
@@ -85,31 +101,13 @@ func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject stri
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for merchant enumeration")
 	}
-	rows, err := c.pool.Query(ctx, `
-		SELECT m.slug, COALESCE(m.display_name, '')
-		  FROM openrails.merchants m
-		 WHERE m.deleted_at IS NULL
-		   AND m.status = 'active'
-		   AND EXISTS (
-		       SELECT 1
-		         FROM openrails.customers c
-		        WHERE c.merchant_id = m.id
-		          AND c.subject = $1
-		   )
-		 ORDER BY m.slug
-	`, subject)
+	rows, err := gen.New(c.pool).ListMerchantsForCustomerSubject(ctx, subject)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []MerchantForSubject
-	for rows.Next() {
-		var m MerchantForSubject
-		if err := rows.Scan(&m.Slug, &m.DisplayName); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
+	out := make([]MerchantForSubject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, MerchantForSubject{Slug: row.Slug, DisplayName: row.DisplayName})
 	}
-	return out, rows.Err()
+	return out, nil
 }

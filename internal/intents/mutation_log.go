@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -24,7 +25,8 @@ const (
 type MutationLogParams struct {
 	MerchantID       uuid.UUID
 	Provider         string
-	PspID            *uuid.UUID
+	PspID            uuid.UUID
+	CustodianID      uuid.UUID
 	ProviderIntentID *uuid.UUID
 	IntentType       string
 	IdempotencyKey   string
@@ -47,6 +49,11 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	if p.MerchantID == uuid.Nil || p.Provider == "" || p.Phase == "" {
 		return fmt.Errorf("intents: mutation log requires merchant_id, provider, and phase")
 	}
+	// rail_mutation_logs_addressed: the log records which account the attempt was
+	// sent to, and a custodian-addressed attempt names a custodian.
+	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
+		return fmt.Errorf("intents: mutation log for %s: %w", p.Provider, db.ErrNoPSPInContext)
+	}
 	var reason *string
 	if p.Reason != "" {
 		r := scrubMutationString(p.Reason)
@@ -65,7 +72,8 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	return s.db.Gen(ctx).InsertRailMutationLog(ctx, gen.InsertRailMutationLogParams{
 		MerchantID:     p.MerchantID,
 		Rail:           p.Provider,
-		PspID:          p.PspID,
+		PspID:          uuidPtrOrNil(p.PspID),
+		CustodianID:    uuidPtrOrNil(p.CustodianID),
 		RailIntentID:   p.ProviderIntentID,
 		IntentType:     intentType,
 		IdempotencyKey: idempotencyKey,

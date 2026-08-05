@@ -24,7 +24,13 @@ const (
 	KindSubscriptionResume = "openrails.subscription_resume"
 )
 
+// MerchantID is REQUIRED on both kinds (or#877 B7). A River job context carries
+// no ambient merchant and no pinned connection, and every subscription read
+// below is RLS-scoped: without it the worker cannot see the very subscription
+// it was asked to act on. The enqueuing request always knows the merchant, so
+// the merchant travels with the job rather than being guessed at execution.
 type CancelSubscriptionArgs struct {
+	MerchantID     uuid.UUID `json:"merchant_id" river:"unique"`
 	UserID         string    `json:"user_id" river:"unique"`
 	SubscriptionID uuid.UUID `json:"subscription_id,omitempty" river:"unique"`
 	Feedback       string    `json:"feedback,omitempty"`
@@ -33,6 +39,7 @@ type CancelSubscriptionArgs struct {
 func (CancelSubscriptionArgs) Kind() string { return KindSubscriptionCancel }
 
 type ResumeSubscriptionArgs struct {
+	MerchantID     uuid.UUID `json:"merchant_id" river:"unique"`
 	UserID         string    `json:"user_id" river:"unique"`
 	SubscriptionID uuid.UUID `json:"subscription_id,omitempty" river:"unique"`
 }
@@ -55,31 +62,41 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 	if w.SubscriptionService == nil {
 		return fmt.Errorf("subscription service unavailable")
 	}
-	userID := job.Args.UserID
-	if userID == "" {
+	if job.Args.UserID == "" {
 		return fmt.Errorf("user_id required")
 	}
+	// or#877 B7: pin BEFORE the first read. This used to call GetByID on the
+	// bare job context and pin afterwards from the row it found — which under
+	// RLS it never found. Same defect as the resume worker, one file over.
+	if job.Args.MerchantID == uuid.Nil {
+		return fmt.Errorf("cancel subscription %s: merchant_id required on the job args", job.Args.SubscriptionID)
+	}
+	return w.DB.RunInMerchantScope(ctx, merchant.ID(job.Args.MerchantID), "cancel subscription", func(ctx context.Context) error {
+		return w.cancel(ctx, job.Args)
+	})
+}
 
+func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscriptionArgs) error {
+	userID := args.UserID
 	var sub *models.Subscription
 	var err error
 
 	// If subscription ID is provided, use it directly
-	if job.Args.SubscriptionID != uuid.Nil {
-		sub, err = w.SubscriptionService.GetByID(ctx, job.Args.SubscriptionID)
+	if args.SubscriptionID != uuid.Nil {
+		sub, err = w.SubscriptionService.GetByID(ctx, args.SubscriptionID)
 		if err != nil {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id":         userID,
-				"subscription_id": job.Args.SubscriptionID,
-			}).Info("subscription not found")
-			return nil
+			// NOT "not found and therefore fine": a cancel that cannot see its
+			// own subscription has failed to do what a user asked for, and must
+			// say so instead of reporting success (or#877 B7).
+			return fmt.Errorf("cancel subscription %s for user %s: %w", args.SubscriptionID, userID, err)
 		}
 		// Verify ownership
 		if sub.CustomerID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
-				"subscription_id": job.Args.SubscriptionID,
+				"subscription_id": args.SubscriptionID,
 			}).Warn("subscription ownership mismatch")
-			return nil
+			return river.JobCancel(fmt.Errorf("subscription %s does not belong to user %s", args.SubscriptionID, userID))
 		}
 	} else {
 		// Fallback to active subscription lookup
@@ -89,16 +106,20 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 			return nil
 		}
 	}
-	// Pin the owning merchant on the job context (#336): the cancel persists a
-	// deferred-delete intent and re-converges the customer, both of which require
-	// merchant resolution. River job contexts carry no ambient merchant.
-	ctx = merchant.WithID(ctx, merchant.ID(sub.MerchantID))
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,
 		"rail":            sub.Rail,
 	}).Info("processing subscription cancellation")
+
+	// or#896: a Solana cancel needs the subscriber's wallet signature, so this
+	// job can never complete — cancel it instead of retrying a rail fact
+	// forever (the API refuses the request up front; this covers jobs already
+	// queued and any other producer).
+	if sub.Rail == models.RailSolana {
+		return river.JobCancel(subscriptions.ErrSolanaCancelNeedsWalletSignature)
+	}
 
 	switch sub.Rail {
 	case models.RailStripe:
@@ -110,8 +131,8 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 			return err
 		}
 		var feedback *string
-		if job.Args.Feedback != "" {
-			feedback = &job.Args.Feedback
+		if args.Feedback != "" {
+			feedback = &args.Feedback
 		}
 		if err := w.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
@@ -125,7 +146,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 		if w.UserSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
-		if err := w.UserSubscriptionService.CancelUserSubscription(ctx, userID, job.Args.Feedback); err != nil {
+		if err := w.UserSubscriptionService.CancelUserSubscription(ctx, userID, args.Feedback); err != nil {
 			return err
 		}
 	}
@@ -150,36 +171,50 @@ type ResumeSubscriptionWorker struct {
 
 func (ResumeSubscriptionWorker) Kind() string { return KindSubscriptionResume }
 
+// Work resumes ONE subscription inside its merchant's scope (or#877 B7).
+//
+// It used to read the subscription on the bare River job context. Under
+// openrails_app that read matched `merchant_id = NULL`, took the not-found
+// branch, logged at INFO and returned NIL — so a user who cancelled and then
+// resumed inside the undo window stayed cancelled, the job was recorded
+// completed, and nothing above INFO said otherwise. Of the whole or#877 family
+// this is the only one that drops user-requested work rather than merely idling,
+// which is why an invisible subscription is now an ERROR: the job retries and
+// eventually surfaces, instead of silently succeeding.
 func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[ResumeSubscriptionArgs]) error {
 	if w.SubscriptionService == nil {
 		return fmt.Errorf("subscription service unavailable")
 	}
-	userID := job.Args.UserID
-	if userID == "" {
+	if job.Args.UserID == "" {
 		return fmt.Errorf("user_id required")
 	}
+	if job.Args.MerchantID == uuid.Nil {
+		return fmt.Errorf("resume subscription %s: merchant_id required on the job args", job.Args.SubscriptionID)
+	}
+	return w.DB.RunInMerchantScope(ctx, merchant.ID(job.Args.MerchantID), "resume subscription", func(ctx context.Context) error {
+		return w.resume(ctx, job.Args)
+	})
+}
 
+func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscriptionArgs) error {
+	userID := args.UserID
 	var sub *models.Subscription
 	var err error
 	now := time.Now().UTC()
 
 	// If subscription ID is provided, use it directly
-	if job.Args.SubscriptionID != uuid.Nil {
-		sub, err = w.SubscriptionService.GetByID(ctx, job.Args.SubscriptionID)
+	if args.SubscriptionID != uuid.Nil {
+		sub, err = w.SubscriptionService.GetByID(ctx, args.SubscriptionID)
 		if err != nil {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id":         userID,
-				"subscription_id": job.Args.SubscriptionID,
-			}).Info("subscription not found")
-			return nil
+			return fmt.Errorf("resume subscription %s for user %s: %w", args.SubscriptionID, userID, err)
 		}
 		// Verify ownership
 		if sub.CustomerID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
-				"subscription_id": job.Args.SubscriptionID,
+				"subscription_id": args.SubscriptionID,
 			}).Warn("subscription ownership mismatch")
-			return nil
+			return river.JobCancel(fmt.Errorf("subscription %s does not belong to user %s", args.SubscriptionID, userID))
 		}
 	} else {
 		// Fallback to active subscription lookup

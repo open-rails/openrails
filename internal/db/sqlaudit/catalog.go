@@ -94,16 +94,17 @@ func (c *Catalog) indexedAnywhere(col string, relations []string) bool {
 }
 
 // capsRowCount reports whether pinning col (plus merchant_id, which RLS always
-// pins) covers an entire unique key on one of the query's tables. Only then does
-// `col = ANY($n)` cap the result at one row per list element. A column that is
-// merely PART of a composite key (subscriptions.rail in UNIQUE(rail,
+// pins, plus any column the query pins to a literal) covers an entire unique key
+// on one of the query's tables. Only then does `col = ANY($n)` cap the result at
+// one row per list element. A column that is merely PART of a composite key and
+// leaves the rest open (subscriptions.rail alone in UNIQUE(rail,
 // rail_subscription_id)) caps nothing.
-func (c *Catalog) capsRowCount(col string, relations []string) bool {
+func (c *Catalog) capsRowCount(col string, s *Structure, relations []string) bool {
 	for _, t := range relations {
 		for _, key := range c.UniqueKeys[t] {
 			covered := true
 			for _, k := range key {
-				if k != col && k != "merchant_id" {
+				if _, konst := s.EqConsts[k]; k != col && k != "merchant_id" && !konst {
 					covered = false
 					break
 				}

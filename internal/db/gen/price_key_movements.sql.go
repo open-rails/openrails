@@ -12,35 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const getPriceKeyMovementAsOf = `-- name: GetPriceKeyMovementAsOf :one
-SELECT id, merchant_id, key, price_id, effective_at, created_at FROM openrails.price_key_movements
-WHERE merchant_id = $1::uuid AND key = $2::text AND effective_at <= $3::timestamptz
-ORDER BY effective_at DESC
-LIMIT 1
-`
-
-type GetPriceKeyMovementAsOfParams struct {
-	MerchantID uuid.UUID
-	Key        string
-	AsOf       time.Time
-}
-
-// The price row that was current for `key` as of `as_of` — "what did key K
-// sell on date D".
-func (q *Queries) GetPriceKeyMovementAsOf(ctx context.Context, arg GetPriceKeyMovementAsOfParams) (OpenrailsPriceKeyMovement, error) {
-	row := q.db.QueryRow(ctx, getPriceKeyMovementAsOf, arg.MerchantID, arg.Key, arg.AsOf)
-	var i OpenrailsPriceKeyMovement
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.PriceID,
-		&i.EffectiveAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const insertPriceKeyMovement = `-- name: InsertPriceKeyMovement :execrows
 
 INSERT INTO openrails.price_key_movements (

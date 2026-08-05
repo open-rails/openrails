@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -44,6 +45,12 @@ type Source interface {
 	// (inbound webhook routing #641 — may address archived accounts).
 	// Returns ErrRailNotArmed (wrapped) when nothing is armed.
 	RailConfig(ctx context.Context, rail string, accountID string) (*config.PSPConfig, error)
+	// CustodianConfig resolves a declared custodian by its VENDOR identity
+	// (kind + custodian-native account id) for the ctx merchant (or#880).
+	// Custody is not a rail, so a custodian's own webhooks cannot resolve
+	// through RailConfig — and one custodian may back several PSPs, so
+	// picking "the" PSP was never a well-defined answer.
+	CustodianConfig(ctx context.Context, kind string, accountID string) (*config.CustodianConfig, error)
 }
 
 // MerchantsSource is the production Source: scope rows via merchants.Service
@@ -69,7 +76,7 @@ func (s *MerchantsSource) service() *merchants.Service {
 	return s.MerchantsFn()
 }
 
-// environment is the deployment's provider-account environment: test under
+// environment is the deployment's PSP environment: test under
 // test_mode, live otherwise (#681).
 func (s *MerchantsSource) environment() string {
 	return config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
@@ -110,7 +117,7 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (me
 		return mid, scope, ok, err
 	}
 	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail, s.environment())
-	if errors.Is(err, merchants.ErrNoActiveRailMerchantAccount) {
+	if errors.Is(err, merchants.ErrNoActivePSP) {
 		return mid, merchants.PSPScope{}, false, nil
 	}
 	return mid, scope, ok, err
@@ -123,11 +130,13 @@ func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope mer
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	// or#812: the version floor recorded on the PSP row makes a credential
+	// rotated on another node effective here at once, not one cache TTL later.
+	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := svc.Secrets().Get(ctx, mid, name)
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
 	if errors.Is(err, merchants.ErrSecretNotFound) {
 		return "", false, nil
 	}
@@ -161,10 +170,9 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
 	out := &config.PSPConfig{
-		Key:         scope.Key,
-		Rail:        models.Rail(scope.Rail),
-		AccountID:   scope.AccountID,
-		Environment: scope.Environment,
+		Key:       scope.Key,
+		Rail:      models.Rail(scope.Rail),
+		AccountID: scope.AccountID,
 	}
 	switch models.Rail(scope.Rail) {
 	case models.RailStripe:
@@ -226,54 +234,160 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		if err != nil {
 			return nil, err
 		}
-		out.Solana = SolanaRailConfigFromSettings(settings, s.testMode())
-	case models.RailVaultedCard:
-		apiKey, err := s.requireSecret(ctx, mid, scope, "api_key")
+		solanaCfg, err := SolanaRailConfigFromSettings(settings, s.testMode())
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("solana account %s: %w", scope.AccountID, err)
 		}
-		settings, err := config.ParseVaultedCardAccountSettings(scope.Settings)
-		if err != nil {
-			return nil, err
-		}
-		// Destination creds come from the LINKED NMI account (one source of
-		// truth): resolve it through this same seam by its account_id.
-		gateway, err := s.RailConfig(ctx, string(models.RailNMI), settings.GatewayAccount)
-		if err != nil {
-			return nil, fmt.Errorf("vaulted_card account %s: resolve gateway account %q: %w", scope.AccountID, settings.GatewayAccount, err)
-		}
-		if gateway.NMI == nil || strings.TrimSpace(gateway.NMI.SecurityKey) == "" {
-			return nil, fmt.Errorf("vaulted_card account %s: gateway account %q has no NMI security key: %w", scope.AccountID, settings.GatewayAccount, ErrRailNotArmed)
-		}
-		out.VaultedCard = &config.VaultedCardRailConfig{
-			APIKey:             apiKey,
-			GatewayAccountID:   settings.GatewayAccount,
-			GatewaySecurityKey: gateway.NMI.SecurityKey,
-			NetworkTokens:      settings.NetworkTokens,
-			PublicAPIKey:       settings.PublicAPIKey,
-		}
+		out.Solana = solanaCfg
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
+	}
+	// Custody rides on TOP of the rail block (or#879): the gateway credentials
+	// above charge the card, these say who holds it and how to detokenize it.
+	custody, err := s.resolveCustody(ctx, mid, scope)
+	if err != nil {
+		return nil, err
+	}
+	out.Custody = custody
+	return out, nil
+}
+
+// resolveCustody arms a PSP's third-party custody arrangement. nil = the PSP
+// holds its own instruments (the overwhelmingly common case). A REFERENCED
+// custodian that cannot be fully armed is a fail-closed error, never a silent
+// downgrade to "no custody" — that would charge the card as though the gateway
+// held it, which is the wrong charge and not a degraded one.
+func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*config.CustodianConfig, error) {
+	// or#880: an inline custody block on a PSP is a retired shape. It must
+	// fail here too, not only at manifest push: a stored settings blob is an
+	// ingestion plane of its own (mode 2).
+	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
+		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
+	}
+	if scope.CustodianID == nil {
+		return nil, nil
+	}
+	svc := s.service()
+	if svc == nil {
+		return nil, fmt.Errorf("psp %s/%s: merchants service is not armed: %w", scope.Rail, scope.AccountID, ErrRailNotArmed)
+	}
+	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("psp %s/%s references custodian %s: %w: %w",
+			scope.Rail, scope.AccountID, *scope.CustodianID, merchants.ErrCustodianNotDeclared, ErrRailNotArmed)
+	}
+	return s.custodianConfig(ctx, mid, custodian)
+}
+
+// custodianConfig materializes ONE declared custodian into its runtime shape:
+// registry-validated settings plus its private credentials from the secret
+// store. Shared by PSP resolution and by custodian-routed webhooks, so both
+// arm from exactly the same row and the same secret names.
+func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope) (*config.CustodianConfig, error) {
+	d, err := custodians.Require(custodian.Kind)
+	if err != nil {
+		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
+	}
+	settings, err := custodians.ParseSettings(d.Kind, custodian.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
+	}
+	out := &config.CustodianConfig{
+		Key:                         custodian.Key,
+		Custodian:                   d.Kind,
+		AccountID:                   custodian.AccountID,
+		PublicAPIKey:                settings.PublicAPIKey,
+		NetworkTokens:               settings.NetworkTokens,
+		AccountUpdater:              settings.AccountUpdater,
+		AccountUpdaterLookaheadDays: settings.LookaheadDays(),
+	}
+	for _, slot := range d.Secrets {
+		value, found, err := s.custodianSecret(ctx, mid, custodian, slot.Name)
+		if err != nil {
+			return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
+		}
+		if !found {
+			if slot.Required {
+				return nil, fmt.Errorf("custodian %q (%s): required secret %s is missing: %w", custodian.Key, d.Kind, slot.Name, ErrRailNotArmed)
+			}
+			continue
+		}
+		if slot.Name == custodians.SecretAPIKey {
+			out.APIKey = value
+		}
 	}
 	return out, nil
 }
 
+func (s *MerchantsSource) custodianSecret(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope, key string) (string, bool, error) {
+	svc := s.service()
+	if svc == nil || svc.Secrets() == nil {
+		return "", false, nil
+	}
+	// or#812: custodial credentials ride the same version floor as every other
+	// provider credential — a rotation on another node is effective here at
+	// once, not one cache TTL later.
+	ref, err := custodian.SecretRef(key)
+	if err != nil {
+		return "", false, err
+	}
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
+	if errors.Is(err, merchants.ErrSecretNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	value := strings.TrimSpace(sec.Value)
+	return value, value != "", nil
+}
+
+// CustodianConfig resolves a declared custodian by its VENDOR identity — the
+// only handle an inbound custodian webhook has (a Basis Theory event carries a
+// tenant id, no merchant and no PSP). The ctx merchant must already be pinned
+// by the cross-merchant directory lookup.
+func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID string) (*config.CustodianConfig, error) {
+	svc := s.service()
+	if svc == nil {
+		return nil, fmt.Errorf("resolve custodian %s: merchants service is not armed: %w", kind, ErrRailNotArmed)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve custodian %s: %w", kind, err)
+	}
+	custodian, ok, err := svc.CustodianScopeByIdentity(ctx, mid, kind, s.environment(), accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("custodian %s tenant %q: %w: %w", kind, accountID, merchants.ErrCustodianNotDeclared, ErrRailNotArmed)
+	}
+	return s.custodianConfig(ctx, mid, custodian)
+}
+
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
 // rail account's declared settings: network derives from test_mode alone
-// (#349), the token set defaults to the network's curated list when the
-// account declares none, and the #360 token pricing policy drops tokens that
-// cannot function (degrade-not-die).
-func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) *config.SolanaRailConfig {
+// (#349), the token set is exactly what the merchant declared — USDC alone when
+// they declared nothing (or#881 select-and-restrict; a built-in symbol is
+// SELECTED and its mint is never restated) — and the #360 pricing policy then
+// drops tokens that cannot function (degrade-not-die). A misdeclared token set
+// is fail-closed: the PSP does not arm rather than arming against a mint nobody
+// vouched for.
+func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) (*config.SolanaRailConfig, error) {
 	network := "mainnet"
 	if testMode {
 		network = "devnet"
 	}
-	out := settings.ApplyTo(&config.SolanaRailConfig{Network: network})
-	if len(out.Tokens) == 0 {
-		out.Tokens = solanatokens.ForNetwork(network)
+	resolved, err := solanatokens.ResolveDeclared(network, settings.Tokens)
+	if err != nil {
+		return nil, err
 	}
-	out.Tokens = solanatokens.NormalizeForNetwork(network, out.Tokens)
-	return out
+	out := settings.ApplyTo(&config.SolanaRailConfig{Network: network})
+	out.Tokens = solanatokens.NormalizeForNetwork(network, resolved)
+	return out, nil
 }
 
 // FixedSet is a static Source over an in-memory PSPSet — a
@@ -308,6 +422,27 @@ func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config
 		return nil, fmt.Errorf("rail %s: %w", rail, ErrRailNotArmed)
 	}
 	return withPSPKey(proc, key), nil
+}
+
+// CustodianConfig finds the declared custodian by vendor identity among the
+// set's PSPs. In production one custodians row backs them all; in a FixedSet
+// the same *CustodianConfig is simply shared by each PSP that references it.
+func (f FixedSet) CustodianConfig(_ context.Context, kind, accountID string) (*config.CustodianConfig, error) {
+	kind = custodians.Normalize(kind)
+	accountID = strings.TrimSpace(accountID)
+	for _, proc := range config.PSPSet(f) {
+		if proc == nil || proc.Custody == nil {
+			continue
+		}
+		if custodians.Normalize(proc.Custody.Custodian) != kind {
+			continue
+		}
+		if accountID != "" && strings.TrimSpace(proc.Custody.AccountID) != accountID {
+			continue
+		}
+		return proc.Custody, nil
+	}
+	return nil, fmt.Errorf("custodian %s tenant %q: %w: %w", kind, accountID, merchants.ErrCustodianNotDeclared, ErrRailNotArmed)
 }
 
 // withPSPKey returns a copy of proc carrying its resolved PSP key (the set's

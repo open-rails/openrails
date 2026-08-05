@@ -72,9 +72,9 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	// --- Merchant Solana key lives as a provider-account SECRET, not on-chain. ----
-	// The private key is scoped to the Solana provider account and resolved
-	// through the production provider-account signer — proving the money-signing
+	// --- Merchant Solana key lives as a PSP SECRET, not on-chain. ----
+	// The private key is scoped to the Solana PSP and resolved
+	// through the production PSP signer — proving the money-signing
 	// authority is internal OpenRails state, never carried in any Solana payload.
 	priv := solanago.MustPrivateKeyFromBase58(base58Key)
 	merchantPub := priv.PublicKey()
@@ -99,11 +99,11 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	secretName, err := merchants.PSPSecretName("solana", environment, merchantPub.String(), "private_key")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, base58Key)
-	require.NoError(t, err, "inject provider-account private_key secret")
+	require.NoError(t, err, "inject PSP private_key secret")
 
-	signer := recurring.NewSignerFromRailMerchantAccounts(secretStore, nil, surface.app.Runtime.DB, 0, environment)
+	signer := recurring.NewSignerFromPSPs(secretStore, nil, surface.app.Runtime.DB, 0, environment)
 	signerPub, err := signer.PublicKey(ctx, dbtest.TestMerchantID)
-	require.NoError(t, err, "production signer must resolve the provider-account key from the secret store")
+	require.NoError(t, err, "production signer must resolve the PSP key from the secret store")
 	require.Equal(t, merchantPub, signerPub, "secret-store-backed signer derives the merchant wallet")
 
 	// --- (b) DB is the source of truth: publish a Solana-priced catalog product.
@@ -124,16 +124,16 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 
 	manifest := catalog.Manifest{
 		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "usd"}},
+		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "USD"}},
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
-			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "usd", Amount: solanaPtrI64(50_000)}},
+			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "USD", Amount: solanaPtrI64(50_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
-				Currency:   "usd",
+				Currency:   "USD",
 				Duration:   "30d",
 				AutoRenew:  true,
 				PSPs:       []string{"solana"}, // priced for the Solana rail
@@ -234,7 +234,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID, priceID uuid.UUID, reference, entitlement string) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, h.DSN)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	payer := openrails.CustomerID(uuid.New())
 	payerID := payer.UUID()
@@ -269,7 +269,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
-		Currency:   "usd",
+		Currency:   "USD",
 		Amount:     50_000,
 		Source:     "solana-money-movement",
 		SourceID:   &depositSourceID,
@@ -282,7 +282,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",
-		Currency:        "usd",
+		Currency:        "USD",
 		EstimatedAmount: 2_500,
 		RequestID:       requestID,
 		Source:          "solana-money-movement",
@@ -305,15 +305,16 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 
 	// Payment state: a Solana payment row whose only on-chain linkage is the
 	// reference id, while the benefit snapshot (entitlements) is held in Postgres.
+	solanaPSP := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "solana")
 	var paymentID uuid.UUID
 	var snapshot []byte
 	err = pool.QueryRow(ctx, `
 		INSERT INTO openrails.payments
-			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot)
-		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'usd', 'completed', $6::jsonb)
+			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot, psp_id)
+		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb, $7)
 		RETURNING id, entitlements_spec_snapshot
 	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
-		`{"entitlements":["`+entitlement+`"]}`).Scan(&paymentID, &snapshot)
+		`{"entitlements":["`+entitlement+`"]}`, solanaPSP).Scan(&paymentID, &snapshot)
 	require.NoError(t, err, "Solana payment + benefit snapshot recorded in openrails.payments")
 	require.NotEqual(t, uuid.Nil, paymentID)
 	require.Contains(t, string(snapshot), entitlement,

@@ -60,7 +60,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 	for _, meter := range m.Meters {
 		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{
 			Key:           meter.Key,
-			Kind:          meter.Kind,
 			EventType:     meter.EventType,
 			ValueProperty: meter.ValueProperty,
 			Aggregation:   meter.Aggregation,
@@ -120,7 +119,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 						PSPs:       append([]string(nil), price.PSPs...),
 						InputMin:   price.InputMin,
 						InputMax:   price.InputMax,
-						Round:      price.Round,
 						Price:      priceJSON,
 					})
 				}

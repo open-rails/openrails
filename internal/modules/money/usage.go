@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -31,9 +32,11 @@ type RecordUsageParams struct {
 	Dimensions map[string]int64
 	// Amount is the host-priced cost (>= 0). 0 records a free/zero-cost event
 	// (still metered for dimensions) without a ledger debit.
-	Amount   int64
-	Source   string // idempotency: namespace
-	SourceID string // idempotency: typically the request id
+	Amount int64
+	// Key is the idempotency coordinate; its operation must be
+	// UsageOperation(EventType), so two different event types at one
+	// (source, source_id) post two distinct charges (or#894).
+	Key      IdempotencyKey
 	Metadata map[string]any
 	// OccurredAt defaults to now when zero.
 	OccurredAt time.Time
@@ -54,19 +57,17 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	params.EventType = strings.TrimSpace(params.EventType)
-	params.Source = strings.TrimSpace(params.Source)
-	params.SourceID = strings.TrimSpace(params.SourceID)
 	if params.EventType == "" {
 		return nil, fmt.Errorf("event_type required")
 	}
-	if params.Source == "" || params.SourceID == "" {
-		return nil, fmt.Errorf("source and source_id required for usage idempotency")
+	if err := params.Key.RequireOperation(UsageOperation(params.EventType)); err != nil {
+		return nil, err
 	}
 	if params.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
 	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -94,7 +95,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		existingRow, gerr := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID,
 			Currency:  cur,
-			EventType: params.EventType, Source: params.Source, SourceID: params.SourceID,
+			EventType: params.EventType, Source: params.Key.Source(), SourceID: params.Key.SourceID(),
 		})
 		if gerr == nil {
 			// or#891 item 3: the replay used to be returned unconditionally, so a
@@ -106,7 +107,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			}
 			if ev.Amount != params.Amount {
 				return &IdempotencyConflict{
-					Operation: "record_usage", Source: params.Source, SourceID: params.SourceID,
+					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
 					Field: "amount", Committed: ev.Amount, Retried: params.Amount,
 				}
 			}
@@ -122,14 +123,15 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
 		if params.Amount > 0 {
-			if _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount, false); derr != nil {
+			if _, _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false); derr != nil {
 				return derr
 			}
 			// Link the usage event to the durable #512 spend transfer (the balance
 			// debit, else the owed accrual) at these coordinates.
 			if tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
 				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-				Source: params.Source, SourceID: params.SourceID,
+				Operation: string(params.Key.Operation()),
+				Source:    params.Key.Source(), SourceID: params.Key.SourceID(),
 			}); terr == nil {
 				id := tr.ID
 				debitID = &id
@@ -151,8 +153,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			EventType:        params.EventType,
 			Dimensions:       params.Dimensions,
 			Amount:           params.Amount,
-			Source:           params.Source,
-			SourceID:         params.SourceID,
+			Source:           params.Key.Source(),
+			SourceID:         params.Key.SourceID(),
 			LedgerTransferID: debitID,
 			Metadata:         params.Metadata,
 			OccurredAt:       occurred,
@@ -212,7 +214,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 		return nil, fmt.Errorf("payer required")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)

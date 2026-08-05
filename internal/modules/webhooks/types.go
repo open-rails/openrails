@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -32,27 +31,39 @@ func (s *Stringish) UnmarshalJSON(data []byte) error {
 		*s = Stringish(str)
 		return nil
 	}
+	// UseNumber keeps a bare JSON number as its literal digits. Decoding into
+	// `any` yields float64, which silently mangles an id past 2^53 and would
+	// route a webhook to the wrong subscription — and MONEY-3 forbids the same
+	// round-trip for any amount-shaped field.
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.UseNumber()
 	var raw any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := dec.Decode(&raw); err != nil {
 		return err
 	}
 	switch v := raw.(type) {
-	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			*s = ""
-			return nil
-		}
-		if math.Trunc(v) == v {
-			*s = Stringish(strconv.FormatInt(int64(v), 10))
-		} else {
-			*s = Stringish(strconv.FormatFloat(v, 'f', -1, 64))
-		}
+	case json.Number:
+		*s = Stringish(trimTrailingZeroFraction(v.String()))
 	case bool:
 		*s = Stringish(strconv.FormatBool(v))
 	default:
 		*s = Stringish(fmt.Sprint(v))
 	}
 	return nil
+}
+
+// trimTrailingZeroFraction normalises "12.0" to "12" so a number-encoded
+// identifier compares equal however the rail wrote it. Purely textual — the
+// digits are never reinterpreted through a float.
+func trimTrailingZeroFraction(text string) string {
+	dot := strings.IndexByte(text, '.')
+	if dot < 0 || strings.ContainsAny(text, "eE") {
+		return text
+	}
+	if strings.Trim(text[dot+1:], "0") != "" {
+		return text
+	}
+	return text[:dot]
 }
 
 // String returns the raw string value.

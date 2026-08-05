@@ -4,19 +4,34 @@
 -- name: EnsureCustomer :one
 -- Materialize (or refresh) the customers row for a payable UUID id under a
 -- merchant. The caller supplies id (the payable UUID). ON CONFLICT refreshes
--- last_seen_at so concurrent first-touch is safe.
+-- last_seen_at so concurrent first-touch is safe. The merchant_id guard makes a
+-- foreign id return NO ROW instead of re-pointing another merchant's customer
+-- (#889) — RLS already blocks it on enforcing roles, this holds for the
+-- privileged ones (bootstrap, import, dev owner) too.
 INSERT INTO openrails.customers (id, merchant_id, subject)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.arg(subject))
 ON CONFLICT (id) DO UPDATE SET
   subject = EXCLUDED.subject,
   last_seen_at = now()
+WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
 RETURNING id;
 
--- name: EnsureCustomerRow :exec
--- FK-target materialization before commerce inserts; no-op when present.
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.arg(subject))
-ON CONFLICT DO NOTHING;
+-- name: EnsureCustomerRow :one
+-- FK-target materialization before commerce inserts; no-op when present. It
+-- RETURNS the id it materialized so a conflicting row owned by ANOTHER merchant
+-- yields no row rather than a silent success (#889): FK checks bypass RLS, so a
+-- silent no-op would let the caller's row attach to a foreign customer.
+WITH inserted AS (
+  INSERT INTO openrails.customers (id, merchant_id, subject)
+  VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.arg(subject))
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id
+)
+SELECT id FROM inserted
+UNION ALL
+SELECT c.id FROM openrails.customers c
+WHERE c.id = sqlc.arg(id) AND c.merchant_id = sqlc.arg(merchant_id)
+LIMIT 1;
 
 -- name: LockCustomerForMerchant :one
 SELECT id FROM openrails.customers
@@ -41,6 +56,7 @@ WHERE merchant_id = $1
 SELECT c.id, c.subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
+       AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
 FROM openrails.customers c
@@ -52,6 +68,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'))
 ORDER BY c.last_seen_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
@@ -66,15 +83,33 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'));
 
 -- name: UpsertCustomerBySubject :one
 -- Customer identity is the merchant plus the host/AuthKit stable UUID subject.
 -- The row id is that subject UUID; issuer is kept only as last-seen audit source.
+-- The merchant_id guard refuses a subject already registered under a DIFFERENT
+-- merchant (#889) — one AuthKit instance can serve several merchants, and the
+-- unguarded upsert handed the second merchant an id owned by the first.
 INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
 VALUES (sqlc.arg(subject)::uuid, sqlc.arg(merchant_id), sqlc.narg(issuer), sqlc.arg(subject))
 ON CONFLICT (id) DO UPDATE SET
   subject = EXCLUDED.subject,
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
+WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
 RETURNING id;
+
+-- #824: the hosted portal's "which merchants am I a customer of" directory
+-- (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+-- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+-- name: ListMerchantsForCustomerSubject :many
+SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND m.status = 'active'
+  AND m.id IN (
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject(sqlc.arg(subject)::text)
+  )
+ORDER BY m.slug;

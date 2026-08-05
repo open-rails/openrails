@@ -42,10 +42,20 @@ identifiers OUT of committed files (code, trackers, this file).
     (NMI provisions every merchant as a "gateway account"; its v4 API documents `{gateway_id}` as
     "the merchant ID"). It is NOT the reseller/ISO (e.g. MobiusPay). It is NOT fetchable from the
     `security_key` — operator must declare it.
-  - **Stripe** — `acct_…` (the one rail that self-discovers, via `GET /v1/account`).
-  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (e.g. `945280-0000`, #697 — never a slash).
-  - **Solana** — the recipient wallet address.
-  - Don't try to derive any of these from credentials at runtime.
+  - **Stripe** — `acct_…`, operator-declared like every other rail. (It does NOT self-discover:
+    there is no `GET /v1/account` call in the tree and `stripeapi` is transport-only. The operator
+    runs that curl themselves and pastes the result — see docs/rails/stripe.md.)
+  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (dash-joined like `999999-0000`, #697 — never a slash).
+  - **Solana** — DERIVED from the signer public key (a declared `account_id` is ignored
+    with a warning); the payout destination is `settings.recipient_wallet`, defaulting to
+    the signer pubkey.
+  - Don't try to derive any of these from credentials at runtime. The structural reason (not just
+    "no API exists"): `account_id` is a SEGMENT of the merchant-secret path
+    `psps/<rail>/<env>/<account_id>/<key>`, so fetching it from a credential needs the credential,
+    which needs the path, which needs the id. Circular on every rail.
+  - Elsewhere the rule is the opposite — **the less a merchant configures, the better**. Where an
+    authoritative source exists (an on-chain mint, a curated registry), derive from it and delete
+    the knob rather than validating it.
 
 ## Catalog
 - Declarative provider model. The **pull** reconciliation job
@@ -79,3 +89,7 @@ identifiers OUT of committed files (code, trackers, this file).
 - Known fragility: running a SINGLE integration package in isolation can hit a pre-existing
   `*_merchant_fk` fixture-seeding failure (the merchant isn't seeded for that subset). That's NOT a
   regression — the full suite seeds it correctly.
+- `tests/` is a SEPARATE package that asserts behavioural contracts end-to-end. A deliberate
+  behaviour change must sweep it too — `grep tests/` for the codes/constants/statuses you changed.
+  Twice now (or#870, or#842) a fix updated only its own package's tests and left `tests/` red
+  asserting the old contract. Green-in-my-package is not green.

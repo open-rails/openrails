@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func startSecretsPostgres(t *testing.T) (*db.Pool, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	rawPool, err := pgxpool.New(ctx, dbtest.SharedPostgresDSN(t))
+	rawPool, err := pgxpool.New(ctx, dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID()))
 	require.NoError(t, err)
 	t.Cleanup(rawPool.Close)
 	return db.WrapPool(rawPool, config.DefaultSchema), ctx
@@ -118,17 +118,17 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 
 	mid, _ := registerMerchant(t, ctx, pool, "dbrt") // merchant_deks FK needs a real merchant
 	const plaintext = "sk_live_667_roundtrip"
-	_, err = store.Secrets.Put(ctx, mid, merchants.SecretStripeSecretKey, plaintext)
+	_, err = store.Secrets.Put(ctx, mid, "psps/stripe/live/acct_884_test/secret_key", plaintext)
 	require.NoError(t, err)
 
-	got, err := store.Secrets.Get(ctx, mid, merchants.SecretStripeSecretKey)
+	got, err := store.Secrets.Get(ctx, mid, "psps/stripe/live/acct_884_test/secret_key")
 	require.NoError(t, err)
 	require.Equal(t, plaintext, got.Value)
 
 	var raw string
-	require.NoError(t, pool.QueryRow(ctx,
+	require.NoError(t, dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(ctx,
 		`SELECT value FROM openrails.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
-		mid.String(), merchants.SecretStripeSecretKey).Scan(&raw))
+		mid.String(), "psps/stripe/live/acct_884_test/secret_key").Scan(&raw))
 	require.NotEqual(t, plaintext, raw, "DB row must hold ciphertext, not plaintext")
 	require.NotContains(t, raw, plaintext)
 }
@@ -161,6 +161,6 @@ func TestBuild_DevDBStoreNoMasterKey_RefusesSolanaPrivateKey(t *testing.T) {
 
 	// The refusal is targeted, not a blanket plaintext ban: dev still stores
 	// ordinary credentials.
-	_, err = store.Secrets.Put(ctx, mid, merchants.SecretStripeSecretKey, "sk_test_sec20")
+	_, err = store.Secrets.Put(ctx, mid, "psps/stripe/live/acct_884_test/secret_key", "sk_test_sec20")
 	require.NoError(t, err)
 }

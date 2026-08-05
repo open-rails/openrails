@@ -248,11 +248,27 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "customer_id")
 
 	for _, body := range []string{
-		`{"scope":"invoker","role_id":"role-1","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`,
+		`{"scope":"invoker","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`,
 		`{"scope":"invoker","scope_key":"invoker-1","windows":[]}`,
 		`{"scope":"invoker","scope_key":"invoker-1","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"BTC"}]}`,
 	} {
 		w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations:upsert", "delegated.jwt.token", body)
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	}
+
+	// or#893 phase 7: role_id is gone. A document that still sends it is
+	// refused with the rewrite — never silently dropped into an unaddressed
+	// delegation.
+	for _, path := range []string{
+		"/v1/customers/acme-merchant/spend-delegations",
+		"/v1/customers/acme-merchant/spend-delegations:upsert",
+	} {
+		body := `{"scope":"role","role_id":"22222222-2222-2222-2222-222222222222","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`
+		if !strings.HasSuffix(path, ":upsert") {
+			body = `{"delegations":[` + body + `]}`
+		}
+		w = doSelfBearerBody(e, http.MethodPut, path, "delegated.jwt.token", body)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), `role_id was removed (or#893): address a role delegation as {\"scope\":\"role\",\"scope_key\":\"\u003crole uuid\u003e\"}`)
 	}
 }

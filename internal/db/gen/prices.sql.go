@@ -101,18 +101,6 @@ func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64
 	return result.RowsAffected(), nil
 }
 
-const deletePrice = `-- name: DeletePrice :execrows
-DELETE FROM openrails.prices WHERE id = $1
-`
-
-func (q *Queries) DeletePrice(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePrice, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getCurrentPriceByKey = `-- name: GetCurrentPriceByKey :one
 SELECT id, product_id, amount, currency, psp_links, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices
 WHERE merchant_id = $1::uuid AND key = $2::text AND NOT archived
@@ -123,8 +111,6 @@ type GetCurrentPriceByKeyParams struct {
 	Key        string
 }
 
-// #774: the CURRENT (non-archived) row for a key, if any. At most one exists
-// per (merchant, key) by uq_prices_merchant_key_current.
 func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceByKeyParams) (OpenrailsPrice, error) {
 	row := q.db.QueryRow(ctx, getCurrentPriceByKey, arg.MerchantID, arg.Key)
 	var i OpenrailsPrice

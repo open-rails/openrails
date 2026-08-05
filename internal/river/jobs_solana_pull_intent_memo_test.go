@@ -38,8 +38,14 @@ func pullMemoTxResult(t *testing.T, memoLocalID uuid.UUID) *rpc.GetTransactionRe
 
 // TestVerifyPullMemoMatchesIntent pins the recurring verify-leg #713 rule:
 // a landed pull whose stamped memo names THIS intent passes; a different
-// local-id fails (→ parked, never auto-repaired); absent memos and
-// undecodable/absent tx payloads pass (pre-memo pulls stay repairable).
+// local-id fails (→ parked, never auto-repaired).
+//
+// or#893: an ABSENT memo now fails too. OpenRails builds and signs the pull
+// transaction and stamps the intent id before submission, and the signature
+// being verified is the one recorded pre-submit — so an unstamped transaction
+// at that signature is not "a pre-memo pull", it is not the transaction we
+// built. Undecodable/absent tx payloads still pass: that is a thin RPC answer,
+// not evidence about the memo.
 func TestVerifyPullMemoMatchesIntent(t *testing.T) {
 	t.Parallel()
 
@@ -54,8 +60,10 @@ func TestVerifyPullMemoMatchesIntent(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "purchase memo mismatch")
 
-	// absent memo passes (backward compatible with pre-#713 pulls)
-	require.NoError(t, verifyPullMemoMatchesIntent(pullMemoTxResult(t, uuid.Nil), intentID))
+	// absent memo fails: we stamp every pull we build
+	err = verifyPullMemoMatchesIntent(pullMemoTxResult(t, uuid.Nil), intentID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "purchase memo missing")
 
 	// no result / no tx payload passes (fakes and thin RPC answers)
 	require.NoError(t, verifyPullMemoMatchesIntent(nil, intentID))

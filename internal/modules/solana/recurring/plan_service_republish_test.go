@@ -7,20 +7,65 @@ import (
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// fakePlanReader returns a fixed (data, err) for GetAccountData regardless of the
-// address — the re-publish guard reads exactly the derived plan PDA, so a single
-// canned response is enough to drive each branch.
+// fakePlanReader answers the plan-PDA read with a canned (data, err) and every
+// OTHER address with a synthetic SPL mint account. PublishPlan reads both the
+// plan PDA (re-publish guard) and the mint (on-chain decimals, #817) through
+// this one interface.
 type fakePlanReader struct {
 	data []byte
 	err  error
+	// mintDecimals is the precision the synthetic mint account reports.
+	mintDecimals uint8
+	// mintMissing makes the mint read return an empty account (fail closed).
+	mintMissing bool
+	// mintZeroDecimals serves a mint that genuinely reports 0 decimals (the
+	// unpayable case), distinct from the zero-value default below.
+	mintZeroDecimals bool
 }
 
-func (r fakePlanReader) GetAccountData(_ context.Context, _ solanago.PublicKey) ([]byte, error) {
+func (r fakePlanReader) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
+	if isTestMintAddress(addr) {
+		if r.mintMissing {
+			return nil, nil
+		}
+		d := r.mintDecimals
+		if d == 0 && !r.mintZeroDecimals {
+			d = 6 // devnet/mainnet USDC
+		}
+		return buildMintBlob(d), nil
+	}
 	return r.data, r.err
+}
+
+// testMintAddresses are the mints the recurring token maps point at; the fake
+// reader recognises them so a mint read never gets a plan blob.
+func isTestMintAddress(addr solanago.PublicKey) bool {
+	for _, tok := range testSolanaTokens() {
+		if tok.Mint == addr.String() {
+			return true
+		}
+	}
+	return false
+}
+
+// buildMintBlob assembles a synthetic, initialized SPL Token mint account with
+// the given decimals — the exact 82-byte base layout DecodeMintDecimals reads.
+func buildMintBlob(decimals uint8) []byte {
+	blob := make([]byte, solanaint.MintAccountSize)
+	blob[44] = decimals
+	blob[45] = 1 // is_initialized
+	return blob
+}
+
+// readerWithMint is a fake reader whose plan PDA is empty (publish proceeds) and
+// whose mint reports `decimals`.
+func readerWithMint(decimals uint8) fakePlanReader {
+	return fakePlanReader{mintDecimals: decimals}
 }
 
 // buildPlanBlob assembles a synthetic on-chain Plan account in the exact byte
@@ -52,7 +97,7 @@ func buildPlanBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, c
 
 func devnetUSDCMint(t *testing.T) solanago.PublicKey {
 	t.Helper()
-	mintStr, _, err := ResolveRecurringMintFromTokens("USDC", testSolanaTokens())
+	mintStr, err := ResolveRecurringMintFromTokens("USDC", testSolanaTokens())
 	if err != nil {
 		t.Fatalf("resolve devnet USDC mint: %v", err)
 	}
@@ -88,6 +133,7 @@ func TestPublishPlanIdempotentRepublish(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: amount,
+		AmountDecimals:  6,
 		PeriodHours:     periodHours,
 	})
 	if err != nil {
@@ -124,6 +170,7 @@ func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 	})
 	if err == nil {
@@ -152,6 +199,7 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
+		AmountDecimals:  6,
 		PeriodHours:     720,
 	})
 	if err != nil {

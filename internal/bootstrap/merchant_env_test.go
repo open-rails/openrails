@@ -12,12 +12,18 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 	tests := map[string]string{
 		"BILLING_VERSION":                                                             "version",
 		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                      "merchants.doujins.display_name",
+		"BILLING_MERCHANTS_DOUJINS_API_HOST":                                          "merchants.doujins.api_host",
 		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                "merchants.doujins.profile.from_email",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.psps.mobius.nmi.secrets.security_key",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_url",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_key",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME":      "merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username",
 		"BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.psps.solana.solana.signer.mode",
+		// or#880: custodians are declared once and overlaid like any PSP —
+		// the private application key must be keepable out of the YAML.
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY":         "merchants.doujins.custodians.bt.basis_theory.secrets.api_key",
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SETTINGS_PUBLIC_API_KEY": "merchants.doujins.custodians.bt.basis_theory.settings.public_api_key",
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_PROD_BASIS_THEORY_ACCOUNT_ID":         "merchants.doujins.custodians.bt-prod.basis_theory.account_id",
 		// #710: real manifest field, previously listed as a section but unrouted.
 		"BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS": "merchants.doujins.delegated_invoker_wasted_spend_windows",
 	}
@@ -69,7 +75,6 @@ merchants:
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: "579145"
           secrets:
             security_key: public-placeholder
@@ -106,7 +111,6 @@ merchants:
     psps:
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "681902"
           secrets:
             security_key: public-placeholder
@@ -198,7 +202,6 @@ merchants:
     psps:
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "681902"
           secrets:
             security_key: public-placeholder

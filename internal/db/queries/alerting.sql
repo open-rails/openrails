@@ -33,13 +33,12 @@ RETURNING *;
 DELETE FROM openrails.alert_rules WHERE id = $1;
 
 -- name: MarkAlertRuleFired :exec
--- Edge transition: open a new active alert. Records the crossing value/detail.
+-- Edge transition: open a new active alert. Records the crossing value.
 UPDATE openrails.alert_rules
 SET fired_at = sqlc.arg(fired_at)::timestamptz,
     cleared_at = NULL,
     last_evaluated_at = sqlc.arg(evaluated_at)::timestamptz,
     last_value = sqlc.narg(value),
-    last_detail = sqlc.narg(detail),
     updated_at = now()
 WHERE id = $1;
 
@@ -63,9 +62,14 @@ SET last_evaluated_at = sqlc.arg(evaluated_at)::timestamptz,
 WHERE id = $1;
 
 -- name: ListArmedAlertMerchants :many
--- CROSS-MERCHANT (base pool / GenGlobal): the evaluator scheduler's armed-merchant
--- selection. Same base-pool posture as the #358 intent executor sweeps.
-SELECT DISTINCT merchant_id FROM openrails.alert_rules WHERE enabled;
+-- CROSS-MERCHANT: the evaluator scheduler's armed-merchant selection, through
+-- migration 0021's SECURITY DEFINER reader (or#861). It used to be a base-pool
+-- `SELECT DISTINCT merchant_id FROM alert_rules` — but the base pool is not
+-- privileged, it is the same openrails_app role with no app.merchant_id, so
+-- alert_rules' FORCEd RLS matched `merchant_id = NULL` and this returned NO
+-- MERCHANTS: the alert evaluator had never run in production. Ids only; the
+-- rules themselves are still read per-merchant under MerchantTx.
+SELECT merchant_id FROM openrails.armed_alert_merchant_ids();
 
 -- ============================================================================
 -- merchant_webhooks

@@ -123,7 +123,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	}
 
 	// Verify-then-execute: absent = success.
-	present, err := h.subscriptionPresent(client, psid)
+	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
 		return Retryable("provider read before delete failed: " + err.Error())
 	}
@@ -134,7 +134,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return Succeeded(map[string]any{"verified_absent": true, "rail_subscription_id": psid})
 	}
 
-	if err := client.DeleteRecurringSubscription(psid); err != nil {
+	if err := client.DeleteRecurringSubscription(ctx, psid); err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}
@@ -170,7 +170,7 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 		}
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
 	}
-	present, err := h.subscriptionPresent(client, psid)
+	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -211,8 +211,8 @@ func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsRai
 // subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/
 // cancelled subscriptions entirely (the v5 GET answers 404), so "not found"
 // means deleted.
-func (h *NMIDeleteHandler) subscriptionPresent(client *nmi.NMIClient, railSubscriptionID string) (bool, error) {
-	_, found, err := client.GetSubscription(railSubscriptionID)
+func (h *NMIDeleteHandler) subscriptionPresent(ctx context.Context, client *nmi.NMIClient, railSubscriptionID string) (bool, error) {
+	_, found, err := client.GetSubscription(ctx, railSubscriptionID)
 	if err != nil {
 		return false, err
 	}

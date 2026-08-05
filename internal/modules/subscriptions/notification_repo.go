@@ -115,64 +115,6 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 	return notificationsFromGen(rows)
 }
 
-func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListUnseenNotificationsByCustomer(ctx, tsid)
-	if err != nil {
-		return nil, err
-	}
-	return notificationsFromGen(rows)
-}
-
-func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType models.NotificationEventType) ([]*models.NotificationQueue, error) {
-	rows, err := r.db.Gen(ctx).ListNotificationsByEventType(ctx, string(eventType))
-	if err != nil {
-		return nil, err
-	}
-	return notificationsFromGen(rows)
-}
-
-func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return 0, err
-	}
-	count, err := r.db.Gen(ctx).CountNotificationsByCustomerEventSince(ctx, gen.CountNotificationsByCustomerEventSinceParams{
-		CustomerID: tsid,
-		EventType:  string(eventType),
-		CreatedAt:  since,
-	})
-	return int(count), err
-}
-
-func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, since time.Time) ([]string, error) {
-	return r.db.Gen(ctx).ListCustomersWithPendingDigest(ctx, gen.ListCustomersWithPendingDigestParams{
-		EventType: string(models.NotificationTranslationCompletedPendingDigest),
-		CreatedAt: since,
-	})
-}
-
-func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	limit32, _ := safecast.Convert[int32](limit)
-	rows, err := r.db.Gen(ctx).ListPendingDigestForCustomer(ctx, gen.ListPendingDigestForCustomerParams{
-		CustomerID: tsid,
-		EventType:  string(models.NotificationTranslationCompletedPendingDigest),
-		CreatedAt:  since,
-		PageLimit:  limit32,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return notificationsFromGen(rows)
-}
-
 // MarkEmailed stamps emailed_at once (#789); already-stamped rows are a no-op.
 func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, at time.Time) error {
 	_, err := r.db.Gen(ctx).MarkNotificationEmailed(ctx, gen.MarkNotificationEmailedParams{ID: id, EmailedAt: at})

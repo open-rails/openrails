@@ -7,8 +7,11 @@ services:
     pids_limit: 512
     environment:
       POSTGRES_DB: openrails_db
+      # The PRIVILEGED role. It exists for DDL only: the bootstrap init SQL and
+      # `openrails migrate up`. Nothing else in this stack connects as it — see
+      # the openrails service below.
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin_password
+      POSTGRES_PASSWORD: "${DB_ADMIN_PASSWORD:-admin_password}"
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
@@ -74,14 +77,51 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      # ENV has no default in the binary and config.Load refuses an empty one,
+      # so the migrate service must declare it too — without this the stack
+      # never gets past migrations.
+      ENV: "${ENV:-development}"
+      TEST_MODE: "${TEST_MODE:-sandbox}"
       # Database connection over the compose network.
       DB_HOST: "postgres"
       DB_PORT: "5432"
       DB_DATABASE: "openrails_db"
+      # Migrations are the ONE job that legitimately needs the privileged role
+      # (DDL, GRANTs, role creation). Everything else runs as openrails_app.
       DB_USERNAME: "admin"
-      DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
+      DB_PASSWORD: "${DB_ADMIN_PASSWORD:-admin_password}"
       DB_SSLMODE: "disable"
     command: ["migrate", "up"]
+    restart: "no"
+    networks:
+      - local-openrails
+
+  # Dev-only role plumbing. `0001_schema.up.sql` creates openrails_app
+  # NOLOGIN NOBYPASSRLS and GRANTs it everything the server needs; a real
+  # deployment attaches the LOGIN credential out of band (Vault, cloud IAM).
+  # Local dev has no such channel, so this one-shot service attaches a
+  # throwaway password after migrations run. It grants no privilege — the role
+  # stays NOBYPASSRLS, so every merchant_isolation policy applies to the local
+  # server exactly as it does in production.
+  openrails-app-role:
+    image: postgres:18-bookworm
+    depends_on:
+      openrails-migrate:
+        condition: service_completed_successfully
+    environment:
+      PGPASSWORD: "${DB_ADMIN_PASSWORD:-admin_password}"
+    entrypoint: ["psql"]
+    command:
+      - "-v"
+      - "ON_ERROR_STOP=1"
+      - "-h"
+      - "postgres"
+      - "-U"
+      - "admin"
+      - "-d"
+      - "openrails_db"
+      - "-c"
+      - "ALTER ROLE openrails_app WITH LOGIN PASSWORD '${DB_PASSWORD:-openrails_app_password}'"
     restart: "no"
     networks:
       - local-openrails
@@ -99,6 +139,8 @@ services:
         condition: service_healthy
       openrails-migrate:
         condition: service_completed_successfully
+      openrails-app-role:
+        condition: service_completed_successfully
       garnet:
         condition: service_healthy
     ports:
@@ -107,7 +149,11 @@ services:
       # (issue #222) — there is no separate private/mTLS service port.
       - "127.0.0.1:${OPENRAILS_HOST_PORT:-3053}:3053"  # API (public + admin + service credential routes)
     environment:
-      # Service runtime mode
+      # Service runtime mode. ENV is REQUIRED by config.Load (SEC-18) — it has
+      # no default in the binary, because the permissive posture (plaintext
+      # merchant secrets) is the development one. The DB role is NOT one of
+      # those relaxations: EnforceRLSPosture refuses to boot on a
+      # superuser/BYPASSRLS role in EVERY environment, development included.
       ENV: "${ENV:-development}"
       TEST_MODE: "${TEST_MODE:-sandbox}"
       PORT: "3053"
@@ -129,18 +175,23 @@ services:
       # Auth authority and provider credentials are merchant configuration, not
       # config/env runtime infrastructure.
 
-      # Database connection (admin superuser)
+      # Database connection. The SERVER connects as openrails_app — the same
+      # unprivileged NOBYPASSRLS role production uses — so per-merchant RLS
+      # policies constrain local dev exactly as they constrain production. A
+      # query that forgets its merchant scope returns zero rows HERE, on the
+      # developer's laptop, instead of silently in production (or#782). Only
+      # openrails-migrate gets the privileged role.
       DB_HOST: "postgres"
       DB_PORT: "5432"
       DB_DATABASE: "openrails_db"
-      DB_USERNAME: "admin"
-      DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
+      DB_USERNAME: "${DB_USERNAME:-openrails_app}"
+      DB_PASSWORD: "${DB_PASSWORD:-openrails_app_password}"
       DB_SSLMODE: "disable"
       # Redis connection
       REDIS_ADDR: "garnet:6379"
       REDIS_PASSWORD: ""
       REDIS_DB: "0"
-    command: ["server"]
+    command: ["run-server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
       - openrails_runtime_keys:/.runtime/authkit
@@ -171,7 +222,9 @@ services:
       DEVSERVER_ISSUER: "http://issuer:8080"
       DEVSERVER_ISSUED_AUDIENCES: "openrails-app"
       DEVSERVER_EXPECTED_AUDIENCES: "openrails-app"
-      DB_URL: "postgres://admin:${DB_PASSWORD:-admin_password}@postgres:5432/openrails_db?sslmode=disable"
+      # The AuthKit devserver runs its OWN migrations, so it needs the
+      # privileged role. It is a dev-sandbox issuer, not OpenRails.
+      DB_URL: "postgres://admin:${DB_ADMIN_PASSWORD:-admin_password}@postgres:5432/openrails_db?sslmode=disable"
       DEVSERVER_DEV_MODE: "true"
       DEVSERVER_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
       DEVSERVER_REGISTRATION_VERIFICATION: "none"

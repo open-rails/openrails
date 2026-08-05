@@ -117,10 +117,11 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "dup-prod-"+suffix, "dup-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		ins := func(id uuid.UUID, txn string) {
-			exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
-			      VALUES ($1,$2,'nmi',$3,9990000,9990000,'usd','completed',$4,$5,$6)`, id, priceID, txn, when, merchantID, customer)
+			exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id, psp_id)
+			      VALUES ($1,$2,'nmi',$3,9990000,9990000,'USD','completed',$4,$5,$6,$7)`, id, priceID, txn, when, merchantID, customer, pspID)
 		}
 		ins(pay1, "dup-txn-1-"+suffix)
 		ins(pay2, "dup-txn-2-"+suffix) // second charge, same product/month -> duplicate

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
@@ -42,10 +43,39 @@ const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
 
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
+// IsSettlementCandidate reports whether this row will land as a completed,
+// positive, non-reversal charge — the shape the host settlement feed's enqueue
+// trigger considers. An empty status is 'completed' (the column default), so it
+// counts here exactly as it does in SQL.
+func IsSettlementCandidate(p *models.Payment) bool {
+	return p != nil && PaymentStatusCompleted(p.Status) && p.Amount > 0 && p.RefundedPaymentID == nil
+}
+
+// resolveMoneyMovement enforces or#827's positive marker at the one place every
+// payment row is minted. The feed publishes on this value alone, so on a row
+// that would otherwise be a settlement candidate an undeclared marker is a bug,
+// not a default: refusing the write is how a new synthetic payment shape gets
+// caught here instead of at a host that was told money arrived.
+func resolveMoneyMovement(p *models.Payment) (models.MoneyMovement, error) {
+	switch {
+	case p.MoneyMovement.Valid():
+		return p.MoneyMovement, nil
+	case p.MoneyMovement != models.MoneyMovementUndeclared:
+		return "", fmt.Errorf("payment money_movement %q is not a known value", string(p.MoneyMovement))
+	case IsSettlementCandidate(p):
+		return "", errors.New("payment money_movement must be declared on a completed positive charge (or#827)")
+	default:
+		return models.MoneyMovementNone, nil
+	}
+}
+
 // paymentInsertParams maps a model onto the insert parameter set shared by
 // CreatePayment and CreatePaymentIfNotExists (identical column lists).
 func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
-	currency := strings.TrimSpace(p.Currency)
+	// CUR-6: the ONE place both CreatePayment and CreatePaymentIfNotExists
+	// build their params, so canonicalising here covers every payment row the
+	// repo mints regardless of which rail's ingestion produced it.
+	currency := moneyutil.NormalizeCurrency(p.Currency)
 	if currency == "" {
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment currency required")
 	}
@@ -62,6 +92,10 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		return gen.CreatePaymentParams{}, err
 	}
 	credSnap, err := models.ToJSONB(p.CreditsSpecSnapshot)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	movement, err := resolveMoneyMovement(p)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
@@ -93,6 +127,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureReason:            p.FailureReason,
 		ReversalKind:             p.ReversalKind,
 		TokenType:                p.TokenType,
+		MoneyMovement:            string(movement),
 	}, nil
 }
 
@@ -109,8 +144,15 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
+	// the account that took it. Off-rail channels (admin comp, manual entry)
+	// legitimately have none — there was no provider.
+	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+		psp, perr := db.RequirePSPID(ctx)
+		if perr != nil {
+			return fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
+		}
+		params.PspID = &psp
 	}
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
@@ -135,8 +177,15 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		return false, terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
+	// the account that took it. Off-rail channels (admin comp, manual entry)
+	// legitimately have none — there was no provider.
+	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+		psp, perr := db.RequirePSPID(ctx)
+		if perr != nil {
+			return false, fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
+		}
+		params.PspID = &psp
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
@@ -222,22 +271,6 @@ func (r *PaymentRepo) GetByTransactionID(ctx context.Context, rail models.Rail, 
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
-}
-
-func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByPriceID(ctx, priceID)
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentsFromGen(rows)
-}
-
-func (r *PaymentRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentsByRail(ctx, string(rail))
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentsFromGen(rows)
 }
 
 func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
@@ -563,53 +596,12 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	return nil
 }
 
-func (r *PaymentRepo) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerRail(ctx, gen.GetLatestPaymentByCustomerRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentFromGen(row)
-}
-
-func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetLatestPaymentBySubscriptionID(ctx, &subscriptionID)
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentFromGen(row)
-}
-
 func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, &subscriptionID)
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
-}
-
-func (r *PaymentRepo) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
-	if userID == "" {
-		return 0, 0, fmt.Errorf("user_id is required")
-	}
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return 0, 0, err
-	}
-	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectRail(ctx, gen.CountPaymentOutcomesBySubjectRailParams{
-		CustomerID: tsid,
-		Rail:       string(rail),
-	})
-	if err != nil {
-		return 0, 0, err
-	}
-	return int(row.Successful), int(row.Failed), nil
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {

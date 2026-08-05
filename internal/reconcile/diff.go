@@ -10,27 +10,28 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // localIndex precomputes the lookups the diff checks share.
 type localIndex struct {
-	byPSID    map[string]*LocalSubscription
-	byID      map[uuid.UUID]*LocalSubscription
-	byEmail   map[string][]*LocalSubscription
-	bySubject map[uuid.UUID][]*LocalSubscription
-	pmByVault map[string]*LocalPaymentMethod
-	pmByID    map[uuid.UUID]*LocalPaymentMethod
-	prices    []LocalPrice
+	byPSID              map[string]*LocalSubscription
+	byID                map[uuid.UUID]*LocalSubscription
+	byEmail             map[string][]*LocalSubscription
+	bySubject           map[uuid.UUID][]*LocalSubscription
+	pmByRailCustomerRef map[string]*LocalPaymentMethod
+	pmByID              map[uuid.UUID]*LocalPaymentMethod
+	prices              []LocalPrice
 }
 
 func buildLocalIndex(local *LocalState) *localIndex {
 	idx := &localIndex{
-		byPSID:    map[string]*LocalSubscription{},
-		byID:      map[uuid.UUID]*LocalSubscription{},
-		byEmail:   map[string][]*LocalSubscription{},
-		bySubject: map[uuid.UUID][]*LocalSubscription{},
-		pmByVault: map[string]*LocalPaymentMethod{},
-		pmByID:    map[uuid.UUID]*LocalPaymentMethod{},
+		byPSID:              map[string]*LocalSubscription{},
+		byID:                map[uuid.UUID]*LocalSubscription{},
+		byEmail:             map[string][]*LocalSubscription{},
+		bySubject:           map[uuid.UUID][]*LocalSubscription{},
+		pmByRailCustomerRef: map[string]*LocalPaymentMethod{},
+		pmByID:              map[uuid.UUID]*LocalPaymentMethod{},
 	}
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
@@ -49,7 +50,7 @@ func buildLocalIndex(local *LocalState) *localIndex {
 	}
 	for i := range local.PaymentMethods {
 		pm := &local.PaymentMethods[i]
-		idx.pmByVault[pm.VaultID] = pm
+		idx.pmByRailCustomerRef[pm.RailCustomerRef] = pm
 		idx.pmByID[pm.ID] = pm
 	}
 	idx.prices = local.Prices
@@ -98,10 +99,10 @@ func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLin
 
 // remoteIndex precomputes snapshot lookups.
 type remoteIndex struct {
-	subByPSID     map[string]*RemoteSubscription
-	subsByCust    map[string][]*RemoteSubscription
-	vaultByID     map[string]*RemoteVaultEntry
-	liveSubByPSID map[string]bool
+	subByPSID               map[string]*RemoteSubscription
+	subsByCust              map[string][]*RemoteSubscription
+	remoteByRailCustomerRef map[string]*RemotePaymentMethod
+	liveSubByPSID           map[string]bool
 }
 
 func remoteLive(status SubscriptionStatus) bool {
@@ -114,10 +115,10 @@ func remoteLive(status SubscriptionStatus) bool {
 
 func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 	idx := &remoteIndex{
-		subByPSID:     map[string]*RemoteSubscription{},
-		subsByCust:    map[string][]*RemoteSubscription{},
-		vaultByID:     map[string]*RemoteVaultEntry{},
-		liveSubByPSID: map[string]bool{},
+		subByPSID:               map[string]*RemoteSubscription{},
+		subsByCust:              map[string][]*RemoteSubscription{},
+		remoteByRailCustomerRef: map[string]*RemotePaymentMethod{},
+		liveSubByPSID:           map[string]bool{},
 	}
 	for i := range snap.Subscriptions {
 		r := &snap.Subscriptions[i]
@@ -137,10 +138,10 @@ func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 	for psid, r := range idx.subByPSID {
 		idx.liveSubByPSID[psid] = remoteLive(r.Status)
 	}
-	for i := range snap.VaultEntries {
-		v := &snap.VaultEntries[i]
-		if v.CustomerVaultID != "" {
-			idx.vaultByID[v.CustomerVaultID] = v
+	for i := range snap.PaymentMethods {
+		v := &snap.PaymentMethods[i]
+		if v.RailCustomerRef != "" {
+			idx.remoteByRailCustomerRef[v.RailCustomerRef] = v
 		}
 	}
 	return idx
@@ -218,11 +219,11 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 
 	// 3. Vault/customer id -> local payment method -> that subject's
 	// subscriptions; unique match only.
-	for _, vaultID := range []string{bc.CustomerVaultID, bc.Customer} {
-		if vaultID == "" {
+	for _, railCustomerRef := range []string{bc.CustomerVaultID, bc.Customer} {
+		if railCustomerRef == "" {
 			continue
 		}
-		if pm, ok := c.local.pmByVault[vaultID]; ok {
+		if pm, ok := c.local.pmByRailCustomerRef[railCustomerRef]; ok {
 			subs := c.local.bySubject[pm.CustomerID]
 			if s, ok := uniqueSub(subs); ok {
 				return s, "vault_id", false
@@ -235,7 +236,7 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 		// subscription id matches locally (Stripe charges: customer ->
 		// subscription roster -> local).
 		var candidates []*LocalSubscription
-		for _, r := range c.remote.subsByCust[vaultID] {
+		for _, r := range c.remote.subsByCust[railCustomerRef] {
 			if s, ok := c.local.byPSID[r.RailSubscriptionID]; ok {
 				candidates = append(candidates, s)
 			}
@@ -373,6 +374,10 @@ type diffOptions struct {
 	// PS-1 findings whose identity and plan both resolve unambiguously carry
 	// a materialize apply action instead of going requires_review.
 	Materialize bool
+	// EvidenceFloor (#835) is the merchant's first-pull instant, handed to
+	// every decider invocation this diff makes: a cancel resting on evidence
+	// older than it is withheld and the row parks as `unknown`.
+	EvidenceFloor time.Time
 }
 
 // diffProvider runs every capability-gated PULL-plane check for one provider
@@ -402,8 +407,14 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		findings = append(findings, diffTransactions(provider, snap, idx, corr, paymentsByTxnID, now)...)
 	}
 	if caps.Vault {
-		findings = append(findings, diffVault(provider, local, ridx, traits)...)
+		findings = append(findings, diffPaymentMethods(provider, local, ridx, traits)...)
 	}
+
+	// #835: every cancel the staleness floor withheld surfaces as its own
+	// requires_review finding. Done HERE, over the finished finding set, so it
+	// covers every decider invocation this diff makes — present and future —
+	// rather than being repeated at each decideApply call site.
+	findings = append(findings, evidenceFlooredFindings(provider, findings)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Type != findings[j].Type {
@@ -412,6 +423,32 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		return findings[i].SubjectKey < findings[j].SubjectKey
 	})
 	return findings
+}
+
+// evidenceFlooredFindings raises the operator record for each decision the #835
+// staleness floor downgraded from a terminal cancel to a park.
+func evidenceFlooredFindings(provider Provider, findings []Finding) []Finding {
+	var out []Finding
+	for i := range findings {
+		a := findings[i].Apply
+		if a == nil || a.Decide == nil || !a.Decide.Decision.EvidenceFloored {
+			continue
+		}
+		out = append(out, Finding{
+			Provider:      provider,
+			Type:          FindingEvidenceStale,
+			SubjectKey:    evidenceStaleSubjectKey(provider, a.Decide.SubscriptionID.String()),
+			Severity:      SeverityHigh,
+			Status:        FindingStatusRequiresReview,
+			RequiresAdmin: true,
+			LocalEvidence: map[string]any{
+				"subscription_id": a.Decide.SubscriptionID.String(),
+				"withheld_cause":  a.Decide.Decision.Reason,
+			},
+			RecommendedAction: evidenceStaleAction(a.Decide.Decision.Reason),
+		})
+	}
+	return out
 }
 
 // diffSubscriptions covers PS-1, PS-2 and PS-3.
@@ -433,14 +470,19 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 		}
 
 		// Matched pair: status comparison.
-		findings = append(findings, compareStatuses(provider, snap, localSub, r, now)...)
+		findings = append(findings, compareStatuses(provider, snap, localSub, r, now, opts)...)
 	}
 
 	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
 	// lists live subscriptions, so a locally-live linked subscription that is
-	// absent is dead at the rail). Guarded upstream by the circuit
-	// breaker.
-	if traits.absenceMeansCancelled {
+	// absent is dead at the rail). Guarded upstream by the circuit breaker and
+	// the cancellation cap.
+	//
+	// #842: absence is only proof when the roster PROVES it covered everything.
+	// This used to force SubscriptionsExhaustive=true regardless of what the
+	// fetcher declared, so an empty or silently-truncated pull cancelled the
+	// merchant's whole book. The snapshot's own coverage decides now.
+	if traits.absenceMeansCancelled && snap.Coverage.SubscriptionsExhaustive {
 		for _, s := range idx.byPSID {
 			if !s.IsLive() {
 				continue
@@ -462,7 +504,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
 				// absenceMeansCancelled: the provider's live-only roster IS
 				// exhaustive for this subject — coverage-absence proof (#665).
-				Apply: decideApply(s, snap, true, now),
+				Apply: decideApply(s, snap, now, opts),
 			}
 			if intent := deletionIntent(s); intent != nil {
 				f.IntentEvidence = intent
@@ -531,6 +573,12 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		// Local past_due requires a period end (chk_past_due_has_period_end).
 		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
 	}
+	localStatus, materializable := LocalMaterializeStatus(r.Status)
+	if !materializable {
+		// or#893: the local lifecycle has no state that means "the provider's
+		// date passed". Only a live remote subscription is minted locally.
+		blockers = append(blockers, fmt.Sprintf("remote status %q has no canonical local lifecycle state; only a live remote subscription is materialized", r.Status))
+	}
 	if discoveredNotLocalRaw(r.Raw) {
 		// #714: chain-scan discoveries (permissionless `subscribe`) never
 		// auto-create local billing state — operator decision only.
@@ -548,7 +596,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		CustomerID:         subjectID,
 		PriceID:            link.price.ID,
 		ProductID:          link.price.ProductID,
-		Status:             string(r.Status),
+		Status:             localStatus,
 		PeriodEndsAt:       r.NextBillingAt,
 		UserEmail:          strings.TrimSpace(r.Email),
 		IdentityVia:        identityVia,
@@ -565,7 +613,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			Rail:          link.railName,
 			TransactionID: t.TransactionID,
 			AmountCents:   t.AmountCents,
-			Currency:      strings.ToLower(t.Currency),
+			Currency:      moneyutil.NormalizeCurrency(t.Currency),
 			PurchasedAt:   t.OccurredAt,
 			PriceID:       link.price.ID,
 			CustomerID:    subjectID,
@@ -602,7 +650,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 func resolvePS1Identity(r *RemoteSubscription, idx *localIndex) (uuid.UUID, string, string) {
 	subjects := map[uuid.UUID]string{} // subject -> how it matched (vault wins)
 	if r.CustomerID != "" {
-		if pm, ok := idx.pmByVault[r.CustomerID]; ok {
+		if pm, ok := idx.pmByRailCustomerRef[r.CustomerID]; ok {
 			subjects[pm.CustomerID] = "vault_id"
 		}
 	}
@@ -671,15 +719,12 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 // the decider consumes. forceExhaustive stamps SubscriptionsExhaustive for
 // providers whose live-only roster is exhaustive by construction
 // (traits.absenceMeansCancelled) even when a fixture omitted the coverage flag.
-func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string, forceExhaustive bool) *RemoteSnapshot {
+func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot {
 	out := &RemoteSnapshot{
 		Provider:     snap.Provider,
 		FetchedAt:    snap.FetchedAt,
 		Capabilities: snap.Capabilities,
 		Coverage:     snap.Coverage,
-	}
-	if forceExhaustive {
-		out.Coverage.SubscriptionsExhaustive = true
 	}
 	for i := range snap.Subscriptions {
 		if snap.Subscriptions[i].RailSubscriptionID == psid {
@@ -698,16 +743,16 @@ func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string, forceExhaustive 
 // its per-subscription snapshot slice and wraps it as the finding's apply
 // action (#665: the pull engine invokes the decider; no applier writes domain
 // state). Nil when the decider has no evidence-justified move.
-func decideApply(s *LocalSubscription, snap *RemoteSnapshot, forceExhaustive bool, now time.Time) *ApplyAction {
+func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts diffOptions) *ApplyAction {
 	state := SubscriptionState{
 		Status:             s.Status,
 		Rail:               s.Rail,
-		Vaulted:            s.PaymentMethodID != nil,
+		HasPaymentMethod:   s.PaymentMethodID != nil,
 		RailSubscriptionID: s.RailSubscriptionID,
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
-	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID, forceExhaustive)}, now, 0)
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, 0)
 	if d.Kind == TransitionNone {
 		return nil
 	}
@@ -719,7 +764,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, forceExhaustive boo
 
 // compareStatuses diffs one matched (local, remote) subscription pair into
 // PS-2/PS-3 findings; the enforce instruction is a decider invocation.
-func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscription, r *RemoteSubscription, now time.Time) []Finding {
+func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscription, r *RemoteSubscription, now time.Time, opts diffOptions) []Finding {
 	if r.Status == SubscriptionStatusUnknown {
 		return nil // the provider declared nothing comparable
 	}
@@ -740,7 +785,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "rail reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
-			Apply:             decideApply(s, snap, false, now),
+			Apply:             decideApply(s, snap, now, opts),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -787,7 +832,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			LocalEvidence:     localSubEvidence(s),
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: fmt.Sprintf("rail status %q vs local %q; enforce applies the evidence-gated transition", r.Status, s.Status),
-			Apply:             decideApply(s, snap, false, now),
+			Apply:             decideApply(s, snap, now, opts),
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -811,7 +856,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
 					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", drift.Hours()),
-					Apply:             decideApply(s, snap, false, now),
+					Apply:             decideApply(s, snap, now, opts),
 				}}
 			}
 		}
@@ -977,7 +1022,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			Rail:           sub.Rail,
 			TransactionID:  t.TransactionID,
 			AmountCents:    t.AmountCents,
-			Currency:       strings.ToLower(t.Currency),
+			Currency:       moneyutil.NormalizeCurrency(t.Currency),
 			PurchasedAt:    t.OccurredAt,
 			PriceID:        *sub.PriceID,
 			SubscriptionID: &subID,
@@ -1103,7 +1148,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,
 		AmountCents:   t.AmountCents,
-		Currency:      strings.ToLower(t.Currency),
+		Currency:      moneyutil.NormalizeCurrency(t.Currency),
 		PurchasedAt:   t.OccurredAt,
 		PriceID:       priceID,
 		CustomerID:    customerID,
@@ -1181,7 +1226,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		Rail:              original.Rail,
 		TransactionID:     t.TransactionID,
 		AmountCents:       t.AmountCents,
-		Currency:          strings.ToLower(t.Currency),
+		Currency:          moneyutil.NormalizeCurrency(t.Currency),
 		PurchasedAt:       t.OccurredAt,
 		RefundedPaymentID: &originalID,
 		SubscriptionID:    original.SubscriptionID,
@@ -1241,29 +1286,29 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}, true
 }
 
-// diffVault covers PS-7.
-func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits providerTraits) []Finding {
+// diffPaymentMethods covers PS-7.
+func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex, traits providerTraits) []Finding {
 	var findings []Finding
 	for i := range local.PaymentMethods {
 		pm := &local.PaymentMethods[i]
-		if pm.VaultID == "" {
+		if pm.RailCustomerRef == "" {
 			continue
 		}
-		remote, ok := ridx.vaultByID[pm.VaultID]
+		remote, ok := ridx.remoteByRailCustomerRef[pm.RailCustomerRef]
 		if !ok {
-			if !traits.vaultExhaustive {
+			if !traits.paymentMethodsExhaustive {
 				continue // partial vault listing: absence proves nothing
 			}
 			findings = append(findings, Finding{
 				Provider:   provider,
-				Type:       FindingVaultMismatch,
-				SubjectKey: pm.VaultID,
+				Type:       FindingPaymentMethodMismatch,
+				SubjectKey: pm.RailCustomerRef,
 				Severity:   SeverityMedium,
 				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
 					"payment_method_id": pm.ID.String(),
 					"customer_id":       pm.CustomerID.String(),
-					"vault_id":          pm.VaultID,
+					"vault_id":          pm.RailCustomerRef,
 					"last_four":         pm.LastFour,
 					"expiry_date":       pm.ExpiryDate,
 				},
@@ -1283,14 +1328,14 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 		}
 		findings = append(findings, Finding{
 			Provider:   provider,
-			Type:       FindingVaultMismatch,
-			SubjectKey: pm.VaultID,
+			Type:       FindingPaymentMethodMismatch,
+			SubjectKey: pm.RailCustomerRef,
 			Severity:   SeverityMedium,
 			Status:     FindingStatusReconcileRequired,
 			LocalEvidence: map[string]any{
 				"payment_method_id": pm.ID.String(),
 				"customer_id":       pm.CustomerID.String(),
-				"vault_id":          pm.VaultID,
+				"vault_id":          pm.RailCustomerRef,
 				"last_four":         pm.LastFour,
 				"expiry_date":       pm.ExpiryDate,
 			},
@@ -1300,7 +1345,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 				"email":       remote.Email,
 			},
 			RecommendedAction: "stored card metadata disagrees with the rail vault (likely an account-updater change); enforce adopts the rail record",
-			Apply: &ApplyAction{AdoptVault: &AdoptVaultAction{
+			Apply: &ApplyAction{AdoptPaymentMethod: &AdoptPaymentMethodAction{
 				PaymentMethodID: pm.ID,
 				LastFour:        remoteLast4,
 				ExpiryDate:      remote.CardExpiry,

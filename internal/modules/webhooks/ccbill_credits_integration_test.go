@@ -21,10 +21,9 @@ import (
 )
 
 func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -76,7 +75,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -87,6 +86,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	periodStart := now
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -95,6 +95,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &periodEnd,

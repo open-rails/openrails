@@ -29,7 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -88,13 +88,13 @@ type Runtime struct {
 	RiverClient       *river.Client[pgx.Tx]
 	riverPool         *pgxpool.Pool
 
-	SubscriptionService  *subscriptions.SubscriptionService
-	ProductService       *catalog.ProductService
-	PriceService         *catalog.PriceService
-	NotificationService  *subscriptions.NotificationService
-	PaymentMethodService *paymentmethods.PaymentMethodService
-	PaymentService       *payments.PaymentService
-	VaultService         *paymentmethods.VaultService
+	SubscriptionService      *subscriptions.SubscriptionService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
+	NotificationService      *subscriptions.NotificationService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	PaymentService           *payments.PaymentService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	// RepriceService is the #773 reprice primitive (move subscribers to a
 	// different price at their next renewal).
 	RepriceService *subscriptions.RepriceService
@@ -132,8 +132,9 @@ type Runtime struct {
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
-	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
-	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
+	// AdmissionPolicyCache is the process-local long-TTL cache of the or#897
+	// billing-policy RESOLUTION (which named policy binds to a payer at a tier).
+	// nil = resolve the binding from Postgres on every admit.
 	AdmissionPolicyCache *admission.PolicyCache
 	MoneyCharger         money.Charger
 	RailCustomerService  *payments.RailCustomerService
@@ -171,7 +172,12 @@ type Runtime struct {
 	// for the process-wide Solana services (poller, crank, intent verify legs,
 	// request-plane chain reads): merchant rail-account settings are the ONLY
 	// credential plane.
-	SolanaRPCResolver   *solanamodule.MerchantRPCBuilder
+	SolanaRPCResolver *solanamodule.MerchantRPCBuilder
+	// SolanaMintDecimals reads SPL mint decimals from the chain and caches them
+	// (#817). The chain is the source of truth for decimals — merchants do not
+	// declare them — so every micros->base-units conversion sources its shift
+	// here. Armed over SolanaRPCResolver's merchant-scoped chain reader.
+	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider          fx.Provider
 	FXRateRefresher     interface {
@@ -203,12 +209,12 @@ type Runtime struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *idempotency.IdempotencyService
+	IdempotencyService           *replaycache.Store
 	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579):
 	// a THIRD idempotency instance (24h TTL), separate from IdempotencyService
 	// (checkout's internal dedup) and the webhook dedup instance, backing the
 	// generic HTTP response-replay middleware on public mutating routes.
-	HTTPIdempotency *idempotency.IdempotencyService
+	HTTPIdempotency *replaycache.Store
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService

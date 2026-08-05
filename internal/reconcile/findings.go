@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // FindingType is the PS-1..PS-9 discrepancy taxonomy from #107.
@@ -35,9 +37,9 @@ const (
 	// matched subscription is still active locally. CRITICAL; requires_review
 	// (terminating a paying-ish user over a dispute is a human decision).
 	FindingChargebackActiveSub FindingType = "pull.dispute.chargeback"
-	// FindingVaultMismatch (PS-7): stored payment-method metadata disagrees
+	// FindingPaymentMethodMismatch (PS-7): stored payment-method metadata disagrees
 	// with the rail vault. Enforce: adopt the rail record.
-	FindingVaultMismatch FindingType = "pull.payment_method.mismatch"
+	FindingPaymentMethodMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
 	// live REMOTE subscriptions. Only the provider snapshot can see this
 	// (local duplicates are schema-blocked), so it is a PULL-plane finding
@@ -45,6 +47,23 @@ const (
 	// by migration 058). Always requires_review — the fix (cancel+refund at
 	// the rail) is remote and human.
 	FindingDuplicateSubscriptions FindingType = "pull.subscription.duplicate"
+	// FindingEvidenceStale (#835): a terminal cancel was WITHHELD because the
+	// evidence justifying it predates this deployment's first pull of the
+	// merchant (or carries no date at all) — inherited history that was never
+	// corroborated by anything we observed. The row parks as `unknown` with its
+	// access intact. Always requires_review: only an operator can say whether
+	// an imported record is true, and a withheld action must be visible rather
+	// than a silent no-op ("unchecked ≠ disappeared").
+	//
+	// Deliberately NOT in stateRosterFindingTypes: the unknown-cohort and
+	// webhook-converge planes write it too, so auto-resolving it on absence
+	// from a pull run would erase another plane's open finding.
+	FindingEvidenceStale FindingType = "pull.subscription.evidence_stale"
+	// FindingCancellationCapped (#837): one pass planned more cancellations
+	// than the merchant's per-pass budget allows, so NONE were applied and the
+	// pass halted. Always requires_review — a book-sized cancellation is a
+	// human decision, never an automatic one.
+	FindingCancellationCapped FindingType = "pull.cancellation.capped"
 )
 
 // #665 single-writer-per-invariant: the legacy PS-9 entitlement check
@@ -115,11 +134,11 @@ type Finding struct {
 // materialization) are direct appliers; subscription STATE transitions are a
 // Decide action — the #665 decider is the only thing that moves lifecycle state.
 type ApplyAction struct {
-	Decide          *DecideAction
-	BackfillPayment *BackfillPaymentAction
-	RecordRefund    *RecordRefundAction
-	AdoptVault      *AdoptVaultAction
-	Materialize     *MaterializeSubscriptionAction
+	Decide             *DecideAction
+	BackfillPayment    *BackfillPaymentAction
+	RecordRefund       *RecordRefundAction
+	AdoptPaymentMethod *AdoptPaymentMethodAction
+	Materialize        *MaterializeSubscriptionAction
 }
 
 // DecideAction carries a decider transition computed at diff time from the
@@ -142,9 +161,9 @@ type DecideAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// PspID is openrails.psps.id for account-bound
-	// provider-pull materialization.
-	PspID *uuid.UUID
+	// PspID is openrails.psps.id for the pull that materialized this row.
+	// Required (or#893): subscriptions.psp_id is NOT NULL.
+	PspID uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
 	// "stripe"), so the new row joins the same roster future reconciles load.
@@ -153,7 +172,9 @@ type MaterializeSubscriptionAction struct {
 	CustomerID         uuid.UUID
 	PriceID            uuid.UUID
 	ProductID          uuid.UUID
-	Status             string // active | past_due (PS-1 only fires for live remote subs)
+	// Status is the CANONICAL LOCAL lifecycle state (or#893) the row is created
+	// with — active or past_due; PS-1 only fires for a live remote subscription.
+	Status models.SubscriptionStatus
 	PeriodStartsAt     *time.Time
 	PeriodEndsAt       *time.Time
 	StartedAt          *time.Time
@@ -218,9 +239,9 @@ type RecordRefundAction struct {
 	MarkRefundedOnly bool
 }
 
-// AdoptVaultAction adopts rail vault metadata onto a local payment
+// AdoptPaymentMethodAction adopts rail vault metadata onto a local payment
 // method (PS-7).
-type AdoptVaultAction struct {
+type AdoptPaymentMethodAction struct {
 	PaymentMethodID uuid.UUID
 	LastFour        string
 	ExpiryDate      string
@@ -245,7 +266,7 @@ var stateRosterFindingTypes = []FindingType{
 	FindingRemoteSubMissingLocal,
 	FindingLocalActiveRemoteDead,
 	FindingStatusMismatch,
-	FindingVaultMismatch,
+	FindingPaymentMethodMismatch,
 	FindingDuplicateSubscriptions,
 }
 

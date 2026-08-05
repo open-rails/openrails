@@ -87,13 +87,16 @@ func TestEnforceEncryptionPosture(t *testing.T) {
 	}
 }
 
-// RequiresSecretEncryption pins the env signal to the same gate as RequiresRLS.
+// RequiresSecretEncryption pins the env signal: only development may run the
+// DB-backed store without an encryption key. (The RLS-role gate is NOT env
+// dependent — see db.EnforceRLSPosture, or#782.)
 func TestRequiresSecretEncryption_EnvSignal(t *testing.T) {
 	cases := []struct {
 		env  string
 		want bool
 	}{
-		{"", false}, {"dev", false}, {"development", false},
+		// SEC-18: an UNDECLARED env is not development — it requires encryption.
+		{"", true}, {"dev", false}, {"development", false},
 		{"production", true}, {"staging", true},
 	}
 	for _, tc := range cases {
@@ -101,13 +104,10 @@ func TestRequiresSecretEncryption_EnvSignal(t *testing.T) {
 		if got := cfg.RequiresSecretEncryption(); got != tc.want {
 			t.Fatalf("Env=%q: RequiresSecretEncryption()=%v, want %v", tc.env, got, tc.want)
 		}
-		if got, rls := cfg.RequiresSecretEncryption(), cfg.RequiresRLS(); got != rls {
-			t.Fatalf("Env=%q: encryption gate %v diverges from RLS gate %v", tc.env, got, rls)
-		}
 	}
 	var nilCfg *config.Config
 	if nilCfg.RequiresSecretEncryption() {
-		t.Fatal("nil config must not require encryption (mirrors RequiresRLS)")
+		t.Fatal("nil config must not require encryption")
 	}
 }
 

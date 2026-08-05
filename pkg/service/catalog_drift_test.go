@@ -101,7 +101,7 @@ func price(id, productID uuid.UUID, _ string, amount int64, currency string, act
 // nmiPrice builds an OpenRails price linked to an NMI plan via the mobius
 // rail map.
 func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd"}
+	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "USD"}
 	if planID != "" {
 		p.PSPLinks = map[string]map[string]string{
 			"mobius": {models.RailKeyRail: string(models.RailNMI), models.RailKeyPlanID: planID, models.RailKeyProvider: "mobius"},
@@ -132,7 +132,7 @@ func TestComputeCatalogDriftOrphan(t *testing.T) {
 	}
 	// Stripe price with marker pointing to a nonexistent OpenRails price -> orphan.
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_ghost", UnitAmount: 1000, Currency: "usd", Active: true, Metadata: map[string]string{
+		{ID: "price_ghost", UnitAmount: 1000, Currency: "USD", Active: true, Metadata: map[string]string{
 			catalog.StripeMetadataOpenRailsPriceID: uuid.New().String(),
 		}},
 	}
@@ -176,7 +176,7 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_1", UnitAmount: 2000, Currency: "eur", Active: false, Nickname: "Yearly", Metadata: map[string]string{
+		{ID: "price_1", UnitAmount: 2000, Currency: "EUR", Active: false, Nickname: "Yearly", Metadata: map[string]string{
 			// Content key reverse-matches the LOCAL row's financial key
 			// (prod-key, usd, 10_000_000 micros, one-time); the Stripe object's own
 			// amount/currency/active diverge -> field drift.
@@ -208,7 +208,7 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
-		{ID: "price_1", UnitAmount: 1000, Currency: "usd", Active: true, Nickname: "Monthly", Metadata: map[string]string{
+		{ID: "price_1", UnitAmount: 1000, Currency: "USD", Active: true, Nickname: "Monthly", Metadata: map[string]string{
 			catalog.StripeMetadataOpenRailsPriceKey: "prod-key.usd.10000000.onetime",
 		}},
 	}
@@ -237,8 +237,13 @@ func TestDriftDedupeKeyStable(t *testing.T) {
 			DetectedAt:            now,
 		}
 	}
-	if driftDedupeKey(mk()) != driftDedupeKey(mk()) {
-		t.Fatal("dedupe key must be stable for the same divergence")
+	// Two INDEPENDENTLY built copies of the same divergence must key the same.
+	// Written through variables so it is a real comparison of two computed
+	// values, not two syntactically identical expressions that staticcheck
+	// (correctly) reads as an assertion that can never fail — or#865/or#869.
+	first, second := driftDedupeKey(mk()), driftDedupeKey(mk())
+	if first != second {
+		t.Fatalf("dedupe key must be stable for the same divergence: %q vs %q", first, second)
 	}
 	other := mk()
 	other.Field = "description"

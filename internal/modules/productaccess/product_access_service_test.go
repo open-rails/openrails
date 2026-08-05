@@ -21,11 +21,10 @@ import (
 // product_id FK. Skips when no DSN is configured.
 func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uuid.UUID) {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	// The Service is RLS-scoped (MerchantTx), so it needs a merchant on the ctx.
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
@@ -116,15 +115,16 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 
 	// grants.payment_id has a real FK to payments (the old product_access_grants
 	// table had none), so seed a real purchase payment for this customer/product.
-	seedPool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	seedPool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
 	custID := dbtest.EnsureCustomerIDPgx(ctx, t, seedPool, userID)
 	priceID := uuid.New()
-	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'usd',720,true,$3)`,
+	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 		priceID, productID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
-	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
-	                             VALUES ($1,$2,'nmi',$3,999,999,'usd','completed',$4,$5,$6)`,
-		paymentID, priceID, "txn-"+paymentID.String(), now, dbtest.TestMerchantID.UUID(), custID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, seedPool, dbtest.TestMerchantID.UUID(), "nmi")
+	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
+	                             VALUES ($1,$2,'nmi',$3,$4,999,999,'USD','completed',$5,$6,$7)`,
+		paymentID, priceID, pspID, "txn-"+paymentID.String(), now, dbtest.TestMerchantID.UUID(), custID)
 	require.NoError(t, err)
 
 	_, _, err = svc.GrantProductAccess(ctx, GrantParams{

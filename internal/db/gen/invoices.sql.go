@@ -670,13 +670,13 @@ INSERT INTO openrails.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
     failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
-    payment_method_id, idempotency_key
+    payment_method_id, idempotency_key, psp_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17,
-    $18, $19
+    $18, $19, $20::uuid
 )
 `
 
@@ -700,6 +700,7 @@ type InsertInvoicePaymentParams struct {
 	UpdatedAt        time.Time
 	PaymentMethodID  *uuid.UUID
 	IdempotencyKey   *string
+	PspID            *uuid.UUID
 }
 
 func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePaymentParams) error {
@@ -723,6 +724,7 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.UpdatedAt,
 		arg.PaymentMethodID,
 		arg.IdempotencyKey,
+		arg.PspID,
 	)
 	return err
 }
@@ -925,10 +927,21 @@ JOIN openrails.invoice_items ii
  AND ii.invoice_id IS NULL
  AND ii.status = 'pending'
  AND ii.invoice_at < $2::timestamptz
+LEFT JOIN LATERAL (
+    SELECT (p.policy ->> 'collection_threshold_amount')::bigint AS threshold
+    FROM openrails.billing_policy_bindings b
+    JOIN openrails.billing_policies p
+      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
+    WHERE b.merchant_id = s.merchant_id
+      AND (b.customer_id = s.customer_id OR b.customer_id IS NULL)
+      AND (b.tier = s.tier OR b.tier IS NULL)
+    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
+    LIMIT 1
+) pol ON true
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.credit_limit_amount > 0
-GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount
+GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount, pol.threshold
 HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
     SELECT COALESCE(SUM(i.amount_due), 0)::bigint
     FROM openrails.invoices i
@@ -937,7 +950,9 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
       AND i.currency = s.currency
       AND i.status IN ('open', 'past_due')
       AND i.amount_due > 0
-) >= CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END
+) >= COALESCE(
+    pol.threshold,
+    CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END)
 ORDER BY period_from ASC
 `
 
@@ -954,6 +969,11 @@ type ListInvoiceThresholdCandidatesRow struct {
 	PeriodAnchor time.Time
 }
 
+// or#897: the trigger amount is the BOUND billing policy's
+// collection_threshold_amount when the payer has one, else the merchant-wide
+// threshold, else the payer's own credit line. Resolved in SQL through the same
+// most-specific-wins rungs the admission path uses (money_settings.tier supplies
+// the tier rung), so a per-payer trigger costs no extra round trip.
 func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListInvoiceThresholdCandidatesParams) ([]ListInvoiceThresholdCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff, arg.MinThreshold)
 	if err != nil {
@@ -1165,15 +1185,14 @@ func (q *Queries) ListUnknownOutcomeInvoices(ctx context.Context, arg ListUnknow
 
 const markInvoiceCollectionOutcomeUnknown = `-- name: MarkInvoiceCollectionOutcomeUnknown :execrows
 UPDATE openrails.invoices
-SET status = 'past_due',
-    next_collection_attempt_at = NULL,
+SET next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_outcome_unknown',
     last_collection_failure_message = NULL,
     updated_at = $3::timestamptz
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $4
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND amount_due > 0
   AND last_collection_failure_code = 'collection_attempt_in_progress'
 `
@@ -1185,6 +1204,10 @@ type MarkInvoiceCollectionOutcomeUnknownParams struct {
 	InvoiceID  uuid.UUID
 }
 
+// Parking an in-doubt outcome, like claiming an attempt, says nothing about
+// whether the invoice is late — so it leaves `status` where the clock put it
+// (or#828: the collection machinery does not move an invoice along the
+// delinquency axis; only a terminal outcome and MarkInvoicesPastDue do).
 func (q *Queries) MarkInvoiceCollectionOutcomeUnknown(ctx context.Context, arg MarkInvoiceCollectionOutcomeUnknownParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markInvoiceCollectionOutcomeUnknown,
 		arg.MerchantID,
@@ -1298,7 +1321,11 @@ const recordInvoiceCollectionFailure = `-- name: RecordInvoiceCollectionFailure 
 UPDATE openrails.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, $3::timestamptz),
-    status = CASE WHEN $4::boolean THEN 'uncollectible' ELSE 'past_due' END,
+    status = CASE
+        WHEN $4::boolean THEN 'uncollectible'
+        WHEN $5::timestamptz IS NULL THEN status
+        ELSE 'past_due'
+    END,
     next_collection_attempt_at = $5::timestamptz,
     last_collection_failure_code = $6,
     last_collection_failure_message = $7,
@@ -1323,6 +1350,20 @@ type RecordInvoiceCollectionFailureParams struct {
 	ExpectedFailureCount int32
 }
 
+// or#828/or#870, three buckets, three dispositions. The two arguments encode
+// them totally and disjointly, because collection.FailureAction does:
+//
+//	terminal                       -> bucket 3, or a bucket-1 schedule that ran
+//	                                  out. The invoice is uncollectible.
+//	no terminal, NULL next attempt -> bucket 2. Charging STOPS because the
+//	                                  customer must fix their instrument.
+//	a next attempt                 -> bucket 1. Still dunning.
+//
+// Bucket 2 leaves `status` exactly where it was on purpose. A decline bucket
+// answers "what do we do about the CARD"; `past_due` is a reading of the CLOCK
+// (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
+// (or#878). Our decision to stop attempting must not age the customer's
+// invoice: it stays open, it stays collectible, and it stays theirs to settle.
 func (q *Queries) RecordInvoiceCollectionFailure(ctx context.Context, arg RecordInvoiceCollectionFailureParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordInvoiceCollectionFailure,
 		arg.MerchantID,
@@ -1352,7 +1393,7 @@ SET status = $3::text,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $9
-  AND status = 'past_due'
+  AND status IN ('open', 'past_due')
   AND last_collection_failure_code IN ('collection_attempt_in_progress', 'collection_outcome_unknown')
 `
 
@@ -1407,7 +1448,7 @@ type ResolveInvoiceCollectionUnknownParams struct {
 }
 
 // #828: an unknown outcome was RESOLVED (verifier provider read, or admin
-// unpark): clear the park so the schedule resumes. Status stays past_due.
+// unpark): clear the park so the schedule resumes. Status is untouched.
 func (q *Queries) ResolveInvoiceCollectionUnknown(ctx context.Context, arg ResolveInvoiceCollectionUnknownParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resolveInvoiceCollectionUnknown,
 		arg.MerchantID,
@@ -1422,9 +1463,54 @@ func (q *Queries) ResolveInvoiceCollectionUnknown(ctx context.Context, arg Resol
 	return result.RowsAffected(), nil
 }
 
+const resumeStoppedInvoiceCollection = `-- name: ResumeStoppedInvoiceCollection :execrows
+UPDATE openrails.invoices
+SET next_collection_attempt_at = $3::timestamptz,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = $4
+  AND status IN ('open', 'past_due')
+  AND amount_due > 0
+  AND collection_method = 'charge_automatically'
+  AND collection_failure_count > 0
+  AND next_collection_attempt_at IS NULL
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
+  AND last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown'
+`
+
+type ResumeStoppedInvoiceCollectionParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+	Currency   string
+}
+
+// or#828 bucket-2 resume. A stopped invoice is one that failed at least once
+// and has NO next attempt scheduled — charging halted because the instrument
+// needs replacing. When the payer designates a collection payment method they
+// have done the thing the notice asked for, so those invoices become due again
+// immediately.
+//
+// Untouched on purpose: `uncollectible` invoices (terminal needs an operator,
+// not a new card) and rows mid-claim or in-doubt, which the claim and verifier
+// machinery owns.
+func (q *Queries) ResumeStoppedInvoiceCollection(ctx context.Context, arg ResumeStoppedInvoiceCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resumeStoppedInvoiceCollection,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.Currency,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setInvoiceCollectionClaim = `-- name: SetInvoiceCollectionClaim :execrows
 UPDATE openrails.invoices
-SET status = 'past_due',
+SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
     next_collection_attempt_at = NULL,
     last_collection_failure_code = 'collection_attempt_in_progress',
     last_collection_failure_message = NULL,
@@ -1446,6 +1532,12 @@ type SetInvoiceCollectionClaimParams struct {
 	InvoiceID  uuid.UUID
 }
 
+// Claiming an attempt says nothing about whether the invoice is late, so it no
+// longer stamps past_due on an invoice the clock has not aged (or#828/or#878):
+// otherwise a bucket-2 decline could never leave the invoice open, because the
+// claim would have moved it before the decline was even read. Reclaiming an
+// `uncollectible` invoice DOES reopen it — that is a manual retry undoing a
+// terminal outcome, a real state change.
 func (q *Queries) SetInvoiceCollectionClaim(ctx context.Context, arg SetInvoiceCollectionClaimParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setInvoiceCollectionClaim,
 		arg.MerchantID,
@@ -1530,46 +1622,6 @@ func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg Se
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const sumOpenInvoiceAmountDue = `-- name: SumOpenInvoiceAmountDue :one
-SELECT COALESCE(SUM(amount_due), 0)::bigint
-FROM openrails.invoices
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-  AND status IN ('open', 'past_due') AND amount_due > 0
-`
-
-type SumOpenInvoiceAmountDueParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-func (q *Queries) SumOpenInvoiceAmountDue(ctx context.Context, arg SumOpenInvoiceAmountDueParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumOpenInvoiceAmountDue, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const sumPendingInvoiceItemAmount = `-- name: SumPendingInvoiceItemAmount :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.invoice_items
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-  AND invoice_id IS NULL AND status = 'pending'
-`
-
-type SumPendingInvoiceItemAmountParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-func (q *Queries) SumPendingInvoiceItemAmount(ctx context.Context, arg SumPendingInvoiceItemAmountParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumPendingInvoiceItemAmount, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const sumPendingInvoiceItemAmountBySourceInPeriod = `-- name: SumPendingInvoiceItemAmountBySourceInPeriod :many

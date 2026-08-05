@@ -29,7 +29,7 @@ type CatalogPushOptions struct {
 	Config  *config.Config
 	PGXPool *pgxpool.Pool
 	// Runtime applies the catalog through an already-bootstrapped embedded
-	// engine. This preserves its armed per-merchant provider accounts and
+	// engine. This preserves its armed per-merchant PSPs and
 	// signers; without it the helper builds an isolated runtime from Config.
 	// The supplied runtime's config is authoritative.
 	Runtime  *Embedded
@@ -37,7 +37,10 @@ type CatalogPushOptions struct {
 	Manifest []byte
 	Out      io.Writer
 
-	DryRun    bool
+	// Insert/Overwrite/Prune are the mutation classes; they compose. Declaring
+	// NONE is plan-only. or#893 deleted the DryRun field: it could override an
+	// explicitly requested mutation, so the same call meant two different things
+	// depending on a second field.
 	Insert    bool
 	Overwrite bool
 	Prune     bool
@@ -96,7 +99,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	for _, target := range targets {
 		manifests = append(manifests, target.Manifest)
 	}
-	rt, svc, cleanup, err := catalogPushRuntime(opts, manifests...)
+	rt, svc, cleanup, err := catalogPushRuntime(ctx, opts, manifests...)
 	if err != nil {
 		return err
 	}
@@ -149,7 +152,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 }
 
 func (o CatalogPushOptions) planOnly() bool {
-	return o.DryRun || (!o.Insert && !o.Overwrite && !o.Prune)
+	return !o.Insert && !o.Overwrite && !o.Prune
 }
 
 func catalogPushConfig(opts CatalogPushOptions) *config.Config {
@@ -160,6 +163,7 @@ func catalogPushConfig(opts CatalogPushOptions) *config.Config {
 }
 
 func catalogPushRuntime(
+	ctx context.Context,
 	opts CatalogPushOptions,
 	manifests ...*catalog.Manifest,
 ) (*app.Runtime, *billingservice.Service, func(), error) {
@@ -174,6 +178,7 @@ func catalogPushRuntime(
 		return opts.Runtime.app.Runtime, svc, func() {}, nil
 	}
 	rt, svc, cleanup, err := newCatalogPushRuntime(
+		ctx,
 		catalogPushConfig(opts),
 		opts.PGXPool,
 		manifests...,
@@ -233,8 +238,8 @@ func loadCatalogPushTargets(opts CatalogPushOptions) ([]catalogPushTarget, error
 	return targets, nil
 }
 
-func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...*catalog.Manifest) (*app.Runtime, *billingservice.Service, func(), error) {
-	database, err := newCatalogPushDB(cfg, pool)
+func newCatalogPushRuntime(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, manifests ...*catalog.Manifest) (*app.Runtime, *billingservice.Service, func(), error) {
+	database, err := openEmbeddedDB(ctx, cfg, pool)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -264,24 +269,6 @@ func newCatalogPushRuntime(cfg *config.Config, pool *pgxpool.Pool, manifests ...
 		return nil, nil, nil, fmt.Errorf("construct OpenRails service: %w", err)
 	}
 	return rt, svc, cleanup, nil
-}
-
-func newCatalogPushDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
-	if pool != nil {
-		schema := config.DefaultSchema
-		if cfg != nil && cfg.DB != nil {
-			schema = cfg.DB.SchemaName()
-		}
-		return db.NewWithPGXPool(pool, schema)
-	}
-	if cfg == nil || cfg.DB == nil {
-		return nil, fmt.Errorf("config database is required")
-	}
-	database, err := db.NewDB(cfg.DB)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
-	}
-	return database, nil
 }
 
 func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out io.Writer, dryRun bool, prune bool) error {

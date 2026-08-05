@@ -26,7 +26,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	require.NotNil(t, rt.DB)
 	require.NotNil(t, rt.IdempotencyService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
@@ -116,6 +116,9 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
 	// Monthly billing cycle -> progressive retry gaps (#359): +2d after the
@@ -132,7 +135,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
 	}
-	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
 	// Fail-open mid-dunning (#691): the failed retry must not have touched
 	// access — entitled well past the missed paid end, with zero grace rows.
@@ -151,7 +154,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// the standing window needs no extension.
 	mock.ShouldFail = false
 	clock.Advance(collection.NextRetryIn(30*24, 2))
-	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
 	for _, entName := range []string{"premium", "extra"} {
 		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
@@ -168,7 +171,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	rt := suite.App.Runtime
 	require.NotNil(t, rt)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)
@@ -217,9 +220,32 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		Rail:           models.RailNMI,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
+		// A real declined charge attempt underlies this failure (#840): that is
+		// what lets the schedule's exhaustion count as a certainty leg.
+		AttemptRecorded: true,
 	}))
 
+	// or#836: the terminal outcome this test is about is a DESTRUCTIVE action,
+	// and destructive actions ship OFF — a fresh deployment cancels nothing and
+	// revokes nothing until an operator arms them. This test asserts what a
+	// live, REVIEWED deployment does, so it puts itself in that state; the
+	// safe default has its own tests.
+	dbtest.ArmDestructiveActions(ctx, t, dbtest.TestMerchantID.UUID())
+	t.Cleanup(func() {
+		_, _ = suite.MerchantPool().Exec(context.Background(),
+			`UPDATE openrails.destructive_action_switch SET enabled = false`)
+		_, _ = suite.MerchantPool().Exec(context.Background(),
+			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
+			dbtest.TestMerchantID.UUID())
+	})
+
+	// or#870: only a NAMED certainty terminates. 261 "Stop All Recurring
+	// Payments" is the issuer withdrawing the recurring mandate — bucket 3, the
+	// one decline class that may end a subscription. A generic 300 is bucket 1
+	// and retries forever, and exhausting the ladder on its own is no longer a
+	// death certificate (or#839/or#840).
 	mock.ShouldFail = true
+	mock.FailCode = "261"
 	worker := &riverjobs.DunningWorker{
 		DB:                 rt.DB,
 		Config:             suite.Config,
@@ -234,7 +260,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	maxDunningFailures := collection.MaxFailures(30 * 24)
 	for i := 0; i < maxDunningFailures+1; i++ {
 		clock.Advance(4 * 24 * time.Hour)
-		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
+		require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 		refreshed := suite.GetSubscription(sub.ID)
 		if refreshed.Status == models.StatusCancelled {
 			break

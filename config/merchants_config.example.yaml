@@ -2,10 +2,9 @@ version: 1
 
 # Store real secrets in Hashicorp Vault and overlay them into this manifest.
 #
-# Per-account `environment: test|live` is an ASSERTION cross-checked against the
-# deployment's test_mode — NOT a behavior selector (test_mode alone drives
-# sandbox posture; a contradiction refuses to boot). Omitted = derived from
-# test_mode.
+# A PSP does NOT declare an environment (#882). test_mode alone decides: sandbox
+# => test, live => live, for every PSP in the deployment. The `-sandbox` keys
+# below are just a second account on the same rail, not a second environment.
 #
 # Solana runtime knobs (#711) live in the solana account's `settings` block
 # below. Solana provider account identity is derived from the signer public key.
@@ -13,6 +12,11 @@ version: 1
 merchants:
   local-stack:
     display_name: Local Stack
+
+    # Canonical API host (#734/#850): the Host header public routes resolve
+    # this merchant from. Bare lowercase hostname, globally unique. Optional —
+    # omitted leaves any stored value untouched.
+    # api_host: api.local-stack.example
 
     remote_application:
       issuer: https://local-stack.example
@@ -28,17 +32,46 @@ merchants:
       billing_period_boundary: calendar_month
       collection_threshold: 50_000_000
       monthly_floor: 1_000_000
+      # or#878 arrears delinquency: days past due_at before new spend is refused
+      # and the host is signalled to shut off. Default 14; the amount floor
+      # defaults to monthly_floor. See docs/arrears-delinquency.md.
+      delinquency_grace_days: 7
 
     delegated_invoker_wasted_spend_windows:
       - { key: burst, window: 15m, limit: 5_000_000 }
       - { key: sustained, window: 5h, limit: 20_000_000 }
+
+    # or#288 processor routing: ordered rules, FIRST MATCH WINS. `prefer` is both
+    # the ranked candidate list and the whitelist — a PSP the winning rule does
+    # not name cannot be routed to, which is how you pin a product to one rail.
+    # Candidates that cannot serve the price right now (unarmed, archived,
+    # credentials missing, no price link, mode unsupported) are skipped and the
+    # next one is taken; the skipped set and its reasons land on the session's
+    # routing_reason. Entries speak the checkout selector vocabulary (#848): PSP
+    # keys, or a rail kind where exactly one PSP is armed on it.
+    #
+    # OMIT THIS BLOCK ENTIRELY for the built-in order (stripe, nmi, ccbill,
+    # solana) — it is the right answer for a merchant with one PSP per rail.
+    # A declared rule REPLACES the policy whole; a rule with an empty `match`
+    # matches everything and must therefore be last.
+    #
+    # A request that NAMES a PSP always gets that PSP: routing decides only when
+    # checkout's payment.rail is omitted, and an explicit choice never falls back.
+    checkout_routing:
+      # EU subscriptions go to CCBill first, NMI second.
+      - match: { currency: eur, mode: subscription }
+        prefer: [ccbill, mobius]
+      # This one product is card-only; solana must never be offered for it.
+      - match: { product: enterprise }
+        prefer: [stripe, mobius]
+      # Catch-all.
+      - prefer: [mobius, ccbill, solana]
 
     # Operator-declared PSP catalog: one word everywhere — this key, the DB table
     # (openrails.psps) and the merchant-secret name prefix (`psps/…`). One rail each.
     psps:
       mobius:
         nmi:
-          environment: live
           account_id: "1234567"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -49,7 +82,6 @@ merchants:
 
       mobius-sandbox:
         nmi:
-          environment: test
           account_id: "7654321"
           settings:
             tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -60,7 +92,6 @@ merchants:
 
       paykings:
         nmi:
-          environment: live
           account_id: "5551234"
           archived: true
           settings:
@@ -70,25 +101,36 @@ merchants:
             security_key: replace-with-paykings-nmi-security-key
             webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
 
-      # #795 vaulted_card: Basis Theory neutral card vault detokenizing through
-      # the BT proxy into the NMI gateway account referenced by gateway_account
-      # (an NMI account_id declared above). account_id = the BT tenant id.
-      # The ONLY custodial secret is the PRIVATE application key; the public
-      # key is checkout-page config. nt_charges must stay false on NMI gateways.
-      bt-vault:
-        vaulted_card:
-          environment: test
-          account_id: replace-with-bt-tenant-id
-          settings:
-            gateway_account: "7654321"
-            network_tokens: false
-            public_api_key: replace-with-bt-public-application-key
+      # or#879/or#880 CUSTODY: ordinary NMI PSPs whose cards are held by a
+      # third-party custodian (Basis Theory) instead of in NMI's own vault.
+      # Custody is a MODIFIER on the rail, never a rail of its own: NMI still
+      # charges, the custodian just detokenizes the PAN into this gateway.
+      #
+      # The custodian is declared ONCE under `custodians:` below and referenced
+      # by key here. Both of these PSPs charge cards out of the same vault —
+      # one tenant id, one application key, no copies to drift.
+      #
+      # The browser tokenizes against the CUSTODIAN, so a custodial PSP
+      # declares no NMI tokenization_key; the custodian's public_api_key
+      # replaces it.
+      mobius-bt:
+        nmi:
+          account_id: "7654322"
+          custodian: bt
           secrets:
-            api_key: replace-with-bt-private-application-key
+            security_key: replace-with-test-nmi-security-key
+            webhook_signing_secret: replace-with-test-nmi-webhook-secret
+
+      mobius-bt-backup:
+        nmi:
+          account_id: "7654323"
+          custodian: bt
+          secrets:
+            security_key: replace-with-backup-nmi-security-key
+            webhook_signing_secret: replace-with-backup-nmi-webhook-secret
 
       ccbill:
         ccbill:
-          environment: live
           # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
           account_id: "999999-0000"
           # Webhook source IPs are CCBill's documented provider-wide ranges,
@@ -100,7 +142,6 @@ merchants:
 
       stripe:
         stripe:
-          environment: live
           account_id: acct_1AbCdEfGhIjKlMnOp
           secrets:
             secret_key: replace-with-live-stripe-secret-key
@@ -108,7 +149,6 @@ merchants:
 
       stripe-sandbox:
         stripe:
-          environment: test
           account_id: acct_1ZyXwVuTsRqPoNmL
           secrets:
             secret_key: replace-with-test-stripe-secret-key
@@ -116,7 +156,6 @@ merchants:
 
       solana:
         solana:
-          environment: live
           archived: false
           signer: { mode: local_keypair }
           settings:
@@ -126,22 +165,64 @@ merchants:
             # embedded boot plane also sets them, these settings win (#699).
             rpc_provider: helius # helius | public; empty defaults to helius
             rpc_api_key: replace-with-helius-api-key
-            # CLIENT HINT: echoed to browsers so frontends only offer Solana Pay
-            # (transaction-request) recurring flows after the deployment validated
-            # its target wallets accept co-signed transactions. Not enforced
-            # server-side.
-            tokens:
-              SOL: { name: Solana, mint: So11111111111111111111111111111111111111112, decimals: 9 }
-              USDC: { name: USD Coin, mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, decimals: 6 }
+            # `tokens` is OPTIONAL and it is the ACCEPTED SET (or#881): what you
+            # declare is what buyers can pay in, nothing more. Omit it and you
+            # accept USDC only — the one token on every network that also
+            # rebills. The built-in registry (SOL, USDC, USDT, PYUSD, USD1, USDG
+            # on mainnet; SOL, USDC, PYUSD on devnet) is a mint lookup table,
+            # not an acceptance list.
+            #   - built-in symbol: SELECT it (`USDC: {}`) — its mint comes from
+            #     the registry. Declaring `mint:` for a built-in symbol is an
+            #     ERROR, even when the address agrees: a mint you can type is a
+            #     mint you can mistype, and a wrong one accepts payment in a
+            #     different token than the one you priced.
+            #   - custom token: `mint:` is REQUIRED — there the mint IS the
+            #     token's identity, so it is genuinely yours to declare.
+            #   - `decimals` is not accepted (or#817): read from the SPL mint
+            #     on-chain, never from config.
+            # Under test_mode the registry's devnet column applies; a built-in
+            # symbol with no devnet mint (USDT/USD1/USDG) is declared there like
+            # any other ad-hoc devnet token, with an explicit mint.
+            #
+            # tokens:
+            #   USDC: {}                    # built-in: mint from the registry
+            #   SOL:  {}
+            #   MYTK: { name: My Token, mint: replace-with-spl-mint-address }
           secrets:
             private_key: replace-with-base58-ed25519-keypair
 
       # Alternative Solana signer using Hashicorp Vault Transit.
       solana-vault:
         solana:
-          environment: live
           archived: false
           signer: { mode: vault_transit, key: openrails-solana-local-stack }
+
+    # Operator-declared CUSTODIAN catalog (or#880): the same shape as `psps:`
+    # one axis over. A PSP says who CHARGES the card; a custodian says who
+    # HOLDS it. Most merchants declare none at all — a card stored inside
+    # Stripe or in NMI's own vault needs no configuration, because the PSP IS
+    # the custodian.
+    #
+    # Declared ONCE and referenced by key from every PSP whose gateway those
+    # cards are charged through (`custodian: bt` above). The ONLY custodial
+    # secret is the vendor's PRIVATE application key.
+    custodians:
+      bt:
+        basis_theory:
+          # The custodian-native tenant identity. Operator-declared: there is
+          # no runtime whoami (#592).
+          account_id: replace-with-bt-tenant-id
+          settings:
+            # The PUBLIC application key the checkout page tokenizes with. It
+            # replaces the rail's own tokenization_key: with custody, the
+            # browser sends the PAN to the CUSTODIAN, not to the gateway.
+            public_api_key: replace-with-bt-public-application-key
+            # Network-token provisioning at instrument creation (a paid
+            # add-on). Never load-bearing: a provisioning failure warns and
+            # the instrument stays a proxied PAN.
+            network_tokens: false
+          secrets:
+            api_key: replace-with-bt-private-application-key
 
   static-jwks-stack:
     display_name: Static JWKS Stack

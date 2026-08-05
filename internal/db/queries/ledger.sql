@@ -19,19 +19,42 @@ INSERT INTO openrails.ledger_accounts (
 )
 RETURNING *;
 
+-- InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
+-- NOTHING against idx_ledger_transfers_operation_once makes once-only a
+-- DATABASE fact: a replay at the same (merchant, customer, currency,
+-- transfer_type, operation, source, source_id, grant_id) inserts nothing and
+-- returns zero rows, whatever order the caller took its locks in. Zero rows is
+-- therefore "already applied", not an error — ledger.Apply reads the committed
+-- row and reports Replayed.
 -- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
-    allow_debit_negative_up_to,
+    allow_debit_negative_up_to, operation,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
-    sqlc.arg(allow_debit_negative_up_to)::bigint,
-    sqlc.narg(source)::text, sqlc.narg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
+    sqlc.arg(allow_debit_negative_up_to)::bigint, sqlc.arg(operation)::text,
+    sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid
 )
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+DO NOTHING
 RETURNING *;
+
+-- GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
+-- the full physical identity, lot included, so a multi-lot spend resolves the
+-- right leg.
+-- name: GetLedgerTransferAtCoordinate :one
+SELECT * FROM openrails.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+  AND transfer_type = sqlc.arg(transfer_type)::text
+  AND operation = sqlc.arg(operation)::text
+  AND source = sqlc.arg(source)::text
+  AND source_id = sqlc.arg(source_id)::text
+  AND grant_id IS NOT DISTINCT FROM sqlc.narg(grant_id)::uuid;
 
 -- name: GetLedgerAccountByID :one
 SELECT * FROM openrails.ledger_accounts
@@ -62,39 +85,32 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text;
 
--- GetLedgerTransferByCoords: idempotency / lookup by the operation coordinate
--- (merchant, customer, currency, transfer_type, source, source_id). Replaces
--- GetMoneyTransactionByCoords. Newest-first so a replay returns the latest row.
+-- GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
+-- coordinate (merchant, customer, currency, transfer_type, operation, source,
+-- source_id). `operation` is the or#894 discriminator: without it a capture and
+-- a wasted-spend usage charge sharing one (source, source_id) alias here.
+-- Newest-first so a replay returns the latest row.
 -- name: GetLedgerTransferByCoords :one
 SELECT * FROM openrails.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type = sqlc.arg(transfer_type)::text
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
 ORDER BY created_at DESC
 LIMIT 1;
 
--- CountLedgerSpendByCoords: unified-spend idempotency — a spend (balance debit)
--- OR an owed accrual with this operation coordinate means it already happened.
--- name: CountLedgerSpendByCoords :one
-SELECT count(*) FROM openrails.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
-  AND source = sqlc.arg(source)::text
-  AND source_id = sqlc.arg(source_id)::text;
-
--- GetLedgerSpendByCoords: the first posted spend movement for an idempotent
--- captured request.
+-- GetLedgerSpendByCoords: the first posted spend movement for one money
+-- operation at its idempotency coordinate.
 -- name: GetLedgerSpendByCoords :one
 SELECT * FROM openrails.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
 ORDER BY created_at ASC
@@ -113,6 +129,56 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND created_at < sqlc.arg(period_to)::timestamptz
 GROUP BY transfer_type;
 
+-- ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
+-- return every breached ledger so the operator cannot receive a false healthy
+-- result from pagination.
+-- name: ListLedgerConservationBreaches :many
+SELECT merchant_id,
+       currency,
+       SUM(credits_posted - debits_posted)::bigint AS net,
+       COUNT(*)::bigint AS accounts
+FROM openrails.ledger_accounts
+WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+    OR merchant_id = sqlc.narg(merchant_id)::uuid)
+GROUP BY merchant_id, currency
+HAVING SUM(credits_posted - debits_posted) <> 0
+ORDER BY merchant_id, currency;
+
+-- ListLedgerCounterDrifts rebuilds account counters from the immutable
+-- transfer log and returns every account whose maintained projection differs.
+-- name: ListLedgerCounterDrifts :many
+WITH logged AS (
+    SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
+    FROM (
+        SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
+        FROM openrails.ledger_transfers
+        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+        UNION ALL
+        SELECT debit_account_id, 0::bigint, amount
+        FROM openrails.ledger_transfers
+        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+    ) legs
+    GROUP BY account_id
+)
+SELECT a.id AS account_id,
+       a.merchant_id,
+       a.currency,
+       a.account_type,
+       a.customer_id,
+       a.credits_posted AS stored_credits,
+       COALESCE(l.credits, 0)::bigint AS logged_credits,
+       a.debits_posted AS stored_debits,
+       COALESCE(l.debits, 0)::bigint AS logged_debits
+FROM openrails.ledger_accounts a
+LEFT JOIN logged l ON l.account_id = a.id
+WHERE (sqlc.narg(merchant_id)::uuid IS NULL
+    OR a.merchant_id = sqlc.narg(merchant_id)::uuid)
+  AND (a.credits_posted <> COALESCE(l.credits, 0)
+    OR a.debits_posted <> COALESCE(l.debits, 0))
+ORDER BY a.merchant_id, a.currency, a.id;
+
 -- SumLedgerSpendByCoords: the TOTAL money already posted at one operation
 -- coordinate. A spend fans out into one credit_spend transfer per FIFO credit
 -- lot drawn plus at most one owed_accrual, so the first transfer's amount is NOT
@@ -125,5 +191,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text;

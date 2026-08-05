@@ -19,19 +19,19 @@ Where secrets live follows the two-mode doctrine (`merchant_source`, see
   in memory, **no persistent secret store is constructed**, `secret_backend` is not consulted.
   Vault, if enabled, serves Transit signing only.
 - **`merchant_source: api` (MODE 2)** — a persistent backend selected by `secret_backend`
-  (env `SECRET_BACKEND`):
+  (env `SECRET_BACKEND`), which is **required**:
 
 ```yaml
-secret_backend: db      # DEK-encrypted Postgres store (default) — or `vault`
+secret_backend: db      # DEK-encrypted Postgres store — or `vault`
 vault:
   enabled: true
 ```
 
 `secret_backend` is **declared intent** — never auto-detected, never auto-fallback (the data lives
-in exactly one place; a store that lacks it would run silently empty). Empty derives from
-`vault.enabled` for back-compat; `secret_backend: vault` requires `vault.enabled`. Outside
-development, `merchant_source: api` refuses to boot without a real backend: Vault, or the DB
-store with `ENCRYPTION_MASTER_KEY` set (#667/#723).
+in exactly one place; a store that lacks it would run silently empty). `merchant_source: api`
+refuses to boot without it; `vault.enabled` is a Vault *connection* (Transit signing counts) and
+never stands in for the declaration. `secret_backend: vault` requires `vault.enabled`;
+`secret_backend: db` outside development requires `ENCRYPTION_MASTER_KEY` (#667/#723).
 
 ### The DB fallback: envelope encryption
 
@@ -122,13 +122,13 @@ secret/openrails/merchants/<merchant-slug>/<name>     # value under KV-v2 field 
 ```
 
 Slugs (not ids) make operator-written paths deterministic and readable. The names are identical
-across backends — switching to Vault changes only the physical path. Canonical names:
+across backends — switching to Vault changes only the physical path.
+
+There is exactly ONE canonical name shape, for every rail (#884 retired the flat
+`<rail>/<purpose>` spellings — they were write-only and never read):
 
 | Secret | `<name>` |
 |---|---|
-| Stripe API key | `stripe/secret_key` |
-| Stripe webhook signing secret | `stripe/webhook_signing_secret` |
-| Stripe thin-event signing secret | `stripe/webhook_signing_secret_thin` |
 | PSP-scoped credential (all rails) | `psps/<rail>/<live\|test>/<account_id>/<key>` |
 
 The `psps/` prefix is the durable per-PSP shape — one merchant can run multiple accounts on a
@@ -139,7 +139,7 @@ CCBill `accnum-subacc`, Solana signer address); `<key>` is a rail-registry crede
 ```sh
 vault kv put secret/openrails/merchants/acme/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
 vault kv put secret/openrails/merchants/acme/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/acme/stripe/secret_key value="$STRIPE_SECRET_KEY"
+vault kv put secret/openrails/merchants/acme/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
 ```
 
 `psps/solana/<env>/<address>/private_key` (local-keypair signer) is operator-only — it is never

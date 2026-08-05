@@ -47,7 +47,7 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return res, err
 	}

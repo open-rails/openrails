@@ -23,6 +23,11 @@ type SolanaSubscription struct {
 	MerchantID     uuid.UUID `json:"merchant_id"`
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 
+	// PspID is the PSP that owns the local subscription this row mirrors.
+	// Carried on the due-window read so the crank's recurring-pull intent names
+	// the account it executes against (or#893). Zero outside that read.
+	PspID uuid.UUID `json:"psp_id,omitempty"`
+
 	SubscriberWallet string `json:"subscriber_wallet"`
 	AuthorityPDA     string `json:"authority_pda"`
 	SubscriptionPDA  string `json:"subscription_pda"`

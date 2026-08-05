@@ -15,6 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -43,10 +44,9 @@ func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Cust
 
 func moneyInEnvWithDB(t *testing.T) (*money.MoneyService, *db.DB, *pgxpool.Pool, identity.CustomerID, string, context.Context) {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
 
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)
@@ -111,13 +111,6 @@ func (f *fakeCollectionAdapter) ChargeSavedMethod(_ context.Context, method gen.
 	return money.ChargeResult{Rail: method.Rail, TransactionID: "tx_" + req.IdempotencyKey}, nil
 }
 
-type fakeAlerter struct{ calls int }
-
-func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.CustomerID, _, _ int64) error {
-	f.calls++
-	return nil
-}
-
 // latestBlockExpiry returns the expiry of the most recent credit lot (a #514
 // credit grant) for the payer — the money_blocks table is gone (#512 hard cut),
 // the credit grant carries the lot's amount + expiry.
@@ -137,29 +130,50 @@ func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 	return seedPaymentMethodRow(t, pool, ctx, payer, rail, pm, "vault_"+pm.String())
 }
 
-func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, vaultID string) uuid.UUID {
+func seedPaymentMethodWithRailCustomerRef(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerRef string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	// One row with the requested rail + vault. (Was double-inserting the
 	// same id via seedPaymentMethod first → duplicate payment_methods_pkey.)
-	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), vaultID)
+	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), railCustomerRef)
 }
 
-func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, vaultID string) uuid.UUID {
+// testPSPForRail resolves an existing armed PSP for (merchant, rail) — several
+// tests in this package arm a SPECIFIC account (seedPSPSecrets)
+// before seeding a payment method/rail-customer row, and that row's psp_id
+// must match the armed one or credential resolution 404s. Only mints a fresh
+// generic PSP via dbtest.EnsureTestPSP when nothing is armed yet.
+func testPSPForRail(t *testing.T, pool *pgxpool.Pool, ctx context.Context, rail string) uuid.UUID {
 	t.Helper()
+	var existing uuid.UUID
+	err := pool.QueryRow(ctx,
+		`SELECT id FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND archived = false
+		 ORDER BY created_at DESC LIMIT 1`,
+		dbtest.TestMerchantID.UUID(), rail).Scan(&existing)
+	if err == nil {
+		return existing
+	}
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+	return dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
+}
+
+func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, railCustomerRef string) uuid.UUID {
+	t.Helper()
+	pspID := testPSPForRail(t, pool, ctx, rail)
 	params := gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           payer.UUID(),
 		Rail:                 rail,
+		PspID:                pspID,
 		InitialTransactionID: "init_" + pm.String(),
 	}
 	// Mirror the migration's per-rail handle placement: NMI keeps the customer
 	// vault in rail_customer_ref; other rails put the instrument in rail_method_ref.
 	if rails.IsNMI(models.Rail(rail)) {
-		params.RailCustomerRef = vaultID
+		params.RailCustomerRef = railCustomerRef
 	} else {
-		params.RailMethodRef = vaultID
+		params.RailMethodRef = railCustomerRef
 	}
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
@@ -172,11 +186,13 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerID string) {
 	t.Helper()
 	now := time.Now().UTC()
+	pspID := testPSPForRail(t, pool, ctx, rail)
 	require.NoError(t, gen.New(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CustomerID: payer.UUID(),
 		Rail:       rail,
+		PspID:      pspID,
 		AccountID:  railCustomerID,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -226,30 +242,6 @@ func TestDeposit_ConfiguredExpiryHours(t *testing.T) {
 	require.InDelta(t, 30, exp.Sub(time.Now().UTC()).Hours()/24, 1.5)
 }
 
-// --- #240 low-balance alerts ---
-
-func TestRunLowBalanceAlerts(t *testing.T) {
-	svc, _, payer, _, ctx := moneyInEnv(t)
-	thr := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{LowBalanceThreshold: &thr})
-	require.NoError(t, err)
-	// available 500 < 1000
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
-	require.NoError(t, err)
-
-	al := &fakeAlerter{}
-	n, err := svc.RunLowBalanceAlerts(ctx, al, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Equal(t, 1, al.calls)
-
-	// Re-run within cooldown -> deduped.
-	n2, err := svc.RunLowBalanceAlerts(ctx, al, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 0, n2)
-	require.Equal(t, 1, al.calls)
-}
-
 // --- #239/#674 auto-top-up (write-through topup_charge intents) ---
 
 // topupHarness drives the #674 flow the AutoTopupWorker runs in production:
@@ -276,6 +268,8 @@ func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, resolver
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, resolver, nil)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
@@ -302,6 +296,7 @@ func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.
 			MerchantID: c.MerchantID,
 			Provider:   c.Rail,
 			IntentType: intents.TypeTopupCharge,
+			PspID:      c.PspID,
 			Payload: intents.TopupChargePayload{
 				CustomerID:      c.CustomerID,
 				Currency:        c.Currency,
@@ -511,8 +506,11 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: pm,
 		AmountCents:     123,
-		IdempotencyKey:  "scope-ok",
-		Description:     "invoice",
+		// or#864: nothing substitutes a currency before a charge — the caller
+		// states it, exactly as invoice collection does in production.
+		Currency:       money.DefaultCurrency,
+		IdempotencyKey: "scope-ok",
+		Description:    "invoice",
 	})
 	require.NoError(t, err)
 	require.Equal(t, string(models.RailNMI), res.Rail)
@@ -526,6 +524,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Payer:           otherPayer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "wrong-customer",
 	})
 	require.ErrorContains(t, err, "another customer")
@@ -536,6 +535,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Payer:           payer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "wrong-merchant",
 	})
 	require.ErrorContains(t, err, "another merchant")
@@ -554,6 +554,7 @@ func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 		Payer:           payer,
 		PaymentMethodID: pm,
 		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "ccbill",
 	})
 	require.ErrorContains(t, err, "does not support invoice collection")
@@ -715,7 +716,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_invoice")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
@@ -824,7 +825,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	pm := seedPaymentMethodWithVault(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
+	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_decline")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
@@ -869,10 +870,14 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 
-	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
+	// Stripe's do_not_honor is or#870 bucket 2 — their card, fixable — so
+	// charging stops and the invoice is left exactly where the clock put it:
+	// OPEN, still owed, nothing terminated (or#828).
+	stopped, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
-	require.Equal(t, "past_due", pastDue.Status)
-	require.Equal(t, int64(50_000), pastDue.AmountDue)
+	require.Equal(t, "open", stopped.Status)
+	require.Nil(t, stopped.NextCollectionAttemptAt)
+	require.Equal(t, int64(50_000), stopped.AmountDue)
 
 	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -903,7 +908,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "scoped-invoice-charge"})
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 1_500, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "scoped-invoice-charge")})
 	require.NoError(t, err)
 
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))

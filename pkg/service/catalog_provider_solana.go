@@ -57,7 +57,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana provider-account signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC by default; set psp_links.solana.token to use another supported stablecoin)",
+		Hint:     "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC by default; set psp_links.solana.token to use another supported stablecoin)",
 	}
 }
 
@@ -133,12 +133,17 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 
 	// symbol arrives already normalized (uppercased/trimmed) by Attach or is the
 	// canonical USDC default from AutoCreate.
-	mint, decimals, err := plan.ResolveMint(symbol)
+	mint, err := plan.ResolveMint(symbol)
+	if err != nil {
+		return nil, err
+	}
+	// #817: decimals come from the SPL mint ON-CHAIN, never from config.
+	decimals, err := plan.MintDecimals(ctx, symbol)
 	if err != nil {
 		return nil, err
 	}
 	// #817: the price is MICROS; the plan amount is token BASE UNITS at the
-	// token's configured decimals — shipping micros verbatim only worked at 6.
+	// mint's ON-CHAIN decimals — shipping micros verbatim only worked at 6.
 	amountBaseUnits, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
 	if err != nil {
 		return nil, err
@@ -162,6 +167,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 		PlanID:            planID,
 		TokenSymbol:       symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
 		AmountBaseUnits:   amountBaseUnits,
+		AmountDecimals:    decimals,
 		PeriodHours:       periodHours,
 		BillingCycleHours: *in.AccessDurationHours,
 		EndTs:             0, // perpetual; OpenRails models open-ended subscriptions
@@ -296,10 +302,10 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
 		}
 	}
-	// Amount + mint + merchant validation requires the plan service (token
-	// decimals, mint allowlist, merchant resolution); skip gracefully when it is
-	// unconfigured — the price is in MICROS and only the token's decimals turn
-	// that into the plan's base units (#817).
+	// Amount + mint + merchant validation requires the plan service (mint
+	// allowlist, on-chain decimals, merchant resolution); skip gracefully when it
+	// is unconfigured — the price is in MICROS and only the MINT's on-chain
+	// decimals turn that into the plan's base units (#817).
 	if plan, ok := a.planService(); ok {
 		if symbol == "" {
 			symbol, err = resolveSolanaTokenFromMint(plan, acct.Mint.String())
@@ -308,7 +314,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			}
 		}
 		if symbol != "" {
-			mint, decimals, err := plan.ResolveMint(symbol)
+			mint, err := plan.ResolveMint(symbol)
 			if err != nil {
 				return nil, err
 			}
@@ -316,6 +322,11 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 				return nil, fmt.Errorf("solana plan %q mint (%s) does not match settlement token %s mint (%s)", pda, acct.Mint, symbol, mint)
 			}
 			if in.UnitAmount > 0 {
+				// #817: decimals come from the SPL mint ON-CHAIN, never from config.
+				decimals, err := plan.MintDecimals(ctx, symbol)
+				if err != nil {
+					return nil, err
+				}
 				want, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
 				if err != nil {
 					return nil, err
@@ -364,7 +375,7 @@ func existingSolanaSettlementToken(currency string) (string, error) {
 
 func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (string, error) {
 	for _, symbol := range [...]string{solanaDefaultRecurringToken, solanaUSD1RecurringToken} {
-		configuredMint, _, err := plan.ResolveMint(symbol)
+		configuredMint, err := plan.ResolveMint(symbol)
 		if err == nil && strings.EqualFold(strings.TrimSpace(configuredMint), strings.TrimSpace(mint)) {
 			return symbol, nil
 		}
@@ -419,7 +430,7 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 
 // Update is a no-op: Solana plan core terms are immutable on-chain. Archiving
 // (updatePlan status=sunset, subscriptions.BuildUpdatePlan) is wired through
-// the provider intent ledger instead — the `push-catalog --prune`
+// the provider intent ledger instead — the `push-merchant-catalog --prune`
 // sweep enqueues solana_sunset_plan intents for plans whose local price is no
 // longer purchasable (#357/#358 phase D).
 func (a *solanaAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {

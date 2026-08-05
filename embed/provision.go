@@ -26,14 +26,21 @@ type MerchantConfig = boot.MerchantConfig
 type InvoiceConfig = boot.InvoiceConfig
 type MerchantProfileConfig = boot.MerchantProfileConfig
 type PSPConfig = boot.PSPConfig
+
+// CheckoutRoutingRuleConfig / CheckoutRoutingMatchConfig alias the or#288
+// processor-routing policy block so embedded hosts can declare it
+// programmatically alongside their PSPs.
+type CheckoutRoutingRuleConfig = boot.CheckoutRoutingRuleConfig
+type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig
+
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
-type RailMerchantAccountSignerConfig = boot.RailMerchantAccountSignerConfig
+type PSPSignerConfig = boot.PSPSignerConfig
 type RemoteApplicationConfig = boot.RemoteApplicationConfig
 type StaticJWKSConfig = boot.StaticJWKSConfig
 type StaticJWKConfig = boot.StaticJWKConfig
 
 // UpsertMerchantConfig idempotently creates or updates a billing merchant and its
-// provider accounts from the embedded engine. Run it as many times as you like —
+// PSPs from the embedded engine. Run it as many times as you like —
 // create-if-missing, reconcile-if-present — so an embedder (e.g. a legacy-data
 // migrate) can just say "here are the payment providers for this merchant" on
 // every run. Billing-only: it touches no AuthKit/control-plane state (the merchant
@@ -145,6 +152,7 @@ func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
 		m.RemoteApplication != nil ||
 		m.Invoice != nil ||
 		len(m.DelegatedInvokerWastedSpendWindows) > 0 ||
+		len(m.CheckoutRouting) > 0 ||
 		strings.TrimSpace(m.Profile.DisplayName) != "" ||
 		strings.TrimSpace(m.Profile.LogoURL) != "" ||
 		strings.TrimSpace(m.Profile.FromEmail) != "" ||

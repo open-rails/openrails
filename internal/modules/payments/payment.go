@@ -75,14 +75,6 @@ func (s *PaymentService) GetByTransactionID(ctx context.Context, rail models.Rai
 	return s.repo.GetByTransactionID(ctx, rail, transactionID)
 }
 
-func (s *PaymentService) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	return s.repo.GetByPriceID(ctx, priceID)
-}
-
-func (s *PaymentService) GetByRail(ctx context.Context, rail models.Rail) ([]*models.Payment, error) {
-	return s.repo.GetByRail(ctx, rail)
-}
-
 func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
 	return errors.New("payments are immutable; updates are not supported")
 }
@@ -127,13 +119,19 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 			id := orig.ID
 			return &id
 		}(),
-		Rail:          orig.Rail,
+		Rail: orig.Rail,
+		// or#893: a reversal is executed by the account that took the charge,
+		// so it inherits the original's provenance rather than re-resolving.
+		PspID:         orig.PspID,
 		TransactionID: refundTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
 		Status:        PaymentStatusCompletedValue,
 		ReversalKind:  &reversalKind,
+		// The reversal settled at the rail; the feed excludes it on
+		// amount/refunded_payment_id, not on this marker (or#827).
+		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   s.now(),
 		CreatedAt:     s.now(),
 	}
@@ -167,7 +165,9 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 			id := orig.ID
 			return &id
 		}(),
-		Rail:          orig.Rail,
+		Rail: orig.Rail,
+		// or#893: same account as the charge it reverses.
+		PspID:         orig.PspID,
 		TransactionID: reservationTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
@@ -265,13 +265,13 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if orig.Amount <= 0 || orig.RefundedPaymentID != nil {
 		return errors.New("only successful charge payments can be refunded")
 	}
-	// Synthetic transaction references are placeholders, not gateway charges:
-	// "sub:" rows reference a subscription, and "*_attempt:" rows are NMI
-	// checkout attempt anchors (the real charge is a separate payment row).
-	for _, prefix := range []string{"sub:", "nmi_sub_attempt:", "nmi_sale_attempt:"} {
-		if strings.HasPrefix(strings.TrimSpace(orig.TransactionID), prefix) {
-			return errors.New("synthetic transaction references are not refundable")
-		}
+	// You can only send back money that arrived. Bookkeeping rows — attempt
+	// anchors whose real charge is a different row, declines, placeholders —
+	// carry a locally-minted transaction reference the rail would not
+	// recognise. or#827 replaced the transaction_id prefix denylist this used
+	// to guess from with the row's own positive marker.
+	if orig.MoneyMovement != models.MoneyMovementRail {
+		return errors.New("payment records no money movement at the rail and is not refundable")
 	}
 
 	refundedTotal, err := s.repo.GetRefundTotalByPaymentID(ctx, orig.ID)
@@ -323,20 +323,8 @@ func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryO
 	return s.repo.GetPayments(ctx, repoOpts)
 }
 
-func (s *PaymentService) GetLatestByUserAndRail(ctx context.Context, userID string, rail models.Rail) (*models.Payment, error) {
-	return s.repo.GetLatestByUserAndRail(ctx, userID, rail)
-}
-
-func (s *PaymentService) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	return s.repo.GetLatestBySubscriptionID(ctx, subscriptionID)
-}
-
 func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	return s.repo.GetLatestChargeBySubscriptionID(ctx, subscriptionID)
-}
-
-func (s *PaymentService) CountByUserAndRail(ctx context.Context, userID string, rail models.Rail) (successful int, failed int, err error) {
-	return s.repo.CountByUserAndRail(ctx, userID, rail)
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {

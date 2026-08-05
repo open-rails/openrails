@@ -7,7 +7,7 @@ correctness check:
 |---|---|---|
 | `internal/db/sqlaudit` | every query is bounded and index-backed | `AUDIT_ALLOWLIST.txt` |
 | `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
-| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` |
+| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` + inline `squawk-ignore` |
 
 Every allowlist entry is classified **PERMANENT** (bounded by design) or
 **DEBT** (a real bug, kept only so the gate could be switched on), carries a
@@ -77,7 +77,7 @@ portable. `unindexed-filter` is openrails-only: tensorhub has no RLS.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`alert_rules`, `merchant_webhooks`. Row counts follow the merchant's own
+`custodians`, `alert_rules`, `merchant_webhooks`. Row counts follow the merchant's own
 configuration, not customer activity, so listing them whole does not scale with
 records on file.
 
@@ -118,6 +118,12 @@ dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
 
+Two more sit in the GUC group: `internal/db/merchant_scope.go` reads
+`app.merchant_id` via `current_setting` (`AssertMerchantScope` checks the LIVE
+session, which is the whole point — a context value would prove nothing), and
+`internal/integrationharness/harness.go` sets it via `set_config`. Neither is a
+query.
+
 `internal/river/progress.go` is PERMANENT for a different reason: it reads
 **River's own** `river_job` table, which is not part of OpenRails' schema, is
 created by River's migrator rather than `migrations/`, and lives in a schema
@@ -130,57 +136,82 @@ Nothing about them requires raw SQL.
 
 ## .squawk.toml
 
-`assume_in_transaction` is set because the migrator applies each file inside one
-transaction. The nine existing migrations are excluded by path: `0001` is the
-squashed baseline (creates the schema from nothing, so lock-safety rules are
-vacuous) and `0002`-`0009` predate this gate. New migrations are **not**
-excluded and must pass clean.
+`assume_in_transaction` is set because migratekit's `applyOne()` does
+`BeginTx` / `Exec(whole file)` / `Commit`, and `scripts/sqlc-vet-db.sh` mirrors
+that with `psql -1`. Those are the only two apply paths — there is no
+non-transactional one — which is why migrations use `SET LOCAL` for their
+timeouts rather than `SET`.
 
-### `require-concurrent-index-creation` / `require-concurrent-index-deletion` — PERMANENT, repo-wide
+`0001` is the only path excluded, and the only one that ever should be. It is
+the squashed baseline (or#893): it creates the schema from nothing, so every
+lock-safety rule is vacuous against it — no existing table to lock, no client
+to break, no row to scan. **Nothing else is excluded by path.** Any migration
+after it edits a live schema and must pass the gate, or carry an inline
+`-- squawk-ignore <rule>` written at the statement with its reason on the lines
+above it, so the rest of the file stays linted and the reason sits where the
+next person edits.
 
-**Not a relaxed standard: an unreachable one.** migratekit's only Postgres apply
-path (`postgres.go` `applyOne`) opens `BeginTx` and executes the whole file
-inside it. There is no per-file opt-out, no `-- no-transaction` directive, and
-no second path — verified by reading migratekit v1.4.0, not inferred from the
-`assume_in_transaction` setting. PostgreSQL then refuses both operations
-outright. Measured on `postgres:18-alpine` rather than quoted from the docs:
+### The two rules this migrator cannot satisfy
+
+`require-concurrent-index-creation` and `require-concurrent-index-deletion` are
+in `excluded_rules`. They are not judgement calls — they are unsatisfiable here,
+verified both ways:
 
 ```
-BEGIN; CREATE INDEX CONCURRENTLY idx_t1_x ON t1 (x);
+BEGIN; CREATE INDEX CONCURRENTLY …;
   ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
-BEGIN; DROP INDEX CONCURRENTLY idx_t1_x2;
+BEGIN; DROP INDEX CONCURRENTLY …;
   ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
 ```
 
-So **no migration in this repo can ever satisfy these two rules**, and a rule
-nobody can satisfy is not a gate — it is noise that blocks every future index
-and trains readers to reach for a path exclusion. They are therefore excluded in
-`.squawk.toml` via `excluded_rules`, repo-wide, in preference to a growing list
-of per-file carve-outs.
+and squawk, run with `assume_in_transaction`, fires
+`ban-concurrent-index-creation-in-transaction` on the very edit the rule asks
+for. Between them the pair accounted for 52 of the gate's 96 original findings.
+Excluding a rule that cannot apply is honest; excluding a *file* from a rule
+that does apply is not, which is the distinction `excluded_paths` above holds
+to.
 
-Two pieces of evidence that this was already the de-facto state, just
-undocumented and unevenly applied:
+The alternative is a non-transactional migration mode — per-file
+`-- migratekit:no-transaction`, applied statement-by-statement outside a
+transaction, with every such file responsible for its own idempotency (an
+interrupted `CREATE INDEX CONCURRENTLY` leaves an INVALID index behind and must
+be re-runnable). That is a change to migratekit, not to this repo, plus a
+matching change to `sqlc-vet-db.sh`, plus a review of what "half-applied
+migration" means for the ledger. Roughly two days, and it buys nothing until
+the schema is large enough that a non-concurrent index build actually blocks
+production writes. Deliberately not started.
 
-- `0011_query_audit_indexes.up.sql` carried a bespoke exclusion implemented as a
-  second squawk invocation inside `scripts/migration-lint.sh`. That carve-out is
-  now deleted; 0011 is linted by the same rule set as every other file.
-- `0016_cross_merchant_directory.up.sql` (on the unmerged `chaos` branch, not on
-  `master`) states the identical constraint in a code comment written
-  independently: *"Not CONCURRENTLY: the migrator applies each file inside ONE
-  transaction, where CREATE INDEX CONCURRENTLY is illegal (same constraint as
-  the five indexes in 0011)."* A second author reached the same conclusion
-  unprompted, and that migration will trip this gate the moment it merges unless
-  the rules are excluded here.
+### The inline exemptions
 
-**What is still enforced.** Only these two rules are excluded. `require-lock-timeout`,
-`require-statement-timeout`, `ban-drop-column`, `ban-drop-table` and the rest
-remain enforcing on every non-baseline migration — verified by running squawk
-with this config against a deliberately unsafe statement, which still reports
-all three of its issues. Because CONCURRENTLY is unavailable, a migration that
-builds an index must instead bound its blocking window explicitly: `SET
-lock_timeout` and `SET statement_timeout` at the top of the file, which
-`require-lock-timeout` / `require-statement-timeout` continue to force.
+or#893 squashed the migration chain into `0001`, and every inline
+`-- squawk-ignore` lived in a file that squash deleted. Those exemptions were
+records of what one-time rename/backfill/hard-cut migrations actually did; the
+baseline states the result instead. The invariants they protected survive as
+constraints, indexes and COMMENTs on the objects themselves. What follows is
+what has been earned since.
 
-**How to reverse this.** Give migratekit a non-transactional apply mode and mark
-such files with a directive; then delete the two entries from `excluded_rules`.
-It is a migratekit change, not a `.squawk.toml` change.
+**`0002_drop_credit_purchase_round.up.sql` — `ban-drop-column`.** or#823 drops
+`catalog_credit_purchase_prices.round`, a column written and never read: the
+runtime credit-purchase quote (`money.loadCatalogCreditPurchase`) lists its
+columns explicitly and this was not among them. The rule guards against a client
+that still names a dropped column, and squawk cannot see who reads what — every
+client that named this one is in this repo and stops naming it in the same
+commit (the sidecar INSERT, and the embedded manifest dump that echoed it back
+out). The residual case the rule really covers, an older binary INSERTing it
+against the new schema, is a catalog-apply/dump path rather than the money path,
+and migratekit applies at boot ahead of the binary that needs it. The rounding
+that IS read lives inside the offer's `price` jsonb as `per_unit.round` and is
+untouched.
+
+Because the baseline is the only file and the only excluded path, squawk has
+nothing to check and exits non-zero on the empty glob. `scripts/migration-lint.sh`
+DERIVES that case — up-migrations minus excluded paths — and passes early only
+when the remainder is genuinely zero; the moment a `0002` exists the run happens
+and every guard applies. The baseline is excluded rather than linted because
+squawk cannot see that a table was created by the same file: it reports 102
+issues on a from-nothing schema, all of them `ADD CONSTRAINT … PRIMARY KEY` and
+friends against tables three statements old.
+
+A new migration that genuinely needs one of these must add the constraint
+`NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction
+each. That is the only shape that actually reduces lock time here.

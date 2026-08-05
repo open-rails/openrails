@@ -31,8 +31,7 @@ func TestCaptureAuthorized_PrepaidOverAdmitRecordsOverdraft(t *testing.T) {
 		Invoker:  "user:a",
 		Currency: money.DefaultCurrency,
 		Amount:   150,
-		Source:   "req",
-		SourceID: "over-admit-1",
+		Key:      money.MustIdempotencyKey(money.OpCapture, "req", "over-admit-1"),
 	})
 	require.NoError(t, err, "pre-authorized capture must not re-gate the credit line")
 	require.NotErrorIs(t, err, money.ErrInsufficientCredits)
@@ -58,7 +57,7 @@ func TestCaptureAuthorized_OverAdmitIsIdempotent(t *testing.T) {
 
 	p := money.SpendParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency,
-		Amount: 150, Source: "req", SourceID: "over-admit-dup",
+		Amount: 150, Key: money.MustIdempotencyKey(money.OpCapture, "req", "over-admit-dup"),
 	}
 	first, err := svc.CaptureAuthorized(ctx, p)
 	require.NoError(t, err)
@@ -97,8 +96,7 @@ func TestCaptureAuthorized_ArrearsOverLineRecordsOverdraft(t *testing.T) {
 		Invoker:  "user:a",
 		Currency: money.DefaultCurrency,
 		Amount:   500,
-		Source:   "req",
-		SourceID: "arrears-over-line",
+		Key:      money.MustIdempotencyKey(money.OpCapture, "req", "arrears-over-line"),
 	})
 	require.NoError(t, err, "pre-authorized capture must not re-gate the credit line")
 	require.NotNil(t, trx)
@@ -119,9 +117,9 @@ func TestSpendCredits_PrepaidStillGatesAfterFix(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency,
-		Amount: 150, Source: "s", SourceID: "x1",
+		Amount: 150, Key: money.MustIdempotencyKey(money.OpSpend, "s", "x1"),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits, "immediate prepaid spend must still floor at balance")
 	bal, _ := svc.GetBalanceForCustomer(ctx, payer, cur)

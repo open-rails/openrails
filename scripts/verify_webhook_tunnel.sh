@@ -36,5 +36,5 @@ curl -fsS "$PUBLIC_BASE/health/ready" >/dev/null
 echo "  OK"
 
 echo "Webhook base URL:"
-echo "  $PUBLIC_BASE/v1/webhooks/mobius"
+echo "  $PUBLIC_BASE/v1/webhooks/nmi"
 

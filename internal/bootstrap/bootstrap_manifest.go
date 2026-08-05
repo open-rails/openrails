@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 const (
@@ -34,6 +35,11 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if strings.TrimSpace(t.DisplayName) == "" {
 			return fmt.Errorf("merchant %q display_name is required", slug)
 		}
+		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
+			if err := merchants.ValidateAPIHost(host); err != nil {
+				return fmt.Errorf("merchant %q api_host: %w", slug, err)
+			}
+		}
 		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
 		}
@@ -54,8 +60,14 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
 			return err
 		}
+		// or#288: the routing policy is validated by the SAME normalizer the
+		// mode-2 config API uses, so a manifest cannot declare a policy the API
+		// would refuse.
+		if _, err := merchantconfig.NormalizeCheckoutRouting(checkoutRoutingRules(t.CheckoutRouting)); err != nil {
+			return fmt.Errorf("merchant %q %w", slug, err)
+		}
 		for key, account := range t.PSPs {
-			if err := validateManifestRailMerchantAccount(slug, key, account); err != nil {
+			if err := validateManifestPSP(slug, key, account); err != nil {
 				return err
 			}
 		}
@@ -116,6 +128,12 @@ func validateManifestInvoice(slug string, inv *InvoiceConfig) error {
 	if inv.MonthlyFloor != nil && *inv.MonthlyFloor < 0 {
 		return fmt.Errorf("merchant %q invoice.monthly_floor must be >= 0", slug)
 	}
+	if inv.DelinquencyGraceDays != nil && *inv.DelinquencyGraceDays < 0 {
+		return fmt.Errorf("merchant %q invoice.delinquency_grace_days must be >= 0", slug)
+	}
+	if inv.DelinquencyAmountFloor != nil && *inv.DelinquencyAmountFloor < 0 {
+		return fmt.Errorf("merchant %q invoice.delinquency_amount_floor must be >= 0", slug)
+	}
 	if b := strings.ToLower(strings.TrimSpace(inv.BillingPeriodBoundary)); b != "" {
 		if _, ok := validInvoiceBoundaries[b]; !ok {
 			return fmt.Errorf("merchant %q invoice.billing_period_boundary must be calendar_month, anniversary, or fixed_interval", slug)
@@ -145,7 +163,7 @@ func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 	return nil
 }
 
-func validateManifestRailMerchantAccount(slug string, key string, account PSPConfig) error {
+func validateManifestPSP(slug string, key string, account PSPConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("merchant %q accounts key is required", slug)
@@ -158,12 +176,11 @@ func validateManifestRailMerchantAccount(slug string, key string, account PSPCon
 		if rail == "" {
 			return fmt.Errorf("merchant %q accounts.%s rail is required", slug, key)
 		}
-		// Omitted environment is valid — it follows deployment posture at
-		// reconcile time (#681); explicit values must normalize.
-		if strings.TrimSpace(cfg.Environment) != "" {
-			if _, err := normalizeProviderEnvironment(cfg.Environment); err != nil {
-				return fmt.Errorf("merchant %q accounts.%s.%s.%w", slug, key, rail, err)
-			}
+		// #882: environment is DERIVED from test_mode, never declared. The field
+		// could only ever agree (a no-op) or disagree (refuse to boot), so it is
+		// retired — a manifest that still carries it fails loudly.
+		if strings.TrimSpace(cfg.LegacyEnvironment) != "" {
+			return fmt.Errorf("merchant %q psps.%s.%s.environment was removed (#882): the environment is derived from test_mode (sandbox => test, live => live) — delete the key", slug, key, rail)
 		}
 		for secretKey := range cfg.Secrets {
 			if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {

@@ -15,17 +15,19 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
 )
 
 // -------------------------------- Products --------------------------------
@@ -462,6 +464,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 	}
 
 	if _, err := rt.RiverProducer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     target.MerchantID,
 		UserID:         userID,
 		SubscriptionID: target.ID,
 	}, &river.InsertOpts{
@@ -536,12 +539,12 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 		return nil, fmt.Errorf("payment method belongs to a different payment provider")
 	}
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
-		return nil, fmt.Errorf("payment method belongs to a different payment provider account")
+		return nil, fmt.Errorf("payment method belongs to a different PSP")
 	}
 	// Pre-flight: resolve the rail read-only so misconfiguration surfaces
 	// immediately (the intent handler re-resolves at execution time).
 	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.CollectionResolver, sub); err != nil {
-		return nil, fmt.Errorf("resolve subscription provider account: %w", err)
+		return nil, fmt.Errorf("resolve subscription PSP: %w", err)
 	} else if !ok {
 		return nil, fmt.Errorf("payment rail not available")
 	}
@@ -666,7 +669,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &checkout.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user.ID, &paymentmethods.CreateVaultRequest{
+	pm, err := vaults.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -716,7 +719,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &paymentmethods.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -735,7 +738,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 		ExpiryDate:   req.ExpiryDate,
 	}
 
-	pm, err = vaults.UpdateVault(ctx, pm, updateReq)
+	pm, err = vaults.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +769,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
-	return vaults.DeleteVault(ctx, pm)
+	return vaults.DeletePaymentMethod(ctx, pm)
 }
 
 // -------------------------------- Notifications --------------------------------
@@ -883,7 +886,7 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
-	decimals, _ := money.CurrencyScale(bal.Currency)
+	decimals, _ := moneyutil.CurrencyScale(bal.Currency)
 
 	return &CreditBalance{
 		Currency:      bal.Currency,
@@ -947,6 +950,15 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 
 // -------------------------------- Solana Tokens --------------------------------
 
+// solanaMintDecimals returns the runtime's on-chain mint-decimals resolver
+// (#817), or nil when the Solana rail is not armed.
+func (s *Service) solanaMintDecimals() solanamodule.MintDecimalsSource {
+	if s == nil || s.rt == nil || s.rt.SolanaMintDecimals == nil {
+		return nil
+	}
+	return s.rt.SolanaMintDecimals
+}
+
 // GetSupportedTokens returns the list of supported Solana tokens with prices.
 func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
 	if _, err := s.requireConfig(); err != nil {
@@ -973,11 +985,18 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 		if name == "" {
 			name = symbol
 		}
+		// #817: decimals are the mint's, read on-chain. An unreadable mint is a
+		// token we cannot price — drop it loudly rather than invent a precision.
+		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMintDecimals(), t.Mint)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			continue
+		}
 		tokens = append(tokens, SolanaToken{
 			Symbol:   symbol,
 			Name:     name,
 			Mint:     t.Mint,
-			Decimals: t.Decimals,
+			Decimals: decimals,
 			Price:    0,
 		})
 	}

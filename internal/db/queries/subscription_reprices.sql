@@ -24,6 +24,13 @@ INSERT INTO openrails.subscription_reprices (
 )
 RETURNING *;
 
+-- SEC-18 NOTE: this by-id surface still has NO application-level merchant
+-- predicate; RLS is its only control. A GUC-derived predicate (the fix used for
+-- the reconciliation findings) is wrong HERE because RepriceRepo is shared with
+-- the plan-migration batch/re-driver paths, which do not consistently pin a
+-- merchant connection — it would trade a hardening for an availability bug of
+-- exactly the #824 shape. The honest fix is threading merchant.ID through the
+-- repo, same as the by-customer admin surface. Tracked in SEC-18.
 -- name: GetSubscriptionRepriceByID :one
 SELECT * FROM openrails.subscription_reprices WHERE id = $1;
 
@@ -109,3 +116,12 @@ SELECT
     count(*) FILTER (WHERE status <> 'blocked') AS scheduled
 FROM openrails.subscription_reprices
 WHERE reprice_batch_id = sqlc.arg(batch_id)::uuid;
+
+-- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
+-- through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
+-- used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
+-- RLS, so it enumerated nothing and never re-drove. A definer must not vend
+-- whole merchant rows, so it vends ids and the rows are read per-merchant.
+-- name: ListRedrivablePlanChangeMerchants :many
+SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+    sqlc.arg(merchant_limit)::int);

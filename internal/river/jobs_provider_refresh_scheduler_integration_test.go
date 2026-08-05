@@ -24,13 +24,13 @@ import (
 func TestProviderRefreshScheduler_UniquePerMerchantAcrossTicks(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	svc := pullTestMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 
 	midA := seedPullMerchant(t, dbi, "sched-a-"+sfx)
 	midB := seedPullMerchant(t, dbi, "sched-b-"+sfx)
-	seedProviderAccount(t, svc, midA, "nmi", "9955"+sfx, map[string]string{"security_key": "sec-" + sfx})
+	seedPSP(t, svc, midA, "nmi", "9955"+sfx, map[string]string{"security_key": "sec-" + sfx})
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{SkipUnknownJobCheck: true})
 	require.NoError(t, err)

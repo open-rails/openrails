@@ -98,6 +98,11 @@ type CreditTransaction struct {
 	Description     *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// Replayed reports that this write's idempotency key had ALREADY committed,
+	// so nothing moved in this call — the transaction described here is the
+	// movement that landed earlier (or#892). This is the applied-vs-replayed
+	// answer consumers were building their own claim tables to get.
+	Replayed bool
 }
 
 type WithdrawCreditsRequest struct {
@@ -159,23 +164,31 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 
+// DepositCreditsRequest is one admin/rail credit deposit. Key is the deposit's
+// idempotency coordinate (operation=deposit); build it with
+// money.NewIdempotencyKey(money.OpDeposit, source, sourceID). It must be
+// REPRODUCIBLE across retries of the same logical deposit — a value minted per
+// attempt passes every check and double-credits.
+//
+// NOTE (measured, or#891): the deposit's structural key is the credit grant's
+// (merchant, customer, source_id); a duplicate is answered with the EXISTING
+// grant at its ORIGINAL amount, it is not rejected.
 type DepositCreditsRequest struct {
 	CustomerID  *identity.CustomerID
 	Invoker     string
 	Currency    string
 	Amount      int64
-	Source      string
-	SourceID    *uuid.UUID
+	Key         money.IdempotencyKey
 	ExpiresAt   *time.Time
 	Description *string
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	req.Invoker = strings.TrimSpace(req.Invoker)
-	req.Source = strings.TrimSpace(req.Source)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
@@ -189,21 +202,16 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
-	if req.Source == "" {
-		return nil, fmt.Errorf("source required")
+	if err := req.Key.RequireOperation(money.OpDeposit); err != nil {
+		return nil, err
 	}
-	if req.SourceID == nil || *req.SourceID == uuid.Nil {
-		return nil, fmt.Errorf("source_id required")
-	}
-	// #491: DepositParams.SourceID is the natural-key string (uuidv7 pk + UNIQUE
-	// natural key); the SDK request carries a uuid, so stringify it.
-	depositSourceID := req.SourceID.String()
+	depositSourceID := req.Key.SourceID()
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		CustomerID:  req.CustomerID,
 		Invoker:     req.Invoker,
 		Currency:    currency,
 		Amount:      req.Amount,
-		Source:      req.Source,
+		Source:      req.Key.Source(),
 		SourceID:    &depositSourceID,
 		ExpiresAt:   req.ExpiresAt,
 		Description: req.Description,
@@ -228,6 +236,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 
@@ -280,14 +289,19 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		source = "usage"
 	}
 	// Durable money movement (#512 ledger), idempotent on
-	// (merchant, payer, currency, source, source_id) = the admit request id.
+	// (merchant, payer, currency, operation=capture, source, source_id) = the
+	// admit request id. The operation is what keeps a capture from aliasing a
+	// wasted-spend usage charge reported at the same request id (or#894).
+	captureKey, err := money.NewIdempotencyKey(money.OpCapture, source, req.RequestID)
+	if err != nil {
+		return nil, err
+	}
 	trx, err := s.moneyService().CaptureAuthorized(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  ref.Invoker,
 		Currency: ref.Currency,
 		Amount:   req.Amount,
-		Source:   source,
-		SourceID: req.RequestID,
+		Key:      captureKey,
 	})
 	if err != nil {
 		return nil, err
@@ -346,6 +360,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		Description:     trx.Description,
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
 	}, nil
 }
 

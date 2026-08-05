@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/modules/money"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -74,7 +76,7 @@ func decodeHostSeamBody(t *testing.T, w *httptest.ResponseRecorder) map[string]a
 
 func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -92,8 +94,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 		Invoker:    subjectA,
 		Currency:   currency,
 		Amount:     7_500_000,
-		Source:     "test_seed",
-		SourceID:   &sourceID,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_seed", sourceID.String()),
 	})
 	require.NoError(t, err)
 

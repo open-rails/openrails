@@ -37,11 +37,13 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 		require.NotEqual(t, http.StatusNotFound, w.Code)
 	}
 	{
-		// Merchant webhook route exists; global /v1/webhooks is intentionally not mounted.
+		// or#893: the merchant-slug webhook alias is NOT mounted on standalone.
+		// It survives only on the embedded surface, where a pinned merchant has
+		// no payload-derived identity to resolve.
 		req := httptest.NewRequest(http.MethodPost, "/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
-		require.NotEqual(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusNotFound, w.Code)
 	}
 	{
 		// Standalone includes host-internal merchant API routes.
@@ -52,7 +54,7 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 	}
 	{
 		// #650: the canonical provider-only global webhook surface IS mounted on
-		// standalone (payload/route resolves the provider account + merchant).
+		// standalone (payload/route resolves the PSP + merchant).
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)

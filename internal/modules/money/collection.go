@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -41,10 +42,11 @@ func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *S
 	return &ScopedCharger{db: database, adapters: cp}
 }
 
-// SetAdapterResolver arms per-merchant store resolution (#725/#788). The
-// resolver is the only source of collection adapters now — there is no
-// boot-config fallback plane; a merchant with no declared account on the
-// rail simply has nothing to charge with.
+// SetAdapterResolver arms per-merchant store resolution (#725/#788). Once
+// armed it is the ONLY source of collection adapters: a merchant with no
+// declared account on the rail has nothing to charge with, and or#893 made
+// that refusal loud rather than a silent fall-through to boot-config
+// credentials.
 func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
 	if c != nil {
 		c.resolver = r
@@ -60,6 +62,14 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 	}
 	if req.Payer.IsZero() {
 		return ChargeResult{}, fmt.Errorf("payer required")
+	}
+	// or#864: the ONE dispatch point for every off-session collection charge.
+	// A rail adapter must never have to decide what an absent currency means —
+	// the answer is always "refuse", and it is decided here, once, before any
+	// credential is resolved.
+	req.Currency = normalizeCurrency(req.Currency)
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+		return ChargeResult{}, fmt.Errorf("refusing to charge without an established currency: %w", err)
 	}
 	merchantID := req.MerchantID
 	if merchantID == uuid.Nil {
@@ -92,17 +102,27 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 		return ChargeResult{}, fmt.Errorf("rail %q does not support invoice collection", rail)
 	}
 
+	// #725/#788 + or#893: store-armed per-merchant credentials are the ONLY
+	// source once a resolver is armed. There is no boot-plane fallback: an
+	// instrument names the PSP that vaulted it (psp_id is required now), so
+	// "this merchant declares no account" and "there is a chargeable instrument"
+	// cannot both be true — mode-1 boot arms real psps rows from the manifest
+	// (#723/#788). Falling back to boot-config credentials when the store
+	// declines was a fail-OPEN credential path: it charged through whatever
+	// account the process happened to be booted with, not the one that holds
+	// the card. A merchant with no armed PSP refuses, loudly.
 	adapter := c.adapters[rail]
-	// #725/#788: store-armed per-merchant credentials are the only source;
-	// a declared account that cannot arm fails the charge closed.
 	if c.resolver != nil {
 		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method)
 		if rerr != nil {
 			return ChargeResult{}, fmt.Errorf("resolve merchant %s collection credentials: %w", rail, rerr)
 		}
-		if ok {
-			adapter = stored
+		if !ok {
+			return ChargeResult{}, fmt.Errorf(
+				"merchant %s has no armed PSP on rail %q: payment method %s cannot be charged until that account is declared and its credentials are stored",
+				merchantID, rail, method.ID)
 		}
+		adapter = stored
 	}
 	if adapter == nil {
 		return ChargeResult{}, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)

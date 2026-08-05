@@ -63,15 +63,20 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
+		pspByRail := map[string]uuid.UUID{
+			"ccbill": dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill"),
+			"nmi":    dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi"),
+			"solana": dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana"),
+		}
 		// Distinct customer + product + price per sub (uq_subscriptions_customer_product_lifecycle).
 		mk := func(id uuid.UUID, rail, railSub string) uuid.UUID {
 			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ur-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-			      VALUES ($1,$2,$3,$4,$5,'unknown',$6,$7,$8,$8,$9)`, id, merchantID, cust, prod, price, rail, railSub, start, periodEnd)
+			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+			      VALUES ($1,$2,$3,$4,$5,'unknown',$6,$7,$8,$8,$9,$10)`, id, merchantID, cust, prod, price, rail, railSub, start, periodEnd, pspByRail[rail])
 			return cust
 		}
 		mk(subRenew, "ccbill", rsRenew)
@@ -111,7 +116,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			{RailSubscriptionID: rsCancel, Status: SubscriptionStatusCancelled},
 		},
 		Transactions: []RemoteTransaction{
-			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "usd", OccurredAt: periodEnd.Add(time.Hour)},
+			{TransactionID: "tx-renew-" + sfx, SubscriptionID: rsRenew, Type: TransactionTypeSale, Success: true, AmountCents: 5000, Currency: "USD", OccurredAt: periodEnd.Add(time.Hour)},
 			{TransactionID: "tx-decline-" + sfx, SubscriptionID: rsDecline, Type: TransactionTypeDecline, Success: false, OccurredAt: periodEnd.Add(time.Hour)},
 		},
 	}

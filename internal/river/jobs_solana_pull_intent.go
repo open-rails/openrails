@@ -287,10 +287,14 @@ func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature 
 }
 
 // verifyPullMemoMatchesIntent applies the #713 verify rule to a landed pull:
-// a stamped purchase memo must name THIS intent — a different local-id is
+// the stamped purchase memo must name THIS intent — a different local-id is
 // cross-wired evidence, parked for operator triage, never auto-repaired.
-// Absent or undecodable memos pass (pre-memo pulls stay repairable; the memo
-// is a discovery hint, never money truth).
+//
+// or#893: MemoRequired. OPENRAILS builds and signs the pull transaction and
+// stamps the intent id on it before submission, and the signature being
+// verified is the one we recorded pre-submit — so an unstamped tx at this
+// signature is not "a pre-memo pull", it is not the transaction we built.
+// Parking it is the safe direction; auto-repairing it is not.
 func verifyPullMemoMatchesIntent(result *rpc.GetTransactionResult, intentID uuid.UUID) error {
 	if result == nil || result.Transaction == nil {
 		return nil
@@ -299,5 +303,5 @@ func verifyPullMemoMatchesIntent(result *rpc.GetTransactionResult, intentID uuid
 	if err != nil || tx == nil {
 		return nil
 	}
-	return solanaint.VerifyPurchaseMemo(tx, intentID)
+	return solanaint.VerifyPurchaseMemo(tx, intentID, solanaint.MemoRequired)
 }

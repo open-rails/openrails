@@ -29,8 +29,11 @@ import (
 func idemEnv(t *testing.T, seed int64) (*billingservice.Service, *money.MoneyService, *redis.Client, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	// The facade stands BELOW the layer that opens the merchant connection (the
+	// HTTP router / River worker), so the test has to supply the pin the way
+	// production's entry point does — an unpinned app-role handle is RLS-denied
+	// the moment Admit materializes the payable customer (or#782/or#868).
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)
@@ -91,11 +94,21 @@ func TestOr891_ServiceRefusesMoneyWritesWithoutAKey(t *testing.T) {
 	svc, ms, _, payer, ctx := idemEnv(t, 10_000_000)
 	pid := payer.UUID()
 
-	_, err := svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
-		CustomerID: &payer, Invoker: pid.String(), Currency: money.DefaultCurrency,
-		Amount: 1_000, Source: "admin",
-	})
+	// or#892: a half-filled key is no longer REPRESENTABLE — the constructor is
+	// the only way to build one and it refuses a blank half, so the five
+	// per-entrypoint validations collapsed into this one check.
+	_, err := money.NewIdempotencyKey(money.OpDeposit, "admin", "")
 	require.ErrorContains(t, err, "source_id required")
+	_, err = money.NewIdempotencyKey(money.UsageOperation("invoke"), "", "req-1")
+	require.ErrorContains(t, err, "source and source_id required")
+
+	// The zero key reaches the entrypoints only as a zero value, and every one
+	// of them refuses it.
+	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
+		CustomerID: &payer, Invoker: pid.String(), Currency: money.DefaultCurrency,
+		Amount: 1_000,
+	})
+	require.ErrorContains(t, err, "idempotency key required")
 
 	_, err = svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
 		CustomerID: &payer, Invoker: pid.String(), Currency: money.DefaultCurrency,
@@ -105,9 +118,9 @@ func TestOr891_ServiceRefusesMoneyWritesWithoutAKey(t *testing.T) {
 
 	err = svc.RecordUsage(ctx, billingservice.RecordUsageInput{
 		CustomerID: payer, Currency: money.DefaultCurrency, EventType: "invoke",
-		Amount: 1_000, Source: "invoke",
+		Amount: 1_000,
 	})
-	require.ErrorContains(t, err, "source_id")
+	require.ErrorContains(t, err, "idempotency key required")
 
 	_, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: pid.String(), InvokerType: "payer",
@@ -166,11 +179,11 @@ func TestOr891_ServiceRecordUsageRefusesAChangedAmount(t *testing.T) {
 
 	require.NoError(t, svc.RecordUsage(ctx, billingservice.RecordUsageInput{
 		CustomerID: payer, Currency: money.DefaultCurrency, EventType: "invoke",
-		Amount: 700, Source: "invoke", SourceID: key,
+		Amount: 700, Key: money.MustIdempotencyKey(money.UsageOperation("invoke"), "invoke", key),
 	}))
 	err := svc.RecordUsage(ctx, billingservice.RecordUsageInput{
 		CustomerID: payer, Currency: money.DefaultCurrency, EventType: "invoke",
-		Amount: 7_000, Source: "invoke", SourceID: key,
+		Amount: 7_000, Key: money.MustIdempotencyKey(money.UsageOperation("invoke"), "invoke", key),
 	})
 	require.ErrorIs(t, err, money.ErrIdempotencyKeyReused)
 	require.Equal(t, int64(700), before-idemBalance(t, ms, ctx, payer))
@@ -189,7 +202,7 @@ func TestOr891_AMintedKeyIsNotAnIdempotencyKey(t *testing.T) {
 		k := uuid.New() // a fresh key per attempt — what a retried handler did
 		_, err := svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 			CustomerID: &payer, Invoker: pid.String(), Currency: money.DefaultCurrency,
-			Amount: 2_500_000, Source: "admin", SourceID: &k,
+			Amount: 2_500_000, Key: money.MustIdempotencyKey(money.OpDeposit, "admin", k.String()),
 		})
 		require.NoError(t, err)
 	}
@@ -203,7 +216,7 @@ func TestOr891_AMintedKeyIsNotAnIdempotencyKey(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		_, err := svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 			CustomerID: &payer, Invoker: pid.String(), Currency: money.DefaultCurrency,
-			Amount: 2_500_000, Source: "admin", SourceID: &derived,
+			Amount: 2_500_000, Key: money.MustIdempotencyKey(money.OpDeposit, "admin", derived.String()),
 		})
 		require.NoError(t, err)
 	}

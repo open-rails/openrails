@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -65,6 +67,18 @@ type Options struct {
 	// RiverManagedByOpenRails() to have OpenRails construct and run its own
 	// (standalone). The zero value is the rejected "nobody" state.
 	River RiverOwnership
+	// StripeTransport is the supported TEST seam for driving rail-push paths
+	// (catalog push, checkout, plan migration) against a fake Stripe (#814).
+	// It is installed as the base RoundTripper UNDER the
+	// internal/integrations/stripeapi choke point, so a host-rewriting
+	// transport aimed at an httptest server still gets readonly enforcement
+	// and the pinned Stripe-Version above it — the choke-point doctrine holds.
+	//
+	// Refused when Config.TestMode is CredentialPostureLive: redirecting
+	// live-credential Stripe traffic is never a test. Process-global (the
+	// choke point is a package), so one engine per process may set it; Close
+	// removes it.
+	StripeTransport http.RoundTripper
 }
 
 type Embedded struct {
@@ -75,6 +89,9 @@ type Embedded struct {
 	// mounted HTTP surface (#623), for ActiveRouteSets() and capability
 	// discovery. Written at mount time (boot), read while serving.
 	activeRouteSets []RouteSet
+	// stripeTransportInstalled records that this engine set the process-global
+	// stripeapi base transport (Options.StripeTransport), so Close removes it.
+	stripeTransportInstalled bool
 }
 
 func New(opts Options) (*Embedded, error) {
@@ -90,6 +107,9 @@ func New(opts Options) (*Embedded, error) {
 	}
 	if err := applyEmbeddedDefaults(opts.Config); err != nil {
 		return nil, err
+	}
+	if opts.StripeTransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("embedded: Options.StripeTransport is a test seam (#814) and is refused with config.TestMode=live — a redirected transport on live credentials is never a test")
 	}
 	// Build the application graph only; HTTP surfaces (StandaloneHandler /
 	// MountHandler) are constructed from this App on demand. (#711: the
@@ -107,6 +127,10 @@ func New(opts Options) (*Embedded, error) {
 	}
 
 	e := &Embedded{app: application, consoleAssets: opts.ConsoleAssets}
+	if opts.StripeTransport != nil {
+		stripeapi.SetBaseTransport(opts.StripeTransport)
+		e.stripeTransportInstalled = true
+	}
 	ctx := context.Background()
 	if err := e.bindRiver(ctx, opts.River); err != nil {
 		_ = application.Close(ctx)
@@ -126,7 +150,7 @@ func New(opts Options) (*Embedded, error) {
 // called once, early, before the application graph is built.
 func applyEmbeddedDefaults(cfg *config.Config) error {
 	// #745: an empty Env reads as "development" throughout this package
-	// (IsDev/RequiresRLS/RequiresSecretEncryption/Validate's isDev gate),
+	// (IsDev/RequiresSecretEncryption/Validate's isDev gate),
 	// disabling every hard-gate check below. Standalone Load() defaults dev
 	// boots to sandbox-safe behavior on top of that; embedded construction has
 	// no such safety net, so it must never inherit the dev-like default by
@@ -173,7 +197,7 @@ func (e *Embedded) App() *app.App {
 }
 
 // ProviderRoutes selects provider-specific public routes for an embedded mount.
-// Leave nil to derive from configured provider accounts when possible.
+// Leave nil to derive from configured PSPs when possible.
 type ProviderRoutes struct {
 	StripePortal bool
 	Solana       bool
@@ -242,6 +266,10 @@ func (e *Embedded) RunWorkers(ctx context.Context) error {
 func (e *Embedded) Close(ctx context.Context) error {
 	if e == nil || e.app == nil {
 		return nil
+	}
+	if e.stripeTransportInstalled {
+		stripeapi.SetBaseTransport(nil)
+		e.stripeTransportInstalled = false
 	}
 	return e.app.Close(ctx)
 }

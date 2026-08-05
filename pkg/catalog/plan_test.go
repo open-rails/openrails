@@ -20,8 +20,6 @@ type fakeApplier struct {
 	updatedProducts  []uuid.UUID
 	deactivatedProds []uuid.UUID
 	createdPrices    []billingservice.CreatePriceRequest
-	updatedPriceIDs  []uuid.UUID
-	updatedPriceReqs []billingservice.UpdatePriceRequest
 	activatedPrices  []uuid.UUID
 	archivedPrices   []uuid.UUID
 	relabeledPrices  map[uuid.UUID]string
@@ -119,12 +117,6 @@ func (f *fakeApplier) CreatePrice(_ context.Context, req billingservice.CreatePr
 	return &billingservice.CatalogPrice{ID: uuid.New(), Key: req.Key, ProductID: req.ProductID, UnitAmount: req.UnitAmount, Currency: req.Currency, Archived: req.Archived}, nil
 }
 
-func (f *fakeApplier) UpdatePrice(_ context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
-	f.updatedPriceIDs = append(f.updatedPriceIDs, id)
-	f.updatedPriceReqs = append(f.updatedPriceReqs, req)
-	return &billingservice.CatalogPrice{ID: id}, nil
-}
-
 func (f *fakeApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
 	f.activatedPrices = append(f.activatedPrices, id)
 	return &billingservice.CatalogPrice{ID: id}, nil
@@ -220,9 +212,6 @@ products:
     prices:
       - currency: usd
         unit_amount: 1200
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
         archived: true
 `)
 	f := newFakeApplier()
@@ -238,9 +227,6 @@ products:
 	if !pp.Prices[0].CreateReq.Archived {
 		t.Fatal("price create must be archived")
 	}
-	if len(pp.Prices[0].CreateReq.PSPs) != 0 || len(pp.Prices[0].CreateReq.PSPLinks) != 0 {
-		t.Fatalf("archived price create must not publish provider objects: %+v", pp.Prices[0].CreateReq)
-	}
 }
 
 func TestPlan_UnchangedAndUpdate(t *testing.T) {
@@ -250,12 +236,12 @@ func TestPlan_UnchangedAndUpdate(t *testing.T) {
 	// initiate is fully converged -> unchanged.
 	initiate := f.seedProduct("initiate", "cozy", 1, false)
 	initiate.DisplayName = "Novice"
-	f.seedPrice(initiate.ID, 1200, "usd", 30*24, false, "stripe")
+	f.seedPrice(initiate.ID, 1200, "USD", 30*24, false, "stripe")
 
 	// craftsman has a different display name + active matching price -> product update, price unchanged.
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "OLD NAME"
-	f.seedPrice(craftsman.ID, 1300, "usd", 30*24, false, "stripe")
+	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, false, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -286,7 +272,7 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	f := newFakeApplier()
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false) // undeclared old price
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -309,90 +295,33 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 }
 
 // A declared price matches an existing one on financial substance alone; a
-// provider-set drift must update the matched row, not spawn a second row — the
+// provider-set drift must NOT spawn a second row — the
 // unique_prices_product_amount_window key (no provider column) would reject it,
-// crashing the converge.
-func TestPlan_ExistingPriceSyncsDeclaredPSPLinks(t *testing.T) {
+// crashing the converge. The declared price below differs from the stored one
+// only by provider set, so it must match (here: archive, since archived:true).
+func TestPlan_SameTermsDifferentProvidersMatchExistingPrice(t *testing.T) {
 	m := loadFrom(t, `
 version: 1
 products:
   - key: premium
     display_name: Premium
     prices:
-      - currency: usd
-        unit_amount: 23000000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [solana], archived: true}
 `)
 	f := newFakeApplier()
 	premium := f.seedProduct("premium", "default", 0, false)
 	premium.DisplayName = "Premium"
-	f.seedPrice(premium.ID, 23_000_000, "usd", 30*24, false, "mobius", "ccbill")
+	f.seedPrice(premium.ID, 23_000_000, "USD", 30*24, false, "mobius", "ccbill", "solana")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	pp := findProduct(plan, "premium")
-	if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceUpdate {
-		t.Fatalf("provider drift must update the existing price: %+v", pp.Prices)
-	}
-	if got := pp.Prices[0].UpdateReq.PSPLinks["solana"]["token"]; got != "USDC" {
-		t.Fatalf("Solana settlement token update = %q, want USDC", got)
-	}
-	if !plan.HasChanges() {
-		t.Fatal("provider link drift must make the plan actionable")
-	}
-
-	res, err := Apply(context.Background(), f, plan)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if res.PricesUpdated != 1 || len(f.updatedPriceReqs) != 1 {
-		t.Fatalf("provider sync updates = result %d calls %d, want 1/1", res.PricesUpdated, len(f.updatedPriceReqs))
-	}
-}
-
-func TestPlan_ExistingPriceWithDeclaredPSPLinksIsUnchanged(t *testing.T) {
-	m := loadFrom(t, `
-version: 1
-products:
-  - key: premium
-    display_name: Premium
-    prices:
-      - currency: usd
-        unit_amount: 23000000
-        duration: 30d
-        auto_renew: true
-        psps: [solana]
-        psp_links:
-          solana: {token: usdc}
-`)
-	f := newFakeApplier()
-	premium := f.seedProduct("premium", "default", 0, false)
-	premium.DisplayName = "Premium"
-	f.seedPrice(premium.ID, 23_000_000, "usd", 30*24, false, "solana")
-	prices := f.prices[premium.ID]
-	prices[0].Providers["solana"] = billingservice.ProviderState{
-		Status: billingservice.ProviderStatusLinked,
-		IDs: map[string]string{
-			"token":       "USDC",
-			"mint_symbol": "USDC",
-			"plan_pda":    "existing-plan",
-		},
-	}
-
-	plan, err := Plan(context.Background(), f, m)
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	pp := findProduct(plan, "premium")
-	if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceUnchanged {
-		t.Fatalf("converged provider link should be unchanged: %+v", pp.Prices)
-	}
-	if plan.HasChanges() {
-		t.Fatal("generated provider fields beyond the desired subset must not cause drift")
+	for _, pr := range pp.Prices {
+		if pr.Action == PriceCreate {
+			t.Fatalf("provider drift must not create a second price: %+v", pp.Prices)
+		}
 	}
 }
 
@@ -412,7 +341,7 @@ products:
 	premium := f.seedProduct("premium", "default", 0, false)
 	premium.DisplayName = "Premium"
 	// Existing price has the same recurring substance but NO trial.
-	f.seedPrice(premium.ID, 23_000_000, "usd", 30*24, false, "mobius")
+	f.seedPrice(premium.ID, 23_000_000, "USD", 30*24, false, "mobius")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -435,7 +364,7 @@ func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testin
 	f := newFakeApplier()
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false) // undeclared old price
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
 	f.seedProduct("expert", "cozy", 3, false)            // undeclared product
 
 	plan, err := PlanWithOptions(context.Background(), f, m, PlanOptions{})
@@ -463,7 +392,7 @@ func TestPlan_ReactivateArchivedDeclaredPrice(t *testing.T) {
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	// The declared $13 price exists but is archived -> activate.
-	f.seedPrice(craftsman.ID, 1300, "usd", 30*24, true, "stripe")
+	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, true, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -503,7 +432,7 @@ func TestApply_DrivesFacade(t *testing.T) {
 	// craftsman exists with old $12 active; initiate is new.
 	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
 	craftsman.DisplayName = "Craftsman"
-	f.seedPrice(craftsman.ID, 1200, "usd", 30*24, false)
+	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false)
 	// stray product to archive.
 	f.seedProduct("expert", "cozy", 3, false)
 
@@ -539,10 +468,10 @@ func TestApply_Idempotent(t *testing.T) {
 	// Seed a fully-converged catalog.
 	ini := f.seedProduct("initiate", "cozy", 1, false)
 	ini.DisplayName = "Novice"
-	f.seedPrice(ini.ID, 1200, "usd", 30*24, false, "stripe")
+	f.seedPrice(ini.ID, 1200, "USD", 30*24, false, "stripe")
 	cra := f.seedProduct("craftsman", "cozy", 2, false)
 	cra.DisplayName = "Craftsman"
-	f.seedPrice(cra.ID, 1300, "usd", 30*24, false, "stripe")
+	f.seedPrice(cra.ID, 1300, "USD", 30*24, false, "stripe")
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -555,7 +484,7 @@ func TestApply_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if res.ProductsCreated+res.ProductsUpdated+res.ProductsArchived+res.PricesCreated+res.PricesUpdated+res.PricesActivated+res.PricesArchived != 0 {
+	if res.ProductsCreated+res.ProductsUpdated+res.ProductsArchived+res.PricesCreated+res.PricesActivated+res.PricesArchived != 0 {
 		t.Fatalf("idempotent apply mutated something: %+v", res)
 	}
 }

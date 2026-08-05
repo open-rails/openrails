@@ -20,7 +20,12 @@ const (
 	// customer's last entitlement window closed with no transition-site email —
 	// neutral "access ended" copy, no charge/dunning language.
 	PremiumEndReasonAccessEnded PremiumEndReason = "access_ended"
-	PremiumEndReasonUnknown     PremiumEndReason = "unknown"
+	// PremiumEndReasonNonRecoverable (or#870 bucket 3): the issuer withdrew the
+	// recurring mandate, or the instrument is permanently dead. We cancelled the
+	// schedule at the rail — their stored payment method is untouched — and the
+	// copy invites them to re-subscribe.
+	PremiumEndReasonNonRecoverable PremiumEndReason = "non_recoverable"
+	PremiumEndReasonUnknown        PremiumEndReason = "unknown"
 )
 
 func ParsePremiumEndReason(value string) PremiumEndReason {
@@ -39,6 +44,8 @@ func ParsePremiumEndReason(value string) PremiumEndReason {
 		return PremiumEndReasonRail
 	case string(PremiumEndReasonAccessEnded):
 		return PremiumEndReasonAccessEnded
+	case string(PremiumEndReasonNonRecoverable):
+		return PremiumEndReasonNonRecoverable
 	default:
 		return PremiumEndReasonUnknown
 	}

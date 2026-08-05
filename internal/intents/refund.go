@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/railresolve"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -236,7 +236,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	// prior execution may have reached the gateway. Verify by reading before
 	// sending another refund.
 	if intent.Attempts > 1 {
-		refundTxnID, found, verr := h.findRefund(client, p)
+		refundTxnID, found, verr := h.findRefund(ctx, client, p)
 		if verr != nil {
 			return Ambiguous("pre-send verification read failed: " + verr.Error())
 		}
@@ -248,17 +248,17 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		}
 	}
 
-	result, err := client.Refund(nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
+	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) {
+		var pmErr *nmi.CustomerVaultError
+		if errors.As(err, &pmErr) {
 			// The gateway answered with a decline: the refund definitively did
 			// not happen and re-sending the identical request cannot succeed.
-			return h.terminally(ctx, p, "nmi refund declined: "+vaultErr.Message, map[string]any{
-				"response_code": vaultErr.ResponseCode,
+			return h.terminally(ctx, p, "nmi refund declined: "+pmErr.Message, map[string]any{
+				"response_code": pmErr.ResponseCode,
 			})
 		}
 		// Transport-level failure: the refund MAY have been processed.
@@ -284,7 +284,7 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	refundTxnID, found, err := h.findRefund(client, p)
+	refundTxnID, found, err := h.findRefund(ctx, client, p)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
@@ -301,8 +301,8 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 // for a successful refund/credit action matching the intent amount. The
 // returned id is the action's own transaction id when NMI reports one, else
 // the original's.
-func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (refundTransactionID string, found bool, err error) {
-	actions, txnFound, err := client.GetPaymentActions(p.ProviderTarget)
+func (h *NMIRefundHandler) findRefund(ctx context.Context, client *nmi.NMIClient, p RefundPayload) (refundTransactionID string, found bool, err error) {
+	actions, txnFound, err := client.GetPaymentActions(ctx, p.ProviderTarget)
 	if err != nil {
 		return "", false, err
 	}
@@ -322,23 +322,6 @@ func (h *NMIRefundHandler) findRefund(client *nmi.NMIClient, p RefundPayload) (r
 		return action.TransactionID, true, nil
 	}
 	return "", false, nil
-}
-
-// nmiAmountToCents converts the Query API dollar amount ("5.00", "-5.00" on
-// refund actions) into absolute cents.
-func nmiAmountToCents(amount string) (int64, error) {
-	trimmed := strings.TrimSpace(amount)
-	if trimmed == "" {
-		return 0, errors.New("empty amount")
-	}
-	f, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0, err
-	}
-	if f < 0 {
-		f = -f
-	}
-	return int64(f*100 + 0.5), nil
 }
 
 // ============================================================================

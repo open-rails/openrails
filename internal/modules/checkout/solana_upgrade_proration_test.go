@@ -62,7 +62,10 @@ func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			firstMicros, gotCycle := CalculateModelBUpgradeCharge(tt.oldFull, tt.newFull, tt.periodEnd, &cycle, now)
+			firstMicros, gotCycle, err := CalculateModelBUpgradeCharge(usd(tt.oldFull), usd(tt.newFull), tt.periodEnd, &cycle, now)
+			if err != nil {
+				t.Fatalf("same-currency proration must not error: %v", err)
+			}
 			if firstMicros != tt.wantFirstMicros {
 				t.Fatalf("first charge micros: expected %d, got %d", tt.wantFirstMicros, firstMicros)
 			}
@@ -94,7 +97,7 @@ func TestSolanaUpgradeFirstChargeHonoursTokenDecimals(t *testing.T) {
 	cycle := 30 * 24
 
 	// $20 -> $50 with 28 days left => 31_330_000 micros (see above).
-	firstMicros, _ := CalculateModelBUpgradeCharge(20_000_000, 50_000_000, timePtr(now.Add(28*24*time.Hour)), &cycle, now)
+	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
 	if firstMicros != 31_330_000 {
 		t.Fatalf("first charge micros: got %d", firstMicros)
 	}
@@ -136,7 +139,7 @@ func TestSolanaDowngradeHasZeroFirstCharge(t *testing.T) {
 	// A "downgrade" (newFull < oldFull) routed through the Model-B charge clamps to
 	// 0 micros, and the prepare endpoint additionally SKIPS this computation for a
 	// downgrade entirely — either way the composed first charge is zero.
-	firstMicros, _ := CalculateModelBUpgradeCharge(50_000_000, 20_000_000, timePtr(now.Add(15*24*time.Hour)), &cycle, now)
+	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(50_000_000), usd(20_000_000), timePtr(now.Add(15*24*time.Hour)), &cycle, now)
 	if firstMicros != 0 {
 		t.Fatalf("a downgrade must not produce a positive Model-B first charge, got %d micros", firstMicros)
 	}

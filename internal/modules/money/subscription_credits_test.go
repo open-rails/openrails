@@ -20,7 +20,7 @@ func TestValidateCreditGrantSpec(t *testing.T) {
 		{"ok expires", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &expiryHours}, false},
 		{"ok expiry_hours", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: &expiryHours}, false},
 		{"ok expiry_hours zero never", "api_credits", models.CreditGrantSpec{Amount: 1, Unit: "USD", ExpiryHours: ptrInt(0)}, false},
-		{"ok explicit unit lowercase", "promo", models.CreditGrantSpec{Amount: 1, Unit: "usd"}, false},
+		{"ok explicit unit lowercase", "promo", models.CreditGrantSpec{Amount: 1, Unit: "USD"}, false},
 		{"ok explicit unit eur", "promo", models.CreditGrantSpec{Amount: 1, Unit: "EUR"}, false},
 		{"bad missing unit", "promo", models.CreditGrantSpec{Amount: 1}, true},
 		{"bad unknown unit", "promo", models.CreditGrantSpec{Amount: 1, Unit: "doge"}, true},

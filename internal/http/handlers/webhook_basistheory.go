@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Basis Theory webhook ingestion (#795, route /webhooks/basistheory →
-// rail vaulted_card). Signature = RSA-PSS SHA-256 against BT's CDN-published
+// Basis Theory webhook ingestion (#795, route /webhooks/basistheory → event
+// source basis_theory, the CUSTODIAN — not a rail, or#879). Signature = RSA-PSS SHA-256 against BT's CDN-published
 // public key (BT-SIGNATURE / BT-SIGNATURE-VERSION) — no per-merchant secret,
 // so one process-wide verifier per key URL serves every merchant.
 
@@ -27,14 +27,6 @@ var (
 	btKeyURLOverride   string
 	btKeyURLOverrideMu sync.RWMutex
 )
-
-// SetBasisTheoryWebhookKeyURL overrides the CDN key URL process-wide —
-// integration-test seam (a locally served keypair). "" restores the default.
-func SetBasisTheoryWebhookKeyURL(u string) {
-	btKeyURLOverrideMu.Lock()
-	btKeyURLOverride = strings.TrimSpace(u)
-	btKeyURLOverrideMu.Unlock()
-}
 
 func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
 	btKeyURLOverrideMu.RLock()
@@ -54,7 +46,7 @@ func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
 }
 
 // basisTheoryWebhookTenantID extracts the tenant identity the payload-derived
-// surface routes by (the vaulted_card account_id is the BT tenant id).
+// surface routes by — the custodian's own account_id (or#880).
 func basisTheoryWebhookTenantID(body []byte) string {
 	var evt basistheory.Event
 	if err := json.Unmarshal(body, &evt); err != nil {
@@ -63,23 +55,22 @@ func basisTheoryWebhookTenantID(body []byte) string {
 	return strings.TrimSpace(evt.TenantID)
 }
 
-func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID merchant.ID, accountID string) bool {
+func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID merchant.ID, _ string) bool {
 	body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 	if !ok {
 		return false
 	}
-	if accountID == "" {
-		// The envelope's tenant id pins the account so records stamp correctly.
-		accountID = basisTheoryWebhookTenantID(body)
-	}
-	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, body)
+	// or#880: the identity a Basis Theory event carries is ITS OWN tenant id.
+	// A route-supplied account_id is a rail account and never addresses a
+	// custodian, so the envelope is the only honest source here.
+	return processMerchantBasisTheoryWebhookBody(r, merchantID, basisTheoryWebhookTenantID(body), body)
 }
 
-func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID merchant.ID, accountID string, body []byte) bool {
-	rail := string(models.RailVaultedCard)
+func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID merchant.ID, tenantID string, body []byte) bool {
+	rail := string(models.EventSourceBasisTheory)
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
-	if err := basisTheoryVerifier(r).Verify(body, sig, sigVersion); err != nil {
+	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context(), rail)
 		log.Warn("basistheory webhook signature verification failed")
 		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
@@ -105,7 +96,10 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID me
 		Signature:      sig,
 		SignatureValid: &verified,
 		ReceivedAt:     time.Now(),
-		PspID:          accountID,
+		// or#880: a custodian event carries the CUSTODIAN's identity, never a
+		// PSP's. Keeping them in separate fields is the whole point of the
+		// issue — a tenant id in a field named PspID is the category error.
+		CustodianAccountID: tenantID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {

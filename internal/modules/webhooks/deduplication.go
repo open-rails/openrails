@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -28,7 +28,7 @@ const (
 // completed keys plus the pending-lease coordination layer — flushing it
 // costs extra Postgres checks and lost lease coordination, never a replay.
 type DeduplicationService struct {
-	idem *idempotency.IdempotencyService
+	idem *replaycache.Store
 	// db hosts the webhook_events truth table; nil = Redis/memory-only
 	// dedup (legacy behavior, unit tests).
 	db *db.DB
@@ -73,10 +73,19 @@ func IsWebhookErrorNonRetryable(err error) bool {
 	return errors.As(err, &nonRetryable)
 }
 
-// NewDeduplicationService creates a webhook deduplication service. database
-// carries the Postgres truth table; nil degrades to Redis/memory-only dedup.
-func NewDeduplicationService(idem *idempotency.IdempotencyService, database *db.DB) *DeduplicationService {
-	return &DeduplicationService{idem: idem, db: database}
+// NewDeduplicationService creates a webhook deduplication service.
+//
+// or#893: database is REQUIRED. Since #678 the dedup TRUTH is the Postgres
+// webhook_events table and Redis is only a cache plus lease coordination — so a
+// nil DB is not a degraded mode, it is no dedup at all: a redelivery after a
+// cache flush would re-run the effects. Nothing in production ever built one;
+// only unit tests did, and a construction the production graph cannot produce
+// is not worth the branches it costs everywhere downstream.
+func NewDeduplicationService(idem *replaycache.Store, database *db.DB) (*DeduplicationService, error) {
+	if database == nil {
+		return nil, fmt.Errorf("webhook dedup: a database is required — Postgres webhook_events is the dedup truth (#678)")
+	}
+	return &DeduplicationService{idem: idem, db: database}, nil
 }
 
 // dedupMarkCtxKey carries the in-flight event's truth-row identity so handlers
@@ -98,8 +107,9 @@ func (m *dedupMark) params() gen.MarkWebhookEventCompletedParams {
 	}
 }
 
-// newDedupMark resolves the truth-row identity, or nil when Postgres truth is
-// unavailable (no DB wired, or no merchant on ctx — then Redis is the only net).
+// newDedupMark resolves the truth-row identity, or nil when no merchant is on
+// ctx — the truth row is merchant-scoped (RLS), so an unattributed event has no
+// row to claim and Redis is the only net left.
 func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID string) *dedupMark {
 	if s == nil || s.db == nil {
 		return nil
@@ -198,7 +208,9 @@ func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, ke
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
-func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, rail models.Rail, payload interface{}, processingFunc func(ctx context.Context) error) error {
+// source is WHO sent the event — a rail, or a custodian that emits its own
+// instrument events (or#879); the dedup namespace is per-source either way.
+func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, source models.EventSource, payload interface{}, processingFunc func(ctx context.Context) error) error {
 	var payloadBytes []byte
 	if payload != nil {
 		if data, err := json.Marshal(payload); err == nil {
@@ -209,7 +221,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 
 	trimmedEventID := strings.TrimSpace(eventID)
-	op := fmt.Sprintf("webhook.%s.%s", rail, eventType)
+	op := fmt.Sprintf("webhook.%s.%s", source, eventType)
 
 	var shouldRecordOutcome bool
 	var mark *dedupMark
@@ -220,7 +232,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Warn("IdempotencyService is not configured; processing webhook without dedupe protection")
 			}
 		} else {
@@ -228,15 +240,15 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			if err != nil {
 				return fmt.Errorf("failed to begin idempotency: %w", err)
 			}
-			if alreadyExists && rec.Status == idempotency.IdempotencyStatusSuccess {
+			if alreadyExists && rec.Status == replaycache.StatusSuccess {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
-			if alreadyExists && rec.Status == idempotency.IdempotencyStatusPending {
+			if alreadyExists && rec.Status == replaycache.StatusPending {
 				if time.Since(rec.CreatedAt) > s.lease() {
 					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, s.lease())
 					if err != nil {
@@ -246,26 +258,26 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 						log.WithContext(ctx).WithFields(log.Fields{
 							"eventID":   trimmedEventID,
 							"eventType": eventType,
-							"rail":      rail,
+							"source":    source,
 						}).Info("Stale pending webhook was claimed by another worker")
 						return fmt.Errorf("webhook already in progress")
 					}
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"rail":      rail,
+						"source":    source,
 					}).Warn("Taking over stale pending webhook idempotency record")
 					shouldRecordOutcome = true
 				} else {
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,
-						"rail":      rail,
+						"source":    source,
 					}).Info("Webhook already in progress, skipping concurrent duplicate")
 					return fmt.Errorf("webhook already in progress")
 				}
 			} else {
-				shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
+				shouldRecordOutcome = rec == nil || rec.Status != replaycache.StatusSuccess
 			}
 		}
 
@@ -282,7 +294,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
-					"rail":      rail,
+					"source":    source,
 				}).Info("Webhook already processed (postgres truth), skipping")
 				return nil
 			}
@@ -308,7 +320,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		log.WithContext(ctx).WithFields(log.Fields{
 			"eventID":   trimmedEventID,
 			"eventType": eventType,
-			"rail":      rail,
+			"source":    source,
 			"error":     processingErr.Error(),
 		}).Error("Webhook processing failed")
 
@@ -338,7 +350,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			log.WithContext(ctx).WithFields(log.Fields{
 				"eventID":   trimmedEventID,
 				"eventType": eventType,
-				"rail":      rail,
+				"source":    source,
 			}).Warn("Webhook failed with non-retryable error; marked complete to avoid futile retries")
 			return nil
 		}
@@ -367,7 +379,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	log.WithContext(ctx).WithFields(log.Fields{
 		"eventID":   trimmedEventID,
 		"eventType": eventType,
-		"rail":      rail,
+		"source":    source,
 	}).Info("Webhook processed successfully")
 
 	return nil

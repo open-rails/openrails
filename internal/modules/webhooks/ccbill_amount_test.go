@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,19 +15,19 @@ func TestValidateCCBillBilledAmount(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1000, 10_000_000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 980, 10_000_000, nil, nil))
-	require.NoError(t, validateCCBillBilledAmount(ctx, nil, 1020, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 1000, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 980, 10_000_000, nil, nil))
+	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "USD", 1020, 10_000_000, nil, nil))
 
-	err := validateCCBillBilledAmount(ctx, nil, 979, 10_000_000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
+	err := validateCCBillBilledAmount(ctx, nil, "USD", 979, 10_000_000, map[string]interface{}{"subscription_id": "sub_123"}, nil)
 	require.Error(t, err)
 
 	var billingErr *BillingError
 	require.True(t, errors.As(err, &billingErr))
 	require.Equal(t, ErrorTypeAmount, billingErr.Type)
-	require.Equal(t, int64(1000), billingErr.Context["expected_amount_cents"])
-	require.Equal(t, int64(979), billingErr.Context["billed_amount_cents"])
-	require.Equal(t, int64(20), billingErr.Context["tolerance_cents"])
+	require.Equal(t, moneyutil.Cents(1000), billingErr.Context["expected_amount_cents"])
+	require.Equal(t, moneyutil.Cents(979), billingErr.Context["billed_amount_cents"])
+	require.Equal(t, moneyutil.Cents(20), billingErr.Context["tolerance_cents"])
 	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
 }
 
@@ -41,8 +42,8 @@ func TestValidateCCBillCurrencyMatches(t *testing.T) {
 	var billingErr *BillingError
 	require.True(t, errors.As(err, &billingErr))
 	require.Equal(t, ErrorTypeValidation, billingErr.Type)
-	require.Equal(t, "eur", billingErr.Context["billed_currency"])
-	require.Equal(t, "usd", billingErr.Context["expected_currency"])
+	require.Equal(t, "EUR", billingErr.Context["billed_currency"])
+	require.Equal(t, "USD", billingErr.Context["expected_currency"])
 	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
 }
 
@@ -52,7 +53,7 @@ func TestCCBillInitialChargeAmountUsesIntro(t *testing.T) {
 	initial := int64(19_950_000)
 	trialHours := 30 * 24
 	price := &models.Price{Amount: 14_950_000, AutoRenew: true, TrialUnitAmount: &initial, TrialDurationHours: &trialHours}
-	require.Equal(t, int64(19_950_000), ccbillInitialChargeAmount(price))
+	require.Equal(t, moneyutil.Micros(19_950_000), ccbillInitialChargeAmount(price))
 }
 
 func TestCCBillPriceLookupIDPrefersRBO(t *testing.T) {

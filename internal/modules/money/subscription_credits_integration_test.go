@@ -19,10 +19,9 @@ import (
 )
 
 func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -73,6 +72,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -81,6 +81,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailStripe),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &now,
 		CurrentPeriodEndsAt:   &periodEnd,
@@ -139,10 +140,9 @@ func TestGrantSubscriptionCredits_ReplaySafety_StripeStyle(t *testing.T) {
 }
 
 func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -195,6 +195,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -203,6 +204,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailStripe),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &now,
 		CurrentPeriodEndsAt:   &periodEnd,
@@ -253,10 +255,9 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 }
 
 func TestGrantPurchaseCredits_OnlyOnceCadence(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	ctx = dbtest.WithTestMerchant(ctx)

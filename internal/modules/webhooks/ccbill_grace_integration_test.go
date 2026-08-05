@@ -24,10 +24,9 @@ import (
 // grace entitlement windows — the auto-renew sub's STANDING window keeps
 // access intact through CCBill's dunning.
 func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -65,7 +64,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -74,6 +73,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,
@@ -82,6 +82,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
@@ -172,10 +173,9 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -212,7 +212,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              9_990_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		Archived:            false,
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -221,6 +221,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,
@@ -229,6 +230,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,

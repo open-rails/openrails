@@ -92,6 +92,11 @@ Credits reference a top-level balance declaration
 `cadence` is `once` (initial activation) or `per_renewal` (granted on each confirmed
 renewal — webhook-replay safe).
 
+**Credits expire only if you say so.** A grant takes its lifetime from its own
+`expires`, else the balance's `expires_default`. Declare neither and the balance
+never expires — OpenRails will not put a clock on customer money you did not ask
+for.
+
 **A variable credit top-up** — buy *any* amount within bounds; graduated tiers give
 volume discounts and stay monotonic, so the quote inverts cleanly (enter $ → credits,
 or credits → $):
@@ -106,7 +111,6 @@ or credits → $):
             psps: [stripe]
             input_min: 5_000_000        # $5 minimum spend
             input_max: 500_000_000
-            round: down
             model: tiered
             tiered:
               mode: graduated
@@ -121,7 +125,7 @@ or credits → $):
 | Model | Cost | Use for |
 |---|---|---|
 | `flat` | fixed amount | base fees ("$5/mo includes…") |
-| `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
+| `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); `round: up\|down\|half_up` (default `half_up`) picks the mode, declared inside `per_unit` — the one place it is read; optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
 | `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; prefer graduated — volume has price cliffs and doesn't invert |
 | `package` | `ceil((qty − free_units)/package_size) × amount` | block pricing, round-up-to-next-unit |
 

@@ -22,6 +22,7 @@ WHERE id = $1
   AND status = 'requires_action'
   AND (reference IS NULL OR reference = $2)
   AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = $5::text)
+  AND deleted_at IS NULL
 `
 
 type BindSolanaCheckoutSessionParams struct {
@@ -51,17 +52,17 @@ const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 INSERT INTO openrails.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, rail_fields, rail_state,
+    subscription_id, metadata, rail_fields, rail_state, routing_reason,
     psp_id, created_at, updated_at
 ) VALUES (
     $1, $8::uuid, $2, $3, $4, $5, $6, $7,
     $9,
     $10, $11, $12,
     $13, $14, $15,
-    $16, $17,
-    $18,
-    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $16, $17, $18,
+    $19::uuid,
+    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($21::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -83,7 +84,8 @@ type CreateCheckoutSessionParams struct {
 	Metadata       []byte
 	RailFields     []byte
 	RailState      []byte
-	PspID          *uuid.UUID
+	RoutingReason  []byte
+	PspID          uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -108,6 +110,7 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 		arg.Metadata,
 		arg.RailFields,
 		arg.RailState,
+		arg.RoutingReason,
 		arg.PspID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -123,6 +126,7 @@ UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 `
 
 type ExpireCheckoutSessionByIDParams struct {
@@ -143,12 +147,29 @@ func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheck
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1
-WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
-  AND status IN ('created', 'requires_action')
+WHERE deleted_at IS NULL
+  AND ctid IN (
+    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    WHERE cs.merchant_id = $2::uuid
+      AND cs.expires_at IS NOT NULL AND cs.expires_at < $1::timestamptz
+      AND cs.status IN ('created', 'requires_action')
+      AND cs.deleted_at IS NULL
+    LIMIT $3::int
+)
 `
 
-func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, expireCheckoutSessions, now)
+type ExpireCheckoutSessionsParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	RowLimit   int32
+}
+
+// Retention sweep (or#877 B4): one pass per merchant off the directory walk,
+// with the merchant predicate written out so it stays scoped on a BYPASSRLS
+// connection too.
+// or#837: batched — row_limit bounds one statement, the caller loops.
+func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckoutSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -156,7 +177,8 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (in
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions WHERE id = $1
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (OpenrailsCheckoutSession, error) {
@@ -183,13 +205,17 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (Ope
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
+  AND cs.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -217,17 +243,21 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, routing_reason FROM openrails.checkout_sessions cs
 WHERE cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
   AND cs.status IN ('created', 'requires_action')
   AND (cs.expires_at IS NULL OR cs.expires_at > $4::timestamptz)
+  AND cs.deleted_at IS NULL
 ORDER BY cs.created_at DESC
 LIMIT 1
 `
@@ -268,6 +298,9 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.RoutingReason,
 	)
 	return i, err
 }
@@ -278,6 +311,7 @@ WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
   AND status IN ('created', 'requires_action')
+  AND deleted_at IS NULL
 ORDER BY expires_at
 `
 
@@ -326,9 +360,10 @@ UPDATE openrails.checkout_sessions SET
     metadata = $14,
     rail_fields = $15,
     rail_state = $16,
-    psp_id = $17,
+    psp_id = $17::uuid,
     updated_at = $18
 WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 type UpdateCheckoutSessionParams struct {
@@ -348,7 +383,7 @@ type UpdateCheckoutSessionParams struct {
 	Metadata       []byte
 	RailFields     []byte
 	RailState      []byte
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 	UpdatedAt      time.Time
 }
 

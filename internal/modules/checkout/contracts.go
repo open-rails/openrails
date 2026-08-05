@@ -34,7 +34,7 @@ type CheckoutRequest struct {
 	PaymentMethodID string `json:"payment_method_id,omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	// BTTokenIntentID (#795): the Basis Theory token-intent id from BT Elements
-	// — the ONLY card handle vaulted_card checkout accepts (PAN firewall).
+	// — the ONLY card handle custodian-held-card checkout accepts (PAN firewall).
 	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`
 	Rail            string `json:"rail"`
 	SuccessURL      string `json:"success_url,omitempty"`
@@ -94,10 +94,4 @@ type EligibilityResult struct {
 	Coverage             *CoverageInfo
 	ExistingSubscription *models.Subscription
 	ExistingProduct      *models.Product
-}
-
-type UpgradeResponse struct {
-	*CheckoutResponse
-	ProratedAmount    int64      `json:"prorated_amount,omitempty"`
-	OldSubscriptionID *uuid.UUID `json:"old_subscription_id,omitempty"`
 }

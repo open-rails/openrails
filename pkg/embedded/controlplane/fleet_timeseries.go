@@ -37,8 +37,8 @@ type FleetSeries struct {
 }
 
 // FleetTimeseries returns the weekly fleet trend series (openrails-saas #38)
-// from the control plane's privileged pool — the FleetAnalytics snapshot's
-// trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
+// through the same 0022 SECURITY DEFINER aggregates — the FleetAnalytics
+// snapshot's trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every series (a hosted platform passes its
 // own platform merchant); zero excludes nothing. weeks outside 4..52 falls

@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -69,7 +70,7 @@ type SaleProbeResult struct {
 // unbounded) restricts the probe to actions on/after that instant — the
 // unknown-cohort prober uses it to ask "was THIS period charged?" without
 // matching the signup-time sale that shares the subscription's order reference.
-func (c *NMIClient) ProbeSalesByOrderID(orderID string, since time.Time) (SaleProbeResult, error) {
+func (c *NMIClient) ProbeSalesByOrderID(ctx context.Context, orderID string, since time.Time) (SaleProbeResult, error) {
 	var result SaleProbeResult
 	if strings.TrimSpace(orderID) == "" {
 		return result, errors.New("orderID is required")
@@ -79,7 +80,7 @@ func (c *NMIClient) ProbeSalesByOrderID(orderID string, since time.Time) (SalePr
 	if !since.IsZero() {
 		filter.StartDate = since.UTC().Format(queryAPITimeFormat)
 	}
-	raw, err := c.SearchTransactions(filter)
+	raw, err := c.SearchTransactions(ctx, filter)
 	if err != nil {
 		return result, err
 	}
@@ -140,8 +141,8 @@ func (c *NMIClient) ProbeSalesByOrderID(orderID string, since time.Time) (SalePr
 // order reference (no date bound) — the manual-rebill verifier's question:
 // every attempt for a period shares the order reference, so a hit from ANY
 // attempt counts (the no-double-charge invariant).
-func (c *NMIClient) FindSuccessfulSaleByOrderID(orderID string) (transactionID string, found bool, err error) {
-	result, err := c.ProbeSalesByOrderID(orderID, time.Time{})
+func (c *NMIClient) FindSuccessfulSaleByOrderID(ctx context.Context, orderID string) (transactionID string, found bool, err error) {
+	result, err := c.ProbeSalesByOrderID(ctx, orderID, time.Time{})
 	if err != nil {
 		return "", false, err
 	}
@@ -159,12 +160,12 @@ type RecurringLiveness struct {
 
 // GetRecurringLiveness reads GET /v5/subscriptions/{id} and reports whether
 // the remote recurring record is still alive and when it will next charge.
-func (c *NMIClient) GetRecurringLiveness(subscriptionID string) (RecurringLiveness, error) {
+func (c *NMIClient) GetRecurringLiveness(ctx context.Context, subscriptionID string) (RecurringLiveness, error) {
 	var out RecurringLiveness
 	if strings.TrimSpace(subscriptionID) == "" {
 		return out, errors.New("subscriptionID is required")
 	}
-	sub, found, err := c.GetSubscription(subscriptionID)
+	sub, found, err := c.GetSubscription(ctx, subscriptionID)
 	if err != nil {
 		return out, err
 	}

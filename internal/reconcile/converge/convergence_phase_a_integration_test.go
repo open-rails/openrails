@@ -5,7 +5,6 @@ package converge
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -125,14 +124,12 @@ func TestConvergenceState_ConfirmedAbsenceGate(t *testing.T) {
 			require.False(t, *got, "domain %s defaults to not-reconciled", d)
 		}
 
-		// Mark subscriptions fully reconciled with a pull watermark.
-		now := time.Now().UTC().Truncate(time.Second)
+		// Mark subscriptions fully reconciled.
 		st, err := q.UpsertReconciliationState(ctx, gen.UpsertReconciliationStateParams{
-			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: true, LastFullPullAt: &now,
+			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: true,
 		})
 		require.NoError(t, err)
 		require.True(t, st.FullyReconciled)
-		require.NotNil(t, st.LastFullPullAt)
 
 		got, err := q.IsSourceDomainReconciled(ctx, gen.IsSourceDomainReconciledParams{
 			MerchantID: merchantID, SourceDomain: "subscriptions",
@@ -147,13 +144,12 @@ func TestConvergenceState_ConfirmedAbsenceGate(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, *got, "payments still not reconciled")
 
-		// Re-upsert with nil watermark preserves the prior last_full_pull_at (COALESCE).
+		// Re-upsert updates in place rather than adding a second row.
 		st2, err := q.UpsertReconciliationState(ctx, gen.UpsertReconciliationStateParams{
-			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: false, LastFullPullAt: nil,
+			MerchantID: merchantID, SourceDomain: "subscriptions", FullyReconciled: false,
 		})
 		require.NoError(t, err)
 		require.False(t, st2.FullyReconciled)
-		require.NotNil(t, st2.LastFullPullAt, "watermark preserved across upsert")
 
 		var stateCount int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,

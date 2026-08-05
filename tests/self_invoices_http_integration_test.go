@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -11,14 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
 func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()

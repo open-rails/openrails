@@ -44,7 +44,7 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 		VALUES ($1, $2, $3, 'Lookup Test Product')`,
 		productID, dbtest.TestMerchantID.UUID(), "lookup-product-"+productID.String())
 	require.NoError(t, err)
-	pa := productaccess.NewService(dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)))
+	pa := productaccess.NewService(dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
 	_, _, err = pa.GrantProductAccess(dbtest.WithTestMerchant(ctx), productaccess.GrantParams{
 		UserID:     subject,
 		ProductID:  productID,

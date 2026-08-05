@@ -29,7 +29,7 @@ const (
 	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
-// CredentialKey is one provider-account secret slot on a rail.
+// CredentialKey is one PSP secret slot on a rail.
 // MerchantWritable=false marks operator-only secrets (e.g. the Solana signing
 // key): merchant admins may neither write them nor see them in the redacted
 // credential-status view.
@@ -47,9 +47,9 @@ type Descriptor struct {
 	// DisplayName is the subscriber-facing name (emails).
 	DisplayName string
 
-	// HasRailMerchantAccounts: the rail participates in the operator-declared
-	// provider-account catalog (openrails.psps).
-	HasRailMerchantAccounts bool
+	// HasPSPs: the rail participates in the operator-declared
+	// PSP catalog (openrails.psps).
+	HasPSPs bool
 
 	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer
 	// object worth materializing into rail_customer_accounts (#635) — Stripe cus_*
@@ -62,6 +62,20 @@ type Descriptor struct {
 	// SupportsChargeSavedMethod: invoice collection may charge a saved method
 	// on this rail (prepaid auto-top-up #239, arrears settlement #241).
 	SupportsChargeSavedMethod bool
+
+	// SupportsCatalogTrial: the rail can honour a catalog first phase
+	// (`trial:` — free or paid intro) declared on a price (or#896). Stripe
+	// maps it onto subscription_data[trial_end]; CCBill's FlexForm carries the
+	// terms and OpenRails validates the billed amount against them. NMI's
+	// add_subscription and Solana's on-chain plan have no first-phase concept —
+	// declaring a trial there is REFUSED at catalog push, never silently dropped.
+	SupportsCatalogTrial bool
+
+	// SupportsPaymentMethodCRUD: OpenRails owns first-party payment-instrument
+	// CRUD on this rail (or#896). NMI only — its customer vault is the one
+	// instrument store OpenRails writes. Stripe delegates to Checkout / the
+	// Billing Portal, CCBill owns its own vault, Solana has no instrument.
+	SupportsPaymentMethodCRUD bool
 
 	// OpenRailsDrivenDunning: OpenRails owns the retry timing (models grace
 	// access as explicit entitlement windows during dunning). NMI + Solana
@@ -95,8 +109,8 @@ type Descriptor struct {
 	// management, set only for CancelModeExternalPortal rails. "" = none.
 	CancelPortalURL string
 
-	// CredentialKeys are the rail's provider-account secret slots, in display
-	// order. Nil = the rail holds no provider-account secrets.
+	// CredentialKeys are the rail's PSP secret slots, in display
+	// order. Nil = the rail holds no PSP secrets.
 	CredentialKeys []CredentialKey
 }
 
@@ -139,22 +153,30 @@ var descriptors = []Descriptor{
 	{
 		models.RailNMI,
 		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts
+		true,          // HasPSPs
 		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
 		true,          // SupportsChargeSavedMethod
+		false,         // SupportsCatalogTrial (add_subscription has no first phase — or#896 refuses the declaration)
+		true,          // SupportsPaymentMethodCRUD (the customer vault)
 		true,          // OpenRailsDrivenDunning
 		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
 		nmiAutoBilled,
 		nmiCancelMode,
 		"", // CancelPortalURL
+		// or#880: a custodian's private application key is NOT an NMI
+		// credential. It belongs to the custodian account, not to whichever
+		// gateway its proxy detokenizes into, and lives under
+		// custodians/<kind>/<environment>/<account_id>/api_key.
 		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}},
 	},
 	{
 		models.RailCCBill,
 		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts
+		true,          // HasPSPs
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
+		true,          // SupportsCatalogTrial (FlexForm terms; OpenRails validates the billed amount)
+		false,         // SupportsPaymentMethodCRUD (CCBill owns the vault)
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
@@ -165,22 +187,29 @@ var descriptors = []Descriptor{
 	{
 		models.RailStripe,
 		"Stripe", // DisplayName
-		true,     // HasRailMerchantAccounts
+		true,     // HasPSPs
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
+		true,     // SupportsCatalogTrial (subscription_data[trial_end]; a PAID intro is refused separately)
+		false,    // SupportsPaymentMethodCRUD (Checkout / Billing Portal own instrument mutation)
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
 		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
 		autoBilledNever,
 		cancelReversible, // cancel_at_period_end
 		"",               // CancelPortalURL
-		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}},
+		// webhook_signing_secret_previous (#856): the outgoing secret, retained
+		// for the rollover overlap so events still queued on the superseded
+		// endpoint keep verifying. Dropped when the last predecessor retires.
+		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}, {"webhook_signing_secret_previous", true}},
 	},
 	{
 		models.RailSolana,
 		"Solana", // DisplayName
-		true,     // HasRailMerchantAccounts
+		true,     // HasPSPs
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
+		false,    // SupportsCatalogTrial (the on-chain plan has one period price — or#896 refuses the declaration)
+		false,    // SupportsPaymentMethodCRUD (a wallet is not an instrument we hold)
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
@@ -189,24 +218,13 @@ var descriptors = []Descriptor{
 		[]CredentialKey{{"private_key", false}}, // operator-only signer
 	},
 	{
-		models.RailVaultedCard,
-		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts (account_id = BT tenant id, operator-declared)
-		false,         // HasRemoteCustomer (BT has no customer scope)
-		true,          // SupportsChargeSavedMethod (invoice/top-up MITs through the proxy)
-		true,          // OpenRailsDrivenDunning (no provider-side recurring engine; the engine drives every rebill)
-		false,         // RemoteDeleteOnTerminalCancel (no provider-side schedule to tear down)
-		autoBilledNever,
-		cancelDestructive,                  // no remote schedule; safe default until a resume path is built
-		"",                                 // CancelPortalURL
-		[]CredentialKey{{"api_key", true}}, // BT PRIVATE application key — the only custodial secret (#795)
-	},
-	{
 		models.RailPayPal,
 		"PayPal", // DisplayName
-		false,    // HasRailMerchantAccounts (no integration; display-only vestige)
+		false,    // HasPSPs (no integration; display-only vestige)
 		false,    // HasRemoteCustomer
 		false,    // SupportsChargeSavedMethod
+		false,    // SupportsCatalogTrial
+		false,    // SupportsPaymentMethodCRUD
 		false,    // OpenRailsDrivenDunning
 		false,    // RemoteDeleteOnTerminalCancel
 		autoBilledNever,
@@ -248,11 +266,26 @@ func HasRemoteCustomer(rail models.Rail) bool {
 	return ok && d.HasRemoteCustomer
 }
 
-// SupportsRailMerchantAccounts reports whether the rail participates in the
-// provider-account catalog. Unknown rails: false.
-func SupportsRailMerchantAccounts(rail models.Rail) bool {
+// SupportsPSPs reports whether the rail participates in the
+// PSP catalog. Unknown rails: false.
+func SupportsPSPs(rail models.Rail) bool {
 	d, ok := Lookup(rail)
-	return ok && d.HasRailMerchantAccounts
+	return ok && d.HasPSPs
+}
+
+// SupportsCatalogTrial reports whether a catalog `trial:` first phase can be
+// executed on this rail (or#896). Unknown rails: false — a trial declared
+// against something we cannot classify is refused, never dropped.
+func SupportsCatalogTrial(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.SupportsCatalogTrial
+}
+
+// SupportsPaymentMethodCRUD reports whether OpenRails owns first-party
+// payment-instrument CRUD on this rail (or#896). Unknown rails: false.
+func SupportsPaymentMethodCRUD(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.SupportsPaymentMethodCRUD
 }
 
 // AutoBilled reports whether the provider rebills the subscription itself

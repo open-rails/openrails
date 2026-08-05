@@ -29,6 +29,7 @@ import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
+import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
 
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
 // log, with dates) and any pending scheduled migration (progress + cancel)
@@ -37,12 +38,15 @@ import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 export function PriceDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
+  // verify (or#812) is opt-in: it makes GET price perform a live retrieve
+  // against every attached provider, which is a network round trip per PSP.
+  const [verify, setVerify] = React.useState(false)
   const {
     data: price,
     loading,
     error,
     reload,
-  } = useApiData(() => getPrice(id), [id])
+  } = useApiData(() => getPrice(id, verify), [id, verify])
   const { data: product } = useApiData(
     () => (price ? getProduct(price.product_id) : Promise.resolve(null)),
     [price?.product_id]
@@ -75,9 +79,14 @@ export function PriceDetailPage() {
     reloadBatches()
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  // Only the FIRST load blanks the page; a verify refetch keeps the rendered
+  // price in place so the button can show its own in-flight state.
   if (!price)
-    return <p className="text-sm text-muted-foreground">Price not found.</p>
+    return (
+      <p className="text-sm text-muted-foreground">
+        {loading ? "Loading…" : "Price not found."}
+      </p>
+    )
 
   const scheduled =
     batchReprices?.items?.filter((r) => r.status === "scheduled") ?? []
@@ -128,6 +137,15 @@ export function PriceDetailPage() {
         </Fact>
         <Fact label="Created">{formatDate(price.created_at)}</Fact>
       </div>
+
+      <PSPLinksCard
+        price={price}
+        verifying={verify && loading}
+        verified={verify}
+        onVerify={() => (verify ? reload() : setVerify(true))}
+      />
+
+      <CheckoutReadinessCard price={price} />
 
       <Card>
         <CardHeader>

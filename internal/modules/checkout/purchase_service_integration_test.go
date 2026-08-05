@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -21,12 +22,11 @@ import (
 )
 
 func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
+	ctx := checkoutFixtureCtx(t, pool, "stripe")
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -150,12 +150,11 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 // stored amount, status-agnostic), while NEW purchases of the same price are
 // rejected.
 func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
+	ctx := checkoutFixtureCtx(t, pool, "stripe")
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -289,4 +288,15 @@ func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, produ
 		UpdatedAt:           price.UpdatedAt,
 	})
 	require.NoError(t, err)
+}
+
+// checkoutFixtureCtx is the production context shape for a provider-bound write
+// (or#893): the merchant, plus the PSP the caller routed to. CheckoutService
+// pins it with stampPSP before any sale; a fixture that drives the service
+// directly has to arrive the same way, and the PSP it names has to exist.
+func checkoutFixtureCtx(t *testing.T, qx gen.DBTX, rail string) context.Context {
+	t.Helper()
+	base := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	psp := dbtest.EnsureTestPSP(base, t, qx, dbtest.TestMerchantID.UUID(), rail)
+	return db.WithPSPID(base, psp)
 }

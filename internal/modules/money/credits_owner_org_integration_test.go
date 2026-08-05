@@ -17,8 +17,8 @@ import (
 func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dsn := dbtest.MerchantPinnedDSN(t, dbtest.TestMerchantID.UUID())
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
 	return dbi, dsn, dbtest.WithTestMerchant(ctx)
 }
@@ -56,13 +56,12 @@ func TestPostedSpend_ConservesTotal(t *testing.T) {
 	require.Equal(t, int64(0), bal0.HeldBalance)
 
 	payer := identity.CustomerIDFromString(userID)
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   150,
-		Source:   "api",
-		SourceID: "req-spend-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-spend-1"),
 	})
 	require.NoError(t, err)
 
@@ -82,22 +81,20 @@ func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 	seedSpendable(t, ctx, svc, userID, initial)
 
 	payer := identity.CustomerIDFromString(userID)
-	err := svc.SpendCredits(ctx, money.SpendParams{
+	_, err := svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   300,
-		Source:   "api",
-		SourceID: "req-replay-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-replay-1"),
 	})
 	require.NoError(t, err)
-	err = svc.SpendCredits(ctx, money.SpendParams{
+	_, err = svc.SpendCredits(ctx, money.SpendParams{
 		Payer:    &payer,
 		Invoker:  userID,
 		Currency: money.DefaultCurrency,
 		Amount:   300,
-		Source:   "api",
-		SourceID: "req-replay-1",
+		Key:      money.MustIdempotencyKey(money.OpSpend, "api", "req-replay-1"),
 	})
 	require.NoError(t, err)
 

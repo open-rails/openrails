@@ -19,12 +19,23 @@ import (
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
+// ledgerOwnerPool is the PRIVILEGED handle. The ledger is append-only BY DESIGN
+// — openrails_app holds SELECT,INSERT and nothing else on ledger_transfers /
+// ledger_accounts (0001_schema) — so a fixture that deletes its rows, rewrites a
+// counter, or disables the counter trigger is doing something no production role
+// can do, and must say so by asking for the owner rather than by widening the
+// grant.
+func ledgerOwnerPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	return dbtest.SharedSuperuserPGXPool(t)
+}
+
 // testLedger provisions a Ledger over the shared test DB on a fresh customer and
 // a unique currency (so each test owns an isolated (merchant, currency) ledger).
 func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, uuid.UUID, uuid.UUID, string) {
 	t.Helper()
 	ctx := context.Background()
-	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -34,10 +45,11 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 		customer, merchantID)
 	require.NoError(t, err)
 
-	currency := "TC" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	currency := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		owner := ledgerOwnerPool(t)
+		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
 	})
 	return ledger.New(gen.New(pool), merchantID), pool, ctx, customer, merchantID, currency
 }
@@ -48,7 +60,7 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 func TestLedger_ConservationAndFlows(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 
-	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 1000, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -63,10 +75,12 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 	c := customer
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 300, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: exp, Amount: 200, Currency: cur, Type: "credit_expire", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpCreditExpire, Source: "credit_expiry", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
 
@@ -82,7 +96,7 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 // A customer_balance cannot be overdrawn past its arrears floor.
 func TestLedger_SignConstraint(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
-	_, err := l.Deposit(ctx, customer, cur, 100, "grant", uuid.NewString(), uuid.New())
+	_, err := l.Deposit(ctx, customer, cur, 100, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
@@ -93,6 +107,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 	// No credit line: overspend rejected, balance unchanged.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord: ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 	})
 	require.ErrorIs(t, err, ledger.ErrInsufficientFunds)
 	mustBalance(t, ctx, l, custAcc, 100)
@@ -100,6 +115,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 	// With a 100 arrears floor, the same spend is allowed and goes negative.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: custAcc, Credit: rev, Amount: 150, Currency: cur, Type: "credit_spend", Customer: &c,
+		Coord:                  ledger.Coord{Operation: ledger.OpSpend, Source: "spend", SourceID: uuid.NewString()},
 		AllowDebitNegativeUpTo: 100,
 	})
 	require.NoError(t, err)
@@ -112,7 +128,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 // A transfer may never cross ledgers (the currency-guard trigger).
 func TestLedger_CurrencyGuard(t *testing.T) {
 	l, pool, ctx, customer, merchantID, curA := testLedger(t)
-	curB := "TC" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	curB := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, curB)
 	})
@@ -125,6 +141,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 	// Debit account is in curB, transfer/credit in curA — the trigger rejects it.
 	_, err = l.Apply(ctx, ledger.Transfer{
 		Debit: clearingB, Credit: custA, Amount: 10, Currency: curA, Type: "deposit",
+		Coord: ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()},
 	})
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "cross-currency")
@@ -134,7 +151,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 // transfer are denied, proving the ledger is append-only at the role level.
 func TestLedger_AppendOnly(t *testing.T) {
 	l, _, ctx, customer, merchantID, cur := testLedger(t)
-	tr, err := l.Deposit(ctx, customer, cur, 100, "grant", uuid.NewString(), uuid.New())
+	tr, err := l.Deposit(ctx, customer, cur, 100, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
 	_, appDSN := dbtest.SharedRLSPostgres(t)

@@ -96,7 +96,7 @@ func TestSubscriptionPresentParsesRecurringReport(t *testing.T) {
 			}))
 			defer srv.Close()
 			h := &NMIDeleteHandler{}
-			present, err := h.subscriptionPresent(newTestNMIClient(t, srv.URL), "sub-1")
+			present, err := h.subscriptionPresent(context.Background(), newTestNMIClient(t, srv.URL), "sub-1")
 			if tc.wantErr {
 				assert.Error(t, err)
 				return

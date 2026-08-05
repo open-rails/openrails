@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 const (
@@ -54,6 +56,10 @@ type Config struct {
 	ReadOnly      bool
 	Timeout       time.Duration     // <= 0 = DefaultTimeout
 	Transport     http.RoundTripper // test seam under the guard; nil = default
+	// Outbound governs PROVIDER-SUPPLIED urls (the account-updater job's
+	// upload_url / download_url). The zero value is the strict production
+	// policy; tests pass httpx.Policy{Allow: httpx.AllowLoopback}.
+	Outbound httpx.Policy
 }
 
 type Client struct {
@@ -63,6 +69,7 @@ type Client struct {
 	readOnly      bool
 	httpClient    *http.Client
 	verifier      *WebhookVerifier
+	outbound      httpx.Policy
 }
 
 func New(cfg Config) (*Client, error) {
@@ -91,6 +98,7 @@ func New(cfg Config) (*Client, error) {
 			Transport: &guardTransport{readOnly: cfg.ReadOnly, base: cfg.Transport},
 		},
 		verifier: NewWebhookVerifier(keyURL),
+		outbound: cfg.Outbound,
 	}, nil
 }
 
@@ -204,9 +212,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, idem
 // VerifyWebhook verifies a BT webhook delivery (BT-SIGNATURE /
 // BT-SIGNATURE-VERSION, RSA-PSS SHA-256) against the client's configured key
 // URL (cached after first fetch).
-func (c *Client) VerifyWebhook(body []byte, sigB64, sigVersion string) error {
+func (c *Client) VerifyWebhook(ctx context.Context, body []byte, sigB64, sigVersion string) error {
 	if c == nil || c.verifier == nil {
 		return errors.New("basistheory: webhook verifier not initialized")
 	}
-	return c.verifier.Verify(body, sigB64, sigVersion)
+	return c.verifier.Verify(ctx, body, sigB64, sigVersion)
 }

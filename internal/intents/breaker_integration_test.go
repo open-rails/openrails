@@ -22,30 +22,37 @@ import (
 // (marker set) and one pending nmi_delete intent each — isolated from the
 // shared test merchant so rolling-window counts are deterministic.
 type breakerMerchant struct {
-	id      uuid.UUID
+	id uuid.UUID
+	// db is pinned to THIS merchant. rail_intents is RLS-forced, so every read,
+	// write and runner pass for this merchant must go through it — a handle
+	// pinned elsewhere sees zero rows and writes nothing. Mirrors production,
+	// where the executor walks the merchant directory and opens one scope each.
+	db      *db.DB
 	intents []uuid.UUID
 	subs    []uuid.UUID
 }
 
-func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
+func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbi.Pool()
-	store := NewStore(dbi)
 	sfx := uuid.NewString()[:8]
 
 	m := breakerMerchant{id: uuid.New()}
+	m.db = dbtest.OpenMerchantDB(t, m.id)
+	pool := dbtest.SharedMerchantPool(t, m.id)
+	store := NewStore(m.db)
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
 	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, m.id, "breaker-"+sfx)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, m.id, "mobius")
 	productID, priceID := uuid.New(), uuid.New()
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "breaker-prod-"+sfx, m.id)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, m.id)
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, m.id)
 
 	now := time.Now().UTC()
 	for i := 0; i < n; i++ {
@@ -58,13 +65,14 @@ func seedBreakerMerchant(t *testing.T, dbi *db.DB, n int) breakerMerchant {
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'expired', $7, $8, $9)`,
+		         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'expired', $7, $8, $9, $10)`,
 			subID, priceID, productID, psid,
-			now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), now, custID, m.id)
+			now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), now, custID, m.id, pspID)
 		row, err := store.Enqueue(ctx, EnqueueParams{
 			MerchantID:     m.id,
 			Provider:       "mobius",
+			PspID:          pspID,
 			IntentType:     TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
 			Payload:        NMIDeletePayload{UserID: custID.String(), RailSubscriptionID: psid},
@@ -125,27 +133,29 @@ func breakerRunner(dbi *db.DB, client *nmi.NMIClient) *Runner {
 // merchant is unaffected; operator ack resumes.
 func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
-	pool := dbi.Pool()
 
 	const over = 2 // intents beyond the budget floor
-	bulk := seedBreakerMerchant(t, dbi, DestructiveBudgetFloor+over)
-	other := seedBreakerMerchant(t, dbi, 1)
+	bulk := seedBreakerMerchant(t, DestructiveBudgetFloor+over)
+	other := seedBreakerMerchant(t, 1)
+	pool := bulk.db.Pool()
 
 	_, client := newFakeNMI(t, "any", true)
-	runner := breakerRunner(dbi, client)
+	runner := breakerRunner(bulk.db, client)
 
 	_, err := runner.RunExecuteOnce(ctx)
 	require.NoError(t, err)
 
 	// Bulk merchant: exactly the budget executed, the rest held pending.
-	counts := bulk.statusCounts(t, dbi)
+	counts := bulk.statusCounts(t, bulk.db)
 	assert.Equal(t, DestructiveBudgetFloor, counts[StatusSucceeded], "exactly the budget executes")
 	assert.Equal(t, over, counts[StatusPending], "over-budget intents stay pending (held)")
 
 	// The other merchant's single delete executed — breakers are per merchant.
-	assert.Equal(t, map[string]int{StatusSucceeded: 1}, other.statusCounts(t, dbi))
+	// Its own scope and its own runner pass, exactly as the executor does in
+	// production; the bulk merchant's halt must not touch it.
+	_, err = breakerRunner(other.db, client).RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{StatusSucceeded: 1}, other.statusCounts(t, other.db))
 
 	// ONE operator finding, requires_review, evidence carries count/budget/window.
 	var findingID uuid.UUID
@@ -166,10 +176,10 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 
 	// Held intents never expire out of the ledger while the finding is open,
 	// even past their relevance window.
-	heldID := heldIntent(t, dbi, bulk)
+	heldID := heldIntent(t, bulk.db, bulk)
 	_, err = pool.Exec(ctx, `UPDATE openrails.rail_intents SET expires_at = now() - interval '1 minute' WHERE id = $1`, heldID)
 	require.NoError(t, err)
-	expired, err := NewStore(dbi).ExpireOverdue(ctx, time.Now().UTC())
+	expired, err := NewStore(bulk.db).ExpireOverdue(ctx, time.Now().UTC())
 	require.NoError(t, err)
 	_ = expired // other tests' rows may expire; ours must not
 	var heldStatus string
@@ -185,7 +195,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runner.RunExecuteOnce(ctx)
 	require.NoError(t, err)
-	counts = bulk.statusCounts(t, dbi)
+	counts = bulk.statusCounts(t, bulk.db)
 	assert.Equal(t, DestructiveBudgetFloor, counts[StatusSucceeded], "open finding keeps destructive execution halted")
 	assert.Equal(t, over, counts[StatusPending])
 
@@ -200,7 +210,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runner.RunExecuteOnce(ctx)
 	require.NoError(t, err)
-	counts = bulk.statusCounts(t, dbi)
+	counts = bulk.statusCounts(t, bulk.db)
 	assert.Equal(t, DestructiveBudgetFloor+over, counts[StatusSucceeded], "resolution resumes destructive execution")
 	assert.Zero(t, counts[StatusPending])
 }

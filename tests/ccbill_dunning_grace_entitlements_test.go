@@ -17,12 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// Ensure catalog + profile mapping exists for webhook resolution.
 	products := suite.SeedProducts()
@@ -135,7 +134,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	_ = suite.SeedProducts()
 
@@ -197,7 +196,9 @@ func postCCBillWebhook(t *testing.T, baseURL, eventType string, payload map[stri
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/ccbill?eventType="+eventType, bytes.NewReader(body))
+	// or#893: ONE standalone surface — CCBill's merchant comes from the payload's
+	// clientAccnum/clientSubacc pair, not a URL slug.
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/webhooks/ccbill?eventType="+eventType, bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -50,6 +51,7 @@ func (f *fakeStripeWebhooks) handler() http.HandlerFunc {
 					URL:           r.Form.Get("url"),
 					Status:        "enabled",
 					APIVersion:    r.Form.Get("api_version"),
+					Created:       int64(1000 + f.n), // monotonic, like Stripe's `created`
 					EnabledEvents: r.Form["enabled_events[]"],
 					Metadata:      map[string]string{StripeMetadataOpenRailsManaged: r.Form.Get("metadata[openrails_managed]")},
 				}
@@ -59,7 +61,8 @@ func (f *fakeStripeWebhooks) handler() http.HandlerFunc {
 				f.secretN++
 				out := map[string]any{
 					"id": ep.ID, "url": ep.URL, "status": ep.Status, "api_version": ep.APIVersion,
-					"enabled_events": ep.EnabledEvents, "metadata": ep.Metadata, "secret": secret,
+					"created": ep.Created, "enabled_events": ep.EnabledEvents,
+					"metadata": ep.Metadata, "secret": secret,
 				}
 				_ = json.NewEncoder(w).Encode(out)
 				return
@@ -85,6 +88,13 @@ func (f *fakeStripeWebhooks) handler() http.HandlerFunc {
 			switch r.Method {
 			case http.MethodPost:
 				f.updates++
+				// Stripe rejects api_version here; the fake mirrors that so a
+				// regression to in-place version updates fails loudly.
+				if r.Form.Get("api_version") != "" {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":{"message":"Received unknown parameter: api_version"}}`))
+					return
+				}
 				if v := r.Form.Get("url"); v != "" {
 					ep.URL = v
 				}
@@ -95,6 +105,21 @@ func (f *fakeStripeWebhooks) handler() http.HandlerFunc {
 					ep.Status = "enabled"
 				} else if d == "true" {
 					ep.Status = "disabled"
+				}
+				for k, v := range r.Form {
+					name, ok := strings.CutPrefix(k, "metadata[")
+					if !ok || !strings.HasSuffix(name, "]") {
+						continue
+					}
+					name = strings.TrimSuffix(name, "]")
+					if ep.Metadata == nil {
+						ep.Metadata = map[string]string{}
+					}
+					if len(v) > 0 && v[0] == "" {
+						delete(ep.Metadata, name)
+					} else if len(v) > 0 {
+						ep.Metadata[name] = v[0]
+					}
 				}
 				_ = json.NewEncoder(w).Encode(ep)
 			case http.MethodDelete:
@@ -113,6 +138,10 @@ func newWebhookTestSvc(t *testing.T, fake *fakeStripeWebhooks) *StripeCatalogSer
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 	return &StripeCatalogService{
+		// Config is required for the write paths: or#865 made
+		// stripeapi.Client(nil, …) fail closed, so a service with no declared
+		// operating mode is read-only — exactly what a wiring bug should get.
+		Config:  &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails:   railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}},
 		BaseURL: srv.URL,
 	}
@@ -158,49 +187,146 @@ func TestReconcileWebhookEndpoint(t *testing.T) {
 	require.Equal(t, 0, fake.deletes)
 }
 
-func TestReconcileWebhookEndpointRecreatesOnVersionDrift(t *testing.T) {
+// #856: an api_version bump ROLLS OVER — the successor is created first, the
+// predecessor is stamped superseded and left ENABLED. Zero deletes, so zero
+// deliveries lost.
+func TestReconcileWebhookEndpointRollsOverOnVersionDrift(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
 	events := []string{"invoice.paid"}
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 
 	// Seed an existing managed endpoint pinned to an OLD api_version.
 	fake.endpoints["we_old"] = &StripeWebhookEndpoint{
 		ID: "we_old", URL: "https://a.example/wh", Status: "enabled",
 		APIVersion:    "2020-01-01",
+		Created:       1,
 		EnabledEvents: events,
 		Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
 	}
 
-	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true})
+	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
+		URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true, Now: now,
+	})
 	require.NoError(t, err)
-	require.Equal(t, WebhookRecreated, res.Action)
-	require.NotEmpty(t, res.Secret) // recreate rotates the secret
-	require.Equal(t, 1, fake.deletes)
+	require.Equal(t, WebhookRolledOver, res.Action)
+	require.NotEmpty(t, res.Secret, "the successor mints a new secret")
+	require.Zero(t, fake.deletes, "NOTHING is deleted on a version bump")
 	require.Equal(t, 1, fake.creates)
-	// The recreated endpoint carries the pinned version.
 	require.Equal(t, stripeapi.APIVersion, fake.endpoints[res.EndpointID].APIVersion)
+
+	// The predecessor survives, still enabled, and is stamped.
+	old := fake.endpoints["we_old"]
+	require.NotNil(t, old, "the old endpoint is NOT deleted")
+	require.Equal(t, "enabled", old.Status, "it keeps delivering through the overlap")
+	require.Equal(t, now.Format(time.RFC3339), old.Metadata[StripeMetadataSupersededAt])
+	require.Equal(t, []string{"we_old"}, res.Superseded)
+	require.Len(t, res.Legacy, 1)
+	require.Equal(t, now.Add(WebhookRolloverOverlap), res.Legacy[0].RetireAfter)
+
+	// Idempotent: a second pass with the new secret held is a no-op, not a
+	// second rollover.
+	res2, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
+		URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true, Now: now,
+	})
+	require.NoError(t, err)
+	require.Equal(t, WebhookUnchanged, res2.Action)
+	require.Equal(t, res.EndpointID, res2.EndpointID)
+	require.Equal(t, 1, fake.creates)
+	require.Zero(t, fake.deletes)
+
+	// Retirement is a separate, time-gated act. Inside the overlap: nothing.
+	ret, err := svc.RetireSupersededWebhookEndpoints(ctx, RetireSupersededParams{Now: now.Add(time.Hour)})
+	require.NoError(t, err)
+	require.Empty(t, ret.Retired)
+	require.Len(t, ret.Pending, 1)
+	require.Zero(t, fake.deletes)
+
+	// After the overlap the predecessor may go.
+	ret, err = svc.RetireSupersededWebhookEndpoints(ctx, RetireSupersededParams{Now: now.Add(WebhookRolloverOverlap + time.Minute)})
+	require.NoError(t, err)
+	require.Equal(t, []string{"we_old"}, ret.Retired)
+	require.Equal(t, 1, fake.deletes)
+	require.NotNil(t, fake.endpoints[res.EndpointID], "the live endpoint stays")
 }
 
-func TestReconcileWebhookEndpointRecreatesWhenSecretLost(t *testing.T) {
+// A local secret miss means UNKNOWN, never lost: the endpoint we cannot verify
+// is replaced ALONGSIDE, not removed.
+func TestReconcileWebhookEndpointRollsOverWhenSecretUnknown(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
 	events := []string{"invoice.paid"}
 
-	// Existing endpoint at the CURRENT version, but caller no longer holds the secret.
+	// Existing endpoint at the CURRENT version, but caller holds no secret.
 	fake.endpoints["we_x"] = &StripeWebhookEndpoint{
 		ID: "we_x", URL: "https://a.example/wh", Status: "enabled",
 		APIVersion:    stripeapi.APIVersion,
+		Created:       1,
 		EnabledEvents: events,
 		Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
 	}
 
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: false})
 	require.NoError(t, err)
-	require.Equal(t, WebhookRecreated, res.Action)
+	require.Equal(t, WebhookRolledOver, res.Action)
 	require.NotEmpty(t, res.Secret)
-	require.Equal(t, 1, fake.deletes)
+	require.Zero(t, fake.deletes, "the endpoint whose secret we lost is NOT deleted")
+	require.NotNil(t, fake.endpoints["we_x"])
+	require.Equal(t, "enabled", fake.endpoints["we_x"].Status)
+
+	// The successor — not the stamped predecessor — is the endpoint the next
+	// pass considers current, even though both sit at the pinned version.
+	res2, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{URL: "https://a.example/wh", EnabledEvents: events, HaveSecret: true})
+	require.NoError(t, err)
+	require.Equal(t, WebhookUnchanged, res2.Action)
+	require.Equal(t, res.EndpointID, res2.EndpointID)
+	require.Equal(t, 1, fake.creates)
+}
+
+// Retirement refuses to leave the account unreachable.
+func TestRetireSupersededRefusesWithoutALiveSuccessor(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeStripeWebhooks()
+	svc := newWebhookTestSvc(t, fake)
+
+	fake.endpoints["we_old"] = &StripeWebhookEndpoint{
+		ID: "we_old", URL: "https://a.example/wh", Status: "enabled",
+		APIVersion:    "2020-01-01",
+		EnabledEvents: []string{"invoice.paid"},
+		Metadata: map[string]string{
+			StripeMetadataOpenRailsManaged: "true",
+			StripeMetadataSupersededAt:     "2020-01-02T00:00:00Z",
+		},
+	}
+	_, err := svc.RetireSupersededWebhookEndpoints(ctx, RetireSupersededParams{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no live endpoint at api_version")
+	require.Zero(t, fake.deletes)
+}
+
+// The endpoint budget stops a runaway rollover before it can crowd out the
+// operator's own endpoints against Stripe's per-account limit.
+func TestReconcileWebhookEndpointBudget(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeStripeWebhooks()
+	svc := newWebhookTestSvc(t, fake)
+	for i := 0; i < maxManagedWebhookEndpoints; i++ {
+		id := fmt.Sprintf("we_seed_%d", i)
+		fake.endpoints[id] = &StripeWebhookEndpoint{
+			ID: id, URL: "https://a.example/wh", Status: "enabled",
+			APIVersion:    "2020-01-01",
+			EnabledEvents: []string{"invoice.paid"},
+			Metadata:      map[string]string{StripeMetadataOpenRailsManaged: "true"},
+		}
+	}
+	_, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
+		URL: "https://a.example/wh", EnabledEvents: []string{"invoice.paid"}, HaveSecret: true,
+	})
+	require.ErrorIs(t, err, ErrWebhookEndpointBudgetExhausted)
+	require.Zero(t, fake.creates)
+	require.Zero(t, fake.deletes)
 }
 
 // ForbidCreate (#723) refuses BOTH create branches before any Stripe mutation:
@@ -217,7 +343,7 @@ func TestReconcileWebhookEndpointForbidCreate(t *testing.T) {
 	require.ErrorIs(t, err, ErrWebhookCreateForbidden)
 	require.Zero(t, fake.creates)
 
-	// 2. Version drift with a held secret: recreate refused BEFORE the delete.
+	// 2. Version drift with a held secret: rollover refused, nothing mutated.
 	fake.endpoints["we_old"] = &StripeWebhookEndpoint{
 		ID: "we_old", URL: "https://a.example/wh", Status: "enabled",
 		APIVersion:    "2020-01-01",

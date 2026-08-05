@@ -252,6 +252,9 @@ func (s *CCBillCancelScheduler) ScheduleCCBillCancel(ctx context.Context, userID
 		Provider:       strings.ToLower(sub.Rail),
 		IntentType:     TypeCCBillCancelSubscription,
 		SubscriptionID: &subscriptionID,
+		// or#893: the cancel is addressed to the account that holds the
+		// subscription, which the row itself names.
+		PspID: sub.PspID,
 		Payload: CCBillCancelPayload{
 			UserID:             userID,
 			RailSubscriptionID: sub.RailSubscriptionID,

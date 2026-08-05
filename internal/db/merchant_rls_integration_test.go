@@ -247,17 +247,26 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	`, productID.String(), merchantID.String(), "prod-"+suffix)
 	require.NoError(t, err)
 
+	// dbtest.EnsureTestPSP is unusable here (internal/dbtest imports internal/db —
+	// this file is `package db`, so importing it back is a cycle); seed inline.
+	pspID := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key)
+		VALUES ($1::uuid, $2::uuid, 'nmi', 'live', $3, 'nmi')
+	`, pspID.String(), merchantID.String(), "boundary-nmi-"+suffix)
+	require.NoError(t, err)
+
 	for _, sub := range []struct {
 		id     uuid.UUID
 		status string
 	}{
 		{id: subscriptionID, status: "active"},
-		{id: nextSubscriptionID, status: "expired"},
+		{id: nextSubscriptionID, status: "unknown"},
 	} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, status, rail)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, 'nmi')
-		`, sub.id.String(), merchantID.String(), customerID.String(), productID.String(), sub.status)
+			INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, status, rail, psp_id)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, 'nmi', $6::uuid)
+		`, sub.id.String(), merchantID.String(), customerID.String(), productID.String(), sub.status, pspID.String())
 		require.NoError(t, err)
 	}
 

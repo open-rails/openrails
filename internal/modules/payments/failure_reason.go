@@ -3,6 +3,9 @@ package payments
 import (
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 // Normalized failure_reason vocabulary (#733). The raw rail code is always
@@ -154,23 +157,72 @@ var solanaFailureReasons = map[string]string{
 	"declined_stop_this_recurring_program": FailureStopRecurring,
 }
 
-// ccbillFailureReasons: CCBill webhook failureCode values. CCBill's decline
-// vocabulary is not publicly enumerated; only codes verified against live
-// webhook traffic get mapped, the rest read "unknown" with the verbatim code
-// preserved (documented as partial coverage in /schema caveats).
-var ccbillFailureReasons = map[string]string{}
+// ccbillFailureReasons: CCBill webhook failureCode values. CCBill does not emit
+// ISO decline codes — it emits its OWN alphanumerical BE-nnn codes, and that
+// string is what arrives verbatim in the webhook `failureCode` field. Source:
+// CCBill's published list (ccbill.com/kb/list-of-credit-card-declined-codes).
+//
+// Keyed on the canonical form (lowercase, dashes stripped) via
+// ccbillFailureReason below, so BE-114 / be-114 / BE114 are one row. Codes
+// outside this list still read "unknown" with the verbatim code preserved.
+var ccbillFailureReasons = map[string]string{
+	"be101": FailureConfigError,       // invalid MID/TID — OURS, never the customer's
+	"be102": FailureFraudSuspected,    // pickup card
+	"be103": FailureCardDeclined,      // do not honor
+	"be105": FailureProcessorError,    // invalid transaction
+	"be107": FailureCardDeclined,      // invalid credit card
+	"be112": FailureCardDeclined,      // no account
+	"be113": FailureInsufficientFunds, // insufficient funds
+	"be114": FailureExpiredCard,       // expired card
+	"be116": FailureCardDeclined,      // service not allowed
+	"be119": FailureCardDeclined,      // activity limit exceeded
+	"be130": FailureProcessorError,    // invalid field provided
+	"be132": FailureCardDeclined,      // card blocked (CCBill)
+	"be146": FailureCardDeclined,      // blocked country (CCBill)
+}
 
-// DefaultTokenTypeForRail is the #796 token_type stamp for charge records
-// created OFF the seam (provider-driven renewals, webhook/converge folds),
-// where no charge.Result carries the rail's answer: NMI charges its own
-// customer vault; vaulted_card proxies the detokenized FPAN (NT charging is
-// config-gated off on NMI gateways). "" = not a stamped card rail.
-func DefaultTokenTypeForRail(rail string) string {
+// ccbillFailureReason resolves one CCBill code, canonicalizing the BE-nnn form
+// and folding the documented BE-900..999 system-error RANGE (a hundred table
+// rows that all mean "authorization did not complete" would be noise) onto
+// processor_error.
+func ccbillFailureReason(rawCode string) string {
+	code := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			return r
+		default:
+			return -1
+		}
+	}, strings.ToLower(strings.TrimSpace(rawCode)))
+	if r, ok := ccbillFailureReasons[code]; ok {
+		return r
+	}
+	if n, err := strconv.Atoi(strings.TrimPrefix(code, "be")); err == nil && n >= 900 && n <= 999 {
+		return FailureProcessorError
+	}
+	return FailureUnknown
+}
+
+// DefaultTokenType is the #796 token_type stamp for charge records created OFF
+// the seam (provider-driven renewals, webhook/converge folds), where no
+// charge.Result carries the rail's answer. It needs BOTH axes (or#879): the
+// rail says a card was charged at all, the CUSTODIAN says which credential form
+// reached the network — the PSP's own stored token, or a detokenized FPAN
+// proxied in from a third party (NT charging is config-gated off on NMI
+// gateways). "" = not a stamped card rail.
+func DefaultTokenType(rail, custodian string) string {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
 	case "nmi", "mobius":
-		return "provider_vault"
-	case "vaulted_card":
-		return "pan_via_vault"
+		switch strings.TrimSpace(custodian) {
+		case models.CustodianBasisTheory:
+			return charge.TokenTypePANViaProxy
+		case models.CustodianPSP:
+			return charge.TokenTypePSPToken
+		default:
+			// Custody unstated: stamp nothing. A guessed form would skew the
+			// approval_rate dimension token_type exists to measure.
+			return ""
+		}
 	default:
 		return ""
 	}
@@ -183,9 +235,9 @@ func NormalizeFailureReason(rail, rawCode string) string {
 		return FailureUnknown
 	}
 	switch rail {
-	case "nmi", "mobius", "vaulted_card":
-		// vaulted_card parses NMI classic responses through the same taxonomy
-		// (#795: one decline vocabulary, two transports).
+	case "nmi", "mobius":
+		// A custodian-proxied charge lands on the SAME NMI gateway and returns
+		// the SAME classic response (or#879) — one taxonomy, two transports.
 		if n, err := strconv.Atoi(rawCode); err == nil {
 			if r, ok := nmiFailureReasons[n]; ok {
 				return r
@@ -207,10 +259,7 @@ func NormalizeFailureReason(rail, rawCode string) string {
 		}
 		return FailureUnknown
 	case "ccbill":
-		if r, ok := ccbillFailureReasons[rawCode]; ok {
-			return r
-		}
-		return FailureUnknown
+		return ccbillFailureReason(rawCode)
 	default:
 		return FailureUnknown
 	}

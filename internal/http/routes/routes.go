@@ -30,7 +30,7 @@ type Options struct {
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
-	// value derived from configured provider accounts.
+	// value derived from configured PSPs.
 	ProviderRoutes *routesurface.ProviderRoutes
 
 	// APIKeys is the #757 merchant self-serve API-key manager (mint/list/revoke
@@ -160,6 +160,13 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
 	group.Handle(http.MethodGet, "/prices", h(httphandlers.GetPrices), optional)
+	// #829: public per-merchant checkout discovery — the merchant's ARMED PSPs
+	// and the public-by-nature values a browser needs to tokenize on each.
+	// Deliberately unauthenticated (the values are public; secrets are
+	// structurally unreachable, see handlers.GetCheckoutConfig) and not gated on
+	// providerRoutes: it is exactly the endpoint that TELLS a frontend which
+	// rails this merchant has.
+	group.Handle(http.MethodGet, "/checkout-config", h(httphandlers.GetCheckoutConfig))
 	if providerRoutes.Solana {
 		group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
 		group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
@@ -216,6 +223,13 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		h(httphandlers.ServicePutCustomerSpendDelegation),
 		writeMW...,
 	)
+	// or#878: the delinquency state OpenRails derived, and the roster of who is
+	// overdue. Read-only on purpose — the state is a reading of invoice truth,
+	// so it is settled by paying the invoice, never by an API call.
+	customers.Handle(http.MethodGet, "/delinquency",
+		h(httphandlers.ServiceGetCustomerDelinquency),
+		readMW...,
+	)
 
 	entitlements := group.Group("/entitlements")
 	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
@@ -242,6 +256,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
 	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
+	group.Handle(http.MethodGet, "/delinquency", h(httphandlers.ServiceListDelinquency), readMW...)
 
 	admissions := group.Group("/admissions")
 	admissions.Handle(http.MethodPost, "/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)
@@ -539,25 +554,6 @@ func resolveMerchantForGroupGateError(err error) billingauth.GateError {
 	return billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 }
 
-func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserContext, bool) {
-	a := opts.Authenticator
-	if a == nil {
-		r.AbortJSON(http.StatusInternalServerError, "authentication disabled")
-		return billingauth.UserContext{}, false
-	}
-	uc, err := a.Authenticate(r.Request.Context(), r.Request)
-	if err != nil {
-		r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
-		return billingauth.UserContext{}, false
-	}
-	if verr := uc.ValidateSubject(); verr != nil {
-		r.AbortJSON(http.StatusUnauthorized, verr.Error())
-		return billingauth.UserContext{}, false
-	}
-	r.SetUserContext(uc)
-	return uc, true
-}
-
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {
 	resolver := g.ServiceCredentialResolver
 	if resolver == nil || r == nil {
@@ -676,6 +672,11 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
 
 	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
+	// or#288 routing dry run: read-only "which PSP would this checkout get, and
+	// why" — same permission as reading the PSP catalog, since the answer is a
+	// projection of it. Registered before "/:provider" so "routing" is never
+	// captured as a provider name.
+	providers.Handle(http.MethodPost, "/routing/dry-run", h(httphandlers.MerchantDryRunCheckoutRouting), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
 	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
 	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).
@@ -781,6 +782,17 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
 	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 
+	// #850 merchant api_host (#734 Host routing): read + assign the merchant's
+	// canonical API host. Reads gate on merchant:settings:read; the write on
+	// merchant:settings:update — owner-only in the fixed #567 catalog. No
+	// MerchantDBConnMW: the merchants directory service writes the directory
+	// row (openrails.merchants, not an RLS-scoped merchant table) with its own
+	// pool.
+	apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
+	apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+	rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
+	rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
+
 	// #760 merchant team management: roster, invites (register+join links),
 	// role changes, and removal — all through AuthKit group membership. Reads
 	// gate on merchant:members:read; mutations on merchant:members:manage. Only
@@ -846,11 +858,12 @@ func (opts Options) merchantAdminOperationMW(perm string, operation middleware.A
 	return append(mw, trailing...)
 }
 
-// RegisterWebhookRoutes mounts the CANONICAL standalone webhook surface (#650):
-// POST /webhooks/:provider (NMI/CCBill; the merchant is derived from the
-// payload's account identity, not the path) and /webhooks/:provider/:account_id
-// (direct Stripe). This is the live production entry point for inbound
-// NMI/CCBill webhooks — standalone mounts it. Embedded hosts use
+// RegisterWebhookRoutes mounts the ONE standalone webhook surface (#650,
+// or#893): POST /webhooks/:provider (NMI/CCBill; the merchant is derived from
+// the payload's account identity, not the path) and
+// /webhooks/:provider/:account_id (direct Stripe). :provider is a RAIL —
+// nmi/ccbill/stripe/solana/basistheory — never a PSP key. This is the live
+// production entry point for inbound NMI/CCBill webhooks. Embedded hosts use
 // RegisterMerchantWebhookRoutes instead, since they pin one merchant in context
 // and have no payload-derived merchant to resolve.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
@@ -861,12 +874,11 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // RegisterMerchantWebhookRoutes mounts the merchant-scoped webhook surface
 // (POST /merchants/:merchant/webhooks/:provider, issue #529): the merchant is
 // resolved from the URL slug, then THAT merchant's signing secret verifies the
-// payload. Embedded hosts mount this as their only webhook surface (a pinned
-// merchant needs no payload-derived resolution); standalone also mounts it
-// alongside RegisterWebhookRoutes as a transition alias for integrations
-// already using this URL shape. One handler (httphandlers.MerchantWebhook,
-// Stripe + NMI-backed rails + CCBill) is shared by both the standalone gin
-// server and the embedded mux, so the two cannot drift.
+// payload. This is the EMBEDDED surface only — a host that pins one merchant
+// has no payload-derived identity to resolve. or#893 removed the standalone
+// mount: there the canonical RegisterWebhookRoutes surface derives the merchant
+// from PSP identity, and a URL slug was a second way to say the
+// same thing.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
 	// #641: per-account endpoint — account_id in the path selects which account the

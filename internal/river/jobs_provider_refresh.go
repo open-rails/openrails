@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -130,7 +131,7 @@ func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]u
 	if w.ListMerchants != nil {
 		return w.ListMerchants(ctx)
 	}
-	return w.DB.Gen(ctx).ListActiveMerchantIDs(ctx)
+	return w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 }
 
 // merchantHasRailAccounts: cheap accounts-exist predicate. psps
@@ -241,7 +242,7 @@ type ProviderRefreshWorker struct {
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
-	// Merchants resolves per-merchant provider accounts + scoped secrets
+	// Merchants resolves per-merchant PSPs + scoped secrets
 	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
 	Merchants           *merchants.Service
 	DeferDelete         subscriptions.DeferredDeleteScheduler
@@ -310,6 +311,8 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"ccbill_errors":    stats.CCBillErrors,
 		"converge_errors":  stats.ConvergeErrors,
 		"lane_errors":      stats.LaneErrors,
+		"gated":            stats.Gated,
+		"advisory":         stats.Advisory,
 	}).Info("Provider Refresh: pass completed")
 	if err != nil {
 		// Merchant connection failed — nothing ran; river retries with backoff.
@@ -323,20 +326,56 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 // CCBill DataLink lane → event refresh → proofs → scoped convergence if
 // changed → unknown-cohort reconcile.
 func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *log.Entry) error {
+	gate := destructive.New(w.DB)
 	mctx := merchant.WithID(ctx, merchant.ID(mid))
 	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
+		// #836 kill switch + #835 first-enforce gate, read once per merchant
+		// per pass.
+		verdict := gate.Check(tctx, mid)
+		if !verdict.Allowed {
+			stats.Gated++
+			logger.WithField("merchant_id", mid).Warn("Provider Refresh: destructive actions gated — " + verdict.Reason)
+			return nil
+		}
+		// #835: an UNARMED merchant pulls in ADVISORY mode. The refresh worker
+		// used to run ModeEnforce with Insert+Overwrite on a RunOnStart
+		// schedule, so the first pass against an imported legacy book applied
+		// its whole diff within seconds of process start, unattended. Now the
+		// first pass surveys: findings are persisted, nothing is mutated, and
+		// an operator arms the merchant after reading them.
+		mode := reconcile.ModeEnforce
+		if !verdict.EnforceArmed {
+			mode = reconcile.ModeAdvisory
+			stats.Advisory++
+			logger.WithField("merchant_id", mid).Warn("Provider Refresh: " + verdict.Reason)
+		}
+
 		armed := builder.Build(tctx, merchant.ID(mid))
 		if err := w.runCCBillDataLinkLane(tctx, armed.CCBillDataLink); err != nil {
 			stats.CCBillErrors++
 			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
 		}
-		res := w.runEventRefresh(tctx, mid, armed.Fetchers)
+		res := w.runEventRefresh(tctx, mid, mode, armed.Coverage, armed.Fetchers)
 		stats.add(res)
+
+		if mode == reconcile.ModeAdvisory {
+			// An advisory dry-run proves nothing about the LOCAL mirror, so it
+			// flips no source-domain gate and drives no local convergence. It
+			// records that the merchant has been surveyed, so the operator
+			// knows the findings are ready to review.
+			if res.Windows > 0 {
+				if err := gate.RecordFirstPull(tctx, mid, w.now()); err != nil {
+					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: record first pull failed")
+				}
+			}
+			return nil
+		}
+
 		// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
 		// PROVES a source domain — flip reconciliation_state before the
 		// convergence pass so held EXCESS repairs can proceed.
 		if len(res.Proofs) > 0 {
-			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs, w.now()); err != nil {
+			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs); err != nil {
 				stats.LaneErrors++
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
 			} else if len(flipped) > 0 {
@@ -367,12 +406,11 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 }
 
 func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
-	worker := CCBillReconcileWorker{
+	return CCBillReconciler{
 		DB:                  w.DB,
 		DataLink:            dataLink,
 		NotificationService: w.NotificationService,
-	}
-	return worker.Work(ctx, &river.Job[CCBillReconcileArgs]{})
+	}.Run(ctx)
 }
 
 // runUnknownReconcile resolves the merchant's `unknown` subscription cohort (#632)
@@ -395,6 +433,10 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		lc.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
 	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
+	if res.Held > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
+			Error("Provider Refresh: unknown-cohort cancellations withheld by a pass-level guard; a requires_review finding is open")
+	}
 	if res.Renewed+res.Adopted+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
@@ -418,14 +460,23 @@ func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUI
 	return err
 }
 
-func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshMerchantResult {
+func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshMerchantResult {
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
-		// Runtime provider-account identity resolution was removed (#592):
-		// watermarks key globally per merchant+provider and reconcile runs
-		// account-agnostic (psps is an operator-declared catalog).
-		providerRes := w.runProviderEventWindows(ctx, mid, provider, nil, nil, fetchers)
+		// or#893: the pass already KNOWS which PSP armed the rail's fetcher —
+		// resolveScopeCoverage recorded it. It used to be thrown away, so the
+		// watermark keyed globally per (merchant, rail) and reconcile ran
+		// account-agnostic: pulling mobius advanced paykings' watermark past
+		// events nobody had read, and every mirror row landed unattributed.
+		binding := coverage[provider].Binding
+		if binding.ID == uuid.Nil {
+			result.ProviderErrors++
+			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "provider": provider}).
+				Error("Provider Refresh: rail armed without a resolved PSP; refusing an unattributed pull")
+			continue
+		}
+		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, coverage, binding, fetchers)
 		result.add(providerRes)
 	}
 	return result
@@ -453,15 +504,17 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	return providers
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, bindings map[reconcile.Provider]reconcile.RailMerchantAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
+	pspID := binding.ID
+	bindings := map[reconcile.Provider]reconcile.PSPBinding{provider: binding}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())
 	if !horizon.After(time.Time{}) {
 		return out
 	}
 
-	since, err := w.loadWatermark(ctx, mid, provider, accountID, horizon.Add(-w.initialLookback()))
+	since, err := w.loadWatermark(ctx, mid, provider, pspID, horizon.Add(-w.initialLookback()))
 	if err != nil {
 		out.WatermarkErrors++
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
@@ -490,20 +543,22 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		if !until.After(since) {
 			break
 		}
-		res, err := engine.Run(ctx, reconcile.RunParams{
-			Mode:      reconcile.ModeEnforce,
-			Mutations: &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
-			Providers: []reconcile.Provider{provider},
-			PSPs:      bindings,
-			Since:     since,
-			Until:     until,
-		})
+		params := reconcile.RunParams{
+			Mode:        mode,
+			Mutations:   &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
+			Providers:   []reconcile.Provider{provider},
+			PSPs:        bindings,
+			PSPCoverage: coverage,
+			Since:       since,
+			Until:       until,
+		}
+		res, err := engine.Run(ctx, params)
 		if err != nil {
 			out.ProviderErrors++
-			if werr := w.recordWatermarkFailure(ctx, mid, provider, accountID, since, now, err); werr != nil {
-				out.WatermarkErrors++
-				log.WithContext(ctx).WithError(werr).WithField("provider", provider).Warn("Provider Refresh: record failed provider attempt failed")
-			}
+			// or#823: the failure is recorded by the job (log + River's own error
+			// record), not by a watermark column nothing surfaced. The row is
+			// deliberately left alone: an unadvanced watermark IS the durable
+			// statement that this window still needs reading.
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"provider": provider,
 				"since":    since,
@@ -528,7 +583,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 			}
 		}
-		if err := w.recordWatermarkSuccess(ctx, mid, provider, accountID, until, now); err != nil {
+		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until); err != nil {
 			out.WatermarkErrors++
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
@@ -545,7 +600,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, fallback time.Time) (time.Time, error) {
+func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, fallback time.Time) (time.Time, error) {
 	var watermark time.Time
 	err := w.DB.Qx(ctx).QueryRow(ctx, `
 SELECT watermark_at
@@ -553,8 +608,8 @@ SELECT watermark_at
  WHERE merchant_id = $1::uuid
    AND rail = $2::text
    AND event_domain = $3::text
-   AND psp_key = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
-`, mid, string(provider), providerRefreshDomainEvents, accountID).Scan(&watermark)
+   AND psp_id = $4::uuid
+`, mid, string(provider), providerRefreshDomainEvents, pspID).Scan(&watermark)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fallback.UTC(), nil
 	}
@@ -564,36 +619,16 @@ SELECT watermark_at
 	return watermark.UTC(), nil
 }
 
-func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time) error {
+func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark time.Time) error {
 	_, err := w.DB.Qx(ctx).Exec(ctx, `
 INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, psp_id, event_domain, watermark_at,
-    last_attempted_at, last_succeeded_at, last_error
-) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, $6::timestamptz, NULL)
+    merchant_id, rail, psp_id, event_domain, watermark_at
+) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz)
 ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
 DO UPDATE SET
     watermark_at = EXCLUDED.watermark_at,
-    last_attempted_at = EXCLUDED.last_attempted_at,
-    last_succeeded_at = EXCLUDED.last_succeeded_at,
-    last_error = NULL,
     updated_at = now()
-`, mid, string(provider), accountID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC())
-	return err
-}
-
-func (w *ProviderRefreshWorker) recordWatermarkFailure(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, accountID *uuid.UUID, watermark, attemptedAt time.Time, cause error) error {
-	errText := cause.Error()
-	_, err := w.DB.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, psp_id, event_domain, watermark_at,
-    last_attempted_at, last_succeeded_at, last_error
-) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz, $6::timestamptz, NULL, $7::text)
-ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
-DO UPDATE SET
-    last_attempted_at = EXCLUDED.last_attempted_at,
-    last_error = EXCLUDED.last_error,
-    updated_at = now()
-`, mid, string(provider), accountID, providerRefreshDomainEvents, watermark.UTC(), attemptedAt.UTC(), errText)
+`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC())
 	return err
 }
 
@@ -637,6 +672,12 @@ type providerRefreshStats struct {
 	CCBillErrors    int
 	ConvergeErrors  int
 	LaneErrors      int
+	// Gated (#836): merchants skipped because the destructive-action switch or
+	// their per-merchant policy is off.
+	Gated int
+	// Advisory (#835): merchants pulled in advisory mode because they have
+	// never been armed for enforcing pulls.
+	Advisory int
 }
 
 func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {

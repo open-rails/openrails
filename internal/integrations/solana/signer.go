@@ -28,7 +28,7 @@ type MerchantSecretGetter interface {
 // the private key to callers. It is resolved PER MERCHANT (via merchant.ID); there
 // is no process-global signer. Two implementations exist:
 //
-//   - keypairSigner: loads the provider-account scoped private_key secret and
+//   - keypairSigner: loads the PSP scoped private_key secret and
 //     signs in-process. Works with any secret backend; the key briefly lives in
 //     memory.
 //   - transitSigner: signs through Vault Transit — the key never leaves Vault.
@@ -100,16 +100,6 @@ func BuildSignSubmitPresubmit(
 	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, func(message []byte) (solanago.Signature, error) {
 		return signer.SignMessage(ctx, merchantID, message)
 	}, presubmit)
-}
-
-func BuildSignSubmitWithPayer(
-	ctx context.Context,
-	rpc blockhashProvider,
-	payer solanago.PublicKey,
-	instructions []solanago.Instruction,
-	signMessage func([]byte) (solanago.Signature, error),
-) (solanago.Signature, error) {
-	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, signMessage, nil)
 }
 
 // BuildSignSubmitWithPayerPresubmit: see BuildSignSubmitPresubmit.

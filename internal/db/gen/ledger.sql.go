@@ -12,39 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countLedgerSpendByCoords = `-- name: CountLedgerSpendByCoords :one
-SELECT count(*) FROM openrails.ledger_transfers
-WHERE merchant_id = $1::uuid
-  AND customer_id = $2::uuid
-  AND currency = $3::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
-  AND source = $4::text
-  AND source_id = $5::text
-`
-
-type CountLedgerSpendByCoordsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Source     string
-	SourceID   string
-}
-
-// CountLedgerSpendByCoords: unified-spend idempotency — a spend (balance debit)
-// OR an owed accrual with this operation coordinate means it already happened.
-func (q *Queries) CountLedgerSpendByCoords(ctx context.Context, arg CountLedgerSpendByCoordsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countLedgerSpendByCoords,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.Source,
-		arg.SourceID,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countLedgerTransfersByCustomer = `-- name: CountLedgerTransfersByCustomer :one
 SELECT count(*) FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
@@ -135,13 +102,14 @@ func (q *Queries) GetLedgerAccountByID(ctx context.Context, arg GetLedgerAccount
 }
 
 const getLedgerSpendByCoords = `-- name: GetLedgerSpendByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
-  AND source = $4::text
-  AND source_id = $5::text
+  AND operation = $4::text
+  AND source = $5::text
+  AND source_id = $6::text
 ORDER BY created_at ASC
 LIMIT 1
 `
@@ -150,17 +118,19 @@ type GetLedgerSpendByCoordsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	Operation  string
 	Source     string
 	SourceID   string
 }
 
-// GetLedgerSpendByCoords: the first posted spend movement for an idempotent
-// captured request.
+// GetLedgerSpendByCoords: the first posted spend movement for one money
+// operation at its idempotency coordinate.
 func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpendByCoordsParams) (OpenrailsLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, getLedgerSpendByCoords,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
+		arg.Operation,
 		arg.Source,
 		arg.SourceID,
 	)
@@ -182,18 +152,80 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 		&i.Resource,
 		&i.InvoiceID,
 		&i.CreatedAt,
+		&i.Operation,
+	)
+	return i, err
+}
+
+const getLedgerTransferAtCoordinate = `-- name: GetLedgerTransferAtCoordinate :one
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
+WHERE merchant_id = $1::uuid
+  AND customer_id IS NOT DISTINCT FROM $2::uuid
+  AND currency = $3::text
+  AND transfer_type = $4::text
+  AND operation = $5::text
+  AND source = $6::text
+  AND source_id = $7::text
+  AND grant_id IS NOT DISTINCT FROM $8::uuid
+`
+
+type GetLedgerTransferAtCoordinateParams struct {
+	MerchantID   uuid.UUID
+	CustomerID   *uuid.UUID
+	Currency     string
+	TransferType string
+	Operation    string
+	Source       string
+	SourceID     string
+	GrantID      *uuid.UUID
+}
+
+// GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
+// the full physical identity, lot included, so a multi-lot spend resolves the
+// right leg.
+func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedgerTransferAtCoordinateParams) (OpenrailsLedgerTransfer, error) {
+	row := q.db.QueryRow(ctx, getLedgerTransferAtCoordinate,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.TransferType,
+		arg.Operation,
+		arg.Source,
+		arg.SourceID,
+		arg.GrantID,
+	)
+	var i OpenrailsLedgerTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.DebitAccountID,
+		&i.CreditAccountID,
+		&i.Amount,
+		&i.Currency,
+		&i.TransferType,
+		&i.AllowDebitNegativeUpTo,
+		&i.Source,
+		&i.SourceID,
+		&i.GrantID,
+		&i.CustomerID,
+		&i.InvokerID,
+		&i.Resource,
+		&i.InvoiceID,
+		&i.CreatedAt,
+		&i.Operation,
 	)
 	return i, err
 }
 
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
   AND transfer_type = $4::text
-  AND source = $5::text
-  AND source_id = $6::text
+  AND operation = $5::text
+  AND source = $6::text
+  AND source_id = $7::text
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -203,19 +235,23 @@ type GetLedgerTransferByCoordsParams struct {
 	CustomerID   uuid.UUID
 	Currency     string
 	TransferType string
+	Operation    string
 	Source       string
 	SourceID     string
 }
 
-// GetLedgerTransferByCoords: idempotency / lookup by the operation coordinate
-// (merchant, customer, currency, transfer_type, source, source_id). Replaces
-// GetMoneyTransactionByCoords. Newest-first so a replay returns the latest row.
+// GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
+// coordinate (merchant, customer, currency, transfer_type, operation, source,
+// source_id). `operation` is the or#894 discriminator: without it a capture and
+// a wasted-spend usage charge sharing one (source, source_id) alias here.
+// Newest-first so a replay returns the latest row.
 func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTransferByCoordsParams) (OpenrailsLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, getLedgerTransferByCoords,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.TransferType,
+		arg.Operation,
 		arg.Source,
 		arg.SourceID,
 	)
@@ -237,6 +273,7 @@ func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTr
 		&i.Resource,
 		&i.InvoiceID,
 		&i.CreatedAt,
+		&i.Operation,
 	)
 	return i, err
 }
@@ -290,16 +327,18 @@ func (q *Queries) InsertLedgerAccount(ctx context.Context, arg InsertLedgerAccou
 const insertLedgerTransfer = `-- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
-    allow_debit_negative_up_to,
+    allow_debit_negative_up_to, operation,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::bigint, $5::text, $6::text,
-    $7::bigint,
-    $8::text, $9::text, $10::uuid, $11::uuid,
-    $12::text, $13::text, $14::uuid
+    $7::bigint, $8::text,
+    $9::text, $10::text, $11::uuid, $12::uuid,
+    $13::text, $14::text, $15::uuid
 )
-RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+DO NOTHING
+RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation
 `
 
 type InsertLedgerTransferParams struct {
@@ -310,8 +349,9 @@ type InsertLedgerTransferParams struct {
 	Currency               string
 	TransferType           string
 	AllowDebitNegativeUpTo int64
-	Source                 *string
-	SourceID               *string
+	Operation              string
+	Source                 string
+	SourceID               string
 	GrantID                *uuid.UUID
 	CustomerID             *uuid.UUID
 	InvokerID              *string
@@ -319,6 +359,13 @@ type InsertLedgerTransferParams struct {
 	InvoiceID              *uuid.UUID
 }
 
+// InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
+// NOTHING against idx_ledger_transfers_operation_once makes once-only a
+// DATABASE fact: a replay at the same (merchant, customer, currency,
+// transfer_type, operation, source, source_id, grant_id) inserts nothing and
+// returns zero rows, whatever order the caller took its locks in. Zero rows is
+// therefore "already applied", not an error — ledger.Apply reads the committed
+// row and reports Replayed.
 func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTransferParams) (OpenrailsLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, insertLedgerTransfer,
 		arg.MerchantID,
@@ -328,6 +375,7 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		arg.Currency,
 		arg.TransferType,
 		arg.AllowDebitNegativeUpTo,
+		arg.Operation,
 		arg.Source,
 		arg.SourceID,
 		arg.GrantID,
@@ -354,6 +402,7 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.Resource,
 		&i.InvoiceID,
 		&i.CreatedAt,
+		&i.Operation,
 	)
 	return i, err
 }
@@ -379,8 +428,134 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 	return balance, err
 }
 
+const listLedgerConservationBreaches = `-- name: ListLedgerConservationBreaches :many
+SELECT merchant_id,
+       currency,
+       SUM(credits_posted - debits_posted)::bigint AS net,
+       COUNT(*)::bigint AS accounts
+FROM openrails.ledger_accounts
+WHERE ($1::uuid IS NULL
+    OR merchant_id = $1::uuid)
+GROUP BY merchant_id, currency
+HAVING SUM(credits_posted - debits_posted) <> 0
+ORDER BY merchant_id, currency
+`
+
+type ListLedgerConservationBreachesRow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	Net        int64
+	Accounts   int64
+}
+
+// ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
+// return every breached ledger so the operator cannot receive a false healthy
+// result from pagination.
+func (q *Queries) ListLedgerConservationBreaches(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerConservationBreachesRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerConservationBreaches, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerConservationBreachesRow
+	for rows.Next() {
+		var i ListLedgerConservationBreachesRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.Currency,
+			&i.Net,
+			&i.Accounts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerCounterDrifts = `-- name: ListLedgerCounterDrifts :many
+WITH logged AS (
+    SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
+    FROM (
+        SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
+        FROM openrails.ledger_transfers
+        WHERE ($1::uuid IS NULL
+            OR merchant_id = $1::uuid)
+        UNION ALL
+        SELECT debit_account_id, 0::bigint, amount
+        FROM openrails.ledger_transfers
+        WHERE ($1::uuid IS NULL
+            OR merchant_id = $1::uuid)
+    ) legs
+    GROUP BY account_id
+)
+SELECT a.id AS account_id,
+       a.merchant_id,
+       a.currency,
+       a.account_type,
+       a.customer_id,
+       a.credits_posted AS stored_credits,
+       COALESCE(l.credits, 0)::bigint AS logged_credits,
+       a.debits_posted AS stored_debits,
+       COALESCE(l.debits, 0)::bigint AS logged_debits
+FROM openrails.ledger_accounts a
+LEFT JOIN logged l ON l.account_id = a.id
+WHERE ($1::uuid IS NULL
+    OR a.merchant_id = $1::uuid)
+  AND (a.credits_posted <> COALESCE(l.credits, 0)
+    OR a.debits_posted <> COALESCE(l.debits, 0))
+ORDER BY a.merchant_id, a.currency, a.id
+`
+
+type ListLedgerCounterDriftsRow struct {
+	AccountID     uuid.UUID
+	MerchantID    uuid.UUID
+	Currency      string
+	AccountType   string
+	CustomerID    *uuid.UUID
+	StoredCredits int64
+	LoggedCredits int64
+	StoredDebits  int64
+	LoggedDebits  int64
+}
+
+// ListLedgerCounterDrifts rebuilds account counters from the immutable
+// transfer log and returns every account whose maintained projection differs.
+func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerCounterDriftsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerCounterDrifts, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerCounterDriftsRow
+	for rows.Next() {
+		var i ListLedgerCounterDriftsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.MerchantID,
+			&i.Currency,
+			&i.AccountType,
+			&i.CustomerID,
+			&i.StoredCredits,
+			&i.LoggedCredits,
+			&i.StoredDebits,
+			&i.LoggedDebits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -431,6 +606,7 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 			&i.Resource,
 			&i.InvoiceID,
 			&i.CreatedAt,
+			&i.Operation,
 		); err != nil {
 			return nil, err
 		}
@@ -502,14 +678,16 @@ WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
   AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
-  AND source = $4::text
-  AND source_id = $5::text
+  AND operation = $4::text
+  AND source = $5::text
+  AND source_id = $6::text
 `
 
 type SumLedgerSpendByCoordsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	Operation  string
 	Source     string
 	SourceID   string
 }
@@ -529,6 +707,7 @@ func (q *Queries) SumLedgerSpendByCoords(ctx context.Context, arg SumLedgerSpend
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
+		arg.Operation,
 		arg.Source,
 		arg.SourceID,
 	)

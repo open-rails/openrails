@@ -25,9 +25,14 @@ var destructiveIntentTypes = map[string]struct{}{
 	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
 	// is exactly the #679 threat model. Held user deletes stay pending and
 	// complete after operator ack; decline-cleanup deletes bypass the ledger
-	// entirely (paymentmethods.CleanupVaultBestEffort) so card-testing floods
+	// entirely (paymentmethods.CleanupPaymentMethodBestEffort) so card-testing floods
 	// cannot burn this budget.
-	TypeNMIVaultDelete: {},
+	//
+	// or#870: this type is USER-INITIATED ONLY — no dunning, cancellation or
+	// reconcile path produces it. It stays gated anyway: the breaker exists for
+	// the case where something starts producing these in bulk, which under the
+	// standing rule would itself be the incident.
+	TypeNMIPaymentMethodDelete: {},
 	// TypeNMIPaymentSourceUpdate is deliberately NOT listed: repointing which
 	// vaulted card a subscription bills destroys nothing (both vaults survive;
 	// swap back any time), so it doesn't fit the #679 mass-destruction threat
@@ -96,6 +101,15 @@ func NewVolumeBreaker(d *db.DB) *VolumeBreaker { return &VolumeBreaker{db: d} }
 func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailIntent, now time.Time) (held bool, reason string, err error) {
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
+	}
+	// or#862: both counts below read policied tables (rail_intents,
+	// subscriptions). On a connection with no app.merchant_id they came back 0
+	// and 0, giving budget = max(25, 1% × 0) = 25 against executed = 0 — a
+	// breaker that could never hold, on exactly the unattended plane it exists
+	// to guard. Assert the pin instead of reading zeros; Check's contract is
+	// fail-closed, so the caller parks the intent.
+	if err := b.db.AssertMerchantScope(ctx, "destructive-volume breaker"); err != nil {
+		return false, "", err
 	}
 	q := b.db.Gen(ctx)
 

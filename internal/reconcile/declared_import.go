@@ -50,7 +50,10 @@ type DeclaredSubscriptionFact struct {
 	PriceID            uuid.UUID
 	Rail               string
 	RailSubscriptionID string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
-	PspID              *uuid.UUID
+	// PspID is the PSP that owns the declared row. Required (or#893): the
+	// import must state which of the merchant's accounts the legacy book came
+	// from — there is no unbound lane left to fall into.
+	PspID              uuid.UUID
 	UserEmail          *string
 	StartedAt          time.Time
 	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)
@@ -81,6 +84,38 @@ const (
 // backfill, capped at #634's 3y).
 const declaredImportLookback = 200 * 365 * 24 * time.Hour
 
+// DeclaredCoverage is the importer's absence claim, plus the typed confirmation
+// that makes the claim expensive to get wrong (or#858).
+//
+// SubscriptionsExhaustive says "this call is the merchant's ENTIRE book", and
+// that is an absence proof: every local subscription NOT in the batch is
+// cancelled. An importer that batches its book and forgets to clear the flag
+// therefore cancels everything it did not happen to send. A boolean cannot tell
+// the two apart — a count can, so the caller must also state how many
+// subscriptions the exhaustive book contains, and it must match what arrived.
+type DeclaredCoverage struct {
+	SubscriptionsExhaustive bool
+	// ExpectedSubscriptions is required when SubscriptionsExhaustive. It must
+	// equal the number of facts in the call.
+	ExpectedSubscriptions *int
+}
+
+func (c DeclaredCoverage) validate(got int) error {
+	if !c.SubscriptionsExhaustive {
+		return nil
+	}
+	if got == 0 {
+		return fmt.Errorf("declared import: refusing an EXHAUSTIVE book with zero subscriptions — that is an absence proof that would cancel every local subscription for this merchant. Send the book, or declare it non-exhaustive")
+	}
+	if c.ExpectedSubscriptions == nil {
+		return fmt.Errorf("declared import: an EXHAUSTIVE book must declare expected_subscriptions (it cancels every local subscription it omits). This call carries %d", got)
+	}
+	if *c.ExpectedSubscriptions != got {
+		return fmt.Errorf("declared import: refusing an EXHAUSTIVE book — expected_subscriptions says %d but the call carries %d. A partial batch declared exhaustive cancels every subscription it omits", *c.ExpectedSubscriptions, got)
+	}
+	return nil
+}
+
 // ImportDeclaredSubscriptions lands one merchant's declared facts. Must run on
 // a merchant-scoped connection. asOf is the evidence horizon: Decide evaluates
 // at it, and lc's clock should be pinned to it so lifecycle writes are
@@ -95,7 +130,7 @@ func ImportDeclaredSubscriptions(
 	merchantID uuid.UUID,
 	facts []DeclaredSubscriptionFact,
 	txns []RemoteTransaction,
-	subscriptionsExhaustive bool,
+	coverage DeclaredCoverage,
 	asOf time.Time,
 ) (map[string]DeclaredOutcome, error) {
 	if database == nil || lc == nil {
@@ -103,6 +138,19 @@ func ImportDeclaredSubscriptions(
 	}
 	if asOf.IsZero() {
 		return nil, fmt.Errorf("declared import: AsOf horizon is required")
+	}
+	if err := coverage.validate(len(facts)); err != nil {
+		return nil, err
+	}
+	// or#893: every declared row is a provider row and must name the account it
+	// came from. billingimport resolves this from the row's `psp` or the book's
+	// `default_psp` and refuses first; this is the seam's own guard, so a direct
+	// caller cannot slip an unattributed fact past the DB constraint with a
+	// bare FK error.
+	for i := range facts {
+		if facts[i].PspID == uuid.Nil {
+			return nil, fmt.Errorf("declared import: subscription %q names no PSP; a declared provider row must state the account it came from", facts[i].SourceID)
+		}
 	}
 	out := make(map[string]DeclaredOutcome, len(facts))
 	q := database.Gen(ctx)
@@ -114,7 +162,7 @@ func ImportDeclaredSubscriptions(
 		Provider:     Provider("declared"),
 		FetchedAt:    asOf,
 		Transactions: txns,
-		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: subscriptionsExhaustive},
+		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: coverage.SubscriptionsExhaustive},
 	}
 	for i := range facts {
 		f := &facts[i]
@@ -286,7 +334,10 @@ func ImportDeclaredSubscriptions(
 			// lands the terminal transition (cancel_type 'expired' at AsOf —
 			// faithful user/chargeback fidelity applies to first import only);
 			// already-terminal rows take no transition but still backfill charges.
-			if _, err := convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, asOf, 0, declaredImportLookback); err != nil {
+			// #835: no first-pull floor here on purpose — the declared snapshot
+			// is dated at AsOf and the operator's declaration IS the
+			// observation, so AsOf itself is the floor.
+			if _, err := convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{}); err != nil {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					// Another live row already owns the customer's lifecycle slot

@@ -30,7 +30,7 @@ import (
 
 func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	_, err := suite.Pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
@@ -85,7 +85,7 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 
 	err = client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{
 		{
-			Scope: " role ", RoleID: " " + second.ScopeKey + " ", Windows: second.Windows,
+			Scope: " role ", ScopeKey: " " + second.ScopeKey + " ", Windows: second.Windows,
 		},
 		second,
 	})
@@ -101,7 +101,7 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 
 func TestReplaceInvokerSpendLimitsRollsBackOnWriteFailure(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -152,7 +152,7 @@ EXECUTE FUNCTION openrails.%s()`, functionName, triggerName, failingKey, functio
 
 func TestReplaceInvokerSpendLimitsPurgesLegacyPaddedScopeKeys(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -209,7 +209,7 @@ WHERE merchant_id = $1 AND customer_id = $2
 
 func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 	payerID := suite.ensureCustomer(ctx, uuid.NewString())
 	payer := identity.CustomerID(payerID)
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -241,9 +241,14 @@ func TestReplaceAndSetInvokerSpendLimitsSerialize(t *testing.T) {
 		Scope: "invoker", ScopeKey: "serialized-upsert",
 		Windows: []billingservice.SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 300}},
 	}
+	// Each caller gets its OWN pinned merchant connection, as two concurrent
+	// requests would. Sharing one pinned context would serialize them on that
+	// single connection and they would never contend on the advisory lock the
+	// test is about.
+	replaceCtx, upsertCtx := suite.MerchantCtx(), suite.MerchantCtx()
 	replaceDone := make(chan error, 1)
 	go func() {
-		replaceDone <- svc.ReplaceInvokerSpendLimits(ctx, payer, []billingservice.InvokerSpendLimitInput{replacement})
+		replaceDone <- svc.ReplaceInvokerSpendLimits(replaceCtx, payer, []billingservice.InvokerSpendLimitInput{replacement})
 	}()
 
 	waiters := func(want int) bool {
@@ -261,7 +266,7 @@ WHERE datname = current_database()
 
 	upsertDone := make(chan error, 1)
 	go func() {
-		upsertDone <- svc.SetInvokerSpendLimits(ctx, payer, singular)
+		upsertDone <- svc.SetInvokerSpendLimits(upsertCtx, payer, singular)
 	}()
 	require.Eventually(t, func() bool { return waiters(2) }, 5*time.Second, 20*time.Millisecond,
 		"singular upsert must queue behind replacement on the same lock")

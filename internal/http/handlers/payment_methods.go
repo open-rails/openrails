@@ -29,9 +29,8 @@ const (
 )
 
 type listPaymentMethodsQuery struct {
-	Limit           int  `form:"limit"`
-	Offset          int  `form:"offset"`
-	IncludeInactive bool `form:"include_inactive"`
+	Limit  int `form:"limit"`
+	Offset int `form:"offset"`
 }
 
 type paymentMethodURI struct {
@@ -160,7 +159,6 @@ type paymentMethodResponse struct {
 	BillingDetails *paymentMethodBillingDetails `json:"billing_details,omitempty"`
 	Card           *paymentMethodCardDetails    `json:"card,omitempty"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
-	Livemode       bool                         `json:"livemode"`
 	Created        int64                        `json:"created"`
 	Health         *paymentMethodHealth         `json:"health,omitempty"`
 	Subscriptions  []subscriptionSummary        `json:"subscriptions,omitempty"`
@@ -230,17 +228,22 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		email = strings.TrimSpace(*user.Email)
 	}
 
-	createReq := createVaultRequestFromPaymentMethodRequest(req, email)
+	createReq := toCreatePaymentMethodRequest(req, email)
 	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
 		createReq.Metadata["e2e_run_id"] = e2eRunID
 	}
 
-	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
+	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, createReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"request_id": r.RequestID(),
 			"user_id":    user.ID,
 		}).Error("Failed to create payment method")
+		// or#896: an unsupported rail is not a misconfiguration — say so.
+		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
@@ -249,9 +252,9 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.APIError(providerErr)
 			return
 		}
-		var vaultErr *paymentmethods.VaultError
-		if errors.As(err, &vaultErr) {
-			writeVaultError(r, vaultErr)
+		var pmErr *paymentmethods.PaymentMethodError
+		if errors.As(err, &pmErr) {
+			writePaymentMethodError(r, pmErr)
 			return
 		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")
@@ -273,7 +276,7 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 	)
 }
 
-func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreateVaultRequest {
+func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
@@ -304,7 +307,7 @@ func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest,
 	setMetadata("billing_state", req.State)
 	setMetadata("billing_company", req.Company)
 
-	return &paymentmethods.CreateVaultRequest{
+	return &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
 		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
@@ -374,12 +377,13 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		}
 	}
 
-	if !rails.IsNMI(pm.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be updated")
+	if !rails.SupportsPaymentMethodCRUD(pm.Rail) {
+		// or#896: name the rail and where the instrument actually lives.
+		r.ErrorJSON(http.StatusBadRequest, paymentmethods.RailPaymentMethodsUnsupported(string(pm.Rail)).Error())
 		return
 	}
 
-	updateReq := &paymentmethods.UpdateVaultRequest{
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &trimmedToken,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
@@ -402,9 +406,13 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	updated, err := r.State.VaultService.UpdateVault(ctx, pm, updateReq)
+	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
+		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return

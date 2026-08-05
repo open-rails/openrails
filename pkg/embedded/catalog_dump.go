@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -35,7 +36,7 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if out == nil {
 		out = io.Discard
 	}
-	database, err := newCatalogPushDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -108,7 +109,31 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Manifes
 			m.Products = append(m.Products, *p)
 		}
 	}
+	warnGrantUnitMismatches(m)
 	return m, nil
+}
+
+// warnGrantUnitMismatches surfaces stored credits_spec rows whose unit
+// disagrees with the credit balance the grant names — the or#883 defect as it
+// may already exist in data. Those grants deposit into a DIFFERENT money
+// account than the balance the catalog names. Detection only: never rewritten
+// here, because rewriting it moves where money lands.
+func warnGrantUnitMismatches(m *catalog.Manifest) {
+	units := make(map[string]string, len(m.CreditBalances))
+	for _, b := range m.CreditBalances {
+		units[b.Key] = b.Unit
+	}
+	for _, p := range m.Products {
+		for _, g := range p.Credits {
+			want, ok := units[g.Key]
+			if !ok || strings.TrimSpace(g.Unit) == "" || strings.EqualFold(g.Unit, want) {
+				continue
+			}
+			log.Warnf("⚠️  or#883: product %q credit grant %q is stored with unit %q but balance %q declares unit %q — "+
+				"this grant deposits into a different money account than the catalog names; re-apply the manifest to correct it",
+				p.Key, g.Key, g.Unit, g.Key, want)
+		}
+	}
 }
 
 func normalizeDumpProduct(p *catalog.Product) {
@@ -119,20 +144,11 @@ func normalizeDumpProduct(p *catalog.Product) {
 		p.TierGroup = ""
 		p.TierRank = nil
 	}
-	if len(p.RateCards) == 0 && !dumpProductHasMeteredPrice(*p) && !dumpProductIsCreditTopUp(*p) {
+	if len(p.RateCards) == 0 && !dumpProductIsCreditTopUp(*p) {
 		return
 	}
 	p.TierGroup = ""
 	p.TierRank = nil
-}
-
-func dumpProductHasMeteredPrice(p catalog.Product) bool {
-	for _, price := range p.Prices {
-		if price.Metered != nil {
-			return true
-		}
-	}
-	return false
 }
 
 func dumpProductIsCreditTopUp(p catalog.Product) bool {
@@ -176,7 +192,7 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 
 func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.Meter, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT key, COALESCE(kind, ''), COALESCE(event_type, ''), COALESCE(value_property, ''),
+SELECT key, COALESCE(event_type, ''), COALESCE(value_property, ''),
        COALESCE(aggregation, ''), COALESCE(unit, ''), COALESCE(group_by, '{}'::jsonb)
 FROM openrails.catalog_meters
 WHERE merchant_id = $1
@@ -189,7 +205,7 @@ ORDER BY key`, merchantID)
 	for rows.Next() {
 		var m catalog.Meter
 		var groupBy []byte
-		if err := rows.Scan(&m.Key, &m.Kind, &m.EventType, &m.ValueProperty, &m.Aggregation, &m.Unit, &groupBy); err != nil {
+		if err := rows.Scan(&m.Key, &m.EventType, &m.ValueProperty, &m.Aggregation, &m.Unit, &groupBy); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(groupBy, &m.GroupBy)
@@ -381,7 +397,7 @@ ORDER BY product_id, ordinal`, merchantID)
 
 func dumpCatalogCreditPurchasePrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT product_id, credit_key, currency, rails, input_min, input_max, COALESCE(round, ''), price
+SELECT product_id, credit_key, currency, rails, input_min, input_max, price
 FROM openrails.catalog_credit_purchase_prices
 WHERE merchant_id = $1
 ORDER BY product_id, ordinal`, merchantID)
@@ -396,7 +412,7 @@ ORDER BY product_id, ordinal`, merchantID)
 			price     catalog.Price
 			priceRaw  []byte
 		)
-		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.PSPs, &price.InputMin, &price.InputMax, &price.Round, &priceRaw); err != nil {
+		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.PSPs, &price.InputMin, &price.InputMax, &priceRaw); err != nil {
 			return err
 		}
 		if err := json.Unmarshal(priceRaw, &price); err != nil {

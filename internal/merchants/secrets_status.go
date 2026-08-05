@@ -4,70 +4,77 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ListSecretStatuses returns the registry plus configured/audit state for a
-// merchant. It never returns plaintext values.
+// ListSecretStatuses returns one status per PSP-scoped or custodian-scoped
+// secret the merchant actually holds, described from the rail credential
+// registry (#884) and the custodian registry (or#880). It never returns
+// plaintext values.
+//
+// It advertises what is READ, not a static catalogue: a merchant's credential
+// slots are a function of the PSPs it declared, and those per-PSP slots are
+// already reported by PaymentProviderDefinitions + PaymentProviderConfig.
+// Names are sorted so the view is stable across calls.
 func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]MerchantSecretStatus, error) {
 	if id.IsZero() {
 		return nil, validateSecretRef(id, "x")
 	}
-	configured := map[string]struct{}{}
-	if s.secrets != nil {
-		names, err := s.secrets.List(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		for _, n := range names {
-			configured[cleanSecretName(n)] = struct{}{}
+	if s.secrets == nil {
+		return nil, nil
+	}
+	names, err := s.secrets.List(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := make([]string, 0, len(names))
+	for _, n := range names {
+		if c := cleanSecretName(n); c != "" {
+			cleaned = append(cleaned, c)
 		}
 	}
+	sort.Strings(cleaned)
 
-	out := make([]MerchantSecretStatus, 0, len(merchantSecretRegistry))
-	for _, def := range merchantSecretRegistry {
-		st := MerchantSecretStatus{SecretDefinition: def}
-		if _, ok := configured[def.Name]; ok {
-			st.Configured = true
-			if s.secrets != nil {
-				if sec, err := s.secrets.Get(ctx, id, def.Name); err == nil {
-					st.Version = sec.Version
-				} else if !errors.Is(err, ErrSecretNotFound) {
-					return nil, err
-				}
-			}
-		}
-		out = append(out, st)
-	}
-	for name := range configured {
-		if _, ok := SecretDefinitionFor(name); ok {
+	out := make([]MerchantSecretStatus, 0, len(cleaned))
+	seen := map[string]struct{}{}
+	for _, name := range cleaned {
+		if _, dup := seen[name]; dup {
 			continue
 		}
-		rail, _, _, key, ok, err := ParsePSPSecretName(name)
-		if !ok || err != nil {
-			continue
-		}
-		st := MerchantSecretStatus{
-			SecretDefinition: SecretDefinition{
-				Name:             name,
-				Rail:             rail,
-				Purpose:          key,
-				DisplayLabel:     rail + " " + key,
-				ManualVault:      true,
-				MerchantWritable: true,
-				Validation:       "presence",
-			},
-			Configured: true,
-		}
-		if s.secrets != nil {
-			if sec, err := s.secrets.Get(ctx, id, name); err == nil {
-				st.Version = sec.Version
-			} else if !errors.Is(err, ErrSecretNotFound) {
-				return nil, err
+		seen[name] = struct{}{}
+		var st MerchantSecretStatus
+		switch kind, _, _, key, custodial, cerr := ParseCustodianSecretName(name); {
+		case custodial && cerr == nil:
+			st = MerchantSecretStatus{
+				Name:         name,
+				Custodian:    kind,
+				Key:          key,
+				DisplayLabel: kind + " " + key,
 			}
+		default:
+			rail, _, _, key, ok, err := ParsePSPSecretName(name)
+			if !ok || err != nil {
+				// A stored name that is neither a PSP-scoped nor a
+				// custodian-scoped credential slot is not a credential
+				// OpenRails reads — never advertise it as one.
+				continue
+			}
+			st = MerchantSecretStatus{
+				Name:         name,
+				Rail:         rail,
+				Key:          key,
+				DisplayLabel: rail + " " + key,
+			}
+		}
+		st.MerchantWritable = SecretWritable(name)
+		st.Configured = true
+		if sec, err := s.secrets.Get(ctx, id, name); err == nil {
+			st.Version = sec.Version
+		} else if !errors.Is(err, ErrSecretNotFound) {
+			return nil, err
 		}
 		out = append(out, st)
 	}
@@ -125,16 +132,26 @@ func validateSecretValue(ctx context.Context, name, value string, stripeTester f
 }
 
 func isStripeSecretKeyName(name string) bool {
-	if cleanSecretName(name) == SecretStripeSecretKey {
-		return true
-	}
 	rail, _, _, key, ok, err := ParsePSPSecretName(name)
 	return ok && err == nil && rail == "stripe" && key == "secret_key"
 }
 
+// validateSecretValueLocal applies per-(rail, key) format rules to a
+// PSP-scoped credential. Names are always scoped (#884), so the rules key off
+// the parsed rail/key rather than a second flat spelling.
 func validateSecretValueLocal(name, value string) error {
-	name = cleanSecretName(name)
 	value = strings.TrimSpace(value)
+	// or#880: a custodian credential is an opaque vendor application key —
+	// there is no rail format rule to apply, only non-emptiness.
+	if _, _, _, _, custodial, cerr := ParseCustodianSecretName(name); custodial {
+		if cerr != nil {
+			return cerr
+		}
+		if value == "" {
+			return errors.New("empty")
+		}
+		return nil
+	}
 	rail, _, _, key, scoped, err := ParsePSPSecretName(name)
 	if err != nil {
 		return err
@@ -142,31 +159,19 @@ func validateSecretValueLocal(name, value string) error {
 	if value == "" {
 		return errors.New("empty")
 	}
-	if scoped {
-		switch {
-		case rail == "stripe" && key == "secret_key":
-			name = SecretStripeSecretKey
-		case rail == "stripe" && key == "webhook_signing_secret":
-			name = SecretStripeWebhookSigning
-		case rail == "stripe" && key == "webhook_signing_secret_thin":
-			name = SecretStripeWebhookSigningThin
-		case rail == "nmi" && key == "tokenization_url":
-			name = SecretNMITokenizationURL
-		}
+	if !scoped {
+		return nil
 	}
-	switch name {
-	case SecretStripeSecretKey:
-		if !strings.HasPrefix(value, "sk_") {
-			return errors.New("invalid_format")
-		}
-	case SecretStripeWebhookSigning, SecretStripeWebhookSigningThin:
-		if !strings.HasPrefix(value, "whsec_") {
-			return errors.New("invalid_format")
-		}
-	case SecretNMITokenizationURL:
-		u, err := url.Parse(value)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return errors.New("invalid_format")
+	if rail == "stripe" {
+		switch key {
+		case "secret_key":
+			if !strings.HasPrefix(value, "sk_") {
+				return errors.New("invalid_format")
+			}
+		case "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous":
+			if !strings.HasPrefix(value, "whsec_") {
+				return errors.New("invalid_format")
+			}
 		}
 	}
 	return nil

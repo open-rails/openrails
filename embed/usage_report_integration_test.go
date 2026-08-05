@@ -98,14 +98,14 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "usage-report-"+uuid.NewString(), "Usage Report Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
-    'currency', 'usd',
+    'currency', 'USD',
     'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)

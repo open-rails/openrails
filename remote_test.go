@@ -41,17 +41,28 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}))
 
 	if err := client.SetMerchantSettings(context.Background(), MerchantSettings{
-		TrustLevelSpendLimits: []PayerSpendLimitInput{{TrustLevel: "gold"}},
+		BillingPolicies: []BillingPolicyInput{{
+			Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000,
+		}},
+		BillingPolicyBindings: []BillingPolicyBindingInput{{PolicyName: "api_line", Tier: "gold"}},
 	}); err != nil {
 		t.Fatalf("SetMerchantSettings: %v", err)
 	}
-	policies, ok := settingsBody["trust_level_spend_limits"].([]any)
+	policies, ok := settingsBody["billing_policies"].([]any)
 	if !ok || len(policies) != 1 {
-		t.Fatalf("expected one trust_level_spend_limits item, got %#v", settingsBody)
+		t.Fatalf("expected one billing_policies item, got %#v", settingsBody)
 	}
 	policy, _ := policies[0].(map[string]any)
-	if policy["trust_level"] != "gold" {
-		t.Fatalf("expected trust_level inside settings document, got %#v", settingsBody)
+	if policy["name"] != "api_line" || policy["kind"] != "outstanding_cap" {
+		t.Fatalf("expected the named policy inside settings document, got %#v", settingsBody)
+	}
+	bindings, ok := settingsBody["billing_policy_bindings"].([]any)
+	if !ok || len(bindings) != 1 {
+		t.Fatalf("expected one billing_policy_bindings item, got %#v", settingsBody)
+	}
+	binding, _ := bindings[0].(map[string]any)
+	if binding["policy"] != "api_line" || binding["tier"] != "gold" {
+		t.Fatalf("expected the tier binding inside settings document, got %#v", settingsBody)
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{

@@ -12,14 +12,203 @@ import (
 	"github.com/google/uuid"
 )
 
+const createDestructiveRun = `-- name: CreateDestructiveRun :one
+
+INSERT INTO openrails.destructive_runs (
+    id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
+) VALUES (
+    $1::uuid, $2::uuid, $3::uuid,
+    $4::text, $5::text, $6::boolean,
+    $7::jsonb, $8::bigint, $9::text
+)
+RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+`
+
+type CreateDestructiveRunParams struct {
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	PspID        *uuid.UUID
+	Kind         string
+	Actor        string
+	DryRun       bool
+	Coverage     []byte
+	ExpectedRows *int64
+	Note         *string
+}
+
+// --- or#858 / or#859 destructive-run ledger ----------------------------------
+// Deliberately the GENERAL run table (or#859 §5.1): kind='prune' is its first
+// user. Opened BEFORE anything is written, so a crash mid-run still leaves a
+// reversible record.
+func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+	row := q.db.QueryRow(ctx, createDestructiveRun,
+		arg.ID,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Kind,
+		arg.Actor,
+		arg.DryRun,
+		arg.Coverage,
+		arg.ExpectedRows,
+		arg.Note,
+	)
+	var i OpenrailsDestructiveRun
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.PspID,
+		&i.Kind,
+		&i.Actor,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Status,
+		&i.Note,
+	)
+	return i, err
+}
+
+const finishDestructiveRun = `-- name: FinishDestructiveRun :one
+UPDATE openrails.destructive_runs
+SET status = $1::text,
+    finished_at = $2::timestamptz,
+    affected = $3::jsonb
+WHERE merchant_id = $4::uuid AND id = $5::uuid
+RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+`
+
+type FinishDestructiveRunParams struct {
+	Status     string
+	Now        time.Time
+	Affected   []byte
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+	row := q.db.QueryRow(ctx, finishDestructiveRun,
+		arg.Status,
+		arg.Now,
+		arg.Affected,
+		arg.MerchantID,
+		arg.ID,
+	)
+	var i OpenrailsDestructiveRun
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.PspID,
+		&i.Kind,
+		&i.Actor,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Status,
+		&i.Note,
+	)
+	return i, err
+}
+
+const getDestructiveRun = `-- name: GetDestructiveRun :one
+SELECT id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note FROM openrails.destructive_runs
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+`
+
+type GetDestructiveRunParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+	row := q.db.QueryRow(ctx, getDestructiveRun, arg.MerchantID, arg.ID)
+	var i OpenrailsDestructiveRun
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.PspID,
+		&i.Kind,
+		&i.Actor,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Status,
+		&i.Note,
+	)
+	return i, err
+}
+
+const listDestructiveRuns = `-- name: ListDestructiveRuns :many
+SELECT id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note FROM openrails.destructive_runs
+WHERE merchant_id = $1::uuid
+  AND ($2::text IS NULL OR kind = $2::text)
+ORDER BY started_at DESC
+LIMIT $3::int
+`
+
+type ListDestructiveRunsParams struct {
+	MerchantID uuid.UUID
+	Kind       *string
+	Lim        int32
+}
+
+func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRunsParams) ([]OpenrailsDestructiveRun, error) {
+	rows, err := q.db.Query(ctx, listDestructiveRuns, arg.MerchantID, arg.Kind, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsDestructiveRun
+	for rows.Next() {
+		var i OpenrailsDestructiveRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.PspID,
+			&i.Kind,
+			&i.Actor,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.DryRun,
+			&i.Coverage,
+			&i.ExpectedRows,
+			&i.Affected,
+			&i.ReversedAt,
+			&i.ReversedBy,
+			&i.Status,
+			&i.Note,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExcessPaymentsForPSP = `-- name: ListExcessPaymentsForPSP :many
 SELECT id FROM openrails.payments
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
-  AND (
-    COALESCE(cardinality($3::text[]), 0) = 0
-    OR transaction_id <> ALL($3::text[])
-  )
+  AND deleted_at IS NULL
+  AND cardinality($3::text[]) > 0
+  AND transaction_id <> ALL($3::text[])
   AND ($4::timestamptz IS NULL OR purchased_at >= $4::timestamptz)
   AND ($5::timestamptz IS NULL OR purchased_at <= $5::timestamptz)
 `
@@ -33,7 +222,8 @@ type ListExcessPaymentsForPSPParams struct {
 }
 
 // Windowed: only payments inside the pulled [since, until] window are eligible
-// (a snapshot only proves absence within the window it covered).
+// (a snapshot only proves absence within the window it covered). Same empty-set
+// refusal as the subscription query.
 func (q *Queries) ListExcessPaymentsForPSP(ctx context.Context, arg ListExcessPaymentsForPSPParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listExcessPaymentsForPSP,
 		arg.MerchantID,
@@ -66,10 +256,9 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND rail_subscription_id <> ''
-  AND (
-    COALESCE(cardinality($3::text[]), 0) = 0
-    OR rail_subscription_id <> ALL($3::text[])
-  )
+  AND deleted_at IS NULL
+  AND cardinality($3::text[]) > 0
+  AND rail_subscription_id <> ALL($3::text[])
 `
 
 type ListExcessSubscriptionsForPSPParams struct {
@@ -78,11 +267,21 @@ type ListExcessSubscriptionsForPSPParams struct {
 	PresentIds []string
 }
 
-// #511 pull-provider --prune: account-bound EXCESS detection + safe deletion.
+// #511 pull-provider --prune: account-bound EXCESS detection + or#858 reversible
+// soft deletion.
 // "Excess" = a local row attributed to the pulled psp_id whose
-// provider key is ABSENT from the freshly fetched provider snapshot. Only rows
-// stamped with the provider account are considered; legacy NULL-binding import
-// rows are never pruned (NULL <> arg).
+// provider key is ABSENT from the freshly fetched provider snapshot. or#893
+// made psp_id NOT NULL everywhere, so there is no unattributed lane left to
+// preserve: every row belongs to exactly one PSP and is reachable by exactly
+// one PSP-scoped pass. Matching FAILS CLOSED — a row whose PSP was not pulled
+// is out of scope, never "maybe ours".
+//
+// or#858: nothing here DELETEs. A prune sets deleted_at and stamps the row with
+// the prune run that took it, so the whole pass reverses in one step.
+// An EMPTY present_ids is not "everything is excess" — it is a snapshot that
+// proved nothing, and `x <> ALL('{}')` is TRUE for every row. The cardinality
+// guard makes an empty remote set match NOTHING here, so even a caller that
+// skipped its own refusal cannot wipe a PSP's book (or#858).
 func (q *Queries) ListExcessSubscriptionsForPSP(ctx context.Context, arg ListExcessSubscriptionsForPSPParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listExcessSubscriptionsForPSP, arg.MerchantID, arg.PspID, arg.PresentIds)
 	if err != nil {
@@ -103,11 +302,133 @@ func (q *Queries) ListExcessSubscriptionsForPSP(ctx context.Context, arg ListExc
 	return items, nil
 }
 
+const listPSPPaymentCandidates = `-- name: ListPSPPaymentCandidates :many
+SELECT id FROM openrails.payments
+WHERE merchant_id = $1::uuid
+  AND psp_id = $2::uuid
+  AND deleted_at IS NULL
+  AND ($3::timestamptz IS NULL OR purchased_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR purchased_at <= $4::timestamptz)
+`
+
+type ListPSPPaymentCandidatesParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Since      *time.Time
+	Until      *time.Time
+}
+
+func (q *Queries) ListPSPPaymentCandidates(ctx context.Context, arg ListPSPPaymentCandidatesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listPSPPaymentCandidates,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Since,
+		arg.Until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPSPSubscriptionCandidates = `-- name: ListPSPSubscriptionCandidates :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND psp_id = $2::uuid
+  AND rail_subscription_id <> ''
+  AND deleted_at IS NULL
+`
+
+type ListPSPSubscriptionCandidatesParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+// Every account-bound subscription a prune WOULD have considered. Reports what
+// a coverage-blocked pass skipped; never a deletion input.
+func (q *Queries) ListPSPSubscriptionCandidates(ctx context.Context, arg ListPSPSubscriptionCandidatesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listPSPSubscriptionCandidates, arg.MerchantID, arg.PspID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markDestructiveRunReversed = `-- name: MarkDestructiveRunReversed :one
+UPDATE openrails.destructive_runs
+SET status = 'reversed',
+    reversed_at = $1::timestamptz,
+    reversed_by = $2::text
+WHERE merchant_id = $3::uuid
+  AND id = $4::uuid
+  AND status <> 'reversed'
+RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+`
+
+type MarkDestructiveRunReversedParams struct {
+	Now        time.Time
+	ReversedBy string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestructiveRunReversedParams) (OpenrailsDestructiveRun, error) {
+	row := q.db.QueryRow(ctx, markDestructiveRunReversed,
+		arg.Now,
+		arg.ReversedBy,
+		arg.MerchantID,
+		arg.ID,
+	)
+	var i OpenrailsDestructiveRun
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.PspID,
+		&i.Kind,
+		&i.Actor,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Status,
+		&i.Note,
+	)
+	return i, err
+}
+
 const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :one
 SELECT
   EXISTS(SELECT 1 FROM openrails.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.checkout_sessions WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
+  OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM openrails.checkout_sessions cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
   AS protected
 `
 
@@ -116,9 +437,9 @@ type PaymentHasProtectedDependentsParams struct {
 	PaymentID  uuid.UUID
 }
 
-// A payment is unsafe to hard-delete if it feeds the #514 grant ledger, backs a
+// A payment is unsafe to remove if it feeds the #514 grant ledger, backs a
 // refund, an admin grant, or a checkout session. Such rows are retracted through
-// convergence (grant revoke), never row-deleted.
+// convergence (grant revoke), never pruned.
 func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg PaymentHasProtectedDependentsParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, paymentHasProtectedDependents, arg.MerchantID, arg.PaymentID)
 	var protected *bool
@@ -126,72 +447,206 @@ func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg Payment
 	return protected, err
 }
 
-const pruneDeleteCheckoutSessionsBySubscription = `-- name: PruneDeleteCheckoutSessionsBySubscription :execrows
-DELETE FROM openrails.checkout_sessions
-WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+const pruneSoftDeleteCheckoutSessionsBySubscription = `-- name: PruneSoftDeleteCheckoutSessionsBySubscription :execrows
+
+UPDATE openrails.checkout_sessions
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $3::uuid
+  AND subscription_id = $4::uuid
+  AND deleted_at IS NULL
 `
 
-type PruneDeleteCheckoutSessionsBySubscriptionParams struct {
+type PruneSoftDeleteCheckoutSessionsBySubscriptionParams struct {
+	Now            time.Time
+	RunID          uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
 }
 
-func (q *Queries) PruneDeleteCheckoutSessionsBySubscription(ctx context.Context, arg PruneDeleteCheckoutSessionsBySubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneDeleteCheckoutSessionsBySubscription, arg.MerchantID, arg.SubscriptionID)
+// --- or#858 soft delete ------------------------------------------------------
+func (q *Queries) PruneSoftDeleteCheckoutSessionsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutSessionsBySubscriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutSessionsBySubscription,
+		arg.Now,
+		arg.RunID,
+		arg.MerchantID,
+		arg.SubscriptionID,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const pruneDeleteEntitlementsBySubscription = `-- name: PruneDeleteEntitlementsBySubscription :execrows
-DELETE FROM openrails.entitlements
-WHERE merchant_id = $1::uuid AND source_type = 'subscription' AND source_id = $2::uuid
+const pruneSoftDeleteEntitlementsBySubscription = `-- name: PruneSoftDeleteEntitlementsBySubscription :execrows
+UPDATE openrails.entitlements
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $3::uuid
+  AND source_type = 'subscription'
+  AND source_id = $4::uuid
+  AND deleted_at IS NULL
 `
 
-type PruneDeleteEntitlementsBySubscriptionParams struct {
+type PruneSoftDeleteEntitlementsBySubscriptionParams struct {
+	Now            time.Time
+	RunID          uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
 }
 
-func (q *Queries) PruneDeleteEntitlementsBySubscription(ctx context.Context, arg PruneDeleteEntitlementsBySubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneDeleteEntitlementsBySubscription, arg.MerchantID, arg.SubscriptionID)
+func (q *Queries) PruneSoftDeleteEntitlementsBySubscription(ctx context.Context, arg PruneSoftDeleteEntitlementsBySubscriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteEntitlementsBySubscription,
+		arg.Now,
+		arg.RunID,
+		arg.MerchantID,
+		arg.SubscriptionID,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const pruneDeletePaymentByID = `-- name: PruneDeletePaymentByID :execrows
-DELETE FROM openrails.payments
-WHERE merchant_id = $1::uuid AND id = $2::uuid
+const pruneSoftDeletePaymentByID = `-- name: PruneSoftDeletePaymentByID :execrows
+UPDATE openrails.payments
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid
+WHERE merchant_id = $3::uuid
+  AND id = $4::uuid
+  AND deleted_at IS NULL
 `
 
-type PruneDeletePaymentByIDParams struct {
+type PruneSoftDeletePaymentByIDParams struct {
+	Now        time.Time
+	RunID      uuid.UUID
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
-func (q *Queries) PruneDeletePaymentByID(ctx context.Context, arg PruneDeletePaymentByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneDeletePaymentByID, arg.MerchantID, arg.ID)
+func (q *Queries) PruneSoftDeletePaymentByID(ctx context.Context, arg PruneSoftDeletePaymentByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeletePaymentByID,
+		arg.Now,
+		arg.RunID,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const pruneDeleteSubscriptionByID = `-- name: PruneDeleteSubscriptionByID :execrows
-DELETE FROM openrails.subscriptions
-WHERE merchant_id = $1::uuid AND id = $2::uuid
+const pruneSoftDeleteSubscriptionByID = `-- name: PruneSoftDeleteSubscriptionByID :execrows
+UPDATE openrails.subscriptions
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $3::uuid
+  AND id = $4::uuid
+  AND deleted_at IS NULL
 `
 
-type PruneDeleteSubscriptionByIDParams struct {
+type PruneSoftDeleteSubscriptionByIDParams struct {
+	Now        time.Time
+	RunID      uuid.UUID
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
-func (q *Queries) PruneDeleteSubscriptionByID(ctx context.Context, arg PruneDeleteSubscriptionByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneDeleteSubscriptionByID, arg.MerchantID, arg.ID)
+func (q *Queries) PruneSoftDeleteSubscriptionByID(ctx context.Context, arg PruneSoftDeleteSubscriptionByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteSubscriptionByID,
+		arg.Now,
+		arg.RunID,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreCheckoutSessionsByDestructiveRun = `-- name: RestoreCheckoutSessionsByDestructiveRun :execrows
+UPDATE openrails.checkout_sessions
+SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
+`
+
+type RestoreCheckoutSessionsByDestructiveRunParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+func (q *Queries) RestoreCheckoutSessionsByDestructiveRun(ctx context.Context, arg RestoreCheckoutSessionsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreCheckoutSessionsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreEntitlementsByDestructiveRun = `-- name: RestoreEntitlementsByDestructiveRun :execrows
+UPDATE openrails.entitlements
+SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
+`
+
+type RestoreEntitlementsByDestructiveRunParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+func (q *Queries) RestoreEntitlementsByDestructiveRun(ctx context.Context, arg RestoreEntitlementsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreEntitlementsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restorePaymentsByDestructiveRun = `-- name: RestorePaymentsByDestructiveRun :execrows
+UPDATE openrails.payments
+SET deleted_at = NULL, destructive_run_id = NULL
+WHERE merchant_id = $1::uuid AND destructive_run_id = $2::uuid
+`
+
+type RestorePaymentsByDestructiveRunParams struct {
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+func (q *Queries) RestorePaymentsByDestructiveRun(ctx context.Context, arg RestorePaymentsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restorePaymentsByDestructiveRun, arg.MerchantID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreSubscriptionsByDestructiveRun = `-- name: RestoreSubscriptionsByDestructiveRun :execrows
+
+UPDATE openrails.subscriptions
+SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
+`
+
+type RestoreSubscriptionsByDestructiveRunParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+// --- or#858 rollback ---------------------------------------------------------
+// Keyed on the run stamp, so a whole prune reverses as a unit. Restoring only
+// the rows THIS run took means an unrelated soft delete — an ordinary
+// entitlement revocation — is never resurrected by a rollback.
+func (q *Queries) RestoreSubscriptionsByDestructiveRun(ctx context.Context, arg RestoreSubscriptionsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreSubscriptionsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return 0, err
 	}

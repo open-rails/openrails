@@ -23,10 +23,10 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -54,15 +54,15 @@ const (
 // Idempotency types are the idempotency module's own (#666 — the copy that
 // lived here, plus the payments adapter that translated between the two, is
 // gone; checkout consumes the module's types directly).
-type IdempotencyStatus = idempotency.IdempotencyStatus
+type IdempotencyStatus = replaycache.Status
 
 const (
-	IdempotencyStatusPending = idempotency.IdempotencyStatusPending
-	IdempotencyStatusSuccess = idempotency.IdempotencyStatusSuccess
-	IdempotencyStatusFailed  = idempotency.IdempotencyStatusFailed
+	IdempotencyStatusPending = replaycache.StatusPending
+	IdempotencyStatusSuccess = replaycache.StatusSuccess
+	IdempotencyStatusFailed  = replaycache.StatusFailed
 )
 
-type IdempotencyRecord = idempotency.IdempotencyRecord
+type IdempotencyRecord = replaycache.Record
 
 type checkoutSessionIdempotencyResult struct {
 	RequestFingerprint string                   `json:"request_fingerprint"`
@@ -77,6 +77,7 @@ type sessionIdempotencyStore interface {
 }
 
 type checkoutSessionExecutor interface {
+	checkoutRailTargets
 	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
 	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
 	// CheckSubscriptionConflict is the shared duplicate-billing guard (issue
@@ -86,19 +87,22 @@ type checkoutSessionExecutor interface {
 	CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error)
 }
 
-// railMerchantAccountIDResolver is the OPTIONAL executor capability (#704):
-// resolve the active provider account for new work on a rail, or nil.
-// Satisfied by *CheckoutService; test fakes may omit it.
-type railMerchantAccountIDResolver interface {
-	ResolvePSPID(ctx context.Context, rail string) *uuid.UUID
-}
-
-// railTargetResolver is the OPTIONAL executor capability (#848): resolve the
-// wire payment.rail selector (PSP key first, unambiguous rail-kind fallback)
-// into the target PSP + rail kind. Satisfied by *CheckoutService; test fakes
-// may omit it (the wire value is then treated as the rail kind directly).
-type railTargetResolver interface {
-	resolveRailTarget(ctx context.Context, requested string) (railTarget, error)
+// checkoutRailTargets is the multi-PSP resolution capability the session
+// service REQUIRES of its executor (or#893, #704, #848): resolve a wire
+// selector — a PSP key or a bare rail kind — to the concrete armed account, and
+// say when a key is declared-but-archived rather than unknown.
+//
+// It is REQUIRED, not optional, because every session must land on a real PSP:
+// checkout_sessions.psp_id is NOT NULL, and a session nobody can attribute
+// would be invisible to a PSP-scoped prune and would collide with a sibling
+// account's reference under the nil-uuid lane 0063 deleted. The methods are
+// unexported so only this package can satisfy it — test fakes implement it
+// (see stubRailTargets) instead of the session path branching on the
+// executor's concrete type.
+type checkoutRailTargets interface {
+	resolveRailTarget(ctx context.Context, selector string) (railTarget, error)
+	pspKeyArchived(ctx context.Context, key string) bool
+	railSource() railresolve.Source
 }
 
 type solanaPaymentService interface {
@@ -111,7 +115,7 @@ type solanaPaymentService interface {
 
 type solanaTransactionService interface {
 	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error
+	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solana.PurchaseMemoPolicy, processedNotAfter *time.Time) error
 }
 
 type CheckoutSessionService struct {
@@ -126,9 +130,12 @@ type CheckoutSessionService struct {
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
-	config                   *config.Config
-	rails                    railresolve.Source
-	clock                    clockwork.Clock
+	// solanaMints reads SPL mint decimals from the chain (#817). Late-bound —
+	// it needs the per-merchant RPC resolver. nil = solana quotes fail closed.
+	solanaMints solanamodule.MintDecimalsSource
+	config      *config.Config
+	rails       railresolve.Source
+	clock       clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
 	// composition root. nil -> solana+subscription checkout returns 503.
@@ -277,6 +284,11 @@ func NewCheckoutSessionService(
 	}
 }
 
+// SetSolanaMintDecimals arms the on-chain mint-decimals resolver (#817).
+func (s *CheckoutSessionService) SetSolanaMintDecimals(mints solanamodule.MintDecimalsSource) {
+	s.solanaMints = mints
+}
+
 func (s *CheckoutSessionService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -346,7 +358,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				if !taken {
 					return nil, ErrCheckoutSessionPending
 				}
-				claimed = true
+				// claimed is set unconditionally after the switch.
 			case IdempotencyStatusFailed:
 				return nil, fmt.Errorf("%w: previous request failed: %s", ErrCheckoutSessionConflict, rec.Error)
 			}
@@ -422,9 +434,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if strings.TrimSpace(req.PriceID) == "" {
 		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
 	}
-	if strings.TrimSpace(req.Payment.Rail) == "" {
-		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
-	}
 
 	// #774: price_id accepts a price_key too.
 	price, err := catalog.ResolveReference(ctx, s.priceService, req.PriceID)
@@ -442,36 +451,45 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
 
-	// #848: the wire payment.rail value speaks PSP vocabulary. Resolve it ONCE
-	// (PSP key first, unambiguous rail-kind fallback) into the rail KIND — used
-	// for dispatch and row vocabulary — plus the PSP the charge must land on.
+	// or#288 + #848: resolve the processor ONCE, before the session exists.
+	// A request that NAMES a PSP gets that PSP (the #848 wire value: PSP key
+	// first, unambiguous rail-kind fallback); a request that names none is
+	// routed by the merchant's policy, falling through unavailable candidates.
+	// Either way this yields the rail KIND — used for dispatch and row
+	// vocabulary — plus the PSP the charge must land on, and the trace that
+	// explains the choice.
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
-	pspSelector := rail
-	var pspID *uuid.UUID
-	if resolver, ok := s.checkoutService.(railTargetResolver); ok {
-		target, err := resolver.resolveRailTarget(ctx, rail)
-		if err != nil {
-			var ambiguous *AmbiguousRailError
-			var unknown *UnknownRailError
-			if errors.As(err, &ambiguous) || errors.As(err, &unknown) {
-				return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
-			}
-			return nil, err
+	var pspID uuid.UUID
+	decision, err := s.Route(ctx, RoutingInput{
+		Price:    price,
+		Product:  product,
+		Mode:     checkoutModeForRail(price, ""),
+		Country:  strings.TrimSpace(req.Payment.Country),
+		Selector: rail,
+	})
+	if err != nil {
+		var ambiguous *AmbiguousRailError
+		var unknown *UnknownRailError
+		if errors.As(err, &ambiguous) || errors.As(err, &unknown) || errors.Is(err, ErrNoRoutableProcessor) {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}
-		rail = target.Rail
-		pspSelector = target.PSP
-		// #704: pin provenance with the REAL resolved account — never invented.
-		if target.Scope != nil && target.Scope.ID != uuid.Nil {
-			id := target.Scope.ID
-			pspID = &id
-		}
-	} else if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-		// #704 fallback for executors without target resolution (test fakes).
-		pspID = resolver.ResolvePSPID(ctx, rail)
+		return nil, err
 	}
-	if pspID != nil {
-		ctx = db.WithPSPID(ctx, *pspID)
+	rail = decision.Target.Rail
+	pspSelector := decision.Target.PSP
+	routingReason := decision.Reason()
+	// #704: pin provenance with the REAL resolved account — never invented.
+	if decision.Target.Scope != nil {
+		pspID = decision.Target.Scope.ID
 	}
+	// or#893: checkout_sessions.psp_id is NOT NULL. A session nobody can
+	// attribute would be invisible to a PSP-scoped prune and would collide with
+	// a sibling account's reference/transaction id under the nil-uuid lane the
+	// 0063 uniques deleted. Refuse before anything is written.
+	if pspID == uuid.Nil {
+		return nil, fmt.Errorf("%w: no PSP is armed for rail %q", ErrCheckoutSessionValidation, rail)
+	}
+	ctx = db.WithPSPID(ctx, pspID)
 
 	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutSessionValidation)
@@ -518,12 +536,15 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		Metadata:   normalizeMetadata(req.Metadata),
 		RailFields: railFields,
 		RailState:  railState,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		PspID:      pspID,
-		LastFour:   &req.Payment.LastFour,
-		CardType:   &req.Payment.CardType,
-		ExpiryDate: &req.Payment.ExpiryDate,
+		// or#288: the decision trace is written with the row and never rewritten
+		// (UpdateCheckoutSession does not name the column).
+		RoutingReason: routingReason,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		PspID:         pspID,
+		LastFour:      &req.Payment.LastFour,
+		CardType:      &req.Payment.CardType,
+		ExpiryDate:    &req.Payment.ExpiryDate,
 	}
 
 	if idempotencyKey != "" {
@@ -575,13 +596,16 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 	if existing == nil || requested == nil {
 		return nil, fmt.Errorf("%w: idempotent checkout session unavailable", ErrCheckoutSessionConflict)
 	}
+	// or#288: Rail and PspID are part of the match, so a retry whose routing
+	// would now resolve elsewhere (arming or policy moved between attempts)
+	// CONFLICTS rather than quietly switching processors mid-idempotency.
 	storedFingerprint, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
 	requestedFingerprint, _ := requested.RailState[checkoutSessionFingerprintKey].(string)
 	parametersMatch := existing.CustomerID == requested.CustomerID &&
 		existing.PriceID == requested.PriceID &&
 		existing.Mode == requested.Mode &&
 		existing.Rail == requested.Rail &&
-		equalOptionalUUID(existing.PspID, requested.PspID) &&
+		existing.PspID == requested.PspID &&
 		storedFingerprint != "" &&
 		storedFingerprint == requestedFingerprint
 	if !parametersMatch {
@@ -670,17 +694,9 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 		return nil, ErrCheckoutSessionExpired
 	}
 
-	// #704: carry the session's pinned provider-account provenance into the
+	// #704: carry the session's pinned PSP provenance into the
 	// confirm flow (falling back to a fresh resolution for older sessions).
-	stampID := session.PspID
-	if stampID == nil {
-		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-			stampID = resolver.ResolvePSPID(ctx, rail)
-		}
-	}
-	if stampID != nil {
-		ctx = db.WithPSPID(ctx, *stampID)
-	}
+	ctx = db.WithPSPID(ctx, session.PspID)
 
 	switch rail {
 	case "solana":
@@ -884,9 +900,14 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutSessionValidation)
 	}
 
+	// or#893: the flow is DECLARED, never defaulted. transfer_request (wallet
+	// builds the tx from a Solana Pay URL) and transaction_request (OpenRails
+	// builds and returns an unsigned tx) diverge in what is written, what is
+	// verified and who signs — a session whose flow was inferred is a session
+	// whose confirm path was guessed.
 	flow := strings.TrimSpace(payment.Flow)
 	if flow == "" {
-		flow = "transfer_request"
+		return fmt.Errorf("%w: payment.flow is required for solana (transfer_request | transaction_request)", ErrCheckoutSessionValidation)
 	}
 
 	if solanaProc.Solana == nil {
@@ -940,7 +961,11 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaTransactionService == nil {
 			return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
+		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMints, tokenCfg.Mint)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -1405,8 +1430,11 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 			lifecycle.productName = s.productDisplayName(ctx, newPrice.ProductID)
 		}
 	}
+	// #830: the session's currency denominates the on-chain charge. If the price
+	// lookup failed or the price carries no currency we do not know what to
+	// charge in — fail the request instead of defaulting to "usd".
 	if strings.TrimSpace(sessionCurrency) == "" {
-		sessionCurrency = "usd"
+		return nil, fmt.Errorf("%w: could not resolve the price currency for this subscription", ErrCheckoutSessionValidation)
 	}
 
 	now := s.now()
@@ -1516,6 +1544,10 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
 		return nil, fmt.Errorf("%w: tier change must stay within the same tier group", ErrCheckoutSessionValidation)
 	}
+	// #820: same FX refusal as CheckoutService.TierChange.
+	if err := RequireSameCurrency(PriceAmountOf(oldPrice), PriceAmountOf(newPrice)); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+	}
 
 	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
 	out := &resolvedSolanaLifecycleTierChange{
@@ -1526,14 +1558,17 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		oldPeriodEndsAt: oldSub.CurrentPeriodEndsAt,
 	}
 	if isUpgrade {
-		firstChargeMicros, _ := CalculateModelBUpgradeCharge(
-			oldPrice.Amount,
-			newPrice.Amount,
+		firstChargeMicros, _, err := CalculateModelBUpgradeCharge(
+			PriceAmountOf(oldPrice),
+			PriceAmountOf(newPrice),
 			oldSub.CurrentPeriodEndsAt,
 			newPrice.RecurringCycleHours(),
 			s.now(),
 		)
-		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		}
+		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol, s.solanaMints)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -1950,6 +1985,16 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	referenceValue := strings.TrimSpace(*session.Reference)
 	reference := &referenceValue
 
+	// or#893: the memo policy follows WHO BUILT the transaction. In the
+	// transaction-request flow OpenRails builds and stamps it (BuildSolanaPay
+	// refuses to build without a session id), so absence means the signature is
+	// not our transaction. In the transfer-request flow the buyer's wallet
+	// builds it from the Solana Pay URL and may drop the memo — a settled
+	// payment must not be rejected over a discovery hint.
+	memoPolicy := solana.MemoRequired
+	if isSolanaTransferRequestFlow(session) {
+		memoPolicy = solana.MemoPresenceOptional
+	}
 	if err := s.solanaTransactionService.VerifyTransactionWithContent(
 		ctx,
 		strings.TrimSpace(req.Payment.Signature),
@@ -1958,7 +2003,8 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		storedTokenMint,
 		expectedPayer,
 		reference,
-		session.ID, // #713: a present purchase memo must name THIS session; absence passes
+		session.ID, // #713: the purchase memo must name THIS session
+		memoPolicy,
 		session.ExpiresAt,
 	); err != nil {
 		return nil, err
@@ -2250,11 +2296,6 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 			return 0
 		}
 		return uint64(val)
-	case float64:
-		if val < 0 {
-			return 0
-		}
-		return uint64(val)
 	case string:
 		if parsed, err := strconv.ParseUint(strings.TrimSpace(val), 10, 64); err == nil {
 			return parsed
@@ -2263,16 +2304,15 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 	return 0
 }
 
+// or#893: no missing-flow default. Every Solana session records its flow in
+// rail_state at creation, so an absent one is not "the old kind of session" —
+// it is a session whose rail_state was not written by this code path, and
+// treating it as transfer_request would run the wrong finalize.
 func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
 	if session == nil {
 		return false
 	}
-	flow := strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow")))
-	if flow == "" {
-		// Legacy default for Solana checkout sessions.
-		return true
-	}
-	return flow == "transfer_request"
+	return strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow"))) == "transfer_request"
 }
 
 func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Context, session *models.CheckoutSession, transactionID string) error {
@@ -2314,7 +2354,10 @@ func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPric
 		return fmt.Errorf("%w: quote expiry missing", ErrCheckoutSessionValidation)
 	}
 
-	railState["token_amount"] = tokenAmount
+	// MONEY-3: the token AMOUNT is written as a decimal string. A JSONB
+	// round-trip decodes numbers as float64, so a base-unit count past 2^53
+	// would come back wrong. The two RATES below are rates, not amounts.
+	railState["token_amount"] = strconv.FormatUint(tokenAmount, 10)
 	railState["token_price_usd"] = tokenPriceUSD
 	railState["fx_rate"] = fxRate
 	railState["fx_currency"] = strings.TrimSpace(fxCurrency)
@@ -2348,9 +2391,11 @@ func checkoutStateUint64(state map[string]any, key string) uint64 {
 		if v > 0 {
 			return uint64(v)
 		}
-	case float64:
-		if v > 0 {
-			return uint64(v)
+	case string:
+		// The canonical JSONB shape for a base-unit amount (MONEY-3): a
+		// decimal string, so the value survives the round-trip exactly.
+		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			return parsed
 		}
 	}
 	return 0

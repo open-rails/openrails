@@ -27,7 +27,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, "b6b6b6b6-0000-4000-8000-000000000042")
+	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "b6b6b6b6-0000-4000-8000-000000000042")
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
@@ -43,8 +43,8 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 			Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 		},
 		{
-			Scope:  "role",
-			RoleID: "test-role",
+			Scope:    "role",
+			ScopeKey: "test-role",
 			Windows: []openrails.SpendLimitWindow{{
 				Key: "month", WindowSeconds: 2592000, Limit: 9_000_000, Currency: "USD",
 			}},
@@ -71,7 +71,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 
 	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
 		{
-			Scope: " role ", RoleID: " test-role ",
+			Scope: " role ", ScopeKey: " test-role ",
 			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
 		},
 		{

@@ -12,7 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -40,10 +44,9 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
-	source = strings.TrimSpace(source)
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil, fmt.Errorf("source_id required for owed accrual idempotency")
+	key, kerr := NewIdempotencyKey(OpArrearsAccrual, source, sourceID)
+	if kerr != nil {
+		return nil, kerr
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -54,9 +57,15 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	now := s.now()
 
 	var trx *models.MoneyTransaction
-	// Privileged (no-GUC) transaction: this path runs with explicit merchant_id
-	// predicates, matching the bun-era plain BeginTx.
-	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	// or#868 B2: this was a bare RunInTx under the comment "privileged (no-GUC)
+	// transaction". No such pool exists — it worked only where an HTTP request
+	// had already pinned a merchant connection and pgxBegin inherited its GUC.
+	// Off that path (pkg/service.FinalizeInvoice, MoneyService.SweepUsage, both
+	// embedded seams) the transaction carried no app.merchant_id and every
+	// insert below was denied 42501, so metered/arrears billing was inoperable
+	// there. MerchantTx sets the GUC transaction-locally from the context's
+	// merchant, which the explicit merchant_id predicates then agree with.
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
 		// #677: per-customer spend mutex (same customers-row FOR UPDATE as
@@ -74,7 +83,8 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		// Idempotency: an owed-accrual transfer at these coordinates means it ran.
 		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransferType: "owed_accrual", Source: source, SourceID: sourceID,
+			TransferType: "owed_accrual", Operation: string(key.Operation()),
+			Source: key.Source(), SourceID: key.SourceID(),
 		})
 		if gerr == nil {
 			trx = moneyTransactionFromTransfer(existing)
@@ -89,13 +99,14 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		}
 
 		ml := s.moneyLedger(q, tenantID)
-		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, source, sourceID, nil)
+		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, key.Coord(), nil)
 		if err != nil {
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)
-		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, amount, now, map[string]any{
-			"source": source,
+		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.invoiceItemSourceID(), amount, now, map[string]any{
+			"operation": string(key.Operation()),
+			"source":    key.Source(),
 		})
 	})
 	if err != nil {
@@ -146,7 +157,9 @@ func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.Custom
 	if err := RequireBillingCurrency(cur); err != nil {
 		return err
 	}
-	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	// or#868 B2: merchant-pinned, not a bare RunInTx — the ensureCustomer inside
+	// ensureSettingsRowTx is denied 42501 on a GUC-less transaction.
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// Ensure a settings row exists (arrears mode if creating — a credit line
 		// only matters for arrears; no-op when the row already exists).
@@ -169,9 +182,15 @@ func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.Custom
 	return settings.CreditLimitAmount, nil
 }
 
-// GetOutstandingOwed returns current arrears exposure for payer in currency:
-// pending unbilled invoice items plus open/past-due invoice balances. The name
-// is retained for older callers, but the value is invoice-derived.
+// GetOutstandingOwed returns the payer's current arrears exposure in currency,
+// read O(1) from their arrears-liability account (or#897).
+//
+// It was invoice-derived (open invoices + pending items). Invoices are
+// presentation/collection artifacts that lag the ledger by a finalize cycle,
+// and EVERY invoice line already has an owed_accrual leg — verified: the only
+// pending-item writer is insertPendingInvoiceItemTx and all of its callers post
+// an accrual first — so the invoice view could only ever be a staler copy of
+// the ledger. One substrate, and it is the ledger.
 func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -187,7 +206,15 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	if err := RequireBillingCurrency(cur); err != nil {
 		return 0, err
 	}
-	return s.arrearsExposureTx(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), cur)
+	// or#868 B2: still pinned — ledger_accounts is RLS-forced, so an unpinned
+	// read sees no account and reports zero exposure, which is fail-OPEN.
+	var owed int64
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		owed, e = s.moneyLedger(s.db.Gen(ctx), tid.UUID()).OutstandingOwed(ctx, payer.UUID(), cur)
+		return e
+	})
+	return owed, err
 }
 
 type invoiceArrearsAccount struct {
@@ -259,22 +286,6 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 	return count, errors.Join(errs...)
 }
 
-func (s *MoneyService) arrearsExposureTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (int64, error) {
-	openDue, err := q.SumOpenInvoiceAmountDue(ctx, gen.SumOpenInvoiceAmountDueParams{
-		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
-	})
-	if err != nil {
-		return 0, err
-	}
-	pendingDue, err := q.SumPendingInvoiceItemAmount(ctx, gen.SumPendingInvoiceItemAmountParams{
-		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
-	})
-	if err != nil {
-		return 0, err
-	}
-	return openDue + pendingDue, nil
-}
-
 func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger, claim *invoiceCollectionClaim) (bool, error) {
 	if claim == nil {
 		return false, fmt.Errorf("invoice collection claim required")
@@ -289,7 +300,7 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 		return false, nil
 	}
 	key := claim.idempotencyKey
-	chargeMinor, err := NativeToRailMinor(r.Currency, snapshot)
+	chargeMinor, err := moneyutil.NativeToRailMinor(r.Currency, snapshot)
 	if err != nil {
 		cleanupCtx, cancel := collectionCleanupContext(ctx)
 		defer cancel()
@@ -324,9 +335,12 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 	cleanupCtx, cancel := collectionCleanupContext(ctx)
 	defer cancel()
 	if res.Declined {
-		// Arrears invoices bill on the monthly cadence; the schedule is the ONE
-		// collection-core table (#828) — the same offsets subscription dunning uses.
-		action := collection.FailureAction(collection.MonthlyCycleHours, res.Rail, res.FailureCode, int(r.FailureCount), r.FirstFailureAt, now)
+		// or#828: ONE decision function. The invoice consumer classifies this
+		// decline with collection.FailureAction — the same or#870 three-bucket
+		// doctrine subscription rebill uses — on the invoice's REAL billing
+		// cycle rather than a hardcoded month.
+		action := collection.FailureAction(invoiceCycleHours(claim), res.Rail, res.FailureCode, int(r.FailureCount), r.FirstFailureAt, now)
+		logInvoiceDeclineDecision(ctx, r.InvoiceID, res.Rail, res.FailureCode, action)
 		if err := s.recordInvoiceCollectionFailure(cleanupCtx, claim, optionalRail(res.Rail), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, action, now); err != nil {
 			markCtx, markCancel := collectionCleanupContext(ctx)
 			defer markCancel()
@@ -335,6 +349,7 @@ func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger
 			}
 			return false, errors.Join(ErrInvoiceRetryOutcomeUnknown, err)
 		}
+		s.notifyInvoiceCollectionOutcome(cleanupCtx, claim, action, res.FailureCode, now)
 		return false, nil
 	}
 
@@ -404,15 +419,17 @@ func (s *MoneyService) settleClaimedInvoiceCharge(ctx context.Context, claim *in
 		// Settle the arrears liability via the external charge. An existing
 		// owed-payment transfer at this attempt key means a previous/concurrent run
 		// already recorded this exact charge — done.
+		payCoord := ledger.Coord{Operation: ledger.OpInvoicePayment, Source: "invoice_charge", SourceID: sid}
 		storedTrx, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: cur,
-			TransferType: "owed_payment", Source: "invoice_charge", SourceID: sid,
+			TransferType: "owed_payment", Operation: string(payCoord.Operation),
+			Source: payCoord.Source, SourceID: payCoord.SourceID,
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
+			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, payCoord, &r.InvoiceID)
 			if err != nil {
 				return err
 			}
@@ -459,6 +476,119 @@ func (s *MoneyService) settleClaimedInvoiceCharge(ctx context.Context, claim *in
 		return false, err
 	}
 	return charged, nil
+}
+
+// invoiceCycleHours is the invoice consumer's answer to "what is this thing's
+// billing cycle" — the question BillingCycleHoursOf answers for a subscription
+// off its price cadence. An invoice carries its own period, so the cycle is
+// the statement window itself: a weekly statement dunned on the weekly
+// offsets, an annual one on the monthly ones. Before or#828 this was the
+// constant collection.MonthlyCycleHours for every invoice ever issued.
+//
+// 0 (no invoice on the claim, or a degenerate period) means unknown, which the
+// schedule handles defensively as monthly.
+//
+// The one place the invoice consumer departs from the subscription reading: a
+// statement period SHORTER than the shortest retriable cycle is floored, not
+// taken literally. The 0-retry tier exists so a SUBSCRIPTION is never still
+// dunning last period when the next charge is due; an invoice is a discrete
+// debt collected independently of every other invoice, so that constraint does
+// not apply to it. Threshold-triggered statements (ListInvoiceThresholdCandidates)
+// routinely cover an hour, and writing such a debt off as uncollectible on its
+// first decline would be the schedule's shape leaking into a decision it was
+// never about.
+func invoiceCycleHours(claim *invoiceCollectionClaim) int {
+	if claim == nil || claim.previous == nil {
+		return 0
+	}
+	cycleHours := collection.CycleHoursBetween(claim.previous.PeriodFrom, claim.previous.PeriodTo)
+	if cycleHours > 0 && cycleHours < collection.MinRetryCycleHours {
+		return collection.MinRetryCycleHours
+	}
+	return cycleHours
+}
+
+// logInvoiceDeclineDecision names the bucket and its invoice-shaped consequence
+// on every decline, the way the subscription consumer's declineLog does. The
+// consequences differ because the products differ — an invoice is not a
+// subscription, so nothing here cancels anything.
+func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+	// or#870: a code no table recognizes is bucket 1 by doctrine, and SILENT by
+	// nature — it duns exactly like insufficient funds, so nothing downstream
+	// ever looks wrong. Say it out loud here, once per decline.
+	collection.AlertUnmappedDecline(ctx, action.Decline)
+	entry := log.WithContext(ctx).WithFields(log.Fields{
+		"invoice_id":       invoiceID,
+		"rail":             rail,
+		"failure_code":     derefStr(failureCode),
+		"decline_outcome":  action.Outcome.String(),
+		"decline_coverage": action.Decline.Coverage.String(),
+	})
+	switch {
+	case action.AwaitingPaymentMethod():
+		entry.Warn("invoice collection: customer's card needs fixing (or#870 bucket 2); charging STOPS, the invoice stays OPEN, access and the stored card are untouched")
+	case action.Terminal && !action.ScheduleExhausted():
+		entry.Error("invoice collection: non-recoverable decline (or#870 bucket 3); the invoice is uncollectible — no subscription is cancelled and the stored payment method is NOT touched")
+	case action.Terminal:
+		entry.Error("invoice collection: the retry schedule is exhausted (or#870 bucket 1); the invoice is uncollectible")
+	default:
+		entry.WithField("next_attempt_at", action.NextAttemptAt).
+			Warn("invoice collection: retryable decline (or#870 bucket 1); will retry on the invoice's own billing cycle")
+	}
+}
+
+// notifyInvoiceCollectionOutcome is the or#870 notification ladder, shaped for
+// an invoice. One rung per bucket, so a payer is never silent-treated through a
+// whole dunning cycle and then handed an uncollectible invoice:
+//
+//	bucket 1, still trying  -> payment_method_failed ("we will keep trying")
+//	bucket 1, schedule out  -> invoice_collection_stopped / schedule_exhausted
+//	bucket 2                -> payment_method_update_required ("fix the card;
+//	                           the invoice stays open and your access is untouched")
+//	bucket 3                -> invoice_collection_stopped / non_recoverable
+//
+// Deliberately absent: any entitlement, access or subscription effect. A
+// decline bucket says what to do about the CARD. What an unpaid invoice does to
+// SERVICE is a separate, time-based, per-merchant opt-in axis (or#878), and
+// conflating them is how our judgement costs a customer access.
+//
+// Notification failure never fails collection: the money outcome is already
+// durable, and losing a rung is not a reason to re-attempt a charge.
+func (s *MoneyService) notifyInvoiceCollectionOutcome(ctx context.Context, claim *invoiceCollectionClaim, action collection.Action, failureCode *string, now time.Time) {
+	r := claim.account
+	data := map[string]any{
+		"invoice_id":      r.InvoiceID.String(),
+		"currency":        r.Currency,
+		"amount_due":      r.AmountDue,
+		"failure_code":    derefStr(failureCode),
+		"decline_outcome": action.Outcome.String(),
+	}
+	eventType := models.NotificationPaymentMethodFailed
+	switch {
+	case action.AwaitingPaymentMethod():
+		eventType = models.NotificationPaymentMethodUpdateRequired
+	case action.Terminal:
+		eventType = models.NotificationInvoiceCollectionStopped
+		reason := "non_recoverable"
+		if action.ScheduleExhausted() {
+			reason = "schedule_exhausted"
+		}
+		data["reason"] = reason
+	case action.NextAttemptAt != nil:
+		data["next_attempt_at"] = action.NextAttemptAt.UTC().Format(time.RFC3339)
+	}
+	notification := &models.NotificationQueue{
+		ID:         uuidutil.NewV7(),
+		CustomerID: r.CustomerID,
+		EventType:  eventType,
+		Data:       data,
+		CreatedAt:  now,
+	}
+	if err := subscriptions.NewNotificationQueueRepo(s.db).Create(ctx, notification); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"invoice_id": r.InvoiceID, "customer_id": r.CustomerID, "event_type": eventType,
+		}).Error("failed to queue invoice collection notification")
+	}
 }
 
 func (s *MoneyService) recordInvoiceCollectionFailure(ctx context.Context, claim *invoiceCollectionClaim, rail, railPaymentID, failureCode, failureMessage *string, action collection.Action, now time.Time) error {

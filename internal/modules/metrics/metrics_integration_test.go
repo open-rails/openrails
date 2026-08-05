@@ -66,7 +66,9 @@ var (
 	pricePO  = uuid.New() // one-time 5M
 	pricePW  = uuid.New() // weekly 2.3M / 168h
 	priceB   = uuid.New()
-	acctRA1  = uuid.New()
+	acctRA1  = uuid.New() // mA/nmi
+	acctCCA1 = uuid.New() // mA/ccbill
+	acctRB1  = uuid.New() // mB/nmi
 
 	subs = map[int]uuid.UUID{1: uuid.New(), 2: uuid.New(), 3: uuid.New(), 4: uuid.New(), 5: uuid.New(), 6: uuid.New(), 7: uuid.New(), 8: uuid.New()}
 )
@@ -85,8 +87,11 @@ func exec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql string, arg
 func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, context.Context) {
 	t.Helper()
 	ctx := context.Background()
+	// The metrics corpus deliberately spans TWO merchants (mA/mB) so isolation is
+	// assertable, so the FIXTURE writes need privilege. The service under test
+	// still runs on the RLS-enforcing default handle.
 	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	pool := dbi.Pool()
+	pool := dbtest.SharedSuperuserPGXPool(t)
 	svc := metrics.NewService(dbi)
 	ctxA := merchant.WithID(ctx, merchant.ID(mA))
 	ctxB := merchant.WithID(ctx, merchant.ID(mB))
@@ -117,11 +122,15 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{priceB, 999_000_000, nil, false, productB, mB},
 	} {
 		exec(ctx, t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew)
-			VALUES ($1, $2, $3, 'usd', $4, $5, $6) ON CONFLICT DO NOTHING`,
+			VALUES ($1, $2, $3, 'USD', $4, $5, $6) ON CONFLICT DO NOTHING`,
 			p.id, p.product, p.amount, p.merchant, p.hours, p.renew)
 	}
 	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
 		acctRA1, mA)
+	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', 'acct-cc-1') ON CONFLICT DO NOTHING`,
+		acctCCA1, mA)
+	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-b1') ON CONFLICT DO NOTHING`,
+		acctRB1, mB)
 
 	// --- subscriptions (insert order matters only for readability) -------------
 	type subRow struct {
@@ -147,9 +156,9 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{id: subs[8], customer: c[8], price: pricePM, status: "cancelled", started: d(t, 2025, 1, 1), ended: tp(d(t, 2025, 6, 1)), cancelled: tp(d(t, 2025, 5, 15)), cancelType: sp("user")},
 	} {
 		exec(ctx, t, pool, `INSERT INTO openrails.subscriptions
-			(id, merchant_id, customer_id, product_id, price_id, rail, status, started_at, ended_at, cancelled_at, cancel_type, current_period_ends_at)
-			VALUES ($1, $2, $3, $4, $5, 'nmi', $6::openrails.subscription_status, $7, $8, $9, $10, $11)`,
-			s.id, mA, s.customer, productA, s.price, s.status, s.started, s.ended, s.cancelled, s.cancelType, s.periodEnd)
+			(id, merchant_id, customer_id, product_id, price_id, rail, psp_id, status, started_at, ended_at, cancelled_at, cancel_type, current_period_ends_at)
+			VALUES ($1, $2, $3, $4, $5, 'nmi', $6, $7::openrails.subscription_status, $8, $9, $10, $11, $12)`,
+			s.id, mA, s.customer, productA, s.price, acctRA1, s.status, s.started, s.ended, s.cancelled, s.cancelType, s.periodEnd)
 	}
 	// Recovery transitions (the trigger records them in the same tx):
 	// sub5 past_due->active; sub6 past_due->cancelled.
@@ -165,27 +174,27 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		(id, merchant_id, customer_id, price_id, subscription_id, refunded_payment_id, rail, psp_id,
 		 transaction_id, amount, list_amount, currency, status, attempt_kind, failure_code, failure_reason, reversal_kind,
 		 card_brand, discount_code, purchased_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'usd',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'USD',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
 	txp := "mtx-" + suffix + "-"
-	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", nil, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
+	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", acctRA1, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
 	exec(ctx, t, pool, payCols, sale1, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s1", 10_000_000, 10_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 6, 2))
 	exec(ctx, t, pool, payCols, sale2, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s2", 10_000_000, 10_000_000, "completed", "renewal", nil, nil, nil, "visa", nil, d(t, 2026, 6, 10))
-	exec(ctx, t, pool, payCols, sale3, mA, c[2], pricePO, nil, nil, "ccbill", nil, txp+"s3", 5_000_000, 5_000_000, "completed", "initial", nil, nil, nil, nil, "PROMO", d(t, 2026, 6, 11))
-	exec(ctx, t, pool, payCols, fail1, mA, c[2], pricePM, nil, nil, "nmi", nil, txp+"f1", 10_000_000, 10_000_000, "failed", "renewal", "202", "insufficient_funds", nil, nil, nil, d(t, 2026, 6, 10))
-	exec(ctx, t, pool, payCols, fail2, mA, c[2], pricePM, nil, nil, "nmi", nil, txp+"f2", 10_000_000, 10_000_000, "failed", "initial", "223", "expired_card", nil, nil, nil, d(t, 2026, 6, 12))
-	exec(ctx, t, pool, payCols, refund1, mA, c[2], pricePO, nil, sale3, "ccbill", nil, txp+"r1", -5_000_000, 5_000_000, "completed", nil, nil, nil, "refund", nil, nil, d(t, 2026, 6, 20))
+	exec(ctx, t, pool, payCols, sale3, mA, c[2], pricePO, nil, nil, "ccbill", acctCCA1, txp+"s3", 5_000_000, 5_000_000, "completed", "initial", nil, nil, nil, nil, "PROMO", d(t, 2026, 6, 11))
+	exec(ctx, t, pool, payCols, fail1, mA, c[2], pricePM, nil, nil, "nmi", acctRA1, txp+"f1", 10_000_000, 10_000_000, "failed", "renewal", "202", "insufficient_funds", nil, nil, nil, d(t, 2026, 6, 10))
+	exec(ctx, t, pool, payCols, fail2, mA, c[2], pricePM, nil, nil, "nmi", acctRA1, txp+"f2", 10_000_000, 10_000_000, "failed", "initial", "223", "expired_card", nil, nil, nil, d(t, 2026, 6, 12))
+	exec(ctx, t, pool, payCols, refund1, mA, c[2], pricePO, nil, sale3, "ccbill", acctCCA1, txp+"r1", -5_000_000, 5_000_000, "completed", nil, nil, nil, "refund", nil, nil, d(t, 2026, 6, 20))
 	exec(ctx, t, pool, payCols, cb1, mA, c[1], pricePM, subs[1], sale2, "nmi", acctRA1, txp+"c1", -10_000_000, 10_000_000, "completed", nil, nil, nil, "chargeback", nil, nil, d(t, 2026, 6, 25))
-	exec(ctx, t, pool, payCols, saleB, mB, cB, priceB, nil, nil, "nmi", nil, txp+"sB", 999_000_000, 999_000_000, "completed", "initial", nil, nil, nil, nil, nil, d(t, 2026, 6, 5))
+	exec(ctx, t, pool, payCols, saleB, mB, cB, priceB, nil, nil, "nmi", acctRB1, txp+"sB", 999_000_000, 999_000_000, "completed", "initial", nil, nil, nil, nil, nil, d(t, 2026, 6, 5))
 
 	// --- credit lots (grants) + usage + ledger ------------------------------------
 	lot := `INSERT INTO openrails.grants (id, merchant_id, customer_id, kind, source_type, source_id, event, amount, currency, created_at, starts_at)
-		VALUES ($1, $2, $3, 'credit', 'purchase', $4, 'grant', $5, 'usd', $6, $6)`
+		VALUES ($1, $2, $3, 'credit', 'purchase', $4, 'grant', $5, 'USD', $6, $6)`
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot1", 20_000_000, d(t, 2026, 6, 3))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot2", 10_000_000, d(t, 2026, 6, 15))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[2], txp+"lot3", 30_000_000, d(t, 2026, 5, 20))
 
 	ue := `INSERT INTO openrails.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, occurred_at)
-		VALUES ($1, $2, $3, 'user:test', 'usd', $4, $5, $6, 'metrics-test', $7, $8)`
+		VALUES ($1, $2, $3, 'user:test', 'USD', $4, $5, $6, 'metrics-test', $7, $8)`
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 5_000_000, txp+"u1", d(t, 2026, 6, 5))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 3_000_000, txp+"u2", d(t, 2026, 6, 18))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[2], "img", "flux", 2_000_000, txp+"u3", d(t, 2026, 6, 10))
@@ -193,14 +202,14 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 
 	clearing, cb1acct, cb2acct, rev, arrears := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	acct := `INSERT INTO openrails.ledger_accounts (id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits)
-		VALUES ($1, $2, $3, $4, 'usd', $5)`
+		VALUES ($1, $2, $3, $4, 'USD', $5)`
 	exec(ctx, t, pool, acct, clearing, mA, nil, "processor_clearing", false)
 	exec(ctx, t, pool, acct, cb1acct, mA, c[1], "customer_balance", true)
 	exec(ctx, t, pool, acct, cb2acct, mA, c[2], "customer_balance", true)
 	exec(ctx, t, pool, acct, rev, mA, nil, "platform_revenue", false)
 	exec(ctx, t, pool, acct, arrears, mA, nil, "arrears_liability", false)
-	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'usd', $6, $7, $8)`
+	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at, operation, source, source_id)
+		VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, $8, $6, 'metrics-fixture', $1::uuid::text)`
 	// deposits first so the customer-balance floor never trips.
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 20_000_000, "deposit", c[1], d(t, 2026, 6, 3))
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 10_000_000, "deposit", c[1], d(t, 2026, 6, 15))
@@ -371,7 +380,10 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	byAcct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count", "chargeback_rate"}, By: []string{"rail_account"}, Range: juneQ}))
 	require.Equal(t, int64(2), cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "payment_count"))
 	require.InDelta(t, 0.5, cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "chargeback_rate").(float64), 1e-9)
-	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "unknown"}, "payment_count"))
+	// or#893: psp_id is required on every real-rail payment now, so the
+	// COALESCE-to-'unknown' fallback is unreachable here — every June payment
+	// carries a real PSP.
+	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "acct-cc-1"}, "payment_count"))
 
 	byDiscount := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"discount_code"}, Range: juneQ}))
 	require.Equal(t, int64(5_000_000), cell(t, byDiscount, map[string]string{"discount_code": "PROMO"}, "gross_revenue"))

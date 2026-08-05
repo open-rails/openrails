@@ -44,9 +44,10 @@ func TestCreditGrantSpec_UnitAndExpiryDefaults(t *testing.T) {
 	if got := (CreditGrantSpec{Unit: "EUR"}).UnitCode(); got != "EUR" {
 		t.Fatalf("explicit unit = %q, want EUR", got)
 	}
-	// expiry: omitted => default; explicit 0 => never.
-	if got := (CreditGrantSpec{}).EffectiveExpiryHours(); got != DefaultCreditGrantExpiryHours {
-		t.Fatalf("default expiry = %d, want %d", got, DefaultCreditGrantExpiryHours)
+	// expiry (#857): omitted => NEVER expires, same as an explicit 0. There is no
+	// implicit clock on customer money — expiry is opt-in, per merchant, per grant.
+	if got := (CreditGrantSpec{}).EffectiveExpiryHours(); got != 0 {
+		t.Fatalf("omitted expiry = %d, want 0 (never)", got)
 	}
 	zero := 0
 	if got := (CreditGrantSpec{ExpiryHours: &zero}).EffectiveExpiryHours(); got != 0 {

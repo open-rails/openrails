@@ -15,9 +15,43 @@ import (
 )
 
 func TestCanonicalRail(t *testing.T) {
-	require.Equal(t, "nmi", CanonicalRail(" Mobius "))
-	require.Equal(t, "nmi", CanonicalRail("nmi"))
-	require.Equal(t, "stripe", CanonicalRail("/stripe/"))
+	for _, tc := range []struct{ in, want string }{
+		{"nmi", "nmi"},
+		{" NMI ", "nmi"},
+		{"/stripe/", "stripe"},
+		{"ccbill", "ccbill"},
+		{"basistheory", "basis_theory"},
+	} {
+		got, err := CanonicalRail(tc.in)
+		require.NoError(t, err, tc.in)
+		require.Equal(t, tc.want, got, tc.in)
+	}
+}
+
+// or#893 phase 6: the webhook path's segment is the gateway KIND. A PSP key is
+// not a rail — /webhooks/mobius folded onto nmi, making two URLs mean one
+// endpoint and implying a PSP was routable by name. It is refused, with the
+// rename.
+func TestCanonicalRailRefusesRetiredSegments(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{
+			"mobius",
+			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+		},
+		{
+			" MOBIUS/",
+			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+		},
+		{
+			"basis_theory",
+			"retired webhook rail segment: /webhooks/basis_theory was removed (or#893) — post to /webhooks/basistheory; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+		},
+	} {
+		got, err := CanonicalRail(tc.in)
+		require.Empty(t, got, tc.in)
+		require.ErrorIs(t, err, ErrWebhookRailRetired, tc.in)
+		require.EqualError(t, err, tc.want, tc.in)
+	}
 }
 
 func TestParseStripeEventMeta(t *testing.T) {
@@ -193,7 +227,7 @@ func TestPrepareNMI(t *testing.T) {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	header := fmt.Sprintf("t=%s,s=%s", ts, signNMIHeader(secret, ts, body))
 
-	prepared, err := PrepareNMI(" Mobius ", body, secret, header)
+	prepared, err := PrepareNMI(" NMI ", body, secret, header)
 	require.NoError(t, err)
 	require.Equal(t, "nmi", prepared.Rail)
 	require.Equal(t, "evt_123", prepared.EventID)
@@ -203,15 +237,15 @@ func TestPrepareNMI(t *testing.T) {
 
 	missingEventIDBody := []byte(`{"event_id":""}`)
 	missingEventIDHeader := fmt.Sprintf("t=%s,s=%s", ts, signNMIHeader(secret, ts, missingEventIDBody))
-	_, err = PrepareNMI("mobius", missingEventIDBody, secret, missingEventIDHeader)
+	_, err = PrepareNMI("nmi", missingEventIDBody, secret, missingEventIDHeader)
 	require.ErrorIs(t, err, ErrWebhookEventIDMissing)
 
 	invalidNMIBody := []byte(`{"event_id":"evt_123"`)
 	invalidNMIHeader := fmt.Sprintf("t=%s,s=%s", ts, signNMIHeader(secret, ts, invalidNMIBody))
-	_, err = PrepareNMI("mobius", invalidNMIBody, secret, invalidNMIHeader)
+	_, err = PrepareNMI("nmi", invalidNMIBody, secret, invalidNMIHeader)
 	require.ErrorIs(t, err, ErrWebhookPayloadInvalid)
 
-	_, err = PrepareNMI("mobius", body, secret, "")
+	_, err = PrepareNMI("nmi", body, secret, "")
 	require.True(t, errors.Is(err, ErrNMIWebhookSignatureMissing))
 }
 

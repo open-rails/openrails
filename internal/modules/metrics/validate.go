@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // FieldError is one corrective validation error: machine-readable code, the
@@ -249,6 +251,16 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 					Message: fmt.Sprintf("measure %q cannot be filtered by %q; supported: %s", m.Name, name, strings.Join(m.Dims, ", ")),
 					Valid:   m.Dims})
 			}
+		}
+		if name == "currency" {
+			// CUR-6: stored currency is canonical UPPER, so an API caller
+			// filtering on "usd" must still match. Normalising here rather
+			// than in SQL keeps the comparison index-friendly.
+			normalized := make([]string, 0, len(vals))
+			for _, v := range vals {
+				normalized = append(normalized, money.NormalizeCurrency(v))
+			}
+			vals = normalized
 		}
 		filters[name] = vals
 	}

@@ -52,18 +52,18 @@ type fakeNMISubGateway struct {
 	createMode  atomic.Value // "approve" | "ambiguous500"
 	createForm  atomic.Value // url.Values: full form of the last create (#297 wire assertions)
 	// remote state
-	subExists atomic.Bool
-	vaultID   string
-	planID    string
-	subID     string
-	txnID     string
-	charged   atomic.Bool
+	subExists       atomic.Bool
+	railCustomerRef string
+	planID          string
+	subID           string
+	txnID           string
+	charged         atomic.Bool
 }
 
-func newFakeNMISubGateway(t *testing.T, vaultID, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
+func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMISubGateway{
-		vaultID: vaultID, planID: planID,
+		railCustomerRef: railCustomerRef, planID: planID,
 		subID: "rsub-" + uuid.NewString()[:8],
 		txnID: "txn-sub-" + uuid.NewString()[:8],
 	}
@@ -74,7 +74,7 @@ func newFakeNMISubGateway(t *testing.T, vaultID, planID string) (*fakeNMISubGate
 			// v5 roster
 			if f.subExists.Load() {
 				fmt.Fprintf(w, `{"subscriptions":[{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}],"next_cursor":null,"has_more":false}`,
-					f.subID, f.vaultID, f.planID)
+					f.subID, f.railCustomerRef, f.planID)
 				return
 			}
 			fmt.Fprint(w, `{"subscriptions":[],"next_cursor":null,"has_more":false}`)
@@ -129,8 +129,7 @@ type subIntentFixture struct {
 
 func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -157,9 +156,9 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
-	vaultID := "vault-" + uuid.NewString()[:8]
+	railCustomerRef := "vault-" + uuid.NewString()[:8]
 	planID := "plan-" + uuid.NewString()[:8]
-	gateway, client := newFakeNMISubGateway(t, vaultID, planID)
+	gateway, client := newFakeNMISubGateway(t, railCustomerRef, planID)
 	clock := clockwork.NewRealClock()
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -175,13 +174,15 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(NewNMISubscriptionCreateIntentHandler(svc)),
+		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
+		Config: fullModeConfig(),
 	}
 	return &subIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, svc: svc,
 		payload: NMISubscriptionCreatePayload{
 			Provider:               "mobius",
 			PlanID:                 planID,
-			CustomerVaultID:        vaultID,
+			CustomerVaultID:        railCustomerRef,
 			AmountMicros:           9_990_000,
 			Currency:               "USD",
 			UserID:                 userID,
@@ -197,11 +198,13 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 
 func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMISubscriptionCreate,
 		PriceID:        &fx.priceID,
+		PspID:          pspID,
 		Payload:        fx.payload,
 		IdempotencyKey: NMISubscriptionCreateIdempotencyKey(fx.payload.CheckoutIdempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),

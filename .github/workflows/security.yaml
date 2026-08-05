@@ -1,54 +1,167 @@
 name: Security Scan
 
+# #855 triggers: PRs to an integration branch (fast, path-filtered), pushes to
+# those branches, nightly, manual. Never ordinary branch pushes. `dev` is listed
+# for the same reason as in ci.yaml: it is where work merges today, and PRs into
+# it were running no security scan at all.
 on:
-  push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, dev ]
+  push:
+    branches: [ master, dev ]
+  schedule:
+    # 05:00 UTC nightly.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: security-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  # PR diff classification. Go scanners' steps no-op on docs-only PRs, but the
+  # jobs themselves always run and report status (required-check safe). On
+  # non-PR events everything runs unconditionally.
+  #
+  # Named security-changes, not `changes`: ci.yaml has a job by that name too,
+  # and a required status check is matched by NAME — two jobs sharing one makes
+  # the ruleset ambiguous about which workflow it is actually requiring.
+  security-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+    steps:
+      - name: Classify changed files
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')"
+          go=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/*|*.md|.trivyignore|LICENSE*|.gitignore|web/admin/*) ;;
+              *) go=true ;;
+            esac
+          done <<< "$files"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "go=$go"
+
   # gosec: Go SAST - source code security scanning. Fails the build on HIGH+
   # findings; MEDIUM findings are surfaced as a non-blocking warning step.
-  gosec:
+  #
+  # SHARDED (or#855). Measured on this pipeline: 36s to load and type-check the
+  # program, then 155s analysing 683 files — analysis, not loading, is the bill,
+  # and it is per-package. Once the Go jobs were split and cached, gosec was the
+  # last thing standing between the required checks and the 3-minute bar.
+  # Coverage-neutral by construction: the shards partition `go list ./...`
+  # itself, so their union is exactly the package set `./...` expands to, with
+  # the same flags and the same pinned binary. Only the load phase is paid
+  # three times.
+  gosec-shard:
+    name: gosec shard ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: security-changes
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+        if: needs.security-changes.outputs.go == 'true'
+      # gosec loads packages with full type information, so it pays the same
+      # dependency-compile bill the Go jobs do and wants the same warm cache.
+      # See .github/actions/go-env for why explicit cache steps are back and why
+      # that does not reintroduce the "tar: File exists" collision.
+      - uses: ./.github/actions/go-env
+        if: needs.security-changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
+          variant: gosec
       - name: Download modules
+        if: needs.security-changes.outputs.go == 'true'
         run: go mod download
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      # or#855: was `go install …@latest` — 47s of compiling a binary upstream
+      # ships, and a floating version with no integrity check. Pinned +
+      # checksum-verified download is ~4s. Pinning freezes the rule set on
+      # purpose (same doctrine as the golangci-lint and sqlc pins): bump the
+      # version in scripts/ci-install-tool.sh deliberately, reading the notes.
+      - name: Install pinned gosec
+        if: needs.security-changes.outputs.go == 'true'
+        run: echo "GOSEC_BIN=$(scripts/ci-install-tool.sh gosec)" >> "$GITHUB_ENV"
       - name: Run gosec (fail on HIGH+)
-        run: gosec -severity high -confidence medium -exclude-dir=.agents ./...
+        if: needs.security-changes.outputs.go == 'true'
+        env:
+          SHARDS: "3"
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mapfile -t dirs < <(go list -f '{{.Dir}}' ./... | sort |
+                              awk -v n="$SHARDS" -v p="$SHARD" 'NR % n == p % n')
+          echo "shard ${SHARD}/${SHARDS}: ${#dirs[@]} packages"
+          [ "${#dirs[@]}" -gt 0 ] || exit 0
+          "$GOSEC_BIN" -severity high -confidence medium -exclude-dir=.agents "${dirs[@]}"
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
+  # One stable name for branch protection, so the shard count stays an
+  # implementation detail. Same pattern as ci.yaml's `integration`.
+  gosec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: gosec-shard
+    if: always()
+    steps:
+      - name: All gosec shards succeeded
+        run: |
+          result="${{ needs.gosec-shard.result }}"
+          echo "gosec-shard matrix result: $result"
+          [ "$result" = "success" ] || exit 1
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
   govulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: security-changes
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+        if: needs.security-changes.outputs.go == 'true'
+      - uses: ./.github/actions/go-env
+        if: needs.security-changes.outputs.go == 'true'
         with:
-          go-version-file: go.mod
+          variant: govulncheck
       - name: Download modules
+        if: needs.security-changes.outputs.go == 'true'
         run: go mod download
+      # Pinned, but no prebuilt release exists and the install is only ~5s.
+      # Unlike gosec, pinning does NOT freeze what this detects: govulncheck
+      # fetches the vulnerability DB at run time.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        if: needs.security-changes.outputs.go == 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
       - name: Run govulncheck
+        if: needs.security-changes.outputs.go == 'true'
         run: govulncheck ./...
 
   # Trivy: additional SCA + filesystem vulnerability/secret scanning. Fails on
-  # HIGH/CRITICAL findings.
+  # HIGH/CRITICAL findings. Cheap — always runs, no path gating.
+      - name: Save Go caches
+        if: always() && env.GO_BUILDCACHE_KEY != ''
+        uses: ./.github/actions/go-cache-save
+
   trivy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy filesystem scan

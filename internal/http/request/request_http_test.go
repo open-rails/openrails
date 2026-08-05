@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -127,7 +128,7 @@ func TestHTTPAPIErrorIncludesRequestID(t *testing.T) {
 				httpReq.Header.Set("X-Request-ID", tt.requestID)
 			}
 			req := NewHTTP(rec, httpReq, nil)
-			req.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, api.CodeCardDeclined, "Your card was declined."))
+			req.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, payments.FailureCardDeclined, "Your card was declined."))
 
 			var body api.ErrorResponse
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))

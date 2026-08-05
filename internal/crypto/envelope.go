@@ -24,9 +24,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -94,10 +96,42 @@ func NewEncryptor(masterKeyB64 string, store DEKStore) (*Encryptor, error) {
 // Enabled reports whether at-rest encryption is active (a master key is set).
 func (e *Encryptor) Enabled() bool { return e != nil && e.masterGCM != nil }
 
+// AAD is additional authenticated data: bound into the GCM tag but not stored.
+// It pins a ciphertext to the ROW it belongs to, so a blob relocated to another
+// row fails to open even though the DEK is the same (SEC-24 item 1). Distinct
+// DEKs already stop cross-MERCHANT relocation; AAD stops the within-merchant
+// case — moving a webhook_signing_secret blob into the security_key slot, or an
+// NMI test key into a Stripe live-key slot.
+type AAD []byte
+
+// SecretAAD is the binding for a merchant secret row: (merchant_id, name).
+// Length-prefixed so no two distinct pairs can encode to the same bytes —
+// ("ab","c") must not collide with ("a","bc").
+func SecretAAD(merchantID merchant.ID, name string) AAD {
+	id := merchantID.UUID()
+	out := make([]byte, 0, 8+len(id)+len(name)+16)
+	out = append(out, "openrails/secret/v1\x00"...)
+	out = binary.BigEndian.AppendUint32(out, uint32(len(id)))
+	out = append(out, id[:]...)
+	// Bounds-checked narrowing: a name at the uint32 ceiling is a bug, not an
+	// input (names are addressing keys like psps/<key>/<field>). The clamp
+	// cannot create the collision the prefix exists to prevent — merchantID is
+	// fixed-width, so name is the only variable-length field AND it is last, and
+	// its bytes are appended in full below.
+	nameLen := len(name)
+	if nameLen > math.MaxUint32 {
+		nameLen = math.MaxUint32
+	}
+	out = binary.BigEndian.AppendUint32(out, uint32(nameLen))
+	out = append(out, name...)
+	return out
+}
+
 // Encrypt seals plaintext with the merchant's DEK and returns a base64 string
-// (nonce || ciphertext || tag). The merchant DEK is created+wrapped+stored lazily
-// on first use and reused thereafter.
-func (e *Encryptor) Encrypt(ctx context.Context, merchantID merchant.ID, plaintext []byte) (string, error) {
+// (nonce || ciphertext || tag). aad binds the ciphertext to its row and MUST be
+// reproduced byte-for-byte at Decrypt; it is authenticated, not stored. The
+// merchant DEK is created+wrapped+stored lazily on first use and reused after.
+func (e *Encryptor) Encrypt(ctx context.Context, merchantID merchant.ID, aad AAD, plaintext []byte) (string, error) {
 	if !e.Enabled() {
 		return "", ErrEncryptionDisabled
 	}
@@ -108,16 +142,18 @@ func (e *Encryptor) Encrypt(ctx context.Context, merchantID merchant.ID, plainte
 	if err != nil {
 		return "", err
 	}
-	sealed, err := seal(gcm, plaintext)
+	sealed, err := seal(gcm, aad, plaintext)
 	if err != nil {
 		return "", fmt.Errorf("crypto: encrypt: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(sealed), nil
 }
 
-// Decrypt reverses Encrypt for the same merchant. A ciphertext produced for one
-// merchant CANNOT be decrypted with another merchant's DEK (GCM auth fails).
-func (e *Encryptor) Decrypt(ctx context.Context, merchantID merchant.ID, ciphertextB64 string) ([]byte, error) {
+// Decrypt reverses Encrypt for the same merchant AND the same aad. A ciphertext
+// produced for one merchant CANNOT be decrypted with another merchant's DEK, and
+// one produced for a different (merchant, name) row CANNOT be decrypted here —
+// both fail the GCM tag.
+func (e *Encryptor) Decrypt(ctx context.Context, merchantID merchant.ID, aad AAD, ciphertextB64 string) ([]byte, error) {
 	if !e.Enabled() {
 		return nil, ErrEncryptionDisabled
 	}
@@ -132,7 +168,7 @@ func (e *Encryptor) Decrypt(ctx context.Context, merchantID merchant.ID, ciphert
 	if err != nil {
 		return nil, err
 	}
-	pt, err := open(gcm, raw)
+	pt, err := open(gcm, aad, raw)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: decrypt: %w", err)
 	}
@@ -175,7 +211,7 @@ func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID merchant.ID)
 	if wrapped, ok, err := e.store.GetWrappedDEK(ctx, merchantID); err != nil {
 		return nil, fmt.Errorf("crypto: load wrapped DEK: %w", err)
 	} else if ok {
-		return e.unwrapDEK(wrapped)
+		return e.unwrapDEK(merchantID, wrapped)
 	}
 
 	// Lazily create a new DEK, wrap it, and store it. Store may return a
@@ -184,7 +220,7 @@ func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID merchant.ID)
 	if _, err := io.ReadFull(rand.Reader, dek); err != nil {
 		return nil, fmt.Errorf("crypto: generate DEK: %w", err)
 	}
-	wrapped, err := seal(e.masterGCM, dek)
+	wrapped, err := seal(e.masterGCM, dekAAD(merchantID), dek)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: wrap DEK: %w", err)
 	}
@@ -195,13 +231,23 @@ func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID merchant.ID)
 	// If the store kept a pre-existing row (concurrent first-use), unwrap that so
 	// every caller converges on the SAME DEK for the merchant.
 	if len(stored) > 0 && !bytesEqual(stored, wrapped) {
-		return e.unwrapDEK(stored)
+		return e.unwrapDEK(merchantID, stored)
 	}
 	return dek, nil
 }
 
-func (e *Encryptor) unwrapDEK(wrapped []byte) ([]byte, error) {
-	dek, err := open(e.masterGCM, wrapped)
+// dekAAD binds a wrapped DEK to the merchant whose row holds it, so a wrapped
+// DEK relocated to another merchant's row does not unwrap.
+func dekAAD(merchantID merchant.ID) AAD {
+	id := merchantID.UUID()
+	out := make([]byte, 0, 24+len(id))
+	out = append(out, "openrails/dek/v1\x00"...)
+	out = append(out, id[:]...)
+	return out
+}
+
+func (e *Encryptor) unwrapDEK(merchantID merchant.ID, wrapped []byte) ([]byte, error) {
+	dek, err := open(e.masterGCM, dekAAD(merchantID), wrapped)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: unwrap DEK (wrong master key?): %w", err)
 	}
@@ -221,22 +267,23 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-// seal returns nonce || ciphertext(+tag).
-func seal(gcm cipher.AEAD, plaintext []byte) ([]byte, error) {
+// seal returns nonce || ciphertext(+tag), with aad bound into the tag.
+func seal(gcm cipher.AEAD, aad AAD, plaintext []byte) ([]byte, error) {
 	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+	return gcm.Seal(nonce, nonce, plaintext, aad), nil
 }
 
-// open reverses seal: it splits the leading nonce and authenticates the rest.
-func open(gcm cipher.AEAD, sealed []byte) ([]byte, error) {
+// open reverses seal: it splits the leading nonce and authenticates the rest
+// against the same aad.
+func open(gcm cipher.AEAD, aad AAD, sealed []byte) ([]byte, error) {
 	if len(sealed) < nonceSize {
 		return nil, errors.New("ciphertext too short")
 	}
 	nonce, ct := sealed[:nonceSize], sealed[nonceSize:]
-	return gcm.Open(nil, nonce, ct, nil)
+	return gcm.Open(nil, nonce, ct, aad)
 }
 
 func bytesEqual(a, b []byte) bool {

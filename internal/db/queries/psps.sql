@@ -3,7 +3,7 @@
 -- name: UpsertPSP :one
 INSERT INTO openrails.psps (
     id, merchant_id, rail, environment, account_id, key,
-    archived, evidence, last_verified_at
+    archived, evidence, last_verified_at, custodian_id
 ) VALUES (
     -- #662: the id column keeps its uuidv7() default. The production write paths
     -- (merchant payment-provider config + manifest bootstrap) supply a
@@ -20,11 +20,16 @@ INSERT INTO openrails.psps (
     sqlc.narg(key),
     COALESCE(sqlc.narg(archived)::boolean, false),
     sqlc.narg(evidence),
-    sqlc.narg(last_verified_at)::timestamptz
+    sqlc.narg(last_verified_at)::timestamptz,
+    sqlc.narg(custodian_id)::uuid
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     key = COALESCE(EXCLUDED.key, openrails.psps.key),
     archived = EXCLUDED.archived,
+    -- or#880: custody is DECLARATIVE — a re-apply that no longer names a
+    -- custodian must un-arm the arrangement, not leave a stale pointer that
+    -- keeps routing charges through a vault the operator stopped declaring.
+    custodian_id = EXCLUDED.custodian_id,
     replaced_at = CASE
         WHEN EXCLUDED.archived THEN COALESCE(openrails.psps.replaced_at, now())
         ELSE NULL
@@ -83,3 +88,52 @@ SELECT count(*)::bigint FROM openrails.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live');
+
+-- #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
+-- account_id) natural key, for webhook routing and the uniqueness preflight —
+-- both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
+-- above carries no merchant predicate, so under the RLS-enforcing app role it
+-- can only ever return no rows; the SECURITY DEFINER directory function
+-- (migration 0016) is the sanctioned way to make that read, and it RAISES
+-- rather than returning empty if its definer cannot bypass RLS.
+-- name: ResolvePSPOwnerByRailIdentity :one
+SELECT id, merchant_id, rail, environment, account_id
+FROM openrails.psp_owner_by_identity(
+    lower(sqlc.arg(rail)::text),
+    COALESCE(sqlc.narg(environment)::text, 'live'),
+    sqlc.arg(account_id)::text
+);
+
+-- CROSS-MERCHANT: merchants armed on one of the named rails, through migration
+-- 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
+-- used to JOIN merchants to psps on the base pool; psps FORCEs RLS, so the join
+-- yielded nothing and the managed endpoint was never registered or
+-- version-bumped. Ids only — each merchant's PSP rows are read inside its own
+-- scope.
+-- name: ListRailArmedMerchants :many
+SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
+    sqlc.arg(rails)::text[],
+    sqlc.arg(merchant_limit)::int);
+
+-- One merchant's live PSPs on a rail, read inside that merchant's scope (the
+-- second leg of the ListRailArmedMerchants fan-out).
+-- name: ListLivePSPsForRail :many
+SELECT id, merchant_id, rail, environment, account_id, key
+FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND rail = sqlc.arg(rail)::text
+  AND archived = false
+ORDER BY account_id;
+
+-- or#880: the custody sibling moved to internal/db/queries/custodians.sql
+-- (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
+-- a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
+-- well-defined answer.
+
+-- One merchant's PSPs that reference a custodian, read inside that merchant's
+-- scope. Custody arrangements are rare, so this is the small side of the join.
+-- name: ListPSPsForCustodian :many
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+ORDER BY rail, account_id;

@@ -62,8 +62,9 @@ route's own dedup guards, never a replacement for them.
 | GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
-| GET | `/v1/products` | optional | List products with embedded active prices. Query: `active`, `limit` (1-100, default 20), `offset` |
-| GET | `/v1/prices` | optional | List prices. Query: `active`, `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
+| GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
 | GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
 
@@ -89,7 +90,7 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
 - `price_id` (required)
 - `mode` (optional) — `one_off` or `subscription`; resolved from the price if omitted
 - `payment` (required):
-  - `rail` (required) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`)
+  - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
   - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
   - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
   - billing details for `ccbill`/`stripe`: `email`, `first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`
@@ -156,7 +157,7 @@ on-chain prepare/confirm routes above.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset`, `include_inactive` |
+| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
 | POST | `/v1/me/payment-methods` | Create + activate a vault record. Body: `payment_token` (Collect.js) + billing details |
 | PUT | `/v1/me/payment-methods/{id}` | Replace the stored vault card (`payment_token` + optional billing fields) |
 | DELETE | `/v1/me/payment-methods/{id}` | Soft-delete the method |
@@ -209,7 +210,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
 | GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
-| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ type, balance, held_balance }`. Query: `customer_id`, `type` (default `api_credits`) |
+| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)` |
 | POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }` (≤ hold) |
 | POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |
@@ -218,10 +219,14 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
 | POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
-| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Update merchant billing settings |
+| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Update merchant billing settings, incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
+| GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's canonical API host (#734 Host routing); `api_host` null when unset |
+| PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 409 when taken by another merchant |
 | GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
 | GET | `/v1/merchant/credit-limit` | `merchant:customer-settings:read` | Read a customer's credit limit |
 | PUT | `/v1/merchant/credit-limit` | `merchant:customer-settings:update` | Set a customer's credit limit |
+| GET | `/v1/merchant/delinquency` | `merchant:customer-settings:read` | Arrears delinquency roster (grace + delinquent, oldest debt first) plus the effective policy. `?state=grace\|delinquent`, `?limit=`. See [arrears-delinquency.md](../arrears-delinquency.md) |
+| GET | `/v1/merchant/customers/{customer_id}/delinquency` | `merchant:customer-settings:read` | One payer's delinquency state per currency; empty = never overdue |
 | GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
 | POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }`. Idempotent per `(customer_id, credit_type, source, source_id)` when `source_id` is set |
 | POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |
@@ -320,6 +325,7 @@ manifest-guarded like catalog writes).
 | GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
 | PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets |
 | DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
+| POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
 
 ### Metrics, dashboard, alerts, notifications
 
@@ -390,19 +396,24 @@ boundary). Success returns `200 { "status": "accepted" }`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/webhooks/{provider}` | Canonical standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
-| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving account pinned in the path (direct Stripe; multi-account rails) |
-| POST | `/v1/merchants/{merchant}/webhooks/{provider}` | Merchant-scoped: `{merchant}` slug resolves the merchant first, then THAT merchant's signing secret verifies the payload. The embedded surface's only webhook shape; standalone mounts it alongside the canonical one |
-| POST | `/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Merchant-scoped, per-account (e.g. multiple NMI accounts) |
+| POST | `/v1/webhooks/{rail}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
+| POST | `/v1/webhooks/{rail}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
+
+`{rail}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
+`basistheory`. It is never a PSP key: `mobius` and `paykings` both post to
+`/v1/webhooks/nmi` and are told apart by `{account_id}` or the payload's own
+account identity.
 
 Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
-serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
+serve `/v1/webhooks/{rail}[/{account_id}]` with the merchant resolved from
 the Host header.
 
 Verification per rail:
 
-- **NMI-backed rails** (e.g. `mobius`): JSON body; `Webhook-Signature`
-  (`t=...,s=...`, preferred) or `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
+- **NMI** (`/v1/webhooks/nmi`): JSON body; `Webhook-Signature`
+  (`t=...,s=...`) — the one header NMI sends, and the only one read.
   Test mode (config) bypasses the check.
 - **CCBill**: form-encoded; verified via CCBill's published source-IP ranges
   (unless test mode), plus `formName`/`flexId` validated against price metadata.

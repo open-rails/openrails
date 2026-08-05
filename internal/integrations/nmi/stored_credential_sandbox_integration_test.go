@@ -3,6 +3,7 @@
 package nmi
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -58,7 +59,7 @@ func TestLiveSandboxStoredCredentialCITThenMIT(t *testing.T) {
 	vaultID := vals.Get("customer_vault_id")
 	require.NotEmpty(t, vaultID, "sandbox vault create failed: %s", string(body[:n]))
 	t.Cleanup(func() {
-		_ = client.DeleteCustomerVault(DeleteCustomerVaultData{CustomerVaultID: vaultID})
+		_ = client.DeleteCustomerVault(context.Background(), DeleteCustomerVaultData{CustomerVaultID: vaultID})
 	})
 
 	// Randomize inside the simulator's approving band (>= $1.00) so repeated
@@ -66,7 +67,7 @@ func TestLiveSandboxStoredCredentialCITThenMIT(t *testing.T) {
 	amount := moneyutil.Cents(110 + time.Now().UnixNano()%80)
 
 	// Leg 1 — initial CIT (unscheduled sequence anchor).
-	cit, err := client.RunSale(SaleParams{
+	cit, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  vaultID,
 		Amount:           amount,
 		Currency:         "USD",
@@ -81,7 +82,7 @@ func TestLiveSandboxStoredCredentialCITThenMIT(t *testing.T) {
 	t.Logf("CIT approved: transactionid=%s (the stored-credential anchor)", cit.TransactionID)
 
 	// Leg 2 — MIT replaying the anchor as initial_transaction_id.
-	mit, err := client.RunSale(SaleParams{
+	mit, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  vaultID,
 		Amount:           amount + 1,
 		Currency:         "USD",

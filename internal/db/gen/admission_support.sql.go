@@ -33,34 +33,8 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 	return result.RowsAffected(), nil
 }
 
-const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
-DELETE FROM openrails.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2
-  AND scope = $3 AND scope_key = $4
-`
-
-type DeleteInvokerSpendLimitParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Scope      string
-	ScopeKey   string
-}
-
-func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvokerSpendLimitParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteInvokerSpendLimit,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Scope,
-		arg.ScopeKey,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
-SELECT id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
+SELECT id, merchant_id, customer_id, currency, rungs, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1
   AND currency = $3
   AND (customer_id = $2 OR customer_id IS NULL)
@@ -86,48 +60,87 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 		&i.CustomerID,
 		&i.Currency,
 		&i.Rungs,
-		&i.ScheduleVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const getPayerSpendLimits = `-- name: GetPayerSpendLimits :one
-SELECT id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at FROM openrails.payer_spend_limits
-WHERE merchant_id = $1 AND tier = $3
-  AND (customer_id = $2 OR customer_id IS NULL)
-ORDER BY (customer_id IS NOT NULL) DESC
-LIMIT 1
+const listBillingPolicies = `-- name: ListBillingPolicies :many
+SELECT id, merchant_id, name, policy, created_at, updated_at FROM openrails.billing_policies
+WHERE merchant_id = $1
+ORDER BY name
 `
 
-type GetPayerSpendLimitsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Tier       string
+// Every named policy the merchant has declared, for the config-sync document.
+func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsBillingPolicy, error) {
+	rows, err := q.db.Query(ctx, listBillingPolicies, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsBillingPolicy
+	for rows.Next() {
+		var i OpenrailsBillingPolicy
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Name,
+			&i.Policy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-// The effective limit for a (tenant, subject, tier): the subject's own override
-// if present, else the tenant-wide default (customer_id IS NULL, #477).
-// Subject-specific rows sort first so LIMIT 1 picks the override.
-func (q *Queries) GetPayerSpendLimits(ctx context.Context, arg GetPayerSpendLimitsParams) (OpenrailsPayerSpendLimit, error) {
-	row := q.db.QueryRow(ctx, getPayerSpendLimits, arg.MerchantID, arg.CustomerID, arg.Tier)
-	var i OpenrailsPayerSpendLimit
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.Tier,
-		&i.Policy,
-		&i.PolicyVersion,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+const listDeclarativeBillingPolicyBindings = `-- name: ListDeclarativeBillingPolicyBindings :many
+SELECT id, merchant_id, customer_id, tier, policy_name, created_at, updated_at FROM openrails.billing_policy_bindings
+WHERE merchant_id = $1 AND customer_id IS NULL
+ORDER BY (tier IS NOT NULL) DESC, tier
+`
+
+// The DECLARATIVE rungs (merchant default + per-tier) for the config-sync
+// document. Per-customer bindings are deliberately excluded: they are runtime
+// segmentation state whose row count follows customers, not configuration, so
+// enumerating them would scale with records on file — and dumping them would
+// put customer identifiers into a source-available manifest.
+func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsBillingPolicyBinding, error) {
+	rows, err := q.db.Query(ctx, listDeclarativeBillingPolicyBindings, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsBillingPolicyBinding
+	for rows.Next() {
+		var i OpenrailsBillingPolicyBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Tier,
+			&i.PolicyName,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
-SELECT id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at FROM openrails.invoker_spend_limits
+SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -154,7 +167,6 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 			&i.Scope,
 			&i.ScopeKey,
 			&i.Windows,
-			&i.PolicyVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -168,25 +180,188 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 	return items, nil
 }
 
+const resolveBillingPolicy = `-- name: ResolveBillingPolicy :one
+SELECT b.policy_name, p.policy
+FROM openrails.billing_policy_bindings b
+JOIN openrails.billing_policies p
+  ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
+WHERE b.merchant_id = $1
+  AND (b.customer_id = $2 OR b.customer_id IS NULL)
+  AND (b.tier = $3 OR b.tier IS NULL)
+ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
+LIMIT 1
+`
+
+type ResolveBillingPolicyParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Tier       *string
+}
+
+type ResolveBillingPolicyRow struct {
+	PolicyName string
+	Policy     []byte
+}
+
+// The effective policy for a (merchant, payer, tier): most specific rung wins —
+// the payer's own binding, else the tier's, else the merchant default. The FK
+// guarantees the joined policy exists, so a resolved binding always yields a body.
+func (q *Queries) ResolveBillingPolicy(ctx context.Context, arg ResolveBillingPolicyParams) (ResolveBillingPolicyRow, error) {
+	row := q.db.QueryRow(ctx, resolveBillingPolicy, arg.MerchantID, arg.CustomerID, arg.Tier)
+	var i ResolveBillingPolicyRow
+	err := row.Scan(&i.PolicyName, &i.Policy)
+	return i, err
+}
+
+const upsertBillingPolicy = `-- name: UpsertBillingPolicy :exec
+
+INSERT INTO openrails.billing_policies (
+    id, merchant_id, name, policy, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (merchant_id, name) DO UPDATE SET
+    policy = EXCLUDED.policy,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertBillingPolicyParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
+	Policy     []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Admission-plane support tables: the or#897 billing-policy registry and its
+// bindings, plus hierarchical budget-scope policies (#473). The Postgres
+// rolling-budget engine (budget_inflight_holds / budget_window_state /
+// budget_reservations + FOR UPDATE) was removed in the #513 hard cut — budget
+// accounting now lives in the Redis spendgate.
+// Declare (or redeclare) one named policy. The body is validated by the shared
+// normalizer before it gets here, so a stored policy is always an enforceable one.
+func (q *Queries) UpsertBillingPolicy(ctx context.Context, arg UpsertBillingPolicyParams) error {
+	_, err := q.db.Exec(ctx, upsertBillingPolicy,
+		arg.ID,
+		arg.MerchantID,
+		arg.Name,
+		arg.Policy,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertBillingPolicyBindingCustomer = `-- name: UpsertBillingPolicyBindingCustomer :exec
+INSERT INTO openrails.billing_policy_bindings (
+    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
+) VALUES ($1, $2, $3, NULL, $4, $5, $6)
+ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    policy_name = EXCLUDED.policy_name,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertBillingPolicyBindingCustomerParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	PolicyName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// The per-customer rung: the merchant's runtime lever for one payer. Beats the
+// tier and default rungs.
+func (q *Queries) UpsertBillingPolicyBindingCustomer(ctx context.Context, arg UpsertBillingPolicyBindingCustomerParams) error {
+	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingCustomer,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PolicyName,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertBillingPolicyBindingDefault = `-- name: UpsertBillingPolicyBindingDefault :exec
+INSERT INTO openrails.billing_policy_bindings (
+    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
+) VALUES ($1, $2, NULL, NULL, $3, $4, $5)
+ON CONFLICT (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL)) DO UPDATE SET
+    policy_name = EXCLUDED.policy_name,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertBillingPolicyBindingDefaultParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	PolicyName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// The merchant-wide default rung: applies to every payer with no more specific
+// binding. ON CONFLICT targets the partial unique index for that rung.
+func (q *Queries) UpsertBillingPolicyBindingDefault(ctx context.Context, arg UpsertBillingPolicyBindingDefaultParams) error {
+	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingDefault,
+		arg.ID,
+		arg.MerchantID,
+		arg.PolicyName,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertBillingPolicyBindingTier = `-- name: UpsertBillingPolicyBindingTier :exec
+INSERT INTO openrails.billing_policy_bindings (
+    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, $4, $5, $6)
+ON CONFLICT (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL)) DO UPDATE SET
+    policy_name = EXCLUDED.policy_name,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertBillingPolicyBindingTierParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Tier       *string
+	PolicyName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// The per-tier rung: applies to every payer at one trust tier.
+func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg UpsertBillingPolicyBindingTierParams) error {
+	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingTier,
+		arg.ID,
+		arg.MerchantID,
+		arg.Tier,
+		arg.PolicyName,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
 INSERT INTO openrails.invoker_spend_limits (
-    id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertInvokerSpendLimitParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    uuid.UUID
-	Scope         string
-	ScopeKey      string
-	Windows       []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	ScopeKey   string
+	Windows    []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
@@ -199,84 +374,6 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 		arg.Scope,
 		arg.ScopeKey,
 		arg.Windows,
-		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertPayerSpendLimit = `-- name: UpsertPayerSpendLimit :exec
-
-INSERT INTO openrails.payer_spend_limits (
-    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL) DO UPDATE SET
-    policy = EXCLUDED.policy,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertPayerSpendLimitParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    *uuid.UUID
-	Tier          string
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
-// Admission-plane support tables: per-(payer, tier) money policies and
-// hierarchical budget-scope policies (#473). The Postgres rolling-budget
-// engine (budget_inflight_holds / budget_window_state / budget_reservations
-// + FOR UPDATE) was removed in the #513 hard cut — budget accounting now
-// lives in the Redis spendgate.
-// Per-(subject, tier) limit override. ON CONFLICT targets the partial unique
-// index for non-NULL subjects (#477).
-func (q *Queries) UpsertPayerSpendLimit(ctx context.Context, arg UpsertPayerSpendLimitParams) error {
-	_, err := q.db.Exec(ctx, upsertPayerSpendLimit,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Tier,
-		arg.Policy,
-		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertPayerSpendLimitDefault = `-- name: UpsertPayerSpendLimitDefault :exec
-INSERT INTO openrails.payer_spend_limits (
-    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
-ON CONFLICT (merchant_id, tier) WHERE (customer_id IS NULL) DO UPDATE SET
-    policy = EXCLUDED.policy,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertPayerSpendLimitDefaultParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	Tier          string
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
-// Tenant-wide DEFAULT tier limit (#477): customer_id IS NULL applies to
-// every payer at this tier — the platform capacity ladder declared once. ON
-// CONFLICT targets the partial unique index for the NULL-subject default.
-func (q *Queries) UpsertPayerSpendLimitDefault(ctx context.Context, arg UpsertPayerSpendLimitDefaultParams) error {
-	_, err := q.db.Exec(ctx, upsertPayerSpendLimitDefault,
-		arg.ID,
-		arg.MerchantID,
-		arg.Tier,
-		arg.Policy,
-		arg.PolicyVersion,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -285,11 +382,10 @@ func (q *Queries) UpsertPayerSpendLimitDefault(ctx context.Context, arg UpsertPa
 
 const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $6, $3, 1, $4, $5)
+    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
+) VALUES ($1, $2, NULL, $6, $3, $4, $5)
 ON CONFLICT (merchant_id, currency) WHERE (customer_id IS NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
-    schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 
@@ -318,11 +414,10 @@ func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierS
 
 const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, $3, $7, $4, 1, $5, $6)
+    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
+) VALUES ($1, $2, $3, $7, $4, $5, $6)
 ON CONFLICT (merchant_id, customer_id, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
-    schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 

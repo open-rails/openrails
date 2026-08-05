@@ -96,27 +96,29 @@ type paymentSourceSwapFixture struct {
 	sub     *models.Subscription
 	oldPM   *models.PaymentMethod
 	newPM   *models.PaymentMethod
+	pspID   uuid.UUID
 	ctx     context.Context
 }
 
 func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	t.Helper()
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 
 	userID := uuid.New().String()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	sfx := uuid.NewString()[:8]
 
-	mkPM := func(vaultID string) *models.PaymentMethod {
+	mkPM := func(railCustomerRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
-			RailCustomerRef:      vaultID,
+			PspID:                pspID,
+			RailCustomerRef:      railCustomerRef,
 			RailMethodRef:        "bill-" + uuid.NewString()[:8],
 			RebillDriver:         models.RebillDriverProvider,
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
@@ -140,14 +142,14 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "swap-prod-"+sfx, dbtest.TestMerchantID.UUID())
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'usd', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
+	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         payment_method_id, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9)`,
+	         payment_method_id, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9, $10)`,
 		subID, priceID, productID, railSubID,
-		now.Add(-time.Hour), now.Add(720*time.Hour), oldPM.ID, customerID, dbtest.TestMerchantID.UUID())
+		now.Add(-time.Hour), now.Add(720*time.Hour), oldPM.ID, customerID, dbtest.TestMerchantID.UUID(), pspID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2", TypeNMIPaymentSourceUpdate, subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
@@ -160,6 +162,9 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 	runner := &Runner{
 		Store:    NewStore(dbi),
 		Registry: NewRegistry(NewNMIPaymentSourceUpdateHandler(dbi, fakeNMIResolver{client: client}, nil)),
+		// or#865 made a nil ModeView fail CLOSED: without it every intent parks
+		// rather than executing, so the fixture must state its mode.
+		Config: fullModeConfig(),
 	}
 	sub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)
@@ -172,6 +177,7 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 		sub:     sub,
 		oldPM:   oldPM,
 		newPM:   newPM,
+		pspID:   pspID,
 		ctx:     ctx,
 	}
 }
@@ -324,15 +330,16 @@ func TestNMIPaymentSourceUpdateIntent_CrashBeforeExecute(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
+		PspID:          fx.pspID,
 		IntentType:     TypeNMIPaymentSourceUpdate,
 		SubscriptionID: &subID,
 		Payload: NMIPaymentSourceUpdatePayload{
 			UserID:             fx.sub.CustomerID.String(),
 			RailSubscriptionID: fx.sub.RailSubscriptionID,
 			NewPaymentMethodID: fx.newPM.ID,
-			NewVaultID:         fx.newPM.RailCustomerRef,
+			NewRailCustomerRef: fx.newPM.RailCustomerRef,
 			OldPaymentMethodID: &oldID,
-			OldVaultID:         fx.oldPM.RailCustomerRef,
+			OldRailCustomerRef: fx.oldPM.RailCustomerRef,
 		},
 		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
 		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),

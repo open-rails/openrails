@@ -36,19 +36,19 @@ func TestListInvoices_Statement(t *testing.T) {
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
-		Amount:     5_000, Source: "req", SourceID: "u1",
+		Amount:     5_000, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "u1"),
 	})
 	require.NoError(t, err)
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
-		Amount:     3_000, Source: "req", SourceID: "u2",
+		Amount:     3_000, Key: money.MustIdempotencyKey(money.UsageOperation("gpt-4o"), "req", "u2"),
 	})
 	require.NoError(t, err)
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
 		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
-		Amount:     1_000, Source: "req", SourceID: "u3",
+		Amount:     1_000, Key: money.MustIdempotencyKey(money.UsageOperation("embeddings"), "req", "u3"),
 	})
 	require.NoError(t, err)
 

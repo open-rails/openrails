@@ -108,10 +108,12 @@ SET notified_at = sqlc.arg(notified_at)::timestamptz,
 WHERE id = sqlc.arg(id);
 
 -- name: ListArmedFindingsDigestMerchants :many
--- #787: CROSS-MERCHANT (base pool / GenGlobal) armed-merchant scan for the
--- low-severity findings digest, mirroring ListArmedAlertMerchants's posture.
-SELECT DISTINCT merchant_id FROM openrails.reconciliation_findings
-WHERE status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
+-- #787: CROSS-MERCHANT armed-merchant scan for the low-severity findings
+-- digest, mirroring ListArmedAlertMerchants — including the fix. It ran on the
+-- base pool, which carries no app.merchant_id, so reconciliation_findings' RLS
+-- matched nothing and the digest had never run (or#861). Now through migration
+-- 0021's SECURITY DEFINER reader; ids only, digest content stays per-merchant.
+SELECT merchant_id FROM openrails.armed_findings_digest_merchant_ids();
 
 -- name: CountLowSeverityFindingsPendingDigest :one
 SELECT count(*) FROM openrails.reconciliation_findings
@@ -139,8 +141,17 @@ ON CONFLICT (merchant_id) DO UPDATE SET
     last_digested_at = EXCLUDED.last_digested_at,
     updated_at = now();
 
+-- SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+-- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
+-- below EXECUTES cancel/refund/revoke/grant against whatever the finding
+-- names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
+-- deployment connected as a superuser/BYPASSRLS role let merchant A's owner
+-- address merchant B's finding. openrails.current_merchant_id() is the same
+-- expression the merchant_isolation policy uses, so under the enforcing role
+-- behaviour is unchanged; under a bypassing one the scope still holds.
 -- name: GetReconciliationFinding :one
-SELECT * FROM openrails.reconciliation_findings WHERE id = $1;
+SELECT * FROM openrails.reconciliation_findings
+WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
 
 -- name: ListReconciliationFindings :many
 SELECT * FROM openrails.reconciliation_findings
@@ -158,6 +169,9 @@ ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
 -- covering their provider "vanished on their own" (design decision 1).
+-- or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
+-- no merchant predicate at all — a long transaction on a big backlog, and a
+-- cross-merchant write the moment it ran on a BYPASSRLS connection.
 -- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
@@ -165,10 +179,15 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE evidence->>'provider' = sqlc.arg(provider)
-  AND status IN ('reconcile_required', 'requires_review')
-  AND last_seen_run <> sqlc.arg(run_id)
-  AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
+WHERE ctid IN (
+    SELECT f.ctid FROM openrails.reconciliation_findings f
+    WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND f.evidence->>'provider' = sqlc.arg(provider)
+      AND f.status IN ('reconcile_required', 'requires_review')
+      AND f.last_seen_run <> sqlc.arg(run_id)
+      AND f.finding_type = ANY (sqlc.arg(finding_types)::text[])
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- life.provider_intent.stuck findings recover subject-first: an open finding
 -- whose intent no longer meets the stuck criteria (executed, superseded, or
@@ -281,7 +300,9 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- Ignore: permanent silence for the subject (the upsert keeps ignored
 -- identities ignored across re-runs — same semantics the breaker's dismiss
@@ -295,7 +316,9 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- Partial failure: append the execution error to operator_notes; the finding
 -- STAYS OPEN (never half-marked fixed).
@@ -306,7 +329,9 @@ SET operator_notes = CASE
         ELSE operator_notes || E'\n' || sqlc.arg(note)::text
     END,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE id = sqlc.arg(id)
+  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND status IN ('reconcile_required', 'requires_review');
 
 -- ============================================================================
 -- Local-state reads for the diff engine
@@ -321,24 +346,27 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND deleted_at IS NULL
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
 WHERE rail::text = ANY (sqlc.arg(rails)::text[])
+  AND deleted_at IS NULL
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentMethodsByRails :many
--- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
--- here, aliased to vault_id so the reconcile matcher keeps its NMI-vault vocabulary.
-SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_type,
+-- rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
+-- the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
+-- for HashiCorp Vault, and the column already carries the right name.
+SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -392,7 +420,8 @@ WHERE NOT EXISTS (
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id
+    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
+    money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -400,7 +429,9 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id)
+    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid,
+    -- or#827: the row mirrors a charge the rail actually settled.
+    'rail'
 )
 ON CONFLICT DO NOTHING;
 
@@ -410,7 +441,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind
+    customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(rail)::text,
@@ -419,14 +450,16 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id), 'refund'
+    -- or#827: a refund is real (negative) money movement at the rail; the
+    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING;
 
 -- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
 SET status = 'refunded'
-WHERE id = sqlc.arg(id) AND status <> 'refunded';
+WHERE id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
 -- PS-1 materialization (bootstrap mode, --materialize): create the local
 -- subscription for a rail subscription that resolved unambiguously to an
@@ -447,15 +480,19 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(psp_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
+        AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
-        AND (sqlc.narg(psp_id)::uuid IS NULL OR s.psp_id = sqlc.narg(psp_id)::uuid)
+        -- or#893: every writer resolves a PSP now, including the declared
+        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
+        -- provider subscription id is only unique within a gateway account.
+        AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
 RETURNING id, entitlements_spec_snapshot;
 
@@ -478,17 +515,16 @@ WHERE id = sqlc.arg(id)
 -- manual/bulk-import decision. The flag is a ratchet: never auto-unset.
 
 -- name: UpsertReconciliationState :one
--- Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
--- last_full_pull_at after a completed authoritative pull/import for that domain.
+-- Mark a source domain's reconciliation watermark: pass fully_reconciled=true
+-- after a completed authoritative pull/import for that domain.
 INSERT INTO openrails.reconciliation_state (
-    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+    merchant_id, source_domain, fully_reconciled, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(source_domain)::text,
-    sqlc.arg(fully_reconciled)::boolean, sqlc.narg(last_full_pull_at)::timestamptz, now()
+    sqlc.arg(fully_reconciled)::boolean, now()
 )
 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     fully_reconciled = EXCLUDED.fully_reconciled,
-    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
     updated_at = now()
 RETURNING *;
 
@@ -515,18 +551,20 @@ SELECT COALESCE((
 --                              and saw no renewal (ownership)
 -- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail,
-       (s.payment_method_id IS NOT NULL)::bool AS vaulted,
+       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
        (s.current_period_starts_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_starts_at
        ))::bool AS payment_opened_period,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
+              AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_ends_at
        ))::bool AS renewal_payment_after_end,
@@ -534,11 +572,12 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
+              AND w.psp_id = s.psp_id
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.deleted_at IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND (
         (s.status = 'active' AND s.current_period_ends_at IS NOT NULL
@@ -546,7 +585,11 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
      OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
          AND s.grace_ends_at < sqlc.arg(now)::timestamptz AND s.next_retry_at IS NULL)
       )
-ORDER BY s.current_period_ends_at;
+-- or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
+-- gets a BOUNDED pass that drains from the front instead of one scan whose
+-- size is the book; the transitions it applies remove rows from the cohort.
+ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 -- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
@@ -554,9 +597,12 @@ ORDER BY s.current_period_ends_at;
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND deleted_at IS NULL
   AND status = 'pending'
   AND created_at < sqlc.arg(cutoff)::timestamptz
-ORDER BY created_at;
+-- or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
@@ -581,6 +627,7 @@ ORDER BY created_at;
 SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND deleted_at IS NULL
   AND status = 'unknown'
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
@@ -592,6 +639,7 @@ LIMIT sqlc.arg(max_rows)::int;
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND deleted_at IS NULL
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
@@ -602,7 +650,7 @@ ORDER BY current_period_ends_at;
 -- worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
 UPDATE openrails.subscriptions
 SET next_retry_at = sqlc.arg(next_retry_at)::timestamptz, updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL;
+WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL AND deleted_at IS NULL;
 
 -- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
 -- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product
@@ -646,6 +694,7 @@ CROSS JOIN LATERAL (
 ) missing
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > sqlc.arg(now)::timestamptz
@@ -684,7 +733,8 @@ SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.status IN ('cancelled', 'expired', 'failed')
+  AND s.deleted_at IS NULL
+  AND s.status = 'cancelled'
   AND EXISTS (
       SELECT 1 FROM openrails.entitlements e
       WHERE e.merchant_id = s.merchant_id
@@ -695,7 +745,10 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
              OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
-ORDER BY s.id;
+-- or#837: LONGEST-DEAD first, capped — the overrun that has been granting
+-- unentitled access the longest is the one a truncated pass must repair.
+ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector
 -- (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
@@ -742,9 +795,9 @@ SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        END::text AS cause
 FROM openrails.entitlements e
 LEFT JOIN openrails.subscriptions s
-       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id
+       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN openrails.payments pay
-       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id
+       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
 LEFT JOIN openrails.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -780,11 +833,14 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'subscription'
-          AND s.status IN ('cancelled', 'expired', 'failed')
+          AND s.status = 'cancelled'
           AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
-ORDER BY e.id;
+-- or#837: oldest window first, capped. Surface-only findings, so truncation
+-- delays an operator decision rather than losing one.
+ORDER BY e.start_at, e.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #690/#691 `verification_pressure` gauge input: subscriptions parked (or
 -- stuck) in `unknown` whose recorded paid-through has passed — standing access
@@ -796,6 +852,7 @@ SELECT COUNT(*)::bigint AS pressure_count,
        COALESCE(MAX(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.deleted_at IS NULL
   AND s.status = 'unknown'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;

@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -21,17 +20,11 @@ type CheckoutRailOption struct {
 	Mode     string
 }
 
-var checkoutRailOptionOrder = []string{
-	string(models.RailStripe),
-	string(models.RailNMI),
-	string(models.RailCCBill),
-	string(models.RailSolana),
-}
-
 // ListCheckoutRailOptions returns payment providers that this runtime can use
-// for new checkout against priceRef. It performs no remote provider probes and
-// no writes; readiness means the active local account, required credentials,
-// price link, checkout mode, and runtime services are all present.
+// for new checkout against priceRef, IN THE MERCHANT'S ROUTING ORDER (or#288).
+// It performs no remote provider probes and no writes; readiness means the
+// active local account, required credentials, price link, checkout mode, and
+// runtime services are all present.
 func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, priceRef string) ([]CheckoutRailOption, error) {
 	priceRef = strings.TrimSpace(priceRef)
 	if priceRef == "" {
@@ -72,43 +65,39 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 	if !product.IsPurchasable() {
 		return []CheckoutRailOption{}, nil
 	}
-	return s.listCheckoutRailOptionsForPrice(ctx, checkoutService, price)
+	return s.listCheckoutRailOptionsForPrice(ctx, price, product)
 }
 
-func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Context, checkoutService *CheckoutService, price *models.Price) ([]CheckoutRailOption, error) {
-	options := make([]CheckoutRailOption, 0, len(checkoutRailOptionOrder))
-	var resolutionErr error
-	for _, requestedRail := range checkoutRailOptionOrder {
-		target, err := checkoutService.resolveRailTarget(ctx, requestedRail)
-		if err != nil {
-			resolutionErr = errors.Join(resolutionErr, fmt.Errorf("resolve checkout rail %s: %w", requestedRail, err))
-			continue
-		}
-		accountID := ""
-		if target.Scope != nil {
-			accountID = target.Scope.AccountID
-		}
-		providerConfig, err := checkoutService.Rails.RailConfig(ctx, target.Rail, accountID)
-		if err != nil {
-			if errors.Is(err, railresolve.ErrRailNotArmed) {
-				continue
+// listCheckoutRailOptionsForPrice is a projection of the routing decision: the
+// options a frontend may offer are exactly the candidates routing found
+// eligible, in the order routing would pick them.
+func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Context, price *models.Price, product *models.Product) ([]CheckoutRailOption, error) {
+	mode := checkoutModeForRail(price, "")
+	decision, err := s.Route(ctx, RoutingInput{Price: price, Product: product, Mode: mode})
+	if err != nil && !errors.Is(err, ErrNoRoutableProcessor) {
+		return nil, err
+	}
+	eligible := decision.Eligible()
+	if len(eligible) == 0 {
+		// Nothing eligible AND something failed to resolve: report the failure
+		// rather than an empty list that reads like "this merchant is unarmed".
+		for _, candidate := range decision.Candidates {
+			if candidate.Skip == models.CheckoutRoutingSkipResolveFailed {
+				return nil, fmt.Errorf("resolve checkout rail %s: resolution failed", candidate.Selector)
 			}
-			resolutionErr = errors.Join(resolutionErr, fmt.Errorf("resolve checkout rail config %s: %w", requestedRail, err))
-			continue
 		}
-
-		mode := checkoutModeForRail(price, target.Rail)
-		if !s.checkoutRailOptionReady(price, target, providerConfig, mode) {
+		return []CheckoutRailOption{}, nil
+	}
+	options := make([]CheckoutRailOption, 0, len(eligible))
+	for _, candidate := range decision.Candidates {
+		if candidate.Skip != "" {
 			continue
 		}
 		options = append(options, CheckoutRailOption{
-			Selector: target.Rail,
-			Rail:     target.Rail,
+			Selector: candidate.Selector,
+			Rail:     candidate.Rail,
 			Mode:     string(mode),
 		})
-	}
-	if len(options) == 0 && resolutionErr != nil {
-		return nil, resolutionErr
 	}
 	return options, nil
 }
@@ -121,61 +110,86 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessio
 	return models.CheckoutSessionModeOneOff
 }
 
-func (s *CheckoutSessionService) checkoutRailOptionReady(price *models.Price, target railTarget, providerConfig *config.PSPConfig, mode models.CheckoutSessionMode) bool {
+// checkoutRailSkipReason reports why this PSP cannot serve the price under mode,
+// or "" when it can. It is the single readiness verdict behind both the option
+// list and routing's fallback classes (or#288) — one place decides, so the
+// advertised list and the routed choice can never disagree.
+func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.PSPConfig, mode models.CheckoutSessionMode) string {
 	if price == nil || providerConfig == nil {
-		return false
+		return models.CheckoutRoutingSkipNotArmed
 	}
 	switch target.Rail {
 	case string(models.RailStripe):
-		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" || stripePaidIntroUnsupported(price) {
-			return false
+		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
+			return models.CheckoutRoutingSkipCredentialsMissing
+		}
+		if stripePaidIntroUnsupported(price) {
+			return models.CheckoutRoutingSkipModeUnsupported
 		}
 		targetPriceID := strings.TrimSpace(checkoutPSPLinkForTarget(price, target)[models.RailKeyStripePriceID])
 		executionPriceID, err := getStripePriceID(price)
-		return err == nil && targetPriceID != "" && targetPriceID == executionPriceID
+		if err != nil || targetPriceID == "" || targetPriceID != executionPriceID {
+			return models.CheckoutRoutingSkipLinkMissing
+		}
+		return ""
 	case string(models.RailNMI):
 		if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
-			return false
+			return models.CheckoutRoutingSkipCredentialsMissing
 		}
 		if checkoutPSPLinkForTarget(price, target) == nil {
-			return false
+			return models.CheckoutRoutingSkipLinkMissing
 		}
 		if mode == models.CheckoutSessionModeSubscription {
-			_, err := requireNMIPlanForTarget(price, target)
-			return err == nil
+			if _, err := requireNMIPlanForTarget(price, target); err != nil {
+				return models.CheckoutRoutingSkipLinkMissing
+			}
 		}
-		return true
+		return ""
 	case string(models.RailCCBill):
-		if mode != models.CheckoutSessionModeSubscription || providerConfig.CCBill == nil {
-			return false
+		if mode != models.CheckoutSessionModeSubscription {
+			return models.CheckoutRoutingSkipModeUnsupported
+		}
+		// The dash-joined composite account id (#697) is CCBill's identity, so a
+		// malformed one is a credential fault, not a link fault.
+		if providerConfig.CCBill == nil {
+			return models.CheckoutRoutingSkipCredentialsMissing
 		}
 		if _, _, err := config.SplitCCBillAccountID(providerConfig.EffectiveAccountID()); err != nil {
-			return false
+			return models.CheckoutRoutingSkipCredentialsMissing
 		}
 		link := checkoutPSPLinkForTarget(price, target)
 		targetForm := strings.TrimSpace(link[models.RailKeyCCBillFormName])
 		targetFlexID := strings.TrimSpace(link[models.RailKeyCCBillFlexID])
 		executionForm, executionFlexID, ok := price.GetCCBillFlexForm()
-		return ok && targetForm != "" && targetFlexID != "" &&
-			targetForm == executionForm && targetFlexID == executionFlexID
+		if !ok || targetForm == "" || targetFlexID == "" ||
+			targetForm != executionForm || targetFlexID != executionFlexID {
+			return models.CheckoutRoutingSkipLinkMissing
+		}
+		return ""
 	case string(models.RailSolana):
 		if providerConfig.Solana == nil || len(providerConfig.Solana.Tokens) == 0 {
-			return false
+			return models.CheckoutRoutingSkipCredentialsMissing
 		}
 		if checkoutPSPLinkForTarget(price, target) == nil {
-			return false
+			return models.CheckoutRoutingSkipLinkMissing
 		}
 		if mode == models.CheckoutSessionModeSubscription {
 			if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-				return false
+				return models.CheckoutRoutingSkipServiceUnavailable
 			}
 			targetTerms, targetErr := parseSolanaPlanTerms(checkoutPSPLinkForTarget(price, target))
 			executionTerms, executionErr := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
-			return targetErr == nil && executionErr == nil && targetTerms == executionTerms
+			if targetErr != nil || executionErr != nil || targetTerms != executionTerms {
+				return models.CheckoutRoutingSkipLinkMissing
+			}
+			return ""
 		}
-		return s.solanaPayService != nil || s.solanaTransactionService != nil
+		if s.solanaPayService == nil && s.solanaTransactionService == nil {
+			return models.CheckoutRoutingSkipServiceUnavailable
+		}
+		return ""
 	default:
-		return false
+		return models.CheckoutRoutingSkipUnknownSelector
 	}
 }
 

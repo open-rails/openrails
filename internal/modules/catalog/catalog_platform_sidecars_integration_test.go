@@ -80,7 +80,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
-			 VALUES ($1, $2, $3, 1250000, 'usd', 720, true)`,
+			 VALUES ($1, $2, $3, 1250000, 'USD', 720, true)`,
 			priceA, productA, tA.UUID(),
 		)
 		require.NoError(t, err)
@@ -92,13 +92,13 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.product_usage_limit_bindings
-			 (id, merchant_id, customer_id, usage_limit_key, measure, windows, source_type, product_key)
-			 VALUES ($1, $2, $3, $4, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb, 'catalog_product', 'pro')`,
+			 (id, merchant_id, customer_id, usage_limit_key, measure, windows)
+			 VALUES ($1, $2, $3, $4, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb)`,
 			uuid.New(), tA.UUID(), customerA, usageKey,
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'counter')`,
+			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), meterKey,
 		)
 		require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
-			 VALUES ($1, $2, $3, 1500000, 'usd', 720, true)`,
+			 VALUES ($1, $2, $3, 1500000, 'USD', 720, true)`,
 			priceB, productB, tB.UUID(),
 		)
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	err := appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'counter')`,
+			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), "cross-tenant-"+suffix,
 		)
 		return err

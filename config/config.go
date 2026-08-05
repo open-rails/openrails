@@ -22,6 +22,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
 )
@@ -52,7 +53,12 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 	return nil
 }
 
-const ConfigContextKey string = "config"
+// configContextKey is a distinct type so this key cannot collide with another
+// package storing "config" in the same context (SA1029, or#869).
+type configContextKey string
+
+// ConfigContextKey is the context key the CLI stores the loaded *Config under.
+const ConfigContextKey configContextKey = "config"
 
 // CredentialPosture is the sandbox-credential axis (#355/#745): "sandbox" or
 // "live", never a bare true/false. The Go zero value (empty string) means
@@ -79,6 +85,16 @@ func (p *CredentialPosture) UnmarshalText(text []byte) error {
 }
 
 type Config struct {
+	// Env is the deployment environment and it is REQUIRED (SEC-18). It is the
+	// switch behind RequiresSecretEncryption, so an unset value must never read
+	// as "development": a container shipped without ENV would otherwise boot
+	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
+	// DataLink passwords, webhook signing secrets) after a single warning —
+	// silently, and in exactly the deployment least likely to be watching. (The
+	// DB role must enforce RLS in every environment; that one is not on this
+	// switch.) Load() refuses an
+	// empty ENV, and IsDev() reads empty as NOT development so any path that
+	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
@@ -115,9 +131,8 @@ type Config struct {
 	// including production — a staging (or production) deployment running
 	// sandbox rails under full non-dev hard gates is a legitimate, common
 	// shape, not a footgun. Nothing here special-cases env=production; the
-	// credential guarantees this field attaches (live-key refusal above,
-	// ExpectedProviderEnvironment's cross-check against each configured rail
-	// account's declared Environment) are what keep a sandbox posture honest
+	// credential guarantees this field attaches (live-key refusal above, the
+	// NMI live-gateway probe) are what keep a sandbox posture honest
 	// regardless of Env. Set test_mode=live explicitly to run live credentials
 	// locally in development.
 	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
@@ -169,10 +184,10 @@ type Config struct {
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
 	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
 	// It is declared intent, never auto-detected and never auto-fallback — the data
-	// lives in exactly one place (#661). Empty derives from vault.enabled for
-	// backward-compat (historically vault.enabled=true implied Vault KV). Env:
-	// SECRET_BACKEND. Only consulted in merchant_source=api mode — MODE 1 (#723)
-	// holds secrets in memory and never constructs a persistent secret store.
+	// lives in exactly one place (#661). REQUIRED in merchant_source=api mode
+	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
+	// consulted in merchant_source=api mode — MODE 1 (#723) holds secrets in
+	// memory and never constructs a persistent secret store.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
 	// MerchantSource is the two-mode doctrine switch (#723/#724): where merchant
@@ -268,20 +283,16 @@ func (cfg *Config) IsManifestMerchantSource() bool {
 }
 
 // SecretStoreBackend returns where merchant secrets live: "vault" or "db".
-// Explicit secret_backend wins; empty derives from vault.enabled (back-compat).
-// Vault Transit signing is orthogonal to this — it can be used with either backend
-// (#661); this only selects the KV secret store.
+// ONLY the declared secret_backend is consulted — or#893 deleted the
+// vault.enabled inference, so enabling Vault for Transit signing can no longer
+// silently move the secret store. merchant_source=api requires the declaration
+// (validateMerchantSource); MODE 1 never constructs a store, so the "db" here is
+// an inert default, not a fallback.
 func (cfg *Config) SecretStoreBackend() string {
 	if cfg == nil {
 		return SecretBackendDB
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
-	case SecretBackendVault:
-		return SecretBackendVault
-	case SecretBackendDB:
-		return SecretBackendDB
-	}
-	if cfg.Vault != nil && cfg.Vault.Enabled {
+	if strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) == SecretBackendVault {
 		return SecretBackendVault
 	}
 	return SecretBackendDB
@@ -597,15 +608,16 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// Provider-account environments (#641): the credentials' nature. A deployment is
+// PSP environments (#641): the credentials' nature. A deployment is
 // all-test OR all-live; test_mode is the switch.
 const (
 	ProviderEnvironmentTest = "test"
 	ProviderEnvironmentLive = "live"
 )
 
-// ExpectedProviderEnvironment is the environment every provider account must
-// declare for the given test_mode: test under sandbox, live in production.
+// ExpectedProviderEnvironment is the environment every PSP runs in
+// for the given test_mode: test under sandbox, live in production. It is DERIVED
+// (#882) — a PSP never declares it.
 func ExpectedProviderEnvironment(testMode bool) string {
 	if testMode {
 		return ProviderEnvironmentTest
@@ -613,7 +625,7 @@ func ExpectedProviderEnvironment(testMode bool) string {
 	return ProviderEnvironmentLive
 }
 
-// ReservedPSPRails maps a provider-account name to the rail it implies, so a
+// ReservedPSPRails maps a PSP name to the rail it implies, so a
 // config entry named after a self-contained gateway need not restate its rail.
 var ReservedPSPRails = map[string]models.Rail{
 	"ccbill": models.RailCCBill,
@@ -621,7 +633,7 @@ var ReservedPSPRails = map[string]models.Rail{
 	"solana": models.RailSolana,
 }
 
-// PSPConfig is one configured provider account: the rail (gateway) it
+// PSPConfig is one configured PSP: the rail (gateway) it
 // is on plus that rail's credentials. The map key in a PSPSet is the
 // operator-chosen account NAME (e.g. "mobius", "paykings" on rail nmi).
 //
@@ -644,22 +656,26 @@ type PSPConfig struct {
 	// e.g. 945280-0000, #697), or Solana wallet (#592: operator-declared).
 	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string
-	// Environment is test|live — an ASSERTION cross-checked against test_mode
-	// (#641/#711), not a behavior selector. Sandbox-vs-live behavior is driven by
-	// test_mode alone; a declared environment that contradicts it refuses to
-	// boot. Empty → derived from test_mode.
-	Environment string
 	// Archived keeps an account addressable for existing obligations and inbound
 	// provider events, but excludes it from new checkout/subscription work.
 	Archived bool
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
 	// the typed block — there is no flat fallback.
-	NMI         *NMIRailConfig
-	CCBill      *CCBillRailConfig
-	Stripe      *StripeRailConfig
-	Solana      *SolanaRailConfig
-	VaultedCard *VaultedCardRailConfig
+	NMI    *NMIRailConfig
+	CCBill *CCBillRailConfig
+	Stripe *StripeRailConfig
+	Solana *SolanaRailConfig
+
+	// Custodian names the declared custodian (custodians.<key>) holding the
+	// instruments charged through this PSP. "" = the PSP holds its own.
+	// DECLARATION input; Custody below is what it resolves to.
+	Custodian string
+
+	// Custody (or#879/or#880) is the axis orthogonal to the rail: nil means
+	// the PSP holds its own instruments. A third-party custodian holds the
+	// card and proxies it into THIS PSP's gateway.
+	Custody *CustodianConfig
 }
 
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
@@ -703,26 +719,36 @@ type SolanaRailConfig struct {
 	Network string
 }
 
-// VaultedCardRailConfig (#795) is the RESOLVED runtime credential shape for
-// the vaulted_card rail: the BT private application key plus the destination
-// NMI gateway credentials resolved from the account's settings.gateway_account
-// reference at resolution time. AccountID on the parent config = BT tenant id.
-type VaultedCardRailConfig struct {
-	// APIKey is the BT PRIVATE application key — the only custodial secret.
+// CustodianConfig (#795 / or#879 / or#880) is the RESOLVED runtime shape of a
+// declared custodian: who holds the card, under what tenant identity, and the
+// credentials to detokenize it into a gateway. It is resolved from ONE
+// custodians row and may be shared by every PSP that references it — the
+// gateway credentials themselves stay on the rail block, one source of truth.
+type CustodianConfig struct {
+	// Key is the merchant's name for this custodian (custodians.key).
+	Key string
+	// Custodian is the vendor KIND (models.CustodianBasisTheory) — the value
+	// stamped on payment_methods.custodian.
+	Custodian string
+	// AccountID is the custodian-native tenant id (operator-declared).
+	AccountID string
+	// APIKey is the custodian's PRIVATE application key — the only custodial
+	// secret; it authorizes detokenization, never a charge on its own.
 	APIKey string
-	// Gateway destination (the linked NMI account): its security key transits
-	// the BT proxy; the PAN never touches OpenRails.
-	GatewayAccountID     string
-	GatewaySecurityKey   string
-	GatewayDirectPostURL string // "" = the NMI client default
+	// PublicAPIKey is checkout-page config (not a secret).
+	PublicAPIKey string
 	// NetworkTokens arms NT provisioning on instrument creation (never
 	// load-bearing; charge routing stays pan_proxy on NMI gateways).
 	NetworkTokens bool
-	// PublicAPIKey is checkout-page config (not a secret).
-	PublicAPIKey string
-	// WebhookKeyURL overrides the BT CDN webhook public-key URL (tests only).
+	// AccountUpdater arms the batch account-updater cycle (or#795 — the
+	// contracted add-on that refreshes the FPAN we actually charge).
+	AccountUpdater bool
+	// AccountUpdaterLookaheadDays is how far ahead of a renewal an instrument
+	// is refreshed, and the same window it then stays fresh for.
+	AccountUpdaterLookaheadDays int
+	// WebhookKeyURL overrides the custodian's CDN webhook public-key URL (tests only).
 	WebhookKeyURL string
-	// APIBaseURL overrides the BT API base URL (tests only; "" = production).
+	// APIBaseURL overrides the custodian API base URL (tests only; "" = production).
 	APIBaseURL string
 }
 
@@ -767,18 +793,6 @@ func ValidateRailAccountID(rail models.Rail, accountID string) error {
 	return nil
 }
 
-// EffectiveEnvironment returns the account's declared environment (test|live), or
-// the test_mode-derived default when unset (#641). An explicitly-set value that
-// contradicts test_mode is rejected by ValidateRailSet.
-func (p *PSPConfig) EffectiveEnvironment(testMode bool) string {
-	if p != nil {
-		if env := strings.ToLower(strings.TrimSpace(p.Environment)); env != "" {
-			return env
-		}
-	}
-	return ExpectedProviderEnvironment(testMode)
-}
-
 func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	if p == nil {
 		return nil
@@ -795,9 +809,6 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 		blockCount++
 	}
 	if p.Solana != nil {
-		blockCount++
-	}
-	if p.VaultedCard != nil {
 		blockCount++
 	}
 	if blockCount == 0 {
@@ -822,10 +833,6 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 	case models.RailSolana:
 		if p.Solana == nil {
 			return fmt.Errorf("rail '%s' type solana must use solana block", name)
-		}
-	case models.RailVaultedCard:
-		if p.VaultedCard == nil {
-			return fmt.Errorf("rail '%s' type vaulted_card must use vaulted_card block", name)
 		}
 	default:
 		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
@@ -853,9 +860,18 @@ func (p *PSPConfig) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
 }
 
-// IsVaultedCard returns true if this rail config is for the vaulted_card rail.
-func (p *PSPConfig) IsVaultedCard(name string) bool {
-	return p.EffectiveRail(name) == models.RailVaultedCard
+// HasThirdPartyCustody reports whether a custodian other than the PSP holds
+// the instruments charged through this PSP (or#879).
+func (p *PSPConfig) HasThirdPartyCustody() bool {
+	return p != nil && p.Custody != nil && p.Custody.Custodian != "" && p.Custody.Custodian != models.CustodianPSP
+}
+
+// CustodianKey is the declared custodian reference for this PSP, normalized.
+func (p *PSPConfig) CustodianKey() string {
+	if p == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(p.Custodian))
 }
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
@@ -968,26 +984,33 @@ type AuthConfig struct {
 }
 
 // TokenConfig defines configuration for a specific Solana token.
+//
+// There is deliberately NO `decimals` field (#817): an SPL token's base-unit
+// precision is a property of the MINT on-chain, immutable since InitializeMint,
+// and the chain is the source of truth. A merchant-settable copy is a field
+// they can get wrong, and a wrong value misprices every charge by a power of
+// ten. Decimals are read from the mint (internal/integrations/solana.
+// ReadMintDecimals) and cached, never declared.
 type TokenConfig struct {
-	Mint     string `json:"mint"`     // Token mint address accepted on the configured Solana network.
-	Name     string `json:"name"`     // Token name.
-	Decimals int    `json:"decimals"` // Token base-unit precision; REQUIRED (see ValidateTokenDecimals).
+	Mint string `json:"mint"` // Token mint address accepted on the configured Solana network.
+	Name string `json:"name"` // Token name.
 }
 
-// Token base-unit precision bounds. SPL mints top out at 9 in practice; the
-// slack guards the 10^n rescale against absurd configuration.
+// Payable base-unit precision bounds for an SPL mint. Applied to the value READ
+// FROM THE MINT, not to configuration. SPL mints top out at 9 in practice; the
+// slack accommodates exotic mints while still refusing an absurd 10^n rescale.
+// 0 is rejected: a whole-unit token cannot represent a sub-unit charge, so it is
+// not usable as a payment token here.
 const (
 	MinTokenDecimals = 1
 	MaxTokenDecimals = 18
 )
 
-// ValidateTokenDecimals rejects an unusable base-unit precision. Zero is
-// rejected on purpose (#817): an OMITTED `decimals` decodes as 0, and treating
-// that as whole-token precision silently misprices every charge by 10^6.
-func ValidateTokenDecimals(symbol string, decimals int) error {
+// ValidateTokenDecimals rejects an on-chain precision unusable for payments.
+func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	if decimals < MinTokenDecimals || decimals > MaxTokenDecimals {
-		return fmt.Errorf("solana token %s: decimals must be %d..%d (got %d) — declare it in the merchant's solana tokens config",
-			symbol, MinTokenDecimals, MaxTokenDecimals, decimals)
+		return fmt.Errorf("solana token %s: on-chain mint decimals %d are outside the payable range %d..%d",
+			mintOrSymbol, decimals, MinTokenDecimals, MaxTokenDecimals)
 	}
 	return nil
 }
@@ -1142,7 +1165,7 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
-	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
+	isDev := cfg.IsDev()
 	if !isDev {
 		// #762: posture (TestMode: sandbox|live) and environment strictness
 		// (isDev vs non-dev hard gates) are INDEPENDENT axes — sandbox is
@@ -1155,9 +1178,8 @@ func Validate(cfg *Config) error {
 		// disabling every other hard gate, or lie as live with no rail
 		// credentials). What actually prevents a sandbox posture from being
 		// misused in a genuinely-live deployment is rail-credential
-		// validation, not the environment string: ExpectedProviderEnvironment
-		// cross-checks every configured rail account's declared Environment
-		// against TestMode (ValidateRailSet/validateRails below), and
+		// validation, not the environment string: the NMI live-gateway probe
+		// asks the gateway itself whether the credentials are live, and
 		// validateStripeKeyForTestMode hard-rejects a live secret key
 		// (sk_live_/rk_live_) whenever TestMode is sandbox, in every
 		// environment including production. A deployment that declares
@@ -1307,12 +1329,18 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 			return fmt.Errorf("merchant_source=api refuses mounted %s* secret files (%s): merchant truth lives in the API/store, not a manifest (two truths, #723)", merchantManifestEnvPrefix, name)
 		}
 	}
-	if !isDev {
-		vaultEnabled := cfg.Vault != nil && cfg.Vault.Enabled
-		hasMasterKey := cfg.Encryption != nil && strings.TrimSpace(cfg.Encryption.MasterKey) != ""
-		if !vaultEnabled && !hasMasterKey {
-			return fmt.Errorf("merchant_source=api requires a merchant-secret backend outside development: enable Vault (vault.enabled / secret_backend=vault) or set ENCRYPTION_MASTER_KEY for the DB store (#723/#667)")
+	// or#893: WHERE merchant secrets live is declared intent, never inferred.
+	// vault.enabled means "a Vault connection exists" (Transit signing counts);
+	// it does not mean the secret store moved there.
+	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
+	case SecretBackendDB:
+		if !isDev && (cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "") {
+			return fmt.Errorf("merchant_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723): the DB store would hold merchant credentials in plaintext")
 		}
+	case SecretBackendVault:
+		// validateSecretBackend already requires vault.enabled for this backend.
+	default:
+		return fmt.Errorf("merchant_source=api requires an explicit secret_backend (%q or %q): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)", SecretBackendDB, SecretBackendVault)
 	}
 	return nil
 }
@@ -1458,19 +1486,6 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 			return err
 		}
 
-		// #641: all-test or all-live — a declared environment is an ASSERTION
-		// cross-checked against test_mode (not a behavior selector; test_mode
-		// alone drives sandbox posture). Empty is derived and always passes.
-		if env := strings.ToLower(strings.TrimSpace(proc.Environment)); env != "" {
-			if env != ProviderEnvironmentTest && env != ProviderEnvironmentLive {
-				return fmt.Errorf("rail '%s' has unknown environment '%s' (want test|live)", name, env)
-			}
-			testMode := cfg != nil && cfg.IsTestMode()
-			if want := ExpectedProviderEnvironment(testMode); env != want {
-				return fmt.Errorf("rail '%s' declares environment=%s but test_mode=%v requires environment=%s (a deployment is all-test or all-live; never mix)", name, env, testMode, want)
-			}
-		}
-
 		effectiveType := proc.EffectiveRail(name)
 		// #641: with multiple accounts on a rail, the made-up map name can't serve
 		// as the provider identity — each must declare its real account_id. Solana is
@@ -1496,12 +1511,11 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 			if err := validateSolanaRail(name, proc, isDev); err != nil {
 				return err
 			}
-		case models.RailVaultedCard:
-			if err := validateVaultedCardRail(name, proc, isDev); err != nil {
-				return err
-			}
 		default:
 			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
+		}
+		if err := validateCustody(name, proc, isDev); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1598,39 +1612,35 @@ func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
 	return nil
 }
 
-// validateVaultedCardRail validates a vaulted_card-type rail (#795).
-func validateVaultedCardRail(name string, proc *PSPConfig, isDev bool) error {
-	vc := proc.VaultedCard
-	if vc == nil {
-		return fmt.Errorf("rail '%s' (vaulted_card): vaulted_card block is required", name)
+// validateCustody validates a PSP's third-party custody arrangement
+// (or#879/or#880). Custody is a MODIFIER on a rail, so it is checked for every
+// rail: only rails the custodian's registry entry names as proxy rails may
+// reference it, and a referenced custodian must be fully armed or the checkout
+// it backs is silently dead.
+func validateCustody(name string, proc *PSPConfig, isDev bool) error {
+	if !proc.HasThirdPartyCustody() {
+		return nil
 	}
-	if strings.TrimSpace(proc.AccountID) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): account_id (the BT tenant id) is required", name)
+	d, err := custodians.Require(proc.Custody.Custodian)
+	if err != nil {
+		return fmt.Errorf("rail '%s': %w", name, err)
+	}
+	rail := proc.EffectiveRail(name)
+	if !d.SupportsRail(rail) {
+		return fmt.Errorf("rail '%s' (%s): custodian %q is not supported on this rail — it can only be charged through %s, which has a detokenizing proxy path", name, rail, d.Kind, d.RailNames())
+	}
+	if strings.TrimSpace(proc.Custody.AccountID) == "" {
+		return fmt.Errorf("rail '%s': custodian %q requires account_id (the custodian-native tenant id)", name, d.Kind)
 	}
 	if isDev {
 		return nil
 	}
-	if strings.TrimSpace(vc.APIKey) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): api_key (BT private application key) is required", name)
-	}
-	if strings.TrimSpace(vc.GatewaySecurityKey) == "" {
-		return fmt.Errorf("rail '%s' (vaulted_card): gateway security key is required (resolved from the linked NMI account)", name)
-	}
-	return nil
-}
-
-// ByRail returns all provider accounts on the given rail, keyed by account name.
-func (set PSPSet) ByRail(rail models.Rail) map[string]*PSPConfig {
-	result := make(map[string]*PSPConfig)
-	if set == nil {
-		return result
-	}
-	for name, proc := range set {
-		if proc != nil && proc.EffectiveRail(name) == rail {
-			result[strings.ToLower(name)] = proc
+	for _, slot := range d.Secrets {
+		if slot.Required && slot.Name == custodians.SecretAPIKey && strings.TrimSpace(proc.Custody.APIKey) == "" {
+			return fmt.Errorf("rail '%s': custodian %q requires the %s secret (its private application key)", name, d.Kind, slot.Name)
 		}
 	}
-	return result
+	return nil
 }
 
 // RailKeysByType returns configured account names on the given rail,
@@ -1653,7 +1663,7 @@ func (set PSPSet) RailKeysByType(rail models.Rail) []string {
 	return keys
 }
 
-// ActiveRailByType returns a deterministic non-archived provider account for a
+// ActiveRailByType returns a deterministic non-archived PSP for a
 // rail. Database-backed new-work selection uses created_at to pick the newest
 // active account; config-only callers do not have that timestamp, so they use
 // sorted config keys.
@@ -1681,7 +1691,7 @@ func (set PSPSet) ActiveRailKeysByType(rail models.Rail) []string {
 }
 
 // FindByAccountID returns the configured account on a rail whose EffectiveAccountID
-// matches accountID (#641), used to target a specific provider account.
+// matches accountID (#641), used to target a specific PSP.
 func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfig, bool) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
@@ -1695,12 +1705,6 @@ func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfi
 	return nil, false
 }
 
-// GetCCBillRail returns the configured active CCBill rail.
-func (set PSPSet) GetCCBillRail() *PSPConfig {
-	_, proc, _ := set.ActiveRailByType(models.RailCCBill)
-	return proc
-}
-
 // GetStripeRail returns the configured active Stripe rail.
 func (set PSPSet) GetStripeRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailStripe)
@@ -1711,27 +1715,6 @@ func (set PSPSet) GetStripeRail() *PSPConfig {
 func (set PSPSet) GetSolanaRail() *PSPConfig {
 	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
-}
-
-// GetRail returns a rail config by name.
-func (set PSPSet) GetRail(name string) *PSPConfig {
-	if set == nil {
-		return nil
-	}
-	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if proc, ok := set[normalizedName]; ok && proc != nil {
-		return proc
-	}
-	return nil
-}
-
-// RailOf returns the rail of the named provider account, or "" if not found.
-func (set PSPSet) RailOf(name string) models.Rail {
-	proc := set.GetRail(name)
-	if proc == nil {
-		return ""
-	}
-	return proc.EffectiveRail(name)
 }
 
 func (cfg *Config) normalizedProviderWriteMode() string {
@@ -1785,20 +1768,23 @@ func (cfg *Config) IsProviderReadOnly() bool {
 }
 
 // IsDev returns true if the environment is development.
+//
+// SEC-18: an EMPTY Env is NOT development. It used to be, which made every
+// dev-only relaxation (plaintext merchant secrets, an RLS-bypassing DB role)
+// the default for any deployment that simply forgot to set ENV. Unset is now
+// the strict posture; Load() refuses it outright.
 func (cfg *Config) IsDev() bool {
-	return cfg.Env == "" || cfg.Env == "dev" || cfg.Env == "development"
+	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
 
-// RequiresRLS reports whether startup must fail if the connected Postgres role
-// bypasses row-level security. Development may use a privileged local DB role;
-// every non-development environment must connect as an RLS-enforcing role.
-func (cfg *Config) RequiresRLS() bool {
-	return cfg != nil && !cfg.IsDev()
-}
+// RLS enforcement is deliberately NOT a config knob (or#782). Every
+// environment, development included, must connect as an RLS-enforcing role;
+// db.EnforceRLSPosture takes no environment argument, so there is nothing here
+// to point back at a superuser.
 
 // RequiresSecretEncryption reports whether startup must fail if the DB-backed
 // merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
-// Same environment gate as RequiresRLS (#667): only development may run without.
+// Only development may run without a key (#667).
 func (cfg *Config) RequiresSecretEncryption() bool {
 	return cfg != nil && !cfg.IsDev()
 }
@@ -1842,7 +1828,12 @@ func validateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
-// GetDefaultBillingConfig returns a billing configuration with sensible defaults
+// GetDefaultBillingConfig returns the DEVELOPMENT default configuration — a
+// local, zero-config working set. Load() uses it as its base but CLEARS Env
+// first (SEC-18): the deployment environment is the one knob whose default
+// cannot be safe, because "development" is the permissive posture (plaintext
+// merchant secrets, an RLS-bypassing DB role is tolerated). A deployment
+// declares ENV or does not boot.
 func GetDefaultBillingConfig() *Config {
 	return &Config{
 		Env:    "development",
@@ -1853,8 +1844,12 @@ func GetDefaultBillingConfig() *Config {
 			Host:     "localhost",
 			Port:     "5434",
 			Database: "openrails_db",
-			Username: "admin",
-			Password: "admin_password",
+			// The unprivileged NOBYPASSRLS role, matching docker-compose
+			// (or#782). The default must NOT be the superuser: boot refuses a
+			// BYPASSRLS role in every environment, and a superuser default
+			// would only teach developers to reach for one.
+			Username: "openrails_app",
+			Password: "openrails_app_password",
 			SSLMode:  "disable",
 			Schema:   DefaultSchema,
 		},
@@ -1997,8 +1992,12 @@ func envKeyToConfigKey(s string) string {
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
 
-	// Start from sensible defaults so zero-config works in containers/compose.
+	// Start from sensible defaults so zero-config works in containers/compose —
+	// except the environment. GetDefaultBillingConfig is the DEVELOPMENT default
+	// set; Load must not inherit that posture, so ENV is cleared here and
+	// required below once every source has been overlaid (SEC-18).
 	cfg := GetDefaultBillingConfig()
+	cfg.Env = ""
 
 	if err := godotenv.Load(); err != nil {
 		var pathErr *os.PathError
@@ -2103,15 +2102,19 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
-	ignoredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
-	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
-	ignoredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
-	ignoredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
-	ignoredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
-	ignoredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
+	// or#893 phase 3: the retired families below used to warn-and-boot. An
+	// operator who believed ignored security or tenant config was active had no
+	// way to find out. Every one of them now REFUSES boot with the error that
+	// names its replacement — no aliases, no dual reads.
+	retiredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
+	retiredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
+	retiredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
+	retiredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
+	retiredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
+	retiredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
 		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
-	ignoredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
-	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
+	retiredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
+	retiredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
 		k.Exists("auth.control_plane.issued_audiences") ||
 		k.Exists("auth.control_plane.expected_audiences") ||
 		k.Exists("auth.control_plane.public_user_registration") ||
@@ -2128,34 +2131,45 @@ func Load(configPath string) (*Config, error) {
 		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
-	if ignoredStoreConfig {
-		log.Warn("ignoring retired store config (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile")
+	if retiredStoreConfig {
+		return nil, fmt.Errorf("store config was removed (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
 	}
-	if ignoredMerchantConfig {
-		log.Warn("ignoring retired merchant config (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant")
+	if retiredMerchantConfig {
+		return nil, fmt.Errorf("merchant config was removed (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant — delete the merchant yaml key and MERCHANT env var")
 	}
-	if ignoredCORSConfig {
-		log.Warn("ignoring retired cors_origins config (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist")
+	if retiredCORSConfig {
+		return nil, fmt.Errorf("cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
 	}
-	if ignoredDBRequireRLS {
-		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")
+	if retiredDBRequireRLS {
+		return nil, fmt.Errorf("db.require_rls config was removed: RLS enforcement is derived from env — development may bypass RLS, every other env requires an RLS-enforcing DB role; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
-	if ignoredAuthIssuers {
-		log.Warn("ignoring retired auth issuer/audience config (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest")
+	if retiredAuthIssuers {
+		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
 	}
-	if ignoredRails {
-		log.Warn("ignoring retired rails config (#521): seed merchant rail accounts and secrets with openrails push-merchant-config under merchants[].accounts")
+	if retiredRails {
+		return nil, fmt.Errorf("rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
 	}
-	if ignoredControlPlaneLegacy {
-		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")
+	if retiredControlPlaneLegacy {
+		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
-	if ignoredPrivatePort {
-		log.Warn("ignoring private_port: OpenRails serves a single HTTP listener; there is no separate internal port")
+	if retiredPrivatePort {
+		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	}
+
+	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
+	// closed on its own; this one decides WHICH way the others fail, so it must
+	// be declared, not inferred. Silently reading unset as "development" meant a
+	// container deployed without ENV kept merchant secrets in PLAINTEXT. (The
+	// DB role is no longer on this switch — or#782 made RLS enforcement
+	// unconditional.)
+	cfg.Env = strings.TrimSpace(cfg.Env)
+	if cfg.Env == "" {
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
 	}
 
 	// These sections are intentionally tolerated for operator visibility during
@@ -2189,7 +2203,7 @@ func Load(configPath string) (*Config, error) {
 		cfg.Auth = &AuthConfig{}
 	}
 	if strings.TrimSpace(cfg.Auth.Issuer) == "" {
-		if isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""; isDev {
+		if cfg.IsDev() {
 			issuer := strings.TrimSpace(cfg.APIURL)
 			if issuer == "" {
 				port := int(cfg.Port)

@@ -23,13 +23,14 @@ const DefaultSecretCacheTTL = 15 * time.Minute
 //     visible immediately, and a transient backend outage must not be pinned.
 //   - Put/Delete are write-through and invalidate (Put refreshes) the entry in the
 //     SAME process immediately, so a rotation through this node is never stale.
-//   - Secret.Version is tracked: a refreshed read with a higher version replaces the
-//     cached value, so an admin rotation is reflected within one TTL even when it
-//     lands on another node.
+//   - GetAtLeastVersion (or#812) is the cross-node cutover: a caller that knows the
+//     credential has been rotated to version N — because the shared PSP row says so —
+//     never gets a pre-N cache entry back. That makes a rotation on ANY node
+//     effective on every other node at its next credential read, not one TTL later.
 //
-// Cross-process rotations converge within one ttl window (the entry expires and is
-// re-read). This is a cache, never the source of truth — it holds plaintext only as
-// long as the underlying store would have returned it.
+// TTL expiry remains the backstop for reads with no recorded version floor. This is
+// a cache, never the source of truth — it holds plaintext only as long as the
+// underlying store would have returned it.
 type cachedSecretStore struct {
 	inner MerchantSecretStore
 	ttl   time.Duration
@@ -65,21 +66,40 @@ func NewCachedSecretStore(inner MerchantSecretStore, ttl time.Duration) Merchant
 }
 
 func (c *cachedSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+	return c.GetAtLeastVersion(ctx, merchantID, name, 0)
+}
+
+// GetAtLeastVersion implements VersionedSecretReader: it is the cross-node
+// rotation cutover (or#812). A cached entry is only usable when it is BOTH
+// unexpired AND at least minVersion; a caller that learned from the shared PSP
+// row that the credential has been rotated to version N is never answered from
+// a pre-N cache entry, however much TTL is left. minVersion 0 is the
+// unversioned path and behaves exactly as before.
+func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error) {
 	key := cacheKey{merchant: merchantID.String(), name: name}
 
 	c.mu.Lock()
-	if e, ok := c.entries[key]; ok && c.now().Before(e.expires) {
+	if e, ok := c.entries[key]; ok && c.now().Before(e.expires) && e.secret.Version >= minVersion {
 		sec := e.secret
 		c.mu.Unlock()
 		return sec, nil
 	}
 	c.mu.Unlock()
 
-	// Miss (or expired): read through. Errors (absent / unavailable) are returned
-	// to the caller and NOT cached.
+	// Miss (or expired, or superseded): read through. Errors (absent /
+	// unavailable) are returned to the caller and NOT cached.
 	sec, err := c.inner.Get(ctx, merchantID, name)
 	if err != nil {
 		return Secret{}, err
+	}
+
+	if sec.Version < minVersion {
+		// The backend has not caught up with a version the shared PSP row says
+		// is committed. Serve what the backend authoritatively holds — refusing
+		// would take a live merchant down over a replication lag — but do NOT
+		// cache it, so the very next call retries instead of pinning the stale
+		// value for a whole TTL.
+		return sec, nil
 	}
 
 	c.mu.Lock()

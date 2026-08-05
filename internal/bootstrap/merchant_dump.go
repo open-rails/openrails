@@ -9,14 +9,17 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -26,8 +29,8 @@ type DumpMerchantConfigOptions struct {
 }
 
 // DumpMerchantConfig reads a merchant's OpenRails-owned configuration (identity,
-// profile, invoice/collection policy, delegated-invoker windows, and provider
-// accounts) and returns it in the push-merchant-config YAML shape (#646/#653).
+// profile, invoice/collection policy, delegated-invoker windows, and PSPs)
+// and returns it in the push-merchant-config YAML shape (#646/#653).
 // Secret fields are omitted entirely by default (so a redacted dump can be
 // re-applied without a placeholder overwriting real secrets); IncludeSecrets
 // emits plaintext from the configured secret backend for operator-controlled exports.
@@ -55,10 +58,10 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 
 	var merchantID string
-	var displayName *string
+	var displayName, apiHost *string
 	if err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, display_name FROM openrails.merchants WHERE slug = $1
-	`, slug).Scan(&merchantID, &displayName); err != nil {
+		SELECT id::text, display_name, api_host FROM openrails.merchants WHERE slug = $1
+	`, slug).Scan(&merchantID, &displayName, &apiHost); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("merchant %q not found", slug)
 		}
@@ -75,6 +78,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if displayName != nil && strings.TrimSpace(*displayName) != "" {
 		mt.DisplayName = *displayName
 	}
+	if apiHost != nil && strings.TrimSpace(*apiHost) != "" {
+		mt.APIHost = *apiHost
+	}
 
 	// merchant_configurations payload: profile + invoice + delegated-invoker windows.
 	conf, found, err := merchantconfig.NewStore(database).Get(mctx)
@@ -89,11 +95,15 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			SupportURL:  conf.Profile.SupportURL,
 			SignupURL:   conf.Profile.SignupURL,
 		}
-		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil || strings.TrimSpace(conf.InvoiceBillingBoundary) != "" {
+		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil ||
+			strings.TrimSpace(conf.InvoiceBillingBoundary) != "" ||
+			conf.ArrearsGraceDays != nil || conf.ArrearsDelinquencyFloor != nil {
 			mt.Invoice = &InvoiceConfig{
-				CollectionThreshold:   conf.InvoiceCollectionThreshold,
-				MonthlyFloor:          conf.InvoiceMonthlyFloor,
-				BillingPeriodBoundary: strings.TrimSpace(conf.InvoiceBillingBoundary),
+				CollectionThreshold:    conf.InvoiceCollectionThreshold,
+				MonthlyFloor:           conf.InvoiceMonthlyFloor,
+				BillingPeriodBoundary:  strings.TrimSpace(conf.InvoiceBillingBoundary),
+				DelinquencyGraceDays:   conf.ArrearsGraceDays,
+				DelinquencyAmountFloor: conf.ArrearsDelinquencyFloor,
 			}
 		}
 		for _, w := range conf.DelegatedInvokerWastedSpendWindows {
@@ -107,9 +117,91 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 				Currency: w.Currency,
 			})
 		}
+		for _, rule := range conf.CheckoutRouting {
+			mt.CheckoutRouting = append(mt.CheckoutRouting, CheckoutRoutingRuleConfig{
+				Match: CheckoutRoutingMatchConfig{
+					Currency: rule.Match.Currency,
+					Product:  rule.Match.Product,
+					Price:    rule.Match.Price,
+					Mode:     rule.Match.Mode,
+					Country:  rule.Match.Country,
+				},
+				Prefer: rule.Prefer,
+			})
+		}
 	}
 
-	// provider accounts (identity + lifecycle + secret references).
+	// custodians (or#880) — dumped BEFORE the PSPs that reference them, and
+	// keyed by row id so each PSP can emit its `custodian:` reference. Omitting
+	// them would round-trip a custody arrangement into an unarmed one.
+	var declaredCustodians []gen.OpenrailsCustodian
+	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		var lerr error
+		declaredCustodians, lerr = database.Gen(ctx).ListCustodiansForMerchant(ctx, mid.UUID())
+		return lerr
+	}); err != nil {
+		return nil, fmt.Errorf("list custodians: %w", err)
+	}
+	custodianSecrets, err := custodianSecretValues(ctx, secretStore, mid, opts.IncludeSecrets)
+	if err != nil {
+		return nil, err
+	}
+	custodianKeyByID := map[uuid.UUID]string{}
+	if len(declaredCustodians) > 0 {
+		mt.Custodians = map[string]CustodianConfig{}
+	}
+	for _, c := range declaredCustodians {
+		key := strings.TrimSpace(c.Key)
+		custodianKeyByID[c.ID] = key
+		entry := CustodianAccountConfig{AccountID: c.AccountID, Archived: c.Archived}
+		var settings map[string]any
+		if len(c.Settings) > 0 && json.Unmarshal(c.Settings, &settings) == nil && len(settings) > 0 {
+			entry.Settings = settings
+		}
+		if values := custodianSecrets[custodianSecretGroupKey(c.Kind, c.Environment, c.AccountID)]; len(values) > 0 {
+			entry.Secrets = values
+		}
+		mt.Custodians[key] = CustodianConfig{c.Kind: entry}
+	}
+
+	// or#897 billing policies + bindings. Dumped so a merchant configured through
+	// the mode-2 API round-trips back into a mode-1 manifest unchanged.
+	policyStore := admission.NewBillingPolicyStore(database)
+	storedPolicies, err := policyStore.ListPolicies(mctx)
+	if err != nil {
+		return nil, fmt.Errorf("load billing policies: %w", err)
+	}
+	for name, body := range storedPolicies {
+		if mt.BillingPolicies == nil {
+			mt.BillingPolicies = map[string]BillingPolicyConfig{}
+		}
+		entry := BillingPolicyConfig{
+			Kind:                   string(body.Kind),
+			OutstandingCap:         body.OutstandingCapAmount,
+			SpendWindows:           dumpBudgetWindows(body.SpendWindows),
+			AccrualRateCapPerHour:  body.AccrualRateCapPerHour,
+			BadSpendWindows:        dumpBudgetWindows(body.BadSpendWindows),
+			CollectionThreshold:    body.CollectionThresholdAmount,
+			DelinquencyGraceDays:   body.DelinquencyGraceDays,
+			DelinquencyAmountFloor: body.DelinquencyAmountFloor,
+			PolicyCurrency:         body.PolicyCurrency,
+		}
+		if body.AccrualRateWindowSeconds > 0 {
+			entry.AccrualRateWindow = formatWindowSeconds(body.AccrualRateWindowSeconds)
+		}
+		mt.BillingPolicies[name] = entry
+	}
+	storedBindings, err := policyStore.ListDeclarativeBindings(mctx)
+	if err != nil {
+		return nil, fmt.Errorf("load billing policy bindings: %w", err)
+	}
+	for _, b := range storedBindings {
+		mt.BillingPolicyBindings = append(mt.BillingPolicyBindings, BillingPolicyBindingConfig{
+			Policy: b.PolicyName, Tier: b.Tier,
+		})
+	}
+
+	// PSPs (identity + lifecycle + secret references).
 	var accounts []gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
@@ -118,11 +210,11 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		})
 		return lerr
 	}); err != nil {
-		return nil, fmt.Errorf("list provider accounts: %w", err)
+		return nil, fmt.Errorf("list PSPs: %w", err)
 	}
-	secretValuesByAccount, err := railMerchantAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
-	if err != nil {
-		return nil, err
+	secretValuesByAccount, err2 := pspSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
+	if err2 != nil {
+		return nil, err2
 	}
 	mt.PSPs = map[string]PSPConfig{}
 	for _, a := range accounts {
@@ -131,20 +223,24 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			localKey = strings.TrimSpace(*a.Key)
 		}
 		if localKey == "" {
-			localKey = railMerchantAccountDumpKey(a.Rail, a.Environment, a.AccountID)
+			localKey = pspDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
+		// #882: environment is derived from test_mode, so it is never emitted —
+		// dumping it would round-trip into the removal error on apply.
 		account := ProviderRailAccountConfig{
-			Environment: a.Environment,
-			AccountID:   a.AccountID,
-			Archived:    a.Archived,
+			AccountID: a.AccountID,
+			Archived:  a.Archived,
 		}
-		if signer := railMerchantAccountSignerFromEvidence(a.Evidence); signer != nil {
+		if a.CustodianID != nil {
+			account.Custodian = custodianKeyByID[*a.CustodianID]
+		}
+		if signer := pspSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
 		}
-		if settings := railMerchantAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
+		if settings := pspSettingsFromEvidence(a.Evidence); len(settings) > 0 {
 			account.Settings = settings
 		}
-		key := railMerchantAccountSecretGroupKey(a.Rail, a.Environment, a.AccountID)
+		key := pspSecretGroupKey(a.Rail, a.Environment, a.AccountID)
 		if values := secretValuesByAccount[key]; len(values) > 0 {
 			account.Secrets = values
 		}
@@ -154,7 +250,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
 }
 
-func railMerchantAccountSignerFromEvidence(raw []byte) *RailMerchantAccountSignerConfig {
+func pspSignerFromEvidence(raw []byte) *PSPSignerConfig {
 	var evidence struct {
 		Signer struct {
 			Mode string `json:"mode"`
@@ -168,13 +264,13 @@ func railMerchantAccountSignerFromEvidence(raw []byte) *RailMerchantAccountSigne
 	if mode == "" || mode == "local_keypair" {
 		return nil
 	}
-	return &RailMerchantAccountSignerConfig{
+	return &PSPSignerConfig{
 		Mode: mode,
 		Key:  strings.TrimSpace(evidence.Signer.Key),
 	}
 }
 
-func railMerchantAccountSettingsFromEvidence(raw []byte) map[string]any {
+func pspSettingsFromEvidence(raw []byte) map[string]any {
 	var evidence struct {
 		Settings map[string]any `json:"settings"`
 	}
@@ -189,11 +285,11 @@ func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-// railMerchantAccountSecrets lists the merchant's provider-account secret VALUES
+// pspSecrets lists the merchant's PSP secret VALUES
 // grouped by (rail, environment, account_id). It returns nothing unless
 // includeValues is set: a redacted dump omits secret fields entirely rather than
 // emitting a placeholder that a re-apply (--overwrite) could store as the real value.
-func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+func pspSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
 		return nil, nil
 	}
@@ -211,7 +307,7 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 		if err != nil {
 			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
 		}
-		gk := railMerchantAccountSecretGroupKey(rail, environment, accountID)
+		gk := pspSecretGroupKey(rail, environment, accountID)
 		if out[gk] == nil {
 			out[gk] = map[string]string{}
 		}
@@ -220,11 +316,44 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 	return out, nil
 }
 
-func railMerchantAccountSecretGroupKey(rail, environment, accountID string) string {
+func pspSecretGroupKey(rail, environment, accountID string) string {
 	return strings.ToLower(rail) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
-func railMerchantAccountDumpKey(rail, environment, accountID string) string {
+// custodianSecretValues is the custody sibling of pspSecrets,
+// grouped by the custodian's (kind, environment, account_id) identity.
+func custodianSecretValues(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+	if secretStore == nil || !includeValues {
+		return nil, nil
+	}
+	names, err := secretStore.List(ctx, mid)
+	if err != nil {
+		return nil, fmt.Errorf("list merchant secrets: %w", err)
+	}
+	out := map[string]map[string]string{}
+	for _, name := range names {
+		kind, environment, accountID, key, ok, perr := merchants.ParseCustodianSecretName(name)
+		if perr != nil || !ok {
+			continue
+		}
+		secret, err := secretStore.Get(ctx, mid, name)
+		if err != nil {
+			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
+		}
+		gk := custodianSecretGroupKey(kind, environment, accountID)
+		if out[gk] == nil {
+			out[gk] = map[string]string{}
+		}
+		out[gk][key] = secret.Value
+	}
+	return out, nil
+}
+
+func custodianSecretGroupKey(kind, environment, accountID string) string {
+	return strings.ToLower(kind) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
+}
+
+func pspDumpKey(rail, environment, accountID string) string {
 	parts := []string{rail, environment, accountID}
 	var b strings.Builder
 	for i, p := range parts {
@@ -252,4 +381,25 @@ func formatWindowSeconds(seconds int64) string {
 	default:
 		return fmt.Sprintf("%ds", seconds)
 	}
+}
+
+// dumpBudgetWindows projects stored windows (seconds) back onto the manifest
+// shape (Go duration strings).
+func dumpBudgetWindows(in []models.BudgetWindowPolicy) []BudgetWindowConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]BudgetWindowConfig, 0, len(in))
+	for _, w := range in {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out = append(out, BudgetWindowConfig{
+			Key:      w.Key,
+			Window:   formatWindowSeconds(w.WindowSeconds),
+			Limit:    w.Limit,
+			Currency: w.Currency,
+		})
+	}
+	return out
 }

@@ -2,6 +2,7 @@ package nmi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,7 +92,7 @@ func v5AmountToCents(amount string) (int64, error) {
 // read-only guard exactly like sendDirectRequest. out may be nil (delete
 // endpoints). A non-2xx status decodes the modern error envelope; 404 wraps
 // ErrV5NotFound so callers can treat "gone at NMI" as a state, not a failure.
-func (c *NMIClient) sendV5Request(method, path string, body any, out any) (err error) {
+func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body any, out any) (err error) {
 	if method != http.MethodGet && c.ReadOnly {
 		log.WithFields(log.Fields{
 			"provider": c.providerName,
@@ -110,20 +111,23 @@ func (c *NMIClient) sendV5Request(method, path string, body any, out any) (err e
 		reqBody = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequest(method, c.v5BaseURL()+path, reqBody)
+	// Non-GET = mutation: failures past the send may have executed at the
+	// gateway and are wrapped transport-ambiguous (#674). Parsed 4xx envelopes
+	// stay clean (the gateway rejected the REQUEST); 5xx / lost responses do not.
+	// The same flag picks the deadline (mutation bound vs read bound).
+	mutating := method != http.MethodGet
+
+	req, cancel, err := c.newRequest(ctx, method, c.v5BaseURL()+path, reqBody, mutating)
 	if err != nil {
 		return fmt.Errorf("build v5 request: %w", err)
 	}
+	defer cancel()
 	// The bare private key is the whole header value — no Bearer/ApiKey scheme.
 	req.Header.Set("Authorization", c.SecurityKey)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Non-GET = mutation: failures past the send may have executed at the
-	// gateway and are wrapped transport-ambiguous (#674). Parsed 4xx envelopes
-	// stay clean (the gateway rejected the REQUEST); 5xx / lost responses do not.
-	mutating := method != http.MethodGet
 	classify := func(err error) error {
 		if mutating {
 			return ambiguous(err)
@@ -359,7 +363,7 @@ type CustomerPage struct {
 
 // ListCustomersPage pulls one page of the customer vault roster
 // (GET /v5/customers). id optionally filters to a single vault id.
-func (c *NMIClient) ListCustomersPage(cursor string, perPage int, id string) (CustomerPage, error) {
+func (c *NMIClient) ListCustomersPage(ctx context.Context, cursor string, perPage int, id string) (CustomerPage, error) {
 	var page CustomerPage
 	if err := c.checkConfiguration(); err != nil {
 		return page, err
@@ -378,7 +382,7 @@ func (c *NMIClient) ListCustomersPage(cursor string, perPage int, id string) (Cu
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}
-	if err := c.sendV5Request(http.MethodGet, path, nil, &page); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &page); err != nil {
 		return page, err
 	}
 	return page, nil
@@ -429,7 +433,7 @@ type SubscriptionPage struct {
 
 // ListSubscriptionsPage pulls one page of the recurring roster
 // (GET /v5/subscriptions).
-func (c *NMIClient) ListSubscriptionsPage(cursor string, perPage int) (SubscriptionPage, error) {
+func (c *NMIClient) ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (SubscriptionPage, error) {
 	var page SubscriptionPage
 	if err := c.checkConfiguration(); err != nil {
 		return page, err
@@ -445,7 +449,7 @@ func (c *NMIClient) ListSubscriptionsPage(cursor string, perPage int) (Subscript
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}
-	if err := c.sendV5Request(http.MethodGet, path, nil, &page); err != nil {
+	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &page); err != nil {
 		return page, err
 	}
 	return page, nil
@@ -456,7 +460,7 @@ func (c *NMIClient) ListSubscriptionsPage(cursor string, perPage int) (Subscript
 // tombstone (200 with delayed_condition=inactive; live-verified 2026-07-01).
 // found therefore means "live recurring record", matching the classic
 // recurring report's absence-is-terminal semantics that #664/#665 depend on.
-func (c *NMIClient) GetSubscription(subscriptionID string) (V5Subscription, bool, error) {
+func (c *NMIClient) GetSubscription(ctx context.Context, subscriptionID string) (V5Subscription, bool, error) {
 	var sub V5Subscription
 	if err := c.checkConfiguration(); err != nil {
 		return sub, false, err
@@ -464,7 +468,7 @@ func (c *NMIClient) GetSubscription(subscriptionID string) (V5Subscription, bool
 	if strings.TrimSpace(subscriptionID) == "" {
 		return sub, false, errors.New("subscriptionID is required")
 	}
-	err := c.sendV5Request(http.MethodGet, "/subscriptions/"+url.PathEscape(strings.TrimSpace(subscriptionID)), nil, &sub)
+	err := c.sendV5Request(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(strings.TrimSpace(subscriptionID)), nil, &sub)
 	if errors.Is(err, ErrV5NotFound) {
 		return sub, false, nil
 	}
@@ -479,7 +483,7 @@ func (c *NMIClient) GetSubscription(subscriptionID string) (V5Subscription, bool
 
 // GetPayment fetches one transaction by id (GET /v5/payments/{id}).
 // found=false on 404.
-func (c *NMIClient) GetPayment(transactionID string) (v5Transaction, bool, error) {
+func (c *NMIClient) GetPayment(ctx context.Context, transactionID string) (v5Transaction, bool, error) {
 	var txn v5Transaction
 	if err := c.checkConfiguration(); err != nil {
 		return txn, false, err
@@ -487,7 +491,7 @@ func (c *NMIClient) GetPayment(transactionID string) (v5Transaction, bool, error
 	if strings.TrimSpace(transactionID) == "" {
 		return txn, false, errors.New("transactionID is required")
 	}
-	err := c.sendV5Request(http.MethodGet, "/payments/"+url.PathEscape(strings.TrimSpace(transactionID)), nil, &txn)
+	err := c.sendV5Request(ctx, http.MethodGet, "/payments/"+url.PathEscape(strings.TrimSpace(transactionID)), nil, &txn)
 	if errors.Is(err, ErrV5NotFound) {
 		return txn, false, nil
 	}
@@ -508,8 +512,8 @@ type PaymentAction struct {
 
 // GetPaymentActions returns the actions recorded on a transaction. found=false
 // when the transaction id is unknown at NMI.
-func (c *NMIClient) GetPaymentActions(transactionID string) ([]PaymentAction, bool, error) {
-	txn, found, err := c.GetPayment(transactionID)
+func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string) ([]PaymentAction, bool, error) {
+	txn, found, err := c.GetPayment(ctx, transactionID)
 	if err != nil || !found {
 		return nil, found, err
 	}
@@ -559,7 +563,7 @@ type PlanPage struct {
 // ListRecurringPlans pulls the complete plan catalog (GET /v5/plans, all
 // cursor pages). Empty pages mid-stream are legal (observed live) — the loop
 // ends only when the gateway stops handing out a cursor.
-func (c *NMIClient) ListRecurringPlans() ([]V5Plan, error) {
+func (c *NMIClient) ListRecurringPlans(ctx context.Context) ([]V5Plan, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -576,7 +580,7 @@ func (c *NMIClient) ListRecurringPlans() ([]V5Plan, error) {
 			path += "?" + q.Encode()
 		}
 		var page PlanPage
-		if err := c.sendV5Request(http.MethodGet, path, nil, &page); err != nil {
+		if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &page); err != nil {
 			return nil, err
 		}
 		out = append(out, page.Plans...)

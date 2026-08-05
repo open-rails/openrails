@@ -134,7 +134,7 @@ func TestManualRebillFindSuccessfulSale(t *testing.T) {
 			client := newTestNMIClient(t, srv.URL)
 			h := NewManualRebillHandler(nil, nil, fakeNMIResolver{client: client}, nil)
 
-			txnID, found, err := h.findSuccessfulSale(client, p)
+			txnID, found, err := h.findSuccessfulSale(context.Background(), client, p)
 			require.NoError(t, err)
 			assert.Equal(t, p.OrderReference, gotOrderID, "query must filter by the period's order reference")
 			assert.Equal(t, tc.wantFound, found)

@@ -197,11 +197,13 @@ type adminRefundPrepared struct {
 	ccbillTransactionID  string
 }
 
-// refundAmountCents converts an admin refund request amount (micros) to the
-// provider cents amount. Refunds must be exact: a sub-cent remainder is an
-// error, never rounded.
-func refundAmountCents(amountMicros int64) (int64, error) {
-	cents, err := moneyutil.MicrosToCentsExact(amountMicros)
+// refundAmountCents converts an admin refund request amount (internal units at
+// the PAYMENT's currency scale) to the provider minor amount. Refunds must be
+// exact: a sub-minor remainder is an error, never rounded. Registry-driven
+// (or#863) — a payment whose currency is blank or unregistered cannot be
+// refunded at a guessed scale.
+func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, error) {
+	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
 		return 0, fmt.Errorf("refund amount must be a whole number of cents: %w", err)
 	}
@@ -231,7 +233,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
-	amountCents, err := refundAmountCents(req.Amount)
+	amountCents, err := refundAmountCents(payment.Currency, req.Amount)
 	if err != nil {
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -424,12 +426,20 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	if err != nil {
 		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no merchant resolved on request")
 	}
+	// The charge's own provenance is the only honest answer to "which account
+	// refunds this?" — an off-rail payment has no provider to refund through.
+	if prepared.payment.PspID == nil {
+		return nil, 0, adminRefundHTTPError(http.StatusConflict, "payment carries no PSP; it was not taken through a provider and cannot be refunded on a rail")
+	}
+	pspID := *prepared.payment.PspID
 	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID:     tid.UUID(),
 		Provider:       provider,
 		IntentType:     intentType,
 		SubscriptionID: prepared.payment.SubscriptionID,
 		PaymentID:      &paymentRowID,
+		// or#893: a refund is executed against the account that took the charge.
+		PspID: pspID,
 		Payload: intents.RefundPayload{
 			OriginalPaymentID:     prepared.payment.ID,
 			ReservationID:         prepared.reservation.ID,

@@ -130,7 +130,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 				Version: catalog.SupportedVersion,
 				Products: []catalog.Product{{
 					Key: productKey, DisplayName: "Copilot Product",
-					Prices: []catalog.Price{{UnitAmount: amount, Currency: "usd", Duration: "30d", AutoRenew: true}},
+					Prices: []catalog.Price{{UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true}},
 				}},
 			},
 			"insert": true, "overwrite": true,
@@ -237,7 +237,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 			Version: catalog.SupportedVersion,
 			Products: []catalog.Product{{
 				Key: incKey, DisplayName: "Copilot Increase Product",
-				Prices: []catalog.Price{{UnitAmount: 10_000_000, Currency: "usd", Duration: "30d", AutoRenew: true}},
+				Prices: []catalog.Price{{UnitAmount: 10_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
 			}},
 		}, "insert": true, "overwrite": true,
 	})
@@ -274,7 +274,11 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		require.Equal(t, 0, draft.PriceChange.AffectedCount, "no subscribers seeded on this key")
 		require.Equal(t, incPriceKey, draft.PriceChange.CreatePrice.Key)
 		require.Equal(t, int64(15_000_000), draft.PriceChange.CreatePrice.UnitAmount)
-		require.Equal(t, "usd", draft.PriceChange.CreatePrice.Currency)
+		// CUR-6: UPPER is the canonical internal form, and the draft copies the
+		// existing price row's currency verbatim. Lowercase survives only on the
+		// three rail wires that demand it (Stripe catalog/invoice, FX) — this is
+		// an OpenRails surface, so it must read back exactly what is stored.
+		require.Equal(t, "USD", draft.PriceChange.CreatePrice.Currency)
 		require.NotEmpty(t, draft.PriceChange.CreatePrice.ProductID)
 
 		// The draft is a PROPOSAL only — nothing in the real catalog changed.
@@ -295,7 +299,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 				Version: catalog.SupportedVersion,
 				Products: []catalog.Product{{
 					Key: otherKey, DisplayName: "Copilot Other Product",
-					Prices: []catalog.Price{{UnitAmount: 8_000_000, Currency: "usd", Duration: "30d", AutoRenew: true}},
+					Prices: []catalog.Price{{UnitAmount: 8_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
 				}},
 			}, "insert": true, "overwrite": true,
 		})
@@ -351,7 +355,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", aToken, map[string]any{
 			"catalog": catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{
 				Key: aKey, DisplayName: "A-only product",
-				Prices: []catalog.Price{{UnitAmount: 9_000_000, Currency: "usd", Duration: "30d", AutoRenew: true}},
+				Prices: []catalog.Price{{UnitAmount: 9_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
 			}}}, "insert": true, "overwrite": true,
 		})
 		require.Equal(t, http.StatusOK, status, string(body))

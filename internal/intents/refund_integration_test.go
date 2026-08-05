@@ -90,6 +90,7 @@ type refundFixture struct {
 	paymentID     uuid.UUID
 	reservationID uuid.UUID
 	originalTxn   string
+	pspID         uuid.UUID
 }
 
 // seedRefundablePayment inserts product/price/payment (completed nmi
@@ -97,8 +98,7 @@ type refundFixture struct {
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
 	fx := refundFixture{db: dbi, store: NewStore(dbi)}
@@ -116,13 +116,17 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		require.NoError(t, err)
 	}
 	tenantID := dbtest.TestMerchantID.UUID()
+	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "nmi")
+	// ReserveRefund's payment Create falls back to the ambient-context PSP
+	// (db.RequirePSPID) when the reservation row's own PspID field is unset.
+	ctx = db.WithPSPID(ctx, fx.pspID)
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'USD', $3)`,
 		priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
-	      VALUES ($1, $2, 'nmi', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
-		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
+	exec(`INSERT INTO openrails.payments (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id, money_movement)
+	      VALUES ($1, $2, 'nmi', $3, $4, 1000, 1000, 'USD', 'completed', $5, $6, 'rail')`,
+		fx.paymentID, priceID, fx.pspID, fx.originalTxn, userID, tenantID)
 
 	reservation, err := payments.NewPaymentService(dbi).ReserveRefund(ctx, fx.paymentID,
 		"admin_refund_reservation:"+fx.paymentID.String(), amountCents,
@@ -153,6 +157,7 @@ func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 	return EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "nmi",
+		PspID:          fx.pspID,
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,
 		Payload:        fx.payload(amountCents),
@@ -359,9 +364,11 @@ func TestCCBillRefundDenialBoundedRetryThenTerminal(t *testing.T) {
 		Config:   fullModeConfig(),
 	}
 	paymentID := fx.paymentID
+	ccbillPspID := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
 	params := EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   "ccbill",
+		PspID:      ccbillPspID,
 		IntentType: TypeCCBillRefund,
 		PaymentID:  &paymentID,
 		Payload: RefundPayload{
@@ -522,9 +529,10 @@ func (fx refundFixture) stripeRunner(cfg *config.Config, baseURL string) *Runner
 	return &Runner{Store: fx.store, Registry: NewRegistry(handler), Config: cfg}
 }
 
-func (fx refundFixture) stripeEnqueueParams(amountCents int64) EnqueueParams {
+func (fx refundFixture) stripeEnqueueParams(t *testing.T, amountCents int64) EnqueueParams {
 	params := fx.enqueueParams(amountCents)
 	params.Provider = "stripe"
+	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe")
 	params.IntentType = TypeStripeRefund
 	payload := fx.payload(amountCents)
 	payload.ProviderTarget = "ch_1"
@@ -541,7 +549,7 @@ func TestStripeRefundSynchronousSuccessCarriesIdempotencyKey(t *testing.T) {
 	stripe := newFakeStripeServer(t)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 
@@ -563,7 +571,7 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 	stripe.createStatus.Store(http.StatusInternalServerError)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 
@@ -592,7 +600,7 @@ func TestStripeRefundRefusalReleasesReservation(t *testing.T) {
 	stripe.createStatus.Store(http.StatusBadRequest)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	status, _, _ := fx.reservation(t)

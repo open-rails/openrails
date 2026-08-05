@@ -47,7 +47,7 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-watermark-"+uuid.NewString(), "Metered Watermark Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'gauge')`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
 	rateMicros, divideBy := int64(500_000), int64(3600)
@@ -55,7 +55,7 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
-    'currency', 'usd',
+    'currency', 'USD',
     'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)
@@ -77,8 +77,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 			EventType:  meterKey,
 			Dimensions: map[string]int64{meterKey: unitSeconds},
 			Amount:     0,
-			Source:     "test-usage",
-			SourceID:   uuid.NewString(),
+			Key:        money.MustIdempotencyKey(money.UsageOperation(meterKey), "test-usage", uuid.NewString()),
 			OccurredAt: occurred,
 		})
 		require.NoError(t, err)
@@ -155,7 +154,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
-    'currency', 'usd',
+    'currency', 'USD',
     'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)

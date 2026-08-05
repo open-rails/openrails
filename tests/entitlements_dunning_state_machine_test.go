@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
@@ -26,7 +24,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := suite.MerchantCtx()
 
 	// Keep simulated times in the past relative to the DB server's NOW() to avoid
 	// constraints like chk_payment_not_future during RenewalSuccess.
@@ -130,8 +128,8 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
 			TransactionID:  "txn_" + uuid.New().String(),
 			SubscriptionID: ccbillSubID,
-			ClientAccnum:   "1234",
-			ClientSubacc:   "0000",
+			ClientAccnum:   suiteCCBillAccnum,
+			ClientSubacc:   suiteCCBillSubacc,
 			Timestamp:      clock.Now().UTC().Format("2006-01-02 15:04:05"),
 			NextRetryDate:  nextRetryDate,
 			FailureCode:    "declined",
@@ -140,13 +138,16 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		require.NoError(t, err)
 
 		svc := &webhooks.CCBillWebhookService{
+			// The service fails CLOSED with no armed account to authenticate
+			// the callback against; the HTTP handler arms it from the merchant's
+			// PSP catalog in production, and this fixture stands in for it.
+			CCBillClient: suite.CCBillWebhookClient(),
 			Data: webhooks.CCBillWebhookEvent{
 				EventType: webhooks.EventTypeRenewalFailure,
 				EventBody: body,
 			},
 			DB:                  rt.DB,
 			Clock:               clock,
-			CCBillClient:        testCCBillWebhookClient(),
 			SubscriptionService: rt.SubscriptionService,
 		}
 		require.NoError(t, svc.HandleCCBillWebhook(ctx))
@@ -183,8 +184,8 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	successBody, err := json.Marshal(webhooks.CCBillRenewalSuccessEvent{
 		TransactionID:      "txn_" + uuid.New().String(),
 		SubscriptionID:     ccbillSubID,
-		ClientAccnum:       "1234",
-		ClientSubacc:       "0000",
+		ClientAccnum:       suiteCCBillAccnum,
+		ClientSubacc:       suiteCCBillSubacc,
 		Timestamp:          clock.Now().UTC().Format("2006-01-02 15:04:05"),
 		BilledAmount:       "9.99",
 		BilledCurrencyCode: "usd",
@@ -193,13 +194,16 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, err)
 
 	webhook := &webhooks.CCBillWebhookService{
+		// The service fails CLOSED with no armed account to authenticate the
+		// callback against; the HTTP handler arms it from the merchant's PSP
+		// catalog in production, and this fixture stands in for it.
+		CCBillClient: suite.CCBillWebhookClient(),
 		Data: webhooks.CCBillWebhookEvent{
 			EventType: webhooks.EventTypeRenewalSuccess,
 			EventBody: successBody,
 		},
 		DB:                           rt.DB,
 		Clock:                        clock,
-		CCBillClient:                 testCCBillWebhookClient(),
 		SubscriptionService:          rt.SubscriptionService,
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		MoneyService:                 rt.MoneyService,

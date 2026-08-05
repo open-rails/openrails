@@ -51,7 +51,9 @@ func seedSolanaRailAccount(t *testing.T, dbi *db.DB, mid merchant.ID, accountID 
 	}
 	raw, err := json.Marshal(evidence)
 	require.NoError(t, err)
-	_, err = dbi.Pool().Exec(context.Background(), `
+	// psps is merchant-policied: seed it on a connection pinned to the merchant
+	// that owns the row, which is the production posture — not on dbi's base pool.
+	_, err = dbtest.SharedMerchantPool(t, mid.UUID()).Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'solana', 'live', $2, false, $3::jsonb)
 	`, mid.String(), accountID, raw)
@@ -66,8 +68,7 @@ func newSolanaMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 }
 
 func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-store-"+sfx)
@@ -87,15 +88,16 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	assert.Contains(t, client.GetEndpoint(), "helius", "store rpc_provider wins")
-	assert.Contains(t, client.GetEndpoint(), storeKey, "store rpc_api_key wins")
+	// #SEC-17: the credential is armed out-of-band, never in the endpoint URL.
+	assert.NotContains(t, client.GetEndpoint(), storeKey, "credential must not be in the endpoint URL")
+	assert.Equal(t, solanarpc.CredentialFingerprint(storeKey), client.PrimaryCredentialFingerprint(), "store rpc_api_key wins")
 }
 
 // #788: there is no boot plane — a merchant with no declared solana account
 // resolves NO client (fail closed); a declared account without RPC knobs
 // arms the public-RPC default.
 func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	// Merchant declares NO solana account at all.
@@ -119,8 +121,7 @@ func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 }
 
 func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
 	mid := newSolanaTestMerchant(t, dbi, "sol-bad-"+sfx)
@@ -181,8 +182,7 @@ func jsonID(id any) string {
 // SKIPPED (fail closed — no boot plane exists, #788). Per merchant, per pass,
 // RLS-scoped.
 func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	rdb := dbtest.NewSharedRedisClient(t)
 	svc := newSolanaMerchantsService(t, dbi)
 	sfx := uuid.NewString()[:8]
@@ -229,7 +229,7 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 			PriceID:     uuid.NewString(),
 			SessionID:   uuid.NewString(),
 			Amount:      1000000,
-			Currency:    "usd",
+			Currency:    "USD",
 			Token:       "USDC",
 			TokenMint:   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 			TokenAmount: 1000000,
@@ -254,4 +254,48 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 	assert.GreaterOrEqual(t, storeFake.count("getSignaturesForAddress"), 1,
 		"store-only merchant's pass polls with the STORE-armed client")
 	assert.Zero(t, storeFake.count(""), "no unparsed RPC bodies")
+}
+
+// or#893 phase 10. The pending set's member shape is `<merchant_id>|<reference>`
+// and every writer (storePendingPayment, RegisterPendingReference) requires a
+// merchant, so a member that does not parse was not written by this code. The
+// pre-#728 compatibility lane SREM'd it with a warning — which, on a live set,
+// deletes a buyer's pending payment reference and with it the poller's only
+// chance to credit a payment that may already be on chain. Corruption of a live
+// input is reported, not tidied away.
+//
+// Failing before this change: PendingReferencesByMerchant returned (map, nil)
+// and the bare member was gone from Redis.
+func TestPendingSetRefusesAMalformedMemberInsteadOfDeletingIt(t *testing.T) {
+	rdb, _ := dbtest.SharedRedisClient(t)
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+
+	bare := "or893-bare-" + uuid.NewString()
+	require.NoError(t, rdb.SAdd(context.Background(), pendingSolanaPaymentsKey, bare).Err())
+	t.Cleanup(func() { _ = rdb.SRem(context.Background(), pendingSolanaPaymentsKey, bare).Err() })
+
+	_, err := paySvc.PendingReferencesByMerchant(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pending set is corrupt")
+
+	still, err := rdb.SIsMember(context.Background(), pendingSolanaPaymentsKey, bare).Result()
+	require.NoError(t, err)
+	require.True(t, still, "the poller must not delete a reference it could not attribute")
+}
+
+// A removal that cannot name the member it is removing is refused rather than
+// issuing an SREM that can only ever be a no-op.
+func TestRemovePendingPaymentRequiresAMerchant(t *testing.T) {
+	rdb, _ := dbtest.SharedRedisClient(t)
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+
+	err := paySvc.RemovePendingPayment(context.Background(), "some-reference")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires a merchant")
 }

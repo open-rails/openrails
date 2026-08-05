@@ -1,6 +1,7 @@
 package embedded
 
 import (
+	"context"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -15,7 +16,7 @@ func TestCatalogPushRuntimeReusesProvidedRuntime(t *testing.T) {
 	}
 	host := &Embedded{app: &app.App{Runtime: hostRuntime}}
 
-	rt, svc, cleanup, err := catalogPushRuntime(CatalogPushOptions{Runtime: host})
+	rt, svc, cleanup, err := catalogPushRuntime(context.Background(), CatalogPushOptions{Runtime: host})
 	if err != nil {
 		t.Fatalf("catalogPushRuntime: %v", err)
 	}

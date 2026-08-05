@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +34,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 		ID:                  priceID,
 		ProductID:           productID,
 		Amount:              23_000_000,
-		Currency:            "usd",
+		Currency:            "USD",
 		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
 		PSPLinks: map[string]map[string]string{
@@ -199,7 +197,7 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
-	plans, err := fetchNMIPlans(client)
+	plans, err := fetchNMIPlans(context.Background(), client)
 	if err != nil {
 		t.Fatalf("fetch nmi plans: %v", err)
 	}
@@ -441,7 +439,7 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	product := &models.Product{ID: productID, Key: "premium"}
 	mkPrice := func(pda string, archived bool) *models.Price {
 		return &models.Price{
-			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "usd",
+			ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "USD",
 			AccessDurationHours: &cycleHours, AutoRenew: true, Archived: archived,
 			PSPLinks: map[string]map[string]string{
 				string(models.RailSolana): {models.RailKeyRail: string(models.RailSolana), "plan_pda": pda},
@@ -482,35 +480,5 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	}
 	if e.Label != "premium.usd.23000000.30" {
 		t.Errorf("label should be the price content key, got %q", e.Label)
-	}
-}
-
-// -- live smoke (read-only; opt-in) ------------------------------------------------
-
-// TestLiveStripeExtrasListing runs the extras-detection LISTING (GETs only;
-// nothing is ever archived) against a real Stripe account. Opt-in via
-// OPENRAILS_LIVE_STRIPE_KEY; use a TEST-mode key.
-func TestLiveStripeExtrasListing(t *testing.T) {
-	key := strings.TrimSpace(os.Getenv("OPENRAILS_LIVE_STRIPE_KEY"))
-	if key == "" {
-		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
-	}
-	rails := railresolve.FixedSet{
-		"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: key}},
-	}
-	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Rails: rails}
-	products, prices, err := fetchStripeCatalog(context.Background(), lister)
-	if err != nil {
-		t.Fatalf("live stripe listing: %v", err)
-	}
-	// Empty local snapshot: every remote object shows up classified ours/foreign.
-	extras := computeStripeExtras(products, prices, buildSnapshotFromRows(nil, nil))
-	t.Logf("live stripe account: %d products, %d prices, %d extras vs an empty catalog", len(products), len(prices), len(extras))
-	for _, e := range extras {
-		marker := "foreign"
-		if e.Owned {
-			marker = "openrails-marked"
-		}
-		t.Logf("  %s %s (%s) active=%v [%s]", e.ObjectType, e.ExternalID, e.Label, e.Active, marker)
 	}
 }

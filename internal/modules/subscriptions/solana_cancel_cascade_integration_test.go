@@ -24,10 +24,9 @@ import (
 // the hourly cranker's ListDue (status = active filter) no longer returns it,
 // which stops billing because OpenRails is the only puller.
 func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -95,10 +94,9 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 // Solana subscription that was never enrolled on-chain (no solana_subscriptions
 // row): the cancel still succeeds rather than erroring.
 func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := dbtest.WithTestMerchant(context.Background())
-	dbi := dbtest.OpenAppDB(t, dsn)
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -156,7 +154,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		ProductID:           productID,
 		Archived:            false,
 		Amount:              999,
-		Currency:            "usd",
+		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		AccessDurationHours: &cycleHours,
 		AutoRenew:           true,
@@ -166,6 +164,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	require.NoError(t, err)
 
 	subPriceID := priceID
+	pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Pool(), dbtest.TestMerchantID.UUID(), string(models.RailSolana))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		CustomerID:            dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Pool(), userID),
@@ -174,6 +173,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailSolana),
+		PspID:                 pspID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
 		StartedAt:             now,

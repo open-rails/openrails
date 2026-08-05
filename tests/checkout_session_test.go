@@ -94,12 +94,16 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	recipientWallet := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
-	suite.seedRailMerchantAccountWithEvidence(
+	suite.seedPSPWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
 		"DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-		`{"source":"test","settings":{"recipient_wallet":"`+recipientWallet+`"}}`,
+		// or#881: these rewrite the SHARED suite's solana PSP row, so they must
+		// carry the same token declaration the fixture seeds — the declared set
+		// IS the accepted set, and dropping it would leave later tests with the
+		// USDC-only default.
+		`{"source":"test","settings":{"recipient_wallet":"`+recipientWallet+`","tokens":`+suiteSolanaTokensJSON+`}}`,
 	)
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID
@@ -135,18 +139,18 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	assert.NotEmpty(t, payment["reference"], "Should include reference")
 	transactionURL, ok := payment["transaction_url"].(string)
 	require.True(t, ok, "Should include transaction_url")
-	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+recipientWallet+"?"), "transaction_url should use provider-account recipient_wallet")
+	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+recipientWallet+"?"), "transaction_url should use PSP recipient_wallet")
 }
 
 func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	accountID := "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
-	suite.seedRailMerchantAccountWithEvidence(
+	suite.seedPSPWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
 		accountID,
-		`{"source":"test"}`,
+		`{"source":"test","settings":{"tokens":`+suiteSolanaTokensJSON+`}}`,
 	)
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID

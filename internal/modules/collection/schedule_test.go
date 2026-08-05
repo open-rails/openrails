@@ -8,25 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClassifyNMIDecline(t *testing.T) {
-	hard := []int{201, 204, 220, 221, 222, 223, 224, 225, 226, 240, 250, 251, 252, 253, 261, 262, 263, 461}
-	for _, code := range hard {
-		if got := ClassifyNMIDecline(code); got != DeclineHard {
-			t.Errorf("code %d: expected DeclineHard, got %v", code, got)
-		}
-	}
-
-	soft := []int{0, 100, 200, 202, 203, 260, 264, 300, 400, 410, 411, 420, 421, 430, 440, 441, 460, 999}
-	for _, code := range soft {
-		if got := ClassifyNMIDecline(code); got != DeclineSoft {
-			t.Errorf("code %d: expected DeclineSoft, got %v", code, got)
-		}
-	}
-}
-
 // TestRetryOffsets pins the cadence-relative tier table (#359), including the
 // exact tier boundaries. The binding principle: the derived staleness window
 // (last retry offset + one day of slack) must fit inside ONE billing cycle.
+//
+// #839: the 0-retry tier's window is the SLACK, never zero. A zero window is
+// true by construction the instant a row lapses, so it gave a short-cycle
+// subscription no chance to be charged at all before collection wrote it off.
 func TestRetryOffsets(t *testing.T) {
 	day := 24 * time.Hour
 	weekly := []time.Duration{1 * day, 2 * day}
@@ -40,15 +28,15 @@ func TestRetryOffsets(t *testing.T) {
 		window      time.Duration
 	}{
 		// Anchors.
-		{"daily: no dunning, first failure terminal", 24, nil, 1, 0},
+		{"daily: no retries, but a full day of slack to attempt the charge", 24, nil, 1, 1 * day},
 		{"weekly: retries at +1d, +2d", 7 * 24, weekly, 3, 3 * day},
 		{"monthly: progressive +2d/+5d/+9d/+13d", 30 * 24, monthly, 5, 14 * day},
 		{"yearly: capped at the monthly schedule", 365 * 24, monthly, 5, 14 * day},
 
 		// Boundaries of the 0-retry tier: a 2-3 day cycle retried daily would
 		// still be dunning when the next period is due (window 3d > cycle).
-		{"2d: still no dunning", 2 * 24, nil, 1, 0},
-		{"3d: still no dunning", 3 * 24, nil, 1, 0},
+		{"2d: still no retries", 2 * 24, nil, 1, 1 * day},
+		{"3d: still no retries", 3 * 24, nil, 1, 1 * day},
 		{"4d: first cycle with retries (window 3d fits inside the cycle)", 4 * 24, weekly, 3, 3 * day},
 
 		// Boundaries of the monthly tier: the 14d window must fit well inside
@@ -113,55 +101,132 @@ func TestBillingCycleHoursOf(t *testing.T) {
 	require.Equal(t, 168, BillingCycleHoursOf(&models.Price{AccessDurationHours: &seven, AutoRenew: true}))
 }
 
-// TestFailureAction pins the invoice-consumer failure mechanics on the SAME
-// offsets table (moved from money/invoice_dunning.go by #828).
+// TestFailureAction pins the failure mechanics BOTH consumers ride on the SAME
+// offsets table (moved from money/invoice_dunning.go by #828), now routed
+// through the or#870 three-bucket doctrine.
+//
+// The load-bearing property: every Action names exactly one disposition. No
+// input produces the old bare Action{} — no next attempt AND not terminal AND
+// no reason — which is the dead state or#828 was filed on.
 func TestFailureAction(t *testing.T) {
 	t.Parallel()
 
 	first := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	insufficientFunds := "insufficient_funds"
 	expiredCard := "expired_card"
+	pickUpCard := "pick_up_card"
+	stopAllRecurring := "declined_stop_all_recurring_payments"
+	numericExpired := "223"
+	wireExpired := "nmi_response_223"
+	wireStopRecurring := "nmi_response_261"
+	unpublishedCode := "nmi_response_997"
 
 	tests := []struct {
 		name            string
+		rail            string
 		code            *string
 		currentFailures int
 		firstFailureAt  *time.Time
+		wantOutcome     DeclineOutcome
 		wantNext        *time.Time
 		wantTerminal    bool
 	}{
 		{
-			name:     "first recoverable failure retries on day two",
-			code:     &insufficientFunds,
-			wantNext: timePointer(first.Add(2 * 24 * time.Hour)),
+			name:        "bucket 1: first recoverable failure retries on day two",
+			code:        &insufficientFunds,
+			wantOutcome: DeclineRetry,
+			wantNext:    timePointer(first.Add(2 * 24 * time.Hour)),
 		},
 		{
-			name:            "later retry remains anchored to first failure",
+			name:            "bucket 1: later retry remains anchored to first failure",
 			code:            &insufficientFunds,
 			currentFailures: 2,
 			firstFailureAt:  &first,
+			wantOutcome:     DeclineRetry,
 			wantNext:        timePointer(first.Add(9 * 24 * time.Hour)),
 		},
 		{
-			name:            "fifth recoverable failure is terminal",
+			name:            "bucket 1: fifth recoverable failure exhausts the schedule",
 			code:            &insufficientFunds,
 			currentFailures: 4,
 			firstFailureAt:  &first,
+			wantOutcome:     DeclineRetry,
 			wantTerminal:    true,
 		},
 		{
-			name: "card replacement failure pauses retries",
-			code: &expiredCard,
+			name:        "bucket 1: an unrecognized code retries, it does NOT park",
+			code:        &unpublishedCode,
+			wantOutcome: DeclineRetry,
+			wantNext:    timePointer(first.Add(2 * 24 * time.Hour)),
 		},
 		{
-			name: "unknown failure pauses retries",
+			name:        "bucket 1: no code at all retries — no evidence, no action",
+			wantOutcome: DeclineRetry,
+			wantNext:    timePointer(first.Add(2 * 24 * time.Hour)),
+		},
+		{
+			name:        "bucket 1: ccbill publishes no decline vocabulary, so every code retries",
+			rail:        "ccbill",
+			code:        &stopAllRecurring,
+			wantOutcome: DeclineRetry,
+			wantNext:    timePointer(first.Add(2 * 24 * time.Hour)),
+		},
+		{
+			name:        "bucket 2: expired card stops charging without terminating",
+			code:        &expiredCard,
+			wantOutcome: DeclineFixPaymentMethod,
+		},
+		{
+			name:        "bucket 2: numeric form of the same code classifies identically",
+			code:        &numericExpired,
+			wantOutcome: DeclineFixPaymentMethod,
+		},
+		{
+			name:        "bucket 2: nmi_response_ wire form of the same code classifies identically",
+			code:        &wireExpired,
+			wantOutcome: DeclineFixPaymentMethod,
+		},
+		{
+			name:        "bucket 2: a lost card is a fixable card, not a dead subscriber",
+			code:        &pickUpCard,
+			wantOutcome: DeclineFixPaymentMethod,
+		},
+		{
+			name:         "bucket 3: withdrawn recurring mandate is terminal on the first look",
+			code:         &stopAllRecurring,
+			wantOutcome:  DeclineNonRecoverable,
+			wantTerminal: true,
+		},
+		{
+			name:         "bucket 3: nmi_response_ wire form is terminal too",
+			code:         &wireStopRecurring,
+			wantOutcome:  DeclineNonRecoverable,
+			wantTerminal: true,
+		},
+		{
+			name:         "bucket 3 on stripe: revoked authorization is terminal",
+			rail:         "stripe",
+			code:         stringPointer("revocation_of_authorization"),
+			wantOutcome:  DeclineNonRecoverable,
+			wantTerminal: true,
+		},
+		{
+			name:        "bucket 2 on stripe: expired card stops charging",
+			rail:        "stripe",
+			code:        stringPointer("expired_card"),
+			wantOutcome: DeclineFixPaymentMethod,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			action := FailureAction(MonthlyCycleHours, "nmi", test.code, test.currentFailures, test.firstFailureAt, first)
+			rail := test.rail
+			if rail == "" {
+				rail = "nmi"
+			}
+			action := FailureAction(MonthlyCycleHours, rail, test.code, test.currentFailures, test.firstFailureAt, first)
+			require.Equal(t, test.wantOutcome, action.Outcome, "decline bucket")
 			require.Equal(t, test.wantTerminal, action.Terminal)
 			if test.wantNext == nil {
 				require.Nil(t, action.NextAttemptAt)
@@ -169,8 +234,54 @@ func TestFailureAction(t *testing.T) {
 				require.NotNil(t, action.NextAttemptAt)
 				require.True(t, action.NextAttemptAt.Equal(*test.wantNext))
 			}
+
+			// The or#828 dead state, asserted out of existence: an Action with
+			// no next attempt and no terminal flag is legal ONLY as bucket 2,
+			// where it means "we deliberately stopped; the customer fixes the
+			// card". Every other input must schedule or terminate.
+			if action.NextAttemptAt == nil && !action.Terminal {
+				require.True(t, action.AwaitingPaymentMethod(),
+					"an Action that neither retries nor terminates must be bucket 2, not a hole")
+			}
+			require.Equal(t, action.Outcome == DeclineFixPaymentMethod, action.AwaitingPaymentMethod())
+			require.Equal(t, test.wantTerminal && test.wantOutcome == DeclineRetry, action.ScheduleExhausted())
 		})
 	}
+}
+
+// TestFailureActionUsesTheRealCycle is the or#828 hardcode: the invoice
+// consumer billed every statement on collection.MonthlyCycleHours, so a weekly
+// statement was dunned on the monthly offsets.
+func TestFailureActionUsesTheRealCycle(t *testing.T) {
+	t.Parallel()
+
+	first := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	code := "insufficient_funds"
+
+	weekly := FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 7)), "nmi", &code, 0, &first, first)
+	require.NotNil(t, weekly.NextAttemptAt)
+	require.Equal(t, first.Add(24*time.Hour), *weekly.NextAttemptAt,
+		"a weekly statement retries on the weekly offsets (+1d), not the monthly ones (+2d)")
+
+	monthly := FailureAction(CycleHoursBetween(first, first.AddDate(0, 1, 0)), "nmi", &code, 0, &first, first)
+	require.NotNil(t, monthly.NextAttemptAt)
+	require.Equal(t, first.Add(2*24*time.Hour), *monthly.NextAttemptAt)
+
+	// A sub-4-day statement period gets no retries at all — the first failure
+	// exhausts the schedule.
+	daily := FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 1)), "nmi", &code, 0, &first, first)
+	require.True(t, daily.Terminal)
+	require.True(t, daily.ScheduleExhausted())
+}
+
+func TestCycleHoursBetween(t *testing.T) {
+	t.Parallel()
+	from := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	require.Equal(t, 168, CycleHoursBetween(from, from.AddDate(0, 0, 7)))
+	require.Equal(t, 744, CycleHoursBetween(from, from.AddDate(0, 1, 0)))
+	require.Equal(t, 0, CycleHoursBetween(time.Time{}, from), "unset period is unknown, not zero-length")
+	require.Equal(t, 0, CycleHoursBetween(from, from), "degenerate period is unknown")
+	require.Equal(t, 0, CycleHoursBetween(from, from.AddDate(0, 0, -1)), "inverted period is unknown")
 }
 
 // TestScheduleParity is the #828 unification proof at the table level: the
@@ -201,3 +312,5 @@ func TestScheduleParity(t *testing.T) {
 }
 
 func timePointer(value time.Time) *time.Time { return &value }
+
+func stringPointer(value string) *string { return &value }

@@ -16,6 +16,7 @@ import (
 // short-circuits with an error so initializeCheckoutSession returns before
 // applyCheckoutResponse — we only assert what was threaded into the request.
 type captureCheckoutExecutor struct {
+	stubRailTargets
 	captured *CheckoutRequest
 }
 

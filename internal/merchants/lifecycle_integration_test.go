@@ -21,13 +21,50 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// allowAllDestructive stands in for the #836/#835 gate in tests that are about
+// merchant ROUTING and tombstoning, not about the gate. The gate's own
+// behaviour on the purge path is pinned against the real migrated schema in
+// purge_integration_test.go.
+type allowAllDestructive struct{}
+
+func (allowAllDestructive) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
+	return true, ""
+}
+
+// applyDirectoryFunctionMigration replays the REAL baseline definitions of the
+// #824 cross-merchant directory functions onto this package's hand-written
+// schema, so they cannot drift from what production runs. schemaDDL below is a
+// deliberate minimal subset of the migrated schema; a hand-copied function body
+// here would be exactly the divergence that let #824 hide behind
+// routes_merchant_webhook_integration_test.go's bespoke openrails.psps.
+func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	// The functions GRANT to openrails_app, which only the baseline creates.
+	_, err := pool.Exec(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
+		END IF;
+	END $$;`)
+	require.NoError(t, err)
+	sql, err := postgresmigrations.BaselineObjects(
+		"current_merchant_id",
+		"assert_cross_merchant_reader",
+		"psp_owner_by_identity",
+		"customer_merchant_ids_for_subject",
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, sql)
+	require.NoError(t, err)
+}
 
 // schemaDDL stands up the minimal openrails.* schema the merchant service touches:
 // the merchant directory (with #225 columns), one representative merchant-owned table
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
-// tables. It mirrors migrations 039 + 041 for the columns under test.
+// tables. The columns under test mirror the baseline's shapes.
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 
@@ -50,7 +87,9 @@ CREATE TABLE IF NOT EXISTS openrails.entitlements (
 
 CREATE TABLE IF NOT EXISTS openrails.customers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL
+    merchant_id UUID NOT NULL,
+    -- #824: the subject-first directory lookup is replayed from the baseline.
+    subject     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
@@ -64,9 +103,27 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
 );
 
 
+CREATE TABLE IF NOT EXISTS openrails.custodians (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    key text NOT NULL,
+    kind text NOT NULL,
+    environment text DEFAULT 'live' NOT NULL,
+    account_id text NOT NULL,
+    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    credential_versions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
+    created_at timestamptz DEFAULT current_timestamp NOT NULL,
+    updated_at timestamptz DEFAULT current_timestamp NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (id, merchant_id),
+    UNIQUE (kind, environment, account_id)
+);
+
 CREATE TABLE IF NOT EXISTS openrails.psps (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
+    custodian_id uuid REFERENCES openrails.custodians(id),
     rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
@@ -111,13 +168,31 @@ CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     status text NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
+CREATE TABLE IF NOT EXISTS openrails.merchant_purge_inventories (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id  UUID NOT NULL,
     status       TEXT NOT NULL DEFAULT 'completed',
-    row_counts   JSONB,
+    manifest     JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS openrails.destructive_runs (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id   UUID NOT NULL,
+    psp_id        UUID,
+    kind          TEXT NOT NULL,
+    actor         TEXT NOT NULL,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at   TIMESTAMPTZ,
+    dry_run       BOOLEAN NOT NULL DEFAULT false,
+    coverage      JSONB,
+    expected_rows BIGINT,
+    affected      JSONB,
+    reversed_at   TIMESTAMPTZ,
+    reversed_by   TEXT,
+    status        TEXT NOT NULL DEFAULT 'running',
+    note          TEXT
 );
 `
 
@@ -128,6 +203,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 		pool := newExternalTenancyTestPool(t, ctx, dsn)
 		_, err := pool.Exec(ctx, schemaDDL)
 		require.NoError(t, err)
+		applyDirectoryFunctionMigration(t, ctx, pool)
 		return pool
 	}
 
@@ -152,6 +228,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 
 	_, err = pool.Exec(ctx, schemaDDL)
 	require.NoError(t, err)
+	applyDirectoryFunctionMigration(t, ctx, pool)
 	return pool
 }
 
@@ -189,7 +266,7 @@ func newSvc(t *testing.T) *Service {
 	return svc
 }
 
-func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
@@ -199,7 +276,7 @@ func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID,
 	require.NoError(t, err)
 }
 
-func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedArchivedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
@@ -209,21 +286,21 @@ func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merc
 	require.NoError(t, err)
 }
 
-func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
+func TestArchivedPSPRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
 	require.NoError(t, err)
 
 	const accountID = "archived-nmi-account"
-	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 	secretName, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
 	_, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "live", "security_key")
-	require.ErrorIs(t, err, ErrNoActiveRailMerchantAccount)
+	require.ErrorIs(t, err, ErrNoActivePSP)
 	require.False(t, ok)
 
 	got, ok, err := svc.LoadNMIWebhookSigningSecretForAccount(ctx, tn.ID, accountID)
@@ -232,14 +309,14 @@ func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *test
 	require.Equal(t, "archived-webhook-secret", got)
 }
 
-func TestArchivedRailMerchantAccountDrainState(t *testing.T) {
+func TestArchivedPSPDrainState(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
 	require.NoError(t, err)
 
 	const accountID = "draining-nmi-account"
-	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 
 	items, err := svc.ListPaymentProviderConfigs(ctx, tn.ID, "nmi", "live", "archived")
 	require.NoError(t, err)
@@ -336,23 +413,34 @@ func TestDelete_RequiresExport(t *testing.T) {
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)
-	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeSecretKey, "sk")
+	_, err = svc.secrets.Put(ctx, tn.ID, "psps/stripe/live/acct_884_test/secret_key", "sk")
 	require.NoError(t, err)
 
-	// Delete without confirm -> error.
-	require.Error(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: false}))
+	svc.WithDestructivePolicy(allowAllDestructive{})
 
-	// Delete with confirm but NO export -> ErrExportRequired.
-	err = svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true})
-	require.True(t, errors.Is(err, ErrExportRequired), "delete must require export, got %v", err)
+	// Unconfirmed -> refused, and the refusal states the true blast radius.
+	err = svc.Delete(ctx, tn.ID, DeleteOptions{})
+	var notConfirmed *ErrPurgeNotConfirmed
+	require.ErrorAs(t, err, &notConfirmed)
+	require.Equal(t, 1, notConfirmed.TotalRows)
 
-	// Export, then delete succeeds and purges rows.
-	exportID, counts, err := svc.Export(ctx, tn.ID)
+	one := 1
+	confirmed := DeleteOptions{ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &one}
+
+	// Confirmed but with NO purge inventory -> refused.
+	err = svc.Delete(ctx, tn.ID, confirmed)
+	var stale *ErrPurgeInventoryStale
+	require.ErrorAs(t, err, &stale, "delete must require a matching purge inventory, got %v", err)
+
+	// Take the inventory, then the purge proceeds.
+	inv, err := svc.TakePurgeInventory(ctx, tn.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, exportID)
-	require.Equal(t, 1, counts["entitlements"])
+	require.NotEmpty(t, inv.ID)
+	require.False(t, inv.IsBackup())
+	require.Equal(t, 1, inv.RowCounts["entitlements"])
+	require.NotEmpty(t, inv.NotCaptured)
 
-	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
+	require.NoError(t, svc.Delete(ctx, tn.ID, confirmed))
 
 	var entCount int
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
@@ -363,13 +451,13 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.True(t, errors.Is(err, ErrMerchantNotFound))
 }
 
-func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
+func TestCredentialRotation_LoadsPSPScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_test")
 	secretName, err := PSPSecretName("stripe", "live", "acct_test", "secret_key")
 	require.NoError(t, err)
 	sec, err := svc.secrets.Put(ctx, tn.ID, secretName, "sk_1")
@@ -404,7 +492,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 
 	// After resolution the caller loads THAT merchant's signing secret (the trust
 	// boundary), which is namespaced to the merchant.
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_acme")
 	secretName, err := PSPSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "whsec_acme")
@@ -414,10 +502,12 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.Equal(t, "whsec_acme", creds.WebhookSigningSecret)
 
 	// A deleted merchant no longer resolves.
-	exportID, _, err := svc.Export(ctx, tn.ID)
+	svc.WithDestructivePolicy(allowAllDestructive{})
+	inv, err := svc.TakePurgeInventory(ctx, tn.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, exportID)
-	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
+	require.NotEmpty(t, inv.ID)
+	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{
+		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows}))
 	_, err = svc.ResolveBySlug(ctx, "acme")
 	require.ErrorIs(t, err, ErrMerchantRouteUnresolved)
 }

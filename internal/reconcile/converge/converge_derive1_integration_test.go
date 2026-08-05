@@ -43,11 +43,12 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7)`, subActive, merchantID, custActive, prod, price, start, end)
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'pending','mobius',$6,$6,$7)`, subPending, merchantID, custPending, prod, price, start, end)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
+		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, subActive, merchantID, custActive, prod, price, start, end, pspID)
+		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'pending','mobius',$6,$6,$7,$8)`, subPending, merchantID, custPending, prod, price, start, end, pspID)
 		return nil
 	}))
 
@@ -146,9 +147,10 @@ func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1o-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7)`, sub, merchantID, customer, prod, price, start, end)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
+		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, sub, merchantID, customer, prod, price, start, end, pspID)
 		// Pre-existing live entitlement that OVERLAPS the subscription window.
 		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
 		      VALUES ($1,$2,$3,'premium',$4,$5,'admin',$6)`, uuid.New(), merchantID, customer, start.Add(-24*time.Hour), end.Add(24*time.Hour), uuid.New())
@@ -238,13 +240,14 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "flap-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// ACTIVE auto-renew sub in a RUNNING period, with the #691 shape already
 		// projected: bounded per-period grant + ONE standing window.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9)`,
-			activeSub, merchantID, cust, prod, price, "flap-live-"+sfx, subStart, periodStart, periodEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9,$10)`,
+			activeSub, merchantID, cust, prod, price, "flap-live-"+sfx, subStart, periodStart, periodEnd, pspID)
 		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,
 			activeGrant, merchantID, cust, activeSub.String(), []byte(`{"entitlements":["`+feat+`"]}`), periodStart, periodEnd)
@@ -252,9 +255,9 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		      VALUES ($1,$2,$3,$4,$5,NULL,$6,'subscription',$7)`, standingEnt, merchantID, cust, feat, subStart, activeSub, activeGrant)
 		// OLD cancelled sub, same product/feature, historical period, NO grant —
 		// the doujins dual-history import shape.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
-		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8)`,
-			cancelledSub, merchantID, cust, prod, price, "flap-old-"+sfx, oldStart, oldEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8,$9)`,
+			cancelledSub, merchantID, cust, prod, price, "flap-old-"+sfx, oldStart, oldEnd, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -353,11 +356,12 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			subProd, "wflap-sub-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			subPrice, subProd, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9)`,
-			activeSub, merchantID, cust, subProd, subPrice, "wflap-live-"+sfx, subStart, periodStart, periodEnd)
+		ccbillPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9,$10)`,
+			activeSub, merchantID, cust, subProd, subPrice, "wflap-live-"+sfx, subStart, periodStart, periodEnd, ccbillPSP)
 		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,
 			activeGrant, merchantID, cust, activeSub.String(), []byte(`{"entitlements":["`+feat+`"]}`), periodStart, periodEnd)
@@ -367,12 +371,13 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		// feature; its stored expiration window sits inside the standing window.
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			oneOffProd, "wflap-oneoff-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'usd',$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`,
 			oneOffPrice, oneOffProd, merchantID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'usd','completed',$6,$7)`,
+		solanaPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, cust, oneOffPrice, "wflap-"+sfx, purchased,
-			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
+			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, solanaPSP)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -450,11 +455,12 @@ func TestConverge_DeriveGrantMissing_CancelledSubNonOverlapped(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "nov-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
-		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8)`,
-			sub, merchantID, cust, prod, price, "nov-"+sfx, oldStart, oldEnd)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8,$9)`,
+			sub, merchantID, cust, prod, price, "nov-"+sfx, oldStart, oldEnd, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -526,24 +532,25 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodAuto, "unk-auto-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			priceAuto, prodAuto, merchantID)
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodBounded, "unk-bnd-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,false,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,false,$3)`,
 			priceBounded, prodBounded, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// AUTO-RENEW sub imported as unknown with a stale (past) stored period.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8)`,
-			subAuto, merchantID, custAuto, prodAuto, priceAuto, "unk-auto-"+sfx, start, pastEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8,$9)`,
+			subAuto, merchantID, custAuto, prodAuto, priceAuto, "unk-auto-"+sfx, start, pastEnd, pspID)
 		// NON-renewing unknown, same stale period.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8)`,
-			subBounded, merchantID, custBounded, prodBounded, priceBounded, "unk-bnd-"+sfx, start, pastEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8,$9)`,
+			subBounded, merchantID, custBounded, prodBounded, priceBounded, "unk-bnd-"+sfx, start, pastEnd, pspID)
 		// Unknown with NO window evidence: no period bounds, no ended_at.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at)
-		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7)`,
-			subBare, merchantID, custBare, prodAuto, priceAuto, "unk-bare-"+sfx, start)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$8)`,
+			subBare, merchantID, custBare, prodAuto, priceAuto, "unk-bare-"+sfx, start, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -669,16 +676,17 @@ func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "cb-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'usd',720,true,$3)`,
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// Charged-back sub, legacy import shape: ended_at = expiration (future).
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
-		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'chargeback',$8)`,
-			subCB, merchantID, custCB, prod, price, "cb-"+sfx, start, futureEnd, cancelled)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'chargeback',$8,$10)`,
+			subCB, merchantID, custCB, prod, price, "cb-"+sfx, start, futureEnd, cancelled, pspID)
 		// User-cancelled sub with the SAME shape: paid-through runway is honored.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at)
-		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'user',$8)`,
-			subUser, merchantID, custUser, prod, price, "cb-user-"+sfx, start, futureEnd, cancelled)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'user',$8,$10)`,
+			subUser, merchantID, custUser, prod, price, "cb-user-"+sfx, start, futureEnd, cancelled, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -752,11 +760,12 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1w-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'usd',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'usd','completed',$6,$7)`,
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, customer, price, "w-"+sfx, purchased,
-			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
+			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, pspID)
 		return nil
 	}))
 

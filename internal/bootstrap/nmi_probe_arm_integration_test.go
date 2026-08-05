@@ -41,7 +41,7 @@ func nmiProbeArmTestServer(t *testing.T, authCode string) *httptest.Server {
 }
 
 func testModeReconcileConfig() *config.Config {
-	return &config.Config{MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureSandbox}
+	return &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureSandbox}
 }
 
 func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
@@ -50,8 +50,7 @@ func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				Environment: "test",
-				AccountID:   "681902",
+				AccountID: "681902",
 				Secrets: map[string]string{
 					"security_key": securityKey,
 				},
@@ -87,7 +86,7 @@ func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
-	require.Zero(t, count, "a refused arm must never persist the provider account row")
+	require.Zero(t, count, "a refused arm must never persist the PSP row")
 }
 
 // TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode is the control:
@@ -192,15 +191,14 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				Environment: "live",
-				AccountID:   "681902",
-				Secrets:     map[string]string{"security_key": "live-security-key-prod"},
+				AccountID: "681902",
+				Secrets:   map[string]string{"security_key": "live-security-key-prod"},
 			},
 		},
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, TestMode: config.CredentialPostureLive}
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureLive}
 	err := ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{
 		Insert:            true,
 		NMIProbeV5BaseURL: server.URL,

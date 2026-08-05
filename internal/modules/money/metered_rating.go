@@ -10,15 +10,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
 
-// Rate cards (#638) are the ONLY metered-pricing engine (#707): the manifest
-// push translates legacy metered: price declarations into rate-card rows, and
-// this sweep rates reported usage (openrails.usage_events) into pending owed
-// invoice items through the #672 per-period watermark.
+// Rate cards (#638) are the ONLY metered-pricing engine (#707) and, since
+// or#893, the only metered-pricing INPUT: this sweep rates reported usage
+// (openrails.usage_events) into pending owed invoice items through the #672
+// per-period watermark.
 
 type catalogRateCardRow struct {
 	ID          uuid.UUID
@@ -27,14 +28,10 @@ type catalogRateCardRow struct {
 	EventType   string
 	ValueKey    string
 	Aggregation string
-	// MissingDefault is an event's contribution when the value property is
-	// absent: 1 for legacy-shaped counter meters ({key, kind: counter} — the
-	// #599 "count the event itself" convention), else 0.
-	MissingDefault int64
-	GroupBy        map[string]string
-	Filter         map[string][]string
-	Allowance      *pricing.Allowance
-	Price          pricing.RatePrice
+	GroupBy     map[string]string
+	Filter      map[string][]string
+	Allowance   *pricing.Allowance
+	Price       pricing.RatePrice
 }
 
 func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
@@ -45,7 +42,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 		return fmt.Errorf("invalid period: to must be after from")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -107,10 +104,9 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 // loadCatalogRateCards loads the arrears usage rate cards that apply to one
 // payer, joined to their meters. A payer-scoped card (#798 negotiated
 // pricing, customer_id set) REPLACES the merchant-default card for the same
-// meter_key. Legacy-shaped meters ({key, kind}, no aggregation) bridge to
-// the #599 conventions: event_type/value property default to the meter key;
-// counter aggregates as sum-of-quantities defaulting each event to 1, gauge as
-// sum of unit-seconds defaulting to 0.
+// meter_key. event_type and value_property default to the meter key when the
+// meter leaves them unset; aggregation defaults to sum. or#893 removed the
+// #599 counter/gauge bridge — aggregation is the only meter shape.
 func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -121,7 +117,6 @@ SELECT rc.id,
        COALESCE(NULLIF(cm.event_type, ''), cm.key) AS event_type,
        COALESCE(NULLIF(cm.value_property, ''), cm.key) AS value_property,
        COALESCE(NULLIF(cm.aggregation, ''), 'sum') AS aggregation,
-       CASE WHEN COALESCE(NULLIF(cm.aggregation, ''), '') = '' AND cm.kind = 'counter' THEN 1 ELSE 0 END AS missing_default,
        COALESCE(cm.group_by, '{}'::jsonb) AS group_by,
        COALESCE(rc.filter, '{}'::jsonb) AS filter,
        rc.allowance,
@@ -143,7 +138,7 @@ ORDER BY rc.ordinal`, merchantID, currency, payer.UUID())
 			var row catalogRateCardRow
 			var groupByJSON, filterJSON, priceJSON []byte
 			var allowanceJSON []byte
-			if err := rows.Scan(&row.ID, &row.MeterKey, &row.PayerScoped, &row.EventType, &row.ValueKey, &row.Aggregation, &row.MissingDefault, &groupByJSON, &filterJSON, &allowanceJSON, &priceJSON); err != nil {
+			if err := rows.Scan(&row.ID, &row.MeterKey, &row.PayerScoped, &row.EventType, &row.ValueKey, &row.Aggregation, &groupByJSON, &filterJSON, &allowanceJSON, &priceJSON); err != nil {
 				return err
 			}
 			if err := json.Unmarshal(groupByJSON, &row.GroupBy); err != nil {
@@ -213,7 +208,7 @@ func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uu
 SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
        COALESCE(SUM(
            CASE WHEN $9 = 'count' THEN 1
-                ELSE COALESCE((ue.dimensions ->> $7)::bigint, (ue.metadata ->> $7)::bigint, $10::bigint)
+                ELSE COALESCE((ue.dimensions ->> $7)::bigint, (ue.metadata ->> $7)::bigint, 0)
            END
        ), 0)::bigint AS quantity
 FROM openrails.usage_events ue
@@ -223,7 +218,7 @@ WHERE ue.merchant_id = $1
   AND ue.event_type = $4
   AND ue.occurred_at >= $5::timestamptz
   AND ue.occurred_at < $6::timestamptz
-GROUP BY dim_value`, merchantID, payer.UUID(), currency, rc.EventType, from, to, valueKey, groupProperty, agg, rc.MissingDefault)
+GROUP BY dim_value`, merchantID, payer.UUID(), currency, rc.EventType, from, to, valueKey, groupProperty, agg)
 		if qerr != nil {
 			return qerr
 		}
@@ -471,9 +466,12 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 	}
 
 	var accrued int64
-	// Privileged (no-GUC) transaction with explicit merchant_id predicates,
-	// matching AccrueOwed.
-	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	// or#868 B2: merchant-pinned, matching AccrueOwed. The watermark INSERT
+	// below is the exact statement that failed with "new row violates
+	// row-level security policy for table metered_rating_watermarks" (42501)
+	// off the request path — the bare RunInTx this replaces carried no
+	// app.merchant_id, so nothing but a caller-supplied pin ever made it work.
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
 		// and returns the current committed values, serializing concurrent sweeps.
 		var alreadyAccrued int64
@@ -503,15 +501,20 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AN
 			return err
 		}
 		ml := s.moneyLedger(q, tenantID)
-		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, source, sourceID, nil); err != nil {
+		ratingKey, kerr := NewIdempotencyKey(OpMeteredRating, source, sourceID)
+		if kerr != nil {
+			return kerr
+		}
+		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, ratingKey.Coord(), nil); err != nil {
 			return err
 		}
 		// #798: the accrual belongs to its RATING PERIOD, not the sweep time —
 		// stamp invoice_at = periodFrom so a close over a past window (e.g. the
 		// previous-month finalize) attaches it instead of leaking it into the
 		// next period's invoice.
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, delta, periodFrom.UTC(), map[string]any{
-			"source": source,
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, ratingKey.invoiceItemSourceID(), delta, periodFrom.UTC(), map[string]any{
+			"operation": string(ratingKey.Operation()),
+			"source":    ratingKey.Source(),
 		}); err != nil {
 			return err
 		}

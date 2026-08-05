@@ -350,7 +350,20 @@ func (r *Request) GetState() *app.Runtime {
 	return r.State
 }
 
+// ClientSafeBindError is a decode error whose message is written FOR the
+// caller — e.g. a retired wire key naming its replacement. Everything else
+// collapses to "invalid_request": a decoder's own text can echo internal
+// structure, so it is not a client-facing message by default.
+type ClientSafeBindError interface {
+	error
+	ClientSafeBindMessage() string
+}
+
 func normaliseBindError(err error) string {
+	var safe ClientSafeBindError
+	if errors.As(err, &safe) {
+		return safe.ClientSafeBindMessage()
+	}
 	var verr validator.ValidationErrors
 	if errors.As(err, &verr) {
 		if len(verr) > 0 {

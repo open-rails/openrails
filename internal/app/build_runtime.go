@@ -36,7 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -52,6 +52,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
@@ -164,16 +165,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 	}
 
-	// Surface (and, outside development, enforce) the Row Level Security
-	// posture of the connected role (issue #227/#763): RLS policies only
-	// constrain a non-superuser, non-BYPASSRLS role. This ONE call covers BOTH
-	// construction paths above — a config-built standalone pool (createDatabase)
-	// AND a host-injected embedded pool (overrides.DB) — so an embedded host
-	// connecting as a privileged/BYPASSRLS role outside development fails boot
-	// exactly like standalone does, with no separate gate to keep in sync.
-	// Previously this ran only inside createDatabase, so embedded construction
-	// (which always supplies overrides.DB) never hit it at all.
-	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
+	// Enforce the Row Level Security posture of the connected role
+	// (#227/#763/or#782): RLS policies only constrain a non-superuser,
+	// non-BYPASSRLS role, so a privileged role makes merchant isolation inert
+	// AND hides every missing-merchant-scope bug. Unconditional — development
+	// is NOT exempt. This ONE call covers BOTH construction paths above (a
+	// config-built standalone pool and a host-injected embedded pool), so an
+	// embedded host connecting as a privileged role fails boot exactly like
+	// standalone does, with no separate gate to keep in sync.
+	if err := database.EnforceRLSPosture(context.Background()); err != nil {
 		return nil, err
 	}
 
@@ -225,7 +225,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		MerchantsFn: merchantsFn,
 	}
 
-	serviceInstances := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	if err != nil {
+		return nil, err
+	}
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -299,7 +302,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
-		VaultService:             serviceInstances.VaultService,
+		RailPaymentMethodService: serviceInstances.RailPaymentMethodService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
@@ -346,6 +349,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	runtime.CollectionResolver = collectionResolver
 	moneyCharger.SetAdapterResolver(collectionResolver)
 	runtime.SolanaRPCResolver = solanaRPCResolver
+	// #817: decimals come from the SPL mint on-chain, read through the same
+	// per-merchant chain reader and cached (mint decimals are immutable).
+	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
+	if serviceInstances.SolanaPayService != nil {
+		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
+	}
+	if serviceInstances.CheckoutSessionService != nil {
+		serviceInstances.CheckoutSessionService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
@@ -372,13 +384,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	// #732: user/admin destructive cancels pass the anti-credential-compromise
-	// rate ceiling before their write-ahead intent is created. System-origin
-	// deletes (dunning) skip it (the gate is inert for system origin).
+	// #732: every destructive cancel passes the rate ceiling before its
+	// write-ahead intent is created — user/admin on the deployment-wide
+	// anti-credential-compromise ceilings, system on the per-merchant automation
+	// ceiling (or#842: the system scheduler used to pass nil, so the paths that
+	// queue the most irreversible work were the only ungated ones).
 	rateCeiling := runtime.RateCeiling()
 	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginUser,
 		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, nil, intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
@@ -391,6 +405,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 	if runtime.SubscriptionLifecycleService != nil {
 		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
+	}
+	// or#896: a merchant-initiated cancel goes through the same durable
+	// intents as the user path — admin-origin (a human asked for it, so it
+	// executes under mode=limited like the user cancel) and rate-ceiling gated.
+	if runtime.AdminSubscriptionService != nil {
+		runtime.AdminSubscriptionService.SetDeferredDeleteScheduler(newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginAdmin,
+			"merchant-initiated cancellation; remote NMI subscription must stop rebilling"))
+		runtime.AdminSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, rateCeiling, intents.OriginAdmin,
+			"merchant-initiated cancellation; remote CCBill subscription must stop rebilling"))
 	}
 
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
@@ -407,14 +430,14 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		if runtime.CheckoutService.NMISaleService != nil {
 			runtime.CheckoutService.NMISaleService.Intents = intentRunner
 		}
-		if runtime.CheckoutService.VaultedCardService != nil {
-			runtime.CheckoutService.VaultedCardService.Intents = intentRunner
+		if runtime.CheckoutService.CustodianSaleService != nil {
+			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner
 		}
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
-	if runtime.VaultService != nil {
-		runtime.VaultService.DeleteIntents = &intents.VaultDeleteThrough{Runner: intentRunner}
+	if runtime.RailPaymentMethodService != nil {
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
@@ -561,7 +584,7 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
-	VaultService             *paymentmethods.VaultService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
@@ -584,9 +607,9 @@ type servicesInstances struct {
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *idempotency.IdempotencyService
+	IdempotencyService           *replaycache.Store
 	// HTTPIdempotency is the client-facing Idempotency-Key replay store (#579).
-	HTTPIdempotency   *idempotency.IdempotencyService
+	HTTPIdempotency   *replaycache.Store
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
 	CheckoutService        *checkout.CheckoutService
@@ -613,7 +636,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return base
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -673,7 +696,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	}
 	if redisClient != nil {
 		redisFX := fx.NewRedisCachedProvider(redisClient, liveFX, 3*time.Hour)
-		redisFX.Start(context.Background(), money.CurrencyCodes(), 2*time.Hour)
+		redisFX.Start(context.Background(), moneyutil.CurrencyCodes(), 2*time.Hour)
 		fxProvider = redisFX
 		fxRateRefresher = redisFX
 	}
@@ -733,14 +756,14 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		Clock:    clock,
 	})
 
-	vaultService := paymentmethods.NewVaultService(paymentMethodService, subscriptionService, database, cfg, clock)
-	subscriptionService.VaultService = vaultService
-	idempotencyService := idempotency.NewIdempotencyService(redisClient)
-	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
+	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
+	subscriptionService.RailPaymentMethodService = railPMService
+	idempotencyService := replaycache.NewStore(redisClient)
+	webhookIdempotencyService := replaycache.NewStoreWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
 	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
 	// HTTP replay middleware, separate from the internal checkout dedup
 	// (idempotencyService) and webhook dedup (webhookIdempotencyService) above.
-	httpIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, idempotency.HTTPIdempotencyTTL)
+	httpIdempotencyService := replaycache.NewStoreWithTTL(redisClient, replaycache.HTTPReplayTTL)
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
@@ -765,7 +788,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		entitlementService,
 		notificationService,
 		purchaseService,
-		collectionResolver,
 		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railConfigs}
@@ -777,7 +799,10 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), paymentMethodService)
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
-	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
+	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
+	if err != nil {
+		return nil, err
+	}
 	webhookDispatcher := &webhooks.WebhookDispatcher{
 		Config:                       cfg,
 		DB:                           database,
@@ -803,7 +828,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		purchaseService,
 		entitlementService,
 		paymentMethodService,
-		vaultService,
+		railPMService,
 		idempotencyService,
 		railCustomerService,
 		cfg,
@@ -858,7 +883,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
-		VaultService:                 vaultService,
+		RailPaymentMethodService:     railPMService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,
@@ -882,7 +907,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		DashboardService:             dashboardService,
 		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
-	}
+	}, nil
 }
 
 func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {

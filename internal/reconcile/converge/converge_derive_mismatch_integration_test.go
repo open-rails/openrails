@@ -41,15 +41,16 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 		      VALUES ($1,$2,$2,$3, jsonb_build_object($4::text, null), $5)`,
 			productID, "gd-prod-"+suffix, "gd-tier-"+suffix, feature, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// Active sub, RUNNING period [now-5d, now+25d).
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7, jsonb_build_object($8::text, null), $9,$10)`,
+		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7, jsonb_build_object($8::text, null), $9,$10,$11)`,
 			subID, priceID, productID, "gd-sub-"+suffix,
-			now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour), now.Add(-40*24*time.Hour), feature, customer, merchantID)
+			now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour), now.Add(-40*24*time.Hour), feature, customer, merchantID, pspID)
 
 		// The sub HAS a grant — but only for a PAST period, with the LEGACY
 		// bounded projection (so derive.subscription.missing and
@@ -142,18 +143,20 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rd-prod-"+suffix, "rd-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-		      VALUES ($1,$2,9990000,'usd',720,true,$3)`, priceID, productID, merchantID)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		seedSub := func(id uuid.UUID, status, railSubID string) {
 			exec(`INSERT INTO openrails.subscriptions
 			        (id, price_id, product_id, status, rail, rail_subscription_id,
 			         current_period_starts_at, current_period_ends_at, started_at,
-			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at)
-			      VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$8,'{}'::jsonb,$9,$10,$11,$12,$13)`,
+			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
+			      VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$8,'{}'::jsonb,$9,$10,$11,$12,$13,$14)`,
 				id, priceID, productID, status, railSubID,
 				now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), now.Add(-40*24*time.Hour), customer, merchantID,
 				timePtrOrNil(status == "cancelled", now.Add(-10*24*time.Hour)),
 				strPtrOrNil(status == "cancelled", "user"),
-				timePtrOrNil(status == "cancelled", now.Add(-10*24*time.Hour)))
+				timePtrOrNil(status == "cancelled", now.Add(-10*24*time.Hour)),
+				pspID)
 		}
 		seedSub(deadSub, "cancelled", "rd-dead-"+suffix)
 		seedSub(unknownSub, "unknown", "rd-unknown-"+suffix)

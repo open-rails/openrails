@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -43,10 +44,12 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     display_name        TEXT,
     status              TEXT NOT NULL DEFAULT 'active',
     permission_group_id     TEXT,
+    api_host            TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at          TIMESTAMPTZ
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_api_host ON openrails.merchants (api_host) WHERE api_host IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_configurations (
     merchant_id uuid NOT NULL,
@@ -102,6 +105,7 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
     key text,
+    custodian_id uuid,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -109,18 +113,68 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT payment_provider_accounts_pkey PRIMARY KEY (id),
-    CONSTRAINT payment_provider_accounts_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
-    CONSTRAINT payment_provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT payment_provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
+    CONSTRAINT psps_pkey PRIMARY KEY (id),
+    CONSTRAINT psps_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
+    CONSTRAINT psps_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
+    CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
 ALTER TABLE ONLY openrails.psps FORCE ROW LEVEL SECURITY;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_identity ON openrails.psps (merchant_id, rail, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_global_identity ON openrails.psps (rail, environment, account_id);
-CREATE INDEX IF NOT EXISTS idx_payment_provider_accounts_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_merchant_identity ON openrails.psps (merchant_id, rail, environment, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_identity ON openrails.psps (rail, environment, account_id);
+CREATE INDEX IF NOT EXISTS idx_psps_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
 ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS merchant_isolation ON openrails.psps;
 CREATE POLICY merchant_isolation ON openrails.psps
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+-- #824: the subject-first directory function targets customers; this harness
+-- replays that function from the baseline, so the table must exist.
+CREATE TABLE IF NOT EXISTS openrails.customers (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id uuid NOT NULL,
+    subject text
+);
+
+-- or#897: the billing-policy registry the manifest loader now installs.
+CREATE TABLE IF NOT EXISTS openrails.billing_policies (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    merchant_id uuid NOT NULL,
+    name text NOT NULL,
+    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT billing_policies_name_key UNIQUE (merchant_id, name),
+    CONSTRAINT billing_policies_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT
+);
+ALTER TABLE ONLY openrails.billing_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.billing_policies ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policies;
+CREATE POLICY merchant_isolation ON openrails.billing_policies
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+CREATE TABLE IF NOT EXISTS openrails.billing_policy_bindings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    merchant_id uuid NOT NULL,
+    customer_id uuid,
+    tier text,
+    policy_name text NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT billing_policy_bindings_rung_ck CHECK ((customer_id IS NULL) OR (tier IS NULL)),
+    CONSTRAINT billing_policy_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+    CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT billing_policy_bindings_policy_fk FOREIGN KEY (merchant_id, policy_name) REFERENCES openrails.billing_policies(merchant_id, name) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_billing_policy_bindings_merchant_id ON openrails.billing_policy_bindings (merchant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_default ON openrails.billing_policy_bindings (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_tier ON openrails.billing_policy_bindings (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_customer ON openrails.billing_policy_bindings (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
+ALTER TABLE ONLY openrails.billing_policy_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.billing_policy_bindings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policy_bindings;
+CREATE POLICY merchant_isolation ON openrails.billing_policy_bindings
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
@@ -177,8 +231,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_test_123",
+				AccountID: "acct_test_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_bootstrap",
 				},
@@ -187,7 +240,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	}
 	manifest.Merchants["cozy-art"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
@@ -239,8 +292,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "900000-0000",
+				AccountID: "900000-0000",
 				Secrets: map[string]string{
 					"salt":              "secret",
 					"datalink_username": "merchant-user",
@@ -291,9 +343,8 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "900000/0000",
-				Secrets:     map[string]string{"salt": "secret"},
+				AccountID: "900000/0000",
+				Secrets:   map[string]string{"salt": "secret"},
 			},
 		},
 	}
@@ -304,7 +355,7 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
 }
 
-func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testing.T) {
+func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
@@ -312,7 +363,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := cozyArtMerchantManifest()
@@ -325,8 +376,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	mt.PSPs = map[string]PSPConfig{
 		"solana": {
 			"solana": {
-				Environment: "live",
-				Signer:      &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
+				Signer: &PSPSignerConfig{Mode: "local_keypair"},
 				Settings: map[string]any{
 					"recipient_wallet": recipientWallet,
 				},
@@ -366,7 +416,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 }
 
 // #646: the merchant config round-trips — push the complete payload (profile +
-// invoice + delegated-invoker windows + named test/live provider accounts), then
+// invoice + delegated-invoker windows + named test/live PSPs), then
 // dump it back into the same struct shape, with secret VALUES never emitted.
 func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	ctx := context.Background()
@@ -389,12 +439,13 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		{Key: "burst", Window: "15m", Limit: 5_000_000},
 		{Key: "sustained", Window: "5h", Limit: 20_000_000},
 	}
-	// NMI gateway "mobius": live and sandbox accounts side by side (#646).
+	// NMI gateway "mobius": two accounts side by side (#646). Both land in the
+	// deployment's derived environment — #882 removed the per-PSP knob, so one
+	// deployment can no longer mix test and live accounts.
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				Environment: "live",
-				AccountID:   "579145",
+				AccountID: "579145",
 				Settings: map[string]any{
 					"tokenization_url": "https://secure.networkmerchants.com/token/Collect.js",
 					"tokenization_key": "live-token",
@@ -404,10 +455,13 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 				},
 			},
 		},
-		"mobius-sandbox": {
+		// Archived: with both NMI accounts in the SAME derived environment
+		// (#882), "the active account for new work" must be unambiguous — an
+		// archived sibling still round-trips through dump.
+		"mobius-secondary": {
 			"nmi": {
-				Environment: "test",
-				AccountID:   "681902",
+				AccountID: "681902",
+				Archived:  true,
 				Secrets: map[string]string{
 					"security_key": "test-security",
 				},
@@ -416,8 +470,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		// #697: CCBill composite identity is dash-joined (clientAccnum-clientSubacc).
 		"ccbill": {
 			"ccbill": {
-				Environment: "live",
-				AccountID:   "945280-0000",
+				AccountID: "945280-0000",
 				Secrets: map[string]string{
 					"salt": "flexform-salt",
 				},
@@ -448,11 +501,28 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, threshold, gotThreshold)
 	require.Equal(t, floor, gotFloor)
 
-	// The manifest PSP map key persists as the provider account key.
+	// #882: every PSP lands in the environment derived from test_mode.
+	derivedEnv := config.ExpectedProviderEnvironment(cfg.IsTestMode())
+	var envs []string
+	rows, err := pool.Query(ctx, `SELECT environment FROM openrails.psps WHERE merchant_id = $1::uuid`, merchantID)
+	require.NoError(t, err)
+	for rows.Next() {
+		var e string
+		require.NoError(t, rows.Scan(&e))
+		envs = append(envs, e)
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+	require.Len(t, envs, 3)
+	for _, e := range envs {
+		require.Equal(t, derivedEnv, e, "a deployment is all-test or all-live (#882)")
+	}
+
+	// The manifest PSP map key persists as the PSP key.
 	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT key FROM openrails.psps
-		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND environment = 'live'
+		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND account_id = '579145'
 	`, merchantID).Scan(&liveKey))
 	require.Equal(t, "mobius", liveKey)
 
@@ -487,27 +557,31 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, "5h", gotWindows["sustained"].Window)
 
 	require.Len(t, d.PSPs, 3)
-	byEnv := map[string]ProviderRailAccountConfig{}
+	byAccount := map[string]ProviderRailAccountConfig{}
 	var ccbillDump ProviderRailAccountConfig
 	for _, account := range d.PSPs {
 		require.Len(t, account, 1)
 		for rail, a := range account {
+			// #882: the dump never re-emits `environment:` — it would round-trip
+			// straight into the removal error on apply.
+			require.Empty(t, a.LegacyEnvironment)
 			if rail == "ccbill" {
 				ccbillDump = a
 				continue
 			}
-			byEnv[a.Environment] = a
+			byAccount[a.AccountID] = a
 		}
 	}
 	// #697: the dash-form CCBill composite id survives push⇄dump verbatim.
 	require.Equal(t, "945280-0000", ccbillDump.AccountID)
-	require.Equal(t, "579145", byEnv["live"].AccountID)
-	require.False(t, byEnv["live"].Archived)
-	require.False(t, byEnv["test"].Archived)
-	require.Empty(t, byEnv["live"].Secrets, "redacted dump omits secret values entirely")
-	require.NotContains(t, byEnv["live"].Secrets, "tokenization_key")
-	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byEnv["live"].Settings["tokenization_url"])
-	require.Equal(t, "live-token", byEnv["live"].Settings["tokenization_key"])
+	require.Contains(t, byAccount, "579145")
+	require.Contains(t, byAccount, "681902")
+	require.False(t, byAccount["579145"].Archived)
+	require.True(t, byAccount["681902"].Archived, "the archived sibling survives push -> dump")
+	require.Empty(t, byAccount["579145"].Secrets, "redacted dump omits secret values entirely")
+	require.NotContains(t, byAccount["579145"].Secrets, "tokenization_key")
+	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byAccount["579145"].Settings["tokenization_url"])
+	require.Equal(t, "live-token", byAccount["579145"].Settings["tokenization_key"])
 
 	// the dump re-marshals to valid YAML that re-parses (round-trip closure).
 	encoded, err := MarshalMerchantManifest(dumped)
@@ -524,7 +598,10 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	vault := newMerchantManifestVault(t)
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Vault: &config.VaultConfig{
+	// or#893: the backend is DECLARED. vault.enabled alone no longer implies the
+	// KV store, so this test — whose whole subject is the Vault backend — has to
+	// say so, and would silently exercise the DB store if it did not.
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendVault, TestMode: config.CredentialPostureSandbox, Vault: &config.VaultConfig{
 		Enabled:    true,
 		Address:    vault.Address,
 		AuthMethod: "token",
@@ -536,8 +613,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_vault_123",
+				AccountID: "acct_vault_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_vault_bootstrap",
 				},
@@ -580,7 +656,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{MerchantSource: config.MerchantSourceAPI, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureSandbox, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 
@@ -589,8 +665,7 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
-				Environment: "test",
-				AccountID:   "acct_db_123",
+				AccountID: "acct_db_123",
 				Secrets: map[string]string{
 					"secret_key": "sk_test_db_bootstrap",
 				},
@@ -786,13 +861,53 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	}
 	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
+
+	// #824 / or#880: the PSP-ownership preflight goes through the SECURITY
+	// DEFINER directory functions, and the manifest loader writes the custodian
+	// registry. Both are replayed from the REAL baseline definitions rather than
+	// hand-copied (and eventually drifted from) here.
+	_, err = pool.Exec(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
+		END IF;
+	END $$;`)
+	require.NoError(t, err)
+	directoryDDL, err := postgresmigrations.BaselineObjects(
+		"current_merchant_id",
+		"assert_cross_merchant_reader",
+		"psp_owner_by_identity",
+		"customer_merchant_ids_for_subject",
+		"custodians",
+		"custodian_owner_by_identity",
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, directoryDDL)
+	require.NoError(t, err)
+
+	// The custody reference onto psps, which this harness's own psps table
+	// declares without it (custodians is created above, after psps).
+	_, err = pool.Exec(ctx, `ALTER TABLE openrails.psps
+		ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (custodian_id, merchant_id)
+		REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT`)
+	require.NoError(t, err)
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723
 // merchant_source=api): they assert persistent-backend side effects (seed-once,
 // merchant_secrets rows, Vault KV) that mode 1 deliberately does not produce.
+// SEC-18: Env is declared, never inferred — an empty Env is no longer
+// development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{MerchantSource: config.MerchantSourceAPI}
+	return &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI}
+}
+
+// sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.
+// #882: that posture is the ONLY thing that puts a PSP in the test environment,
+// so a test asserting `psps/<rail>/test/…` must declare it.
+func sandboxModeReconcileConfig() *config.Config {
+	cfg := apiModeReconcileConfig()
+	cfg.TestMode = config.CredentialPostureSandbox
+	return cfg
 }
 
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {

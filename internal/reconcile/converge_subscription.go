@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #684: the webhook fetch-and-converge entry point. A verified webhook is only
@@ -32,7 +33,7 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 	return SubscriptionState{
 		Status:             string(sub.Status),
 		Rail:               string(sub.Rail),
-		Vaulted:            sub.PaymentMethodID != nil,
+		HasPaymentMethod:   sub.PaymentMethodID != nil,
 		RailSubscriptionID: sub.RailSubscriptionID,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		GraceEndsAt:        sub.GraceEndsAt,
@@ -52,13 +53,22 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 // against a terminal row is money truth and must leave a durable payment row
 // (money truth ≠ lifecycle truth).
 func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) (SubscriptionConvergence, error) {
-	return convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback)
+	var floor time.Time
+	if database != nil && sub != nil {
+		floor = EvidenceFloorFor(ctx, database, sub.MerchantID)
+	}
+	return convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback, floor)
 }
 
 // convergeSubscriptionFromSnapshotLookback is the lookback-parameterized core:
 // live planes cap backfill at #634's 3y; the declared import (#737) unbounds it
 // (a legacy book's charges are all in scope by declaration).
-func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration) (SubscriptionConvergence, error) {
+//
+// floor is the #835 evidence-staleness floor. The live path passes the
+// merchant's first-pull instant; the declared import passes ZERO on purpose —
+// its snapshot is dated at the operator's AsOf horizon and that declaration IS
+// the observation, so AsOf becomes the floor (see EvidenceBundle.EvidenceFloor).
+func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration, floor time.Time) (SubscriptionConvergence, error) {
 	out := SubscriptionConvergence{}
 	if database == nil || lc == nil || sub == nil || snap == nil {
 		return out, fmt.Errorf("converge subscription: db, lifecycle, subscription and snapshot are required")
@@ -67,7 +77,10 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 		dunningWindow = DefaultDunningWindow
 	}
 
-	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap}, now, dunningWindow)
+	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
+	if d.EvidenceFloored {
+		recordEvidenceStaleFinding(ctx, database.Gen(ctx), merchant.ID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
+	}
 	// Money truth is mirrored UNCONDITIONALLY: every fetched charge event for
 	// this subscription is imported idempotently (by transaction id), even when
 	// the decider refuses a transition (terminal/pending rows, early renewals,
@@ -125,6 +138,10 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 			ID:         uuid.New(),
 			CustomerID: sub.CustomerID,
 			Rail:       string(sub.Rail),
+			// or#893: the mapping belongs to the account that owns the
+			// subscription, which is the account whose remote customer id this
+			// is. The subscription's own provenance answers it — no resolution.
+			PspID:      sub.PspID,
 			AccountID:  d.RemoteCustomerID,
 			CreatedAt:  now,
 			UpdatedAt:  now,

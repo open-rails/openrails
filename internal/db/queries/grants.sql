@@ -68,20 +68,18 @@ SELECT EXISTS (
 -- name: CreateProductUsageLimitBinding :exec
 INSERT INTO openrails.product_usage_limit_bindings (
     id, merchant_id, customer_id, usage_limit_key, measure, windows,
-    source_type, source_id, product_key, grant_id, starts_at, ends_at, policy_version
+    grant_id, starts_at, ends_at
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid,
     sqlc.arg(usage_limit_key)::text, sqlc.arg(measure)::text, sqlc.arg(windows)::jsonb,
-    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(product_key)::text,
     sqlc.narg(grant_id)::uuid, sqlc.arg(starts_at)::timestamptz,
-    sqlc.narg(ends_at)::timestamptz, sqlc.arg(policy_version)::bigint
+    sqlc.narg(ends_at)::timestamptz
 );
 
 -- name: RevokeProductUsageLimitBindingsByGrant :exec
 UPDATE openrails.product_usage_limit_bindings
 SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
-    updated_at = now(),
-    policy_version = policy_version + 1
+    updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND grant_id = sqlc.arg(grant_id)::uuid
   AND revoked_at IS NULL;
@@ -245,6 +243,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
+  AND p.deleted_at IS NULL
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
@@ -278,7 +277,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   )
   AND EXISTS (
       SELECT 1 FROM openrails.payments p
-      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.status = 'refunded'
+      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
   )
 ORDER BY g.id;
 
@@ -425,6 +424,7 @@ FROM openrails.subscriptions s
 JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
   AND s.status IN ('active', 'cancelled', 'unknown')
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
@@ -454,6 +454,7 @@ JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_i
 JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
+  AND p.deleted_at IS NULL
   AND p.rail = 'solana'
   AND p.status = 'completed'
   AND p.amount > 0
@@ -512,3 +513,14 @@ SELECT EXISTS (
       AND g.event = 'grant' AND g.kind = 'entitlement'
       AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
 ) AS exists;
+
+-- CROSS-MERCHANT: merchants holding a lapsed credit lot, through migration
+-- 0022's SECURITY DEFINER reader (or#868 B1). The credit-expiry worker used to
+-- run ListCustomersWithLapsedCreditLots inside a bare RunInTx on the base pool;
+-- grants FORCEs RLS, so it enumerated nothing and NO credit lot has ever been
+-- clawed back. Ids only — the per-customer work list and the ledger transfers
+-- run per-merchant under RunInMerchantConn.
+-- name: ListLapsedCreditLotMerchants :many
+SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+    sqlc.arg(as_of)::timestamptz,
+    sqlc.arg(merchant_limit)::int);

@@ -20,7 +20,7 @@ import (
 )
 
 // Catalog archive intent types (#358 phase D): the provider writes of
-// `push-catalog --prune` (#357) flow through the ledger. Archives are
+// `push-merchant-catalog --prune` (#357) flow through the ledger. Archives are
 // idempotent verify-then-execute (the remote object is read first;
 // already-archived/absent = success with evidence) and admin-origin (the
 // --prune flag is an explicit human request), so they execute under

@@ -12,28 +12,18 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	KindCCBillReconcile = "openrails.ccbill_reconcile"
-)
-
-type CCBillReconcileArgs struct{}
-
-func (CCBillReconcileArgs) Kind() string { return KindCCBillReconcile }
-
-type CCBillReconcileWorker struct {
-	river.WorkerDefaults[CCBillReconcileArgs]
+// CCBillReconciler is the CCBill DataLink guarded-repair scan. It is NOT a River
+// job: ProviderRefreshWorker's CCBill lane calls Run directly.
+type CCBillReconciler struct {
 	DB                  *db.DB
 	DataLink            *ccbill.DataLinkClient
 	NotificationService *subscriptions.NotificationService
 }
 
-func (CCBillReconcileWorker) Kind() string { return KindCCBillReconcile }
-
-func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillReconcileArgs]) error {
+func (w CCBillReconciler) Run(ctx context.Context) error {
 	if w.DataLink == nil {
 		log.WithContext(ctx).Info("CCBillReconcile: DataLink not configured; skipping")
 		return nil
@@ -161,7 +151,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 	return nil
 }
 
-func (w CCBillReconcileWorker) recordDataLinkRepairAlert(ctx context.Context, operation string, subscriptionID *uuid.UUID, userID, railSubID string, record *ccbill.CCBillRecord, err error) error {
+func (w CCBillReconciler) recordDataLinkRepairAlert(ctx context.Context, operation string, subscriptionID *uuid.UUID, userID, railSubID string, record *ccbill.CCBillRecord, err error) error {
 	metadata := map[string]any{"rail_subscription_id": strings.TrimSpace(railSubID)}
 	if record != nil {
 		metadata["datalink_status"] = record.Status

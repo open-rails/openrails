@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -47,9 +48,12 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen
 		return ChargeResult{}, fmt.Errorf("amount_cents must be positive")
 	}
 	rail := normalizeRail(method.Rail)
+	// or#864: NO default. This is the last statement before a card is charged;
+	// a guessed currency here mints a real charge in a currency nobody
+	// established. Registry-validated (CUR-8), not merely non-blank.
 	currency := normalizeCurrency(req.Currency)
-	if currency == "" {
-		currency = DefaultCurrency
+	if err := moneyutil.ValidateCurrency(currency); err != nil {
+		return ChargeResult{}, fmt.Errorf("nmi collection: refusing to charge without an established currency: %w", err)
 	}
 	description := strings.TrimSpace(req.Description)
 	if description == "" {

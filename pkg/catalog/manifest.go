@@ -14,7 +14,7 @@
 //     declared prices are ensured active; an active OpenRails price whose
 //     financial identity is not declared is archived.
 //
-// Each price declares its own `psps:` list and optional `psp_links`
+// Each price declares its own `providers:` list and optional `provider_links`
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
@@ -25,7 +25,7 @@ import (
 
 // Manifest is the root of a catalog-as-code document.
 //
-// Every price declares its own `currency` and `psps` explicitly — there
+// Every price declares its own `currency` and `providers` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
 	Version        int             `json:"version" yaml:"version"`
@@ -37,13 +37,13 @@ type Manifest struct {
 	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
 
-// Meter is a billed usage stream. Two shapes are accepted (additive, #638):
-//   - legacy: {key, kind: counter|gauge}.
-//   - rate-card: {key, event_type, value_property, aggregation, group_by, unit}
-//     (OpenMeter-style). aggregation in sum/count/max/min/unique_count/latest.
+// Meter is a billed usage stream: {key, event_type, value_property,
+// aggregation, group_by, unit} (OpenMeter-style, #638). aggregation is required
+// and is one of sum/count/max/min/unique_count/latest. The #599 `kind:
+// counter|gauge` shape was retired by or#893 — a rate card is the only pricing
+// input.
 type Meter struct {
-	Key  string `json:"key" yaml:"key"`
-	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Key string `json:"key" yaml:"key"`
 
 	EventType     string            `json:"event_type,omitempty" yaml:"event_type,omitempty"`
 	ValueProperty string            `json:"value_property,omitempty" yaml:"value_property,omitempty"`
@@ -78,7 +78,7 @@ type Product struct {
 	TierGroup   string `json:"tier_group,omitempty" yaml:"tier_group,omitempty"`
 	TierRank    *int   `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
 	// Archived maps to status=archived. Omitted/false = active (matches the
-	// merchant-manifest provider-account `archived` key).
+	// merchant-manifest PSP `archived` key).
 	Archived     bool          `json:"archived,omitempty" yaml:"archived,omitempty"`
 	Entitlements []string      `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
 	Credits      []CreditGrant `json:"credits,omitempty" yaml:"credits,omitempty"`
@@ -96,11 +96,18 @@ type Product struct {
 }
 
 type CreditBalance struct {
-	Key            string `json:"key" yaml:"key"`
-	Unit           string `json:"unit" yaml:"unit"`
+	Key  string `json:"key" yaml:"key"`
+	Unit string `json:"unit" yaml:"unit"`
+	// ExpiresDefault is the DECLARED expiry every grant into this balance
+	// inherits unless it declares its own `expires` (e.g. "365d"). Omitting it
+	// means balances in this bucket never expire — OpenRails supplies no
+	// implicit clock of its own (#857).
 	ExpiresDefault string `json:"expires_default,omitempty" yaml:"expires_default,omitempty"`
 }
 
+// CreditGrant is one product-bundled deposit into a declared credit balance.
+// Expiry comes from `expires` here, else the balance's `expires_default`, else
+// nowhere — and "nowhere" means the granted balance never expires (#857).
 type CreditGrant struct {
 	Key string `json:"key" yaml:"key"`
 	// Unit is resolved from the referenced CreditBalance during validation.
@@ -173,28 +180,21 @@ type Price struct {
 	// only: no external provider sync.
 	PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
 
-	// PSPLinks supplies PSP-specific link/config values, mapping
+	// PSPLinks pre-supplies PSP-specific link ids, mapping
 	// PSP key -> key/value pairs. Maps straight onto
 	// service.CreatePriceRequest.PSPLinks. A supplied link is VALIDATED
 	// against the provider (object exists + matches the price's money terms)
 	// before it is accepted; a mismatch fails the apply loudly. An existing
-	// object is never duplicated. A MISSING object is created where the supplied
-	// value is declarative (NMI plan_id, Stripe lookup_key, Solana token)
-	// and errors where it is provider-generated (Stripe price_id, Solana
-	// plan_pda). Canonical keys:
+	// object is never duplicated. A MISSING object is created where the linked id
+	// is client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
+	// provider-generated (Stripe price_id, Solana plan_pda). Canonical keys:
 	//   psp_links:
 	//     stripe: {lookup_key: premium}                        # recommended: find-or-create at a chosen key ...
 	//     stripe: {price_id: price_xxx, product_id: prod_xxx}  # ... or pin an exact existing Price (require-exists)
 	//     mobius: {plan_id: premium}                           # NMI recurring plan on the "mobius" PSP; find-or-create
-	//     solana: {token: USD1}                                # optional override; recurring defaults to USDC
-	//     solana: {plan_pda: 7Xy...PdA}                        # attach a plan and resolve its token on-chain
+	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
-
-	// Retired manifest keys (renamed to psps / psp_links). Kept only so a
-	// stale manifest fails loudly instead of silently dropping its links.
-	LegacyProviders     []string                     `json:"providers,omitempty" yaml:"providers,omitempty"`
-	LegacyProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
 
 	// Trial is an optional FIRST phase that differs from the recurring terms above
 	// (#622). unit_amount=0 is a free trial. Requires auto_renew. Omit for a flat
@@ -203,25 +203,17 @@ type Price struct {
 	//   trial: {unit_amount: 0, duration: 7d}           # free 7-day trial, then UnitAmount recurring
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
 
-	Metered *MeteredPrice `json:"metered,omitempty" yaml:"metered,omitempty"`
-
 	// Variable credit top-up offer fields. Fixed catalog prices keep using the
-	// UnitAmount/Duration shape above.
+	// UnitAmount/Duration shape above. Rounding is declared where it applies —
+	// per_unit.round — not here (or#823: a top-level `round:` was validated and
+	// then never carried into the price, so it is retired and now fails to load).
 	InputMin int64         `json:"input_min,omitempty" yaml:"input_min,omitempty"`
 	InputMax int64         `json:"input_max,omitempty" yaml:"input_max,omitempty"`
-	Round    string        `json:"round,omitempty" yaml:"round,omitempty"`
 	Model    string        `json:"model,omitempty" yaml:"model,omitempty"`
 	Flat     *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
 	PerUnit  *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
 	Tiered   *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
 	Package  *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
-}
-
-type MeteredPrice struct {
-	Meter    string `json:"meter" yaml:"meter"`
-	Rate     int64  `json:"rate" yaml:"rate"`
-	PerUnits int64  `json:"per_units,omitempty" yaml:"per_units,omitempty"`
-	Per      string `json:"per,omitempty" yaml:"per,omitempty"`
 }
 
 // PriceTrial is the trial first phase for a Price (#622): a first phase at its

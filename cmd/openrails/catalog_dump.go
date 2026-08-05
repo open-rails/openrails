@@ -17,10 +17,9 @@ type catalogDumpOptions struct {
 func newDumpCatalogCmd() *cobra.Command {
 	opts := catalogDumpOptions{}
 	cmd := &cobra.Command{
-		Use:     "dump-merchant-catalog --slug <merchant>",
-		Aliases: []string{"dump-catalog"},
-		Short:   "Dump a merchant's live catalog as push-catalog YAML",
-		Args:    cobra.NoArgs,
+		Use:   "dump-merchant-catalog --slug <merchant>",
+		Short: "Dump a merchant's live catalog as push-merchant-catalog YAML",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpCatalog(cmd, opts)
 		},
