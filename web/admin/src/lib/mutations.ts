@@ -33,6 +33,7 @@ import {
   listCustomers,
   listPayments,
   listSubscriptions,
+  markNotificationRead,
   putMerchantSettings,
   putPaymentProvider,
   previewRepriceAllPriorVersions,
@@ -70,6 +71,7 @@ import {
 import type {
   CustomerSummary,
   MerchantSettings,
+  MerchantNotification,
   PaymentObject,
   AdminSubscription,
 } from "@/lib/api/types"
@@ -110,7 +112,69 @@ const invalidateTreeOnSuccess =
   (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
     queryClient.invalidateQueries({ queryKey })
 
+const updateNotificationReadCache = (
+  queryClient: QueryClient,
+  notificationsKey: readonly unknown[],
+  unreadKey: readonly unknown[],
+  readIds: string[]
+) => {
+  if (readIds.length === 0) return
+  const ids = new Set(readIds)
+  const readAt = new Date().toISOString()
+  queryClient.setQueryData<{ data: MerchantNotification[] | null }>(
+    notificationsKey,
+    (current) =>
+      current
+        ? {
+            ...current,
+            data: (current.data ?? []).map((notification) =>
+              ids.has(notification.id)
+                ? { ...notification, read_at: readAt }
+                : notification
+            ),
+          }
+        : current
+  )
+  queryClient.setQueryData<{ unread: number }>(unreadKey, (current) =>
+    current ? { unread: Math.max(0, current.unread - readIds.length) } : current
+  )
+}
+
 export const adminMutations = {
+  markNotificationRead: (queryClient: QueryClient) => {
+    const notificationsKey = queryKeys.notifications()
+    const unreadKey = [...notificationsKey, "unread-count"] as const
+    return mutationOptions({
+      mutationKey: [...notificationsKey, "mark-read"],
+      mutationFn: (id: string) => markNotificationRead(id),
+      onSuccess: (_result, id) =>
+        updateNotificationReadCache(queryClient, notificationsKey, unreadKey, [
+          id,
+        ]),
+    })
+  },
+  markNotificationsRead: (queryClient: QueryClient) => {
+    const notificationsKey = queryKeys.notifications()
+    const unreadKey = [...notificationsKey, "unread-count"] as const
+    return mutationOptions({
+      mutationKey: [...notificationsKey, "mark-all-read"],
+      mutationFn: async (ids: string[]) => {
+        const results = await Promise.allSettled(
+          ids.map((id) => markNotificationRead(id))
+        )
+        return results.flatMap((result, index) =>
+          result.status === "fulfilled" ? [ids[index]] : []
+        )
+      },
+      onSuccess: (readIds) =>
+        updateNotificationReadCache(
+          queryClient,
+          notificationsKey,
+          unreadKey,
+          readIds
+        ),
+    })
+  },
   saveDashboard: (queryClient: QueryClient) => {
     const dashboardKey = queryKeys.dashboard()
     return mutationOptions({

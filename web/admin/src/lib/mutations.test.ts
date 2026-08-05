@@ -17,6 +17,7 @@ import {
   listCustomers,
   listPayments,
   listSubscriptions,
+  markNotificationRead,
   previewRepriceAllPriorVersions,
   publishCatalog,
   putMerchantSettings,
@@ -66,6 +67,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   listCustomers: vi.fn(),
   listPayments: vi.fn(),
   listSubscriptions: vi.fn(),
+  markNotificationRead: vi.fn(),
   putMerchantSettings: vi.fn(),
   putPaymentProvider: vi.fn(),
   previewRepriceAllPriorVersions: vi.fn(),
@@ -159,6 +161,67 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("notification mutations", () => {
+  it("marks one notification read and reconciles both notification caches", async () => {
+    const queryClient = new QueryClient()
+    const notificationsKey = queryKeys.notifications()
+    const unreadKey = [...notificationsKey, "unread-count"] as const
+    queryClient.setQueryData(notificationsKey, {
+      data: [
+        { id: "notification-1", read_at: null },
+        { id: "notification-2", read_at: null },
+      ],
+    })
+    queryClient.setQueryData(unreadKey, { unread: 2 })
+    vi.mocked(markNotificationRead).mockResolvedValueOnce({
+      id: "notification-1",
+      read: true,
+    })
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.markNotificationRead(queryClient))
+      .execute("notification-1")
+
+    const notifications = queryClient.getQueryData<{
+      data: Array<{ id: string; read_at: string | null }>
+    }>(notificationsKey)
+    expect(markNotificationRead).toHaveBeenCalledWith("notification-1")
+    expect(notifications?.data[0].read_at).toEqual(expect.any(String))
+    expect(notifications?.data[1].read_at).toBeNull()
+    expect(queryClient.getQueryData(unreadKey)).toEqual({ unread: 1 })
+  })
+
+  it("updates only successfully read notifications in a partial bulk result", async () => {
+    const queryClient = new QueryClient()
+    const notificationsKey = queryKeys.notifications()
+    const unreadKey = [...notificationsKey, "unread-count"] as const
+    queryClient.setQueryData(notificationsKey, {
+      data: [
+        { id: "notification-1", read_at: null },
+        { id: "notification-2", read_at: null },
+      ],
+    })
+    queryClient.setQueryData(unreadKey, { unread: 2 })
+    vi.mocked(markNotificationRead)
+      .mockResolvedValueOnce({ id: "notification-1", read: true })
+      .mockRejectedValueOnce(new Error("unavailable"))
+
+    const readIds = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.markNotificationsRead(queryClient))
+      .execute(["notification-1", "notification-2"])
+
+    const notifications = queryClient.getQueryData<{
+      data: Array<{ id: string; read_at: string | null }>
+    }>(notificationsKey)
+    expect(readIds).toEqual(["notification-1"])
+    expect(notifications?.data[0].read_at).toEqual(expect.any(String))
+    expect(notifications?.data[1].read_at).toBeNull()
+    expect(queryClient.getQueryData(unreadKey)).toEqual({ unread: 1 })
+  })
+})
 
 describe("dashboard AI mutations", () => {
   it("routes metrics questions through the ask endpoint", async () => {

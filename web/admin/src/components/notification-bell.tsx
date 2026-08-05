@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate } from "react-router-dom"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -14,9 +14,9 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { markNotificationRead } from "@/lib/api/endpoints"
 import type { MerchantNotification } from "@/lib/api/types"
 import { timeAgo } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
@@ -36,6 +36,12 @@ function normalizeLink(link?: string | null): { path?: string; href?: string } {
 export function NotificationBell() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const readNotification = useMutation(
+    adminMutations.markNotificationRead(queryClient)
+  )
+  const readNotifications = useMutation(
+    adminMutations.markNotificationsRead(queryClient)
+  )
   const [open, setOpen] = React.useState(false)
   const unreadOptions = adminQueries.unreadNotifications()
   const notificationsOptions = adminQueries.notifications(open)
@@ -55,21 +61,7 @@ export function NotificationBell() {
     setOpen(false)
     if (isUnread(n)) {
       try {
-        await markNotificationRead(n.id)
-        const readAt = new Date().toISOString()
-        queryClient.setQueryData<{ data: MerchantNotification[] | null }>(
-          notificationsOptions.queryKey,
-          (current) => ({
-            ...current,
-            data: (current?.data ?? []).map((item) =>
-              item.id === n.id ? { ...item, read_at: readAt } : item
-            ),
-          })
-        )
-        queryClient.setQueryData<{ unread: number }>(
-          unreadOptions.queryKey,
-          (current) => ({ unread: Math.max(0, (current?.unread ?? 0) - 1) })
-        )
+        await readNotification.mutateAsync(n.id)
       } catch {
         /* best effort */
       }
@@ -80,34 +72,10 @@ export function NotificationBell() {
   }
 
   // No bulk endpoint in the contract — mark each currently-listed unread item.
-  const markAll = async () => {
+  const markAll = () => {
     const unread = items.filter(isUnread)
     if (unread.length === 0) return
-    const results = await Promise.allSettled(
-      unread.map((notification) => markNotificationRead(notification.id))
-    )
-    const readIDs = new Set(
-      results.flatMap((result, index) =>
-        result.status === "fulfilled" ? [unread[index].id] : []
-      )
-    )
-    if (readIDs.size === 0) return
-    const now = new Date().toISOString()
-    queryClient.setQueryData<{ data: MerchantNotification[] | null }>(
-      notificationsOptions.queryKey,
-      (current) => ({
-        ...current,
-        data: (current?.data ?? []).map((item) =>
-          readIDs.has(item.id) ? { ...item, read_at: now } : item
-        ),
-      })
-    )
-    queryClient.setQueryData<{ unread: number }>(
-      unreadOptions.queryKey,
-      (current) => ({
-        unread: Math.max(0, (current?.unread ?? 0) - readIDs.size),
-      })
-    )
+    readNotifications.mutate(unread.map((notification) => notification.id))
   }
 
   return (
@@ -138,8 +106,9 @@ export function NotificationBell() {
               size="sm"
               className="h-6 px-2 text-xs"
               onClick={markAll}
+              disabled={readNotifications.isPending}
             >
-              Mark all read
+              {readNotifications.isPending ? "Marking…" : "Mark all read"}
             </Button>
           )}
         </div>
