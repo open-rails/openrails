@@ -173,10 +173,19 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.Equal(t, unit, quote.Unit)
 	require.NotNil(t, quote.ExpiresAt)
 
-	quote, trx, err := svc.DepositCatalogCreditPurchase(ctx, payer, payer.UUID().String(), money.CatalogCreditPurchaseQuoteInput{
-		ProductKey:  productKey,
-		SpendMicros: 50_000_000,
-	}, "checkout_"+uuid.NewString())
+	// or#896: delivery is the LIVE deposit path (the one POST
+	// /v1/service/credits/deposit drives) fed by the quote — there is no second
+	// catalog-specific money writer.
+	sourceID := "checkout_" + uuid.NewString()
+	trx, err := svc.Deposit(ctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    payer.UUID().String(),
+		Currency:   quote.Unit,
+		Amount:     quote.TotalCredits,
+		Source:     "credit_purchase",
+		SourceID:   &sourceID,
+		ExpiresAt:  quote.ExpiresAt,
+	})
 	require.NoError(t, err)
 	require.Equal(t, quote.TotalCredits, trx.Amount)
 	require.Equal(t, unit, trx.Currency)
@@ -185,10 +194,17 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.NoError(t, err)
 	require.Equal(t, quote.TotalCredits, bal.Balance)
 
-	_, _, err = svc.DepositCatalogCreditPurchase(ctx, payer, payer.UUID().String(), money.CatalogCreditPurchaseQuoteInput{
-		ProductKey:  productKey,
-		SpendMicros: 50_000_000,
-	}, derefString(trx.SourceID))
+	// Same payment source id = same deposit: a replayed settlement never
+	// double-credits the quoted lot.
+	_, err = svc.Deposit(ctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    payer.UUID().String(),
+		Currency:   quote.Unit,
+		Amount:     quote.TotalCredits,
+		Source:     "credit_purchase",
+		SourceID:   trx.SourceID,
+		ExpiresAt:  quote.ExpiresAt,
+	})
 	require.NoError(t, err)
 	bal, err = svc.GetBalanceForCustomer(ctx, payer, unit)
 	require.NoError(t, err)
@@ -289,9 +305,3 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
 	require.Equal(t, int64(50_000_000), quote.PaidAmount)
 }
 
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
