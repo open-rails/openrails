@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,6 +86,8 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 }
 
 func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
+	hook := logtest.NewGlobal()
+	t.Cleanup(hook.Reset)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := merchants.NewMemorySecretStore()
 	secretName, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
@@ -102,6 +106,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		seen <- v5CreateSeen{auth: r.Header.Get("Authorization"), body: body}
+		time.Sleep(5 * time.Millisecond)
 		_, _ = io.WriteString(w, `{"object":"customer","id":"vault_123","billing":[{"object":"billing","id":"billing_456","priority":1}]}`)
 	}))
 	defer server.Close()
@@ -154,6 +159,21 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	require.Equal(t, "Visa", *pm.CardType)
 	require.Equal(t, "12/30", *pm.ExpiryDate)
 	require.Equal(t, "Ada Lovelace", pm.Metadata["name_on_card"])
+
+	var timingFields map[string]any
+	for _, entry := range hook.AllEntries() {
+		if entry.Message == "Payment method create timing" {
+			timingFields = entry.Data
+			break
+		}
+	}
+	require.NotNil(t, timingFields)
+	require.Equal(t, "payment_method_create", timingFields["operation"])
+	require.Equal(t, "nmi", timingFields["provider"])
+	require.Equal(t, "success", timingFields["outcome"])
+	require.GreaterOrEqual(t, timingFields["provider_duration_ms"], int64(5))
+	require.GreaterOrEqual(t, timingFields["database_duration_ms"], int64(0))
+	require.GreaterOrEqual(t, timingFields["total_duration_ms"], timingFields["provider_duration_ms"])
 }
 
 // #788: the boot-config plane is gone — a vault create with no armed rail
