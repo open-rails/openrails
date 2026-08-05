@@ -63,7 +63,10 @@ func (s *NMIDeleteScheduler) ScheduleNMIDelete(ctx context.Context, userID strin
 	if s == nil || s.db == nil {
 		return fmt.Errorf("intent ledger unavailable for deferred delete scheduling")
 	}
-	// The subscription row carries the merchant + provider the intent needs.
+	// The subscription row carries the merchant, provider and — or#893 — the PSP
+	// the intent must execute against. The delete is addressed to the SAME
+	// gateway account that holds the schedule; anything else would fire against
+	// a sibling account's book.
 	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription for deferred delete intent: %w", err)
@@ -73,6 +76,7 @@ func (s *NMIDeleteScheduler) ScheduleNMIDelete(ctx context.Context, userID strin
 		Provider:       strings.ToLower(sub.Rail),
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &subscriptionID,
+		PspID:          sub.PspID,
 		Payload: NMIDeletePayload{
 			UserID:             userID,
 			RailSubscriptionID: sub.RailSubscriptionID,

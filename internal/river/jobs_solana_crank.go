@@ -176,6 +176,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			if _, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
 				MerchantID:     row.MerchantID,
 				Provider:       string(models.RailSolana),
+				PspID:          row.PspID,
 				IntentType:     TypeSolanaPull,
 				SubscriptionID: &row.SubscriptionID,
 				Payload: SolanaPullPayload{

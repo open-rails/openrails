@@ -761,10 +761,11 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1w-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata)
-		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7)`,
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
+		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, customer, price, "w-"+sfx, purchased,
-			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`)
+			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, pspID)
 		return nil
 	}))
 

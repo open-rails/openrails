@@ -167,7 +167,10 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	require.Equal(t, a.MerchantID.String(), itemA.ID)
 	require.False(t, itemA.CreatedAt.IsZero())
 	require.Nil(t, itemA.DeletedAt)
-	require.Equal(t, []string{}, itemA.RailsArmed, "A has no rail accounts")
+	// or#893: a payment on a real rail now REQUIRES a psps row (psp_id is
+	// NOT NULL), so A's nmi payment necessarily arms nmi — the fixture can no
+	// longer isolate "has activity" from "has rail accounts".
+	require.Equal(t, []string{"nmi"}, itemA.RailsArmed, "A's payment required an nmi PSP")
 	require.NotNil(t, itemA.LastPaymentAt, "A has a payment")
 	require.WithinDuration(t, paidAt, *itemA.LastPaymentAt, time.Second)
 

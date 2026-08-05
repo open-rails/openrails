@@ -27,8 +27,9 @@ import (
 )
 
 // seedScanSubscription inserts a subscription row shaped for the dunning scan
-// filter matrix. Returns the subscription id.
-func seedScanSubscription(ctx context.Context, t *testing.T, q *gen.Queries, productID, priceID, customerID uuid.UUID, rail string, status models.SubscriptionStatus, nextRetryAt *time.Time) uuid.UUID {
+// filter matrix. pspID must already exist for (merchant, rail). Returns the
+// subscription id.
+func seedScanSubscription(ctx context.Context, t *testing.T, q *gen.Queries, productID, priceID, customerID, pspID uuid.UUID, rail string, status models.SubscriptionStatus, nextRetryAt *time.Time) uuid.UUID {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(-24 * time.Hour)
@@ -37,6 +38,7 @@ func seedScanSubscription(ctx context.Context, t *testing.T, q *gen.Queries, pro
 	params := gen.CreateSubscriptionParams{
 		ID: id, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 		Status: string(status), Rail: rail,
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_scan_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: nextRetryAt, CreatedAt: now, UpdatedAt: now,
@@ -94,13 +96,15 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	newCustomer := func() uuid.UUID { return dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String()) }
 	pastRetry := now.Add(-time.Hour)
 	futureRetry := now.Add(24 * time.Hour)
+	nmiPspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	ccbillPspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 
-	due := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailNMI), models.StatusPastDue, &pastRetry)
-	notDueYet := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailNMI), models.StatusPastDue, &futureRetry)
-	active := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailNMI), models.StatusActive, &pastRetry)
-	cancelled := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailNMI), models.StatusCancelled, &pastRetry)
-	otherRail := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailCCBill), models.StatusPastDue, &pastRetry)
-	noRetryAt := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), string(models.RailNMI), models.StatusPastDue, nil)
+	due := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), nmiPspID, string(models.RailNMI), models.StatusPastDue, &pastRetry)
+	notDueYet := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), nmiPspID, string(models.RailNMI), models.StatusPastDue, &futureRetry)
+	active := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), nmiPspID, string(models.RailNMI), models.StatusActive, &pastRetry)
+	cancelled := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), nmiPspID, string(models.RailNMI), models.StatusCancelled, &pastRetry)
+	otherRail := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), ccbillPspID, string(models.RailCCBill), models.StatusPastDue, &pastRetry)
+	noRetryAt := seedScanSubscription(ctx, t, q, productID, priceID, newCustomer(), nmiPspID, string(models.RailNMI), models.StatusPastDue, nil)
 	seeded := map[uuid.UUID]string{
 		due: "due", notDueYet: "notDueYet", active: "active",
 		cancelled: "cancelled", otherRail: "otherRail", noRetryAt: "noRetryAt",
@@ -179,12 +183,15 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+
 	// Sub A: openrails-driven payment method whose vault refs are MISSING —
 	// nothing chargeable, and nothing that could justify a failure either.
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
 	paymentMethodID := uuid.New()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, Rail: string(models.RailNMI),
+		PspID:           pspID,
 		RailCustomerRef: "", RailMethodRef: "", // missing vault!
 		RebillDriver:         "openrails", // OpenRails drives rebills — NOT provider-auto-billed
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
@@ -193,6 +200,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:              pspID,
 		RailSubscriptionID: "sub_nopm_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
@@ -206,6 +214,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: autoBilledSubID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: autoBilledCustomer, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_autobilled_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 		NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,

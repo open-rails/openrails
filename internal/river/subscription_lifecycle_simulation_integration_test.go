@@ -167,9 +167,11 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	require.NoError(t, err)
 
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	billingID := "bill_" + uuid.New().String()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
+		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
 		RebillDriver:         "openrails",
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
@@ -181,6 +183,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusActive), Rail: "nmi",
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_sim_" + uuid.New().String(),
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
@@ -196,6 +199,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 			PriceID:        priceID,
 			SubscriptionID: &subID,
 			Rail:           models.RailNMI,
+			PspID:          &pspID,
 			// or#827: a completed positive charge must DECLARE where the money
 			// moved; the signup payment is a real rail settlement.
 			MoneyMovement: models.MoneyMovementRail,

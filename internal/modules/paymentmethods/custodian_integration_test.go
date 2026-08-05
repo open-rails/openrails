@@ -29,12 +29,14 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 	customerID, err := db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, uuid.NewString())
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	repo := NewPaymentMethodRepo(database)
 	create := func(custodian string) uuid.UUID {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
 			CustomerID:           customerID,
 			Rail:                 models.RailNMI,
+			PspID:                pspID,
 			RailCustomerRef:      "vault-" + uuid.NewString()[:8],
 			RailMethodRef:        "bill-" + uuid.NewString()[:8],
 			RebillDriver:         models.RebillDriverProvider,
@@ -78,9 +80,9 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 		id := uuid.New()
 		_, err := pool.Exec(ctx,
 			`INSERT INTO openrails.payment_methods
-			   (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian)
-			 VALUES ($1, $2, $3, 'nmi', $4, $5, 'txn-x', $6)`,
-			id, dbtest.TestMerchantID.UUID(), customerID,
+			   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian)
+			 VALUES ($1, $2, $3, 'nmi', $4, $5, $6, 'txn-x', $7)`,
+			id, dbtest.TestMerchantID.UUID(), customerID, pspID,
 			"vault-"+uuid.NewString()[:8], "bill-"+uuid.NewString()[:8], custodian)
 		if err == nil {
 			t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = $1`, id) })

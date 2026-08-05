@@ -196,11 +196,13 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 
 func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMISale,
 		PriceID:        &fx.priceID,
+		PspID:          pspID,
 		Payload:        fx.payload,
 		IdempotencyKey: NMISaleIdempotencyKey(key),
 		NextAttemptAt:  time.Now().UTC(),

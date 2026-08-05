@@ -97,6 +97,7 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 			intent, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
 				MerchantID: c.MerchantID,
 				Provider:   c.Rail,
+				PspID:      c.PspID,
 				IntentType: intents.TypeTopupCharge,
 				Payload: intents.TopupChargePayload{
 					CustomerID:      c.CustomerID,

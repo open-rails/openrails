@@ -58,6 +58,12 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	if err != nil {
 		return err
 	}
+	// or#893: checkout_sessions.psp_id is NOT NULL. The service refuses an
+	// unroutable rail before it builds a session; this is the repo's own guard
+	// so the failure names the reason rather than surfacing as a NOT NULL error.
+	if session.PspID == uuid.Nil {
+		return fmt.Errorf("create checkout session %s: %w", session.ID, db.ErrNoPSPInContext)
+	}
 	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
 		ID:             session.ID,
 		MerchantID:     tid.UUID(),

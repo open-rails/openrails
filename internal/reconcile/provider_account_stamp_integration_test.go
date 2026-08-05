@@ -18,9 +18,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TestRepoCreateStampsOnlyExplicitRailMerchantAccount proves psp_id is
-// provenance: repo writes do not invent it from primary routing.
-func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
+// TestRepoCreateRequiresObservedPSPProvenance proves psp_id is provenance and
+// nothing else: the repo never invents one from primary routing, and or#893
+// turned the old "write it unattributed" outcome into a REFUSAL — an
+// unattributed provider charge is not representable. Off-rail channels, which
+// have no provider at all, are the one lane that still writes without a PSP.
+func TestRepoCreateRequiresObservedPSPProvenance(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbtest.EnsureTestMerchant(context.Background(), t, appDB.Pool())
@@ -51,7 +54,8 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 
-		// Create a payment via the repo WITHOUT setting PspID.
+		// A charge on a REAL rail with no observed PSP is refused, before any
+		// write — not stored with NULL provenance.
 		pmt := &models.Payment{
 			ID:            uuid.New(),
 			CustomerID:    customerID,
@@ -66,11 +70,23 @@ func TestRepoCreateStampsOnlyExplicitRailMerchantAccount(t *testing.T) {
 			PurchasedAt:   now,
 			CreatedAt:     now,
 		}
-		require.NoError(t, payments.NewPaymentRepo(appDB).Create(ctx, pmt))
+		err = payments.NewPaymentRepo(appDB).Create(ctx, pmt)
+		require.ErrorIs(t, err, db.ErrNoPSPInContext, "an unattributed provider charge must refuse, not write NULL")
+		_, err = payments.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
+		require.Error(t, err, "the refused charge left no row")
 
-		got, err := payments.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
+		// Off-rail money genuinely has no provider account, so it writes without
+		// one — the exemption payments_psp_required_on_rail names.
+		manual := &models.Payment{
+			ID: uuid.New(), CustomerID: customerID, PriceID: priceID,
+			Rail:          models.Rail(models.ChannelManual),
+			TransactionID: "txn-manual-" + suffix, Amount: 999, ListAmount: 999, Currency: "USD",
+			Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
+		}
+		require.NoError(t, payments.NewPaymentRepo(appDB).Create(ctx, manual))
+		gotManual, err := payments.NewPaymentRepo(appDB).GetByID(ctx, manual.ID)
 		require.NoError(t, err)
-		require.Nil(t, got.PspID, "payment must not invent psp_id from primary routing")
+		require.Nil(t, gotManual.PspID, "a channel has no PSP to attribute")
 
 		// #641: a context-pinned account (the per-account inbound webhook path)
 		// records observed external-account provenance.

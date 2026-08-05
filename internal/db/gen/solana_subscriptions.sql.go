@@ -174,9 +174,11 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 }
 
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
-WHERE status = 'active' AND next_pull_at <= $1::timestamptz
-ORDER BY merchant_id ASC, next_pull_at ASC
+SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_start, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, sub.psp_id
+FROM openrails.solana_subscriptions s
+JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
+WHERE s.status = 'active' AND s.next_pull_at <= $1::timestamptz
+ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF($2::int, 0)
 `
 
@@ -185,32 +187,40 @@ type ListDueSolanaSubscriptionsParams struct {
 	PageLimit int32
 }
 
-func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]OpenrailsSolanaSubscription, error) {
+type ListDueSolanaSubscriptionsRow struct {
+	OpenrailsSolanaSubscription OpenrailsSolanaSubscription
+	PspID                       uuid.UUID
+}
+
+// or#893: the crank's recurring-pull intent must name the PSP it executes
+// against, and the local subscription is where that provenance lives.
+func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]ListDueSolanaSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.Now, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsSolanaSubscription
+	var items []ListDueSolanaSubscriptionsRow
 	for rows.Next() {
-		var i OpenrailsSolanaSubscription
+		var i ListDueSolanaSubscriptionsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.SubscriptionID,
-			&i.SubscriberWallet,
-			&i.AuthorityPda,
-			&i.SubscriptionPda,
-			&i.PlanPda,
-			&i.MerchantAddress,
-			&i.Mint,
-			&i.PlanCreatedAtFingerprint,
-			&i.LastPulledPeriodStart,
-			&i.LastSignature,
-			&i.NextPullAt,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.OpenrailsSolanaSubscription.ID,
+			&i.OpenrailsSolanaSubscription.MerchantID,
+			&i.OpenrailsSolanaSubscription.SubscriptionID,
+			&i.OpenrailsSolanaSubscription.SubscriberWallet,
+			&i.OpenrailsSolanaSubscription.AuthorityPda,
+			&i.OpenrailsSolanaSubscription.SubscriptionPda,
+			&i.OpenrailsSolanaSubscription.PlanPda,
+			&i.OpenrailsSolanaSubscription.MerchantAddress,
+			&i.OpenrailsSolanaSubscription.Mint,
+			&i.OpenrailsSolanaSubscription.PlanCreatedAtFingerprint,
+			&i.OpenrailsSolanaSubscription.LastPulledPeriodStart,
+			&i.OpenrailsSolanaSubscription.LastSignature,
+			&i.OpenrailsSolanaSubscription.NextPullAt,
+			&i.OpenrailsSolanaSubscription.Status,
+			&i.OpenrailsSolanaSubscription.CreatedAt,
+			&i.OpenrailsSolanaSubscription.UpdatedAt,
+			&i.PspID,
 		); err != nil {
 			return nil, err
 		}

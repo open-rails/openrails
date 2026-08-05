@@ -274,6 +274,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 	_, err := pool.Exec(ctx, "TRUNCATE openrails.customers, openrails.products RESTART IDENTITY CASCADE")
 	require.NoError(t, err)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "ccbill")
 
 	// One base product/price (all scale subs+payments use it) + perfFatProducts
 	// distinct products for the fat customer's active-sub fan-out. tier_group NULL
@@ -325,28 +326,28 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// subscriptions: one active sub per customer on the base product (created_at spread).
 	copyRows(ctx, t, pool, "subscriptions",
-		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
+		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at", "psp_id"},
 		scale, func(i int) []any {
-			return []any{perfSubUUID(i), productIDs[0], priceIDs[0], "active", "ccbill", merchantID, perfCustomerUUID(i), now.Add(720 * time.Hour), now, now.Add(-time.Duration(i) * time.Second), now}
+			return []any{perfSubUUID(i), productIDs[0], priceIDs[0], "active", "ccbill", merchantID, perfCustomerUUID(i), now.Add(720 * time.Hour), now, now.Add(-time.Duration(i) * time.Second), now, pspID}
 		})
 	// fat customer: an active sub in each extra product (active-sub fan-out for the LIMIT 1 path).
 	copyRows(ctx, t, pool, "subscriptions",
-		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at"},
+		[]string{"id", "product_id", "price_id", "status", "rail", "merchant_id", "customer_id", "current_period_ends_at", "started_at", "created_at", "updated_at", "psp_id"},
 		perfFatProducts, func(j int) []any {
-			return []any{perfSubUUID(scale + j), productIDs[j+1], priceIDs[j+1], "active", "ccbill", merchantID, fatCustomerID, now.Add(720 * time.Hour), now, now.Add(-time.Duration(j) * time.Minute), now}
+			return []any{perfSubUUID(scale + j), productIDs[j+1], priceIDs[j+1], "active", "ccbill", merchantID, fatCustomerID, now.Add(720 * time.Hour), now, now.Add(-time.Duration(j) * time.Minute), now, pspID}
 		})
 
 	// payments: one completed charge per subscription on the base price.
 	copyRows(ctx, t, pool, "payments",
-		[]string{"id", "price_id", "rail", "transaction_id", "amount", "list_amount", "currency", "status", "subscription_id", "merchant_id", "customer_id", "purchased_at", "created_at"},
+		[]string{"id", "price_id", "rail", "transaction_id", "amount", "list_amount", "currency", "status", "subscription_id", "merchant_id", "customer_id", "purchased_at", "created_at", "psp_id"},
 		scale, func(i int) []any {
-			return []any{perfPayUUID(i), priceIDs[0], "ccbill", fmt.Sprintf("txn-%012d", i), int64(1999), int64(1999), perfCurrency, "completed", perfSubUUID(i), merchantID, perfCustomerUUID(i), now.Add(-time.Hour), now}
+			return []any{perfPayUUID(i), priceIDs[0], "ccbill", fmt.Sprintf("txn-%012d", i), int64(1999), int64(1999), perfCurrency, "completed", perfSubUUID(i), merchantID, perfCustomerUUID(i), now.Add(-time.Hour), now, pspID}
 		})
 	// fat subscription: many completed charges (purchased_at spread) for the LIMIT 1 path.
 	copyRows(ctx, t, pool, "payments",
-		[]string{"id", "price_id", "rail", "transaction_id", "amount", "list_amount", "currency", "status", "subscription_id", "merchant_id", "customer_id", "purchased_at", "created_at"},
+		[]string{"id", "price_id", "rail", "transaction_id", "amount", "list_amount", "currency", "status", "subscription_id", "merchant_id", "customer_id", "purchased_at", "created_at", "psp_id"},
 		perfFatPayments, func(j int) []any {
-			return []any{perfPayUUID(scale + j), priceIDs[0], "ccbill", fmt.Sprintf("txn-fat-%012d", j), int64(1999), int64(1999), perfCurrency, "completed", fatSubID, merchantID, fatCustomerID, now.Add(-time.Duration(j) * time.Minute), now}
+			return []any{perfPayUUID(scale + j), priceIDs[0], "ccbill", fmt.Sprintf("txn-fat-%012d", j), int64(1999), int64(1999), perfCurrency, "completed", fatSubID, merchantID, fatCustomerID, now.Add(-time.Duration(j) * time.Minute), now, pspID}
 		})
 
 	// grants: one live credit lot per customer.
@@ -395,15 +396,15 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// payment_methods: one stored instrument per customer.
 	copyRows(ctx, t, pool, "payment_methods",
-		[]string{"id", "rail", "initial_transaction_id", "merchant_id", "customer_id", "rail_customer_ref", "rail_method_ref", "created_at", "updated_at"},
+		[]string{"id", "rail", "initial_transaction_id", "merchant_id", "customer_id", "rail_customer_ref", "rail_method_ref", "created_at", "updated_at", "psp_id"},
 		scale, func(i int) []any {
-			return []any{perfPmUUID(i), "ccbill", fmt.Sprintf("init-%012d", i), merchantID, perfCustomerUUID(i), "", fmt.Sprintf("pm-%012d", i), now, now}
+			return []any{perfPmUUID(i), "ccbill", fmt.Sprintf("init-%012d", i), merchantID, perfCustomerUUID(i), "", fmt.Sprintf("pm-%012d", i), now, now, pspID}
 		})
 	// fat customer: many stored instruments (ORDER BY created_at DESC fan-out).
 	copyRows(ctx, t, pool, "payment_methods",
-		[]string{"id", "rail", "initial_transaction_id", "merchant_id", "customer_id", "rail_customer_ref", "rail_method_ref", "created_at", "updated_at"},
+		[]string{"id", "rail", "initial_transaction_id", "merchant_id", "customer_id", "rail_customer_ref", "rail_method_ref", "created_at", "updated_at", "psp_id"},
 		perfFatPayMethods, func(j int) []any {
-			return []any{perfPmUUID(scale + j), "ccbill", fmt.Sprintf("init-fat-%012d", j), merchantID, fatCustomerID, "", fmt.Sprintf("pm-fat-%012d", j), now.Add(-time.Duration(j) * time.Minute), now}
+			return []any{perfPmUUID(scale + j), "ccbill", fmt.Sprintf("init-fat-%012d", j), merchantID, fatCustomerID, "", fmt.Sprintf("pm-fat-%012d", j), now.Add(-time.Duration(j) * time.Minute), now, pspID}
 		})
 
 	for _, tbl := range []string{

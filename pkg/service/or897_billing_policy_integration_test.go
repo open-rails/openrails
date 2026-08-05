@@ -353,6 +353,7 @@ func or897ArrearsPayer(t *testing.T, ctx context.Context, ms *money.MoneyService
 func or897SeedPaymentMethod(t *testing.T, ctx context.Context, pool *pgxpool.Pool, payer identity.CustomerID) uuid.UUID {
 	t.Helper()
 	pm := uuid.New()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
@@ -360,6 +361,7 @@ func or897SeedPaymentMethod(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		Rail:                 "nmi",
 		InitialTransactionID: "init_" + pm.String(),
 		RailCustomerRef:      "vault_" + pm.String(),
+		PspID:                pspID,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

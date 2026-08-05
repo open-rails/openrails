@@ -38,15 +38,16 @@ func TestFailMembershipLimitedModeQueuesDeleteIntent(t *testing.T) {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "nmi")
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "qa-prod-"+uuid.NewString()[:8], tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
-	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, $8)`,
-		subID, priceID, productID, psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), custID, tenantID)
+	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
+		subID, priceID, productID, psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), custID, tenantID, pspID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
 			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, subID)

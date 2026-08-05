@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 // or#860: the #732 destructive-rate ceiling is a FAIL-OPEN control until this
@@ -45,12 +47,13 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 			id, "or860-"+suffix+"-"+uuid.NewString()[:6])
 		require.NoError(t, err)
+		pspID := dbtest.EnsureTestPSP(ctx, t, super, id, "nmi")
 		for j := 0; j < 3; j++ {
 			_, err = super.Exec(ctx, `
 				INSERT INTO openrails.rail_intents
-				  (merchant_id, rail, intent_type, idempotency_key, origin, actor, status, next_attempt_at)
-				VALUES ($1,'nmi',$2,$3,'user',$4,'pending', now())`,
-				id, intentType, "or860-"+suffix+"-"+uuid.NewString(), actor)
+				  (merchant_id, rail, psp_id, intent_type, idempotency_key, origin, actor, status, next_attempt_at)
+				VALUES ($1,'nmi',$2,$3,$4,'user',$5,'pending', now())`,
+				id, pspID, intentType, "or860-"+suffix+"-"+uuid.NewString(), actor)
 			require.NoError(t, err)
 		}
 	}

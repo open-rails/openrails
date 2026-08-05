@@ -210,11 +210,13 @@ func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFix
 
 func (fx *custodianSaleFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   string(models.RailNMI),
 		IntentType: TypeCustodianSale,
 		PriceID:    &fx.priceID,
+		PspID:      pspID,
 		Payload: CustodianSalePayload{
 			TokenIntentID: fx.bt.intentID,
 			AmountMicros:  1_990_000,

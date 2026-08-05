@@ -77,8 +77,16 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
+	// or#893: rail_intents.psp_id is NOT NULL. An explicit PspID wins; otherwise
+	// the PSP the caller already routed to and pinned on ctx (checkout's
+	// stampPSP, the webhook plane) is the answer. Nothing else is: an intent
+	// nobody can attribute cannot be executed against the right credentials.
 	if p.PspID == uuid.Nil {
-		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, db.ErrNoPSPInContext)
+		psp, err := db.RequirePSPID(ctx)
+		if err != nil {
+			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
+		}
+		p.PspID = psp
 	}
 	var payload []byte
 	if p.Payload != nil {

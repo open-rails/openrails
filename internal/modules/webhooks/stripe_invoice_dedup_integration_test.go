@@ -74,6 +74,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 
 	paymentSvc := payments.NewPaymentService(dbi)
 	svc := &StripeConvergeService{PaymentService: paymentSvc}
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 
 	// Reconcile-backfill row: keyed by CHARGE id, invoice id only in metadata.
 	const chargeID = "ch_dedup_1"
@@ -83,6 +84,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		CustomerID:    tenantSubjectID,
 		PriceID:       priceID,
 		Rail:          models.RailStripe,
+		PspID:         &pspID,
 		TransactionID: chargeID,
 		Amount:        2900,
 		ListAmount:    2900,
@@ -128,6 +130,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 		CustomerID:    tenantSubjectID,
 		PriceID:       priceID,
 		Rail:          models.RailStripe,
+		PspID:         &pspID,
 		TransactionID: "failed:in_dedup_2",
 		Amount:        2900,
 		ListAmount:    2900,

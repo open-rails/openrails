@@ -661,6 +661,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 	require.NoError(t, err)
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	periodStart := now
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -669,6 +670,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &periodEnd,

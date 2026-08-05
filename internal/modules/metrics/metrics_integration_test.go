@@ -380,7 +380,10 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	byAcct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count", "chargeback_rate"}, By: []string{"rail_account"}, Range: juneQ}))
 	require.Equal(t, int64(2), cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "payment_count"))
 	require.InDelta(t, 0.5, cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "chargeback_rate").(float64), 1e-9)
-	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "unknown"}, "payment_count"))
+	// or#893: psp_id is required on every real-rail payment now, so the
+	// COALESCE-to-'unknown' fallback is unreachable here — every June payment
+	// carries a real PSP.
+	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "acct-cc-1"}, "payment_count"))
 
 	byDiscount := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"discount_code"}, Range: juneQ}))
 	require.Equal(t, int64(5_000_000), cell(t, byDiscount, map[string]string{"discount_code": "PROMO"}, "gross_revenue"))

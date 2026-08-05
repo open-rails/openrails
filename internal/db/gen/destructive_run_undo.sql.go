@@ -121,7 +121,8 @@ SELECT
     (SELECT count(*) FROM openrails.subscriptions
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*) FROM openrails.payments
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS payments,
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL
+        AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
     (SELECT count(*) FROM openrails.checkout_sessions
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
     -- payment_methods carries no soft-delete column; every row is live.
@@ -140,13 +141,18 @@ type CountUnattributedProviderRowsRow struct {
 	UnfiredIntents   int64
 }
 
-// or#859 §3.2, hole 1, CLOSED by or#893: `psp_id` is NOT NULL on every
-// provider-bound table, so a PSP-scoped predicate can no longer skip anything.
-// This is therefore no longer a blind-spot count to report — it is the
-// INVARIANT, asserted where the rollback relies on it. Every column below is
-// NOT NULL, so every count is structurally zero; a non-zero answer means the
-// schema was reopened underneath this code and the undo refuses rather than
-// silently under-covering. Live rows only.
+// or#859 §3.2, hole 1, CLOSED by or#893: PSP provenance is required on every
+// PROVIDER row, so a PSP-scoped predicate can no longer skip one. This is
+// therefore no longer a blind-spot count to report — it is the INVARIANT,
+// asserted where the rollback relies on it. Every count is structurally zero
+// (NOT NULL, or payments' CHECK); a non-zero answer means the schema was
+// reopened underneath this code and the undo refuses rather than silently
+// under-covering.
+//
+// `payments` excludes the OFF-RAIL channels (manual/admin). Those rows carry no
+// PSP because no provider took the money, so no PSP-scoped operation was ever
+// supposed to reach them — counting them here would report the exemption as a
+// hole. Live rows only.
 func (q *Queries) CountUnattributedProviderRows(ctx context.Context, merchantID uuid.UUID) (CountUnattributedProviderRowsRow, error) {
 	row := q.db.QueryRow(ctx, countUnattributedProviderRows, merchantID)
 	var i CountUnattributedProviderRowsRow

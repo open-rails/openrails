@@ -426,12 +426,20 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	if err != nil {
 		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no merchant resolved on request")
 	}
+	// The charge's own provenance is the only honest answer to "which account
+	// refunds this?" — an off-rail payment has no provider to refund through.
+	if prepared.payment.PspID == nil {
+		return nil, 0, adminRefundHTTPError(http.StatusConflict, "payment carries no PSP; it was not taken through a provider and cannot be refunded on a rail")
+	}
+	pspID := *prepared.payment.PspID
 	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID:     tid.UUID(),
 		Provider:       provider,
 		IntentType:     intentType,
 		SubscriptionID: prepared.payment.SubscriptionID,
 		PaymentID:      &paymentRowID,
+		// or#893: a refund is executed against the account that took the charge.
+		PspID: pspID,
 		Payload: intents.RefundPayload{
 			OriginalPaymentID:     prepared.payment.ID,
 			ReservationID:         prepared.reservation.ID,

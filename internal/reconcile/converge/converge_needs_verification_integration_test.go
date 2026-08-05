@@ -133,12 +133,12 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "wmev-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','wm-cust','wm-vault','wm-tx')`, pm, merchantID, cust)
 		// or#893: the watermark is the cursor of ONE PSP's event stream, so it is
 		// only evidence about the subscriptions of THAT PSP. Both rows name it.
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
 			merchantID, "nmi-wmev-"+sfx).Scan(&psp))
+		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,psp_id) VALUES ($1,$2,$3,'nmi','wm-cust','wm-vault','wm-tx',$4)`, pm, merchantID, cust, psp)
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, pm, start, periodEnd, psp)
 		// Provider truth synced past the period end, for THIS PSP.
@@ -192,13 +192,13 @@ func TestConverge_PeriodOverdue_WatermarkOfAnotherPSPIsNotEvidence(t *testing.T)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "wmsib-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','sib-cust','sib-vault','sib-tx')`, pm, merchantID, cust)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
 			merchantID, "nmi-pulled-"+sfx).Scan(&pulledPSP))
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
 			merchantID, "nmi-silent-"+sfx).Scan(&silentPSP))
+		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,psp_id) VALUES ($1,$2,$3,'nmi','sib-cust','sib-vault','sib-tx',$4)`, pm, merchantID, cust, silentPSP)
 		// The lapsed subscription belongs to the PSP nobody pulled.
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, pm, start, periodEnd, silentPSP)

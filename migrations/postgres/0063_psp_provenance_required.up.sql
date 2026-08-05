@@ -14,8 +14,9 @@
 -- revenue and double fulfilment. 0013 closed it by dropping the PSP dimension;
 -- 0017 correctly restored the dimension (a provider id is only unique WITHIN a
 -- gateway account) but restored the hole along with it, because COALESCE-to-nil
--- is only "one total index" if nil is unreachable. Making the column NOT NULL is
--- what actually makes it unreachable, and then the COALESCE has nothing left to
+-- is only "one total index" if nil is unreachable — and nothing made it so.
+-- Requiring the column (NOT NULL, or the CHECK below where an off-rail lane is
+-- real) is what makes it unreachable, and then the COALESCE has nothing left to
 -- do. Same shape on subscriptions, checkout_sessions (0020) and payment_methods
 -- (whose two `WHERE psp_id IS NULL` legacy uniques are disjoint from
 -- `uq_payment_methods_psp_instrument` — the identical hole, one instrument twice).

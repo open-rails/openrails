@@ -362,7 +362,7 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 		}
 		out := make(map[string]struct{}, len(rows))
 		for _, r := range rows {
-			out[r.SubscriptionPda] = struct{}{}
+			out[r.OpenrailsSolanaSubscription.SubscriptionPda] = struct{}{}
 		}
 		return out, nil
 	}

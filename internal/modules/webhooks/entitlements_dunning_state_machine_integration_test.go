@@ -76,6 +76,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -84,6 +85,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailCCBill),
+		PspID:                 pspID,
 		RailSubscriptionID:    ccbillSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
