@@ -113,6 +113,14 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 		"rail":            sub.Rail,
 	}).Info("processing subscription cancellation")
 
+	// or#896: a Solana cancel needs the subscriber's wallet signature, so this
+	// job can never complete — cancel it instead of retrying a rail fact
+	// forever (the API refuses the request up front; this covers jobs already
+	// queued and any other producer).
+	if sub.Rail == models.RailSolana {
+		return river.JobCancel(subscriptions.ErrSolanaCancelNeedsWalletSignature)
+	}
+
 	switch sub.Rail {
 	case models.RailStripe:
 		if w.SubscriptionLifecycleService == nil {

@@ -167,8 +167,19 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		return nil, errors.New("provider is required")
 	}
 
+	// or#896: refuse an unsupported RAIL honestly before credential resolution.
+	// A reserved gateway name (stripe/ccbill/solana) resolves to itself, so the
+	// old code reported "PSP 'stripe' is not configured" — a misconfiguration
+	// message for a surface that does not exist on that rail.
+	if rail := models.Rail(psp); knownRail(rail) && !rails.SupportsPaymentMethodCRUD(rail) {
+		return nil, RailPaymentMethodsUnsupported(psp)
+	}
+
 	client, scope, err := s.resolveNMIClientByName(ctx, psp)
 	if err != nil {
+		if errors.Is(err, ErrPaymentMethodsUnsupportedOnRail) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("PSP '%s' is not configured: %w", psp, err)
 	}
 	rail := psp
@@ -333,8 +344,10 @@ func (s *RailPaymentMethodService) resolveNMIClientByName(ctx context.Context, n
 				return nil, nil, fmt.Errorf("resolve PSP %q: %w", name, err)
 			}
 			if found {
-				if !rails.IsNMI(models.Rail(scope.Rail)) {
-					return nil, nil, fmt.Errorf("PSP %q is on rail %s, not an NMI rail", name, scope.Rail)
+				if !rails.SupportsPaymentMethodCRUD(models.Rail(scope.Rail)) {
+					// or#896: honest unsupported-surface refusal, not a
+					// credential complaint about a PSP that resolved fine.
+					return nil, nil, RailPaymentMethodsUnsupported(scope.Rail)
 				}
 				client, err := s.resolveNMIClientForScope(ctx, scope)
 				if err != nil {
@@ -474,6 +487,10 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
+	}
+
+	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
+		return nil, RailPaymentMethodsUnsupported(rail)
 	}
 
 	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
@@ -651,6 +668,10 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return false, nil, errors.New("payment method rail is required")
+	}
+
+	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
+		return false, nil, RailPaymentMethodsUnsupported(rail)
 	}
 
 	// #682 shared-vault handling: deleting the remote vault customer destroys

@@ -403,6 +403,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	if runtime.SubscriptionLifecycleService != nil {
 		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
 	}
+	// or#896: a merchant-initiated cancel goes through the same durable
+	// intents as the user path — admin-origin (a human asked for it, so it
+	// executes under mode=limited like the user cancel) and rate-ceiling gated.
+	if runtime.AdminSubscriptionService != nil {
+		runtime.AdminSubscriptionService.SetDeferredDeleteScheduler(newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginAdmin,
+			"merchant-initiated cancellation; remote NMI subscription must stop rebilling"))
+		runtime.AdminSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, rateCeiling, intents.OriginAdmin,
+			"merchant-initiated cancellation; remote CCBill subscription must stop rebilling"))
+	}
 
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
 	// whether the producer came from config or an embedded host's external
@@ -776,7 +785,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		entitlementService,
 		notificationService,
 		purchaseService,
-		collectionResolver,
 		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railConfigs}

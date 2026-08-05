@@ -54,6 +54,10 @@ type fakeNMIGateway struct {
 	refundCalls  atomic.Int64
 	deleteCalls  atomic.Int64
 	subDeleted   atomic.Bool
+	// deleteFails makes DELETE answer a transport-level failure — the
+	// ambiguous outcome the delete intent must verify rather than assume
+	// (or#896).
+	deleteFails atomic.Bool
 }
 
 func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
@@ -71,6 +75,11 @@ func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
 			fmt.Fprint(w, `{"object":"subscription","id":"psid","delayed_condition":"active"}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/subscriptions/"):
 			f.deleteCalls.Add(1)
+			if f.deleteFails.Load() {
+				w.WriteHeader(http.StatusBadGateway)
+				fmt.Fprint(w, `{"type":"internalError","error_code":"E_INTERNAL","message":"delete failed"}`)
+				return
+			}
 			f.subDeleted.Store(true)
 			fmt.Fprint(w, `{}`)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund"):

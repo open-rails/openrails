@@ -63,6 +63,20 @@ type Descriptor struct {
 	// on this rail (prepaid auto-top-up #239, arrears settlement #241).
 	SupportsChargeSavedMethod bool
 
+	// SupportsCatalogTrial: the rail can honour a catalog first phase
+	// (`trial:` — free or paid intro) declared on a price (or#896). Stripe
+	// maps it onto subscription_data[trial_end]; CCBill's FlexForm carries the
+	// terms and OpenRails validates the billed amount against them. NMI's
+	// add_subscription and Solana's on-chain plan have no first-phase concept —
+	// declaring a trial there is REFUSED at catalog push, never silently dropped.
+	SupportsCatalogTrial bool
+
+	// SupportsPaymentMethodCRUD: OpenRails owns first-party payment-instrument
+	// CRUD on this rail (or#896). NMI only — its customer vault is the one
+	// instrument store OpenRails writes. Stripe delegates to Checkout / the
+	// Billing Portal, CCBill owns its own vault, Solana has no instrument.
+	SupportsPaymentMethodCRUD bool
+
 	// OpenRailsDrivenDunning: OpenRails owns the retry timing (models grace
 	// access as explicit entitlement windows during dunning). NMI + Solana
 	// recurring (#256/#257) — both charged by an OpenRails worker. Stripe
@@ -142,6 +156,8 @@ var descriptors = []Descriptor{
 		true,          // HasRailMerchantAccounts
 		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
 		true,          // SupportsChargeSavedMethod
+		false,         // SupportsCatalogTrial (add_subscription has no first phase — or#896 refuses the declaration)
+		true,          // SupportsPaymentMethodCRUD (the customer vault)
 		true,          // OpenRailsDrivenDunning
 		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
 		nmiAutoBilled,
@@ -158,6 +174,8 @@ var descriptors = []Descriptor{
 		true,          // HasRailMerchantAccounts
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
+		true,          // SupportsCatalogTrial (FlexForm terms; OpenRails validates the billed amount)
+		false,         // SupportsPaymentMethodCRUD (CCBill owns the vault)
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
@@ -171,6 +189,8 @@ var descriptors = []Descriptor{
 		true,     // HasRailMerchantAccounts
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
+		true,     // SupportsCatalogTrial (subscription_data[trial_end]; a PAID intro is refused separately)
+		false,    // SupportsPaymentMethodCRUD (Checkout / Billing Portal own instrument mutation)
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
 		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
 		autoBilledNever,
@@ -187,6 +207,8 @@ var descriptors = []Descriptor{
 		true,     // HasRailMerchantAccounts
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
+		false,    // SupportsCatalogTrial (the on-chain plan has one period price — or#896 refuses the declaration)
+		false,    // SupportsPaymentMethodCRUD (a wallet is not an instrument we hold)
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
@@ -200,6 +222,8 @@ var descriptors = []Descriptor{
 		false,    // HasRailMerchantAccounts (no integration; display-only vestige)
 		false,    // HasRemoteCustomer
 		false,    // SupportsChargeSavedMethod
+		false,    // SupportsCatalogTrial
+		false,    // SupportsPaymentMethodCRUD
 		false,    // OpenRailsDrivenDunning
 		false,    // RemoteDeleteOnTerminalCancel
 		autoBilledNever,
@@ -246,6 +270,21 @@ func HasRemoteCustomer(rail models.Rail) bool {
 func SupportsRailMerchantAccounts(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.HasRailMerchantAccounts
+}
+
+// SupportsCatalogTrial reports whether a catalog `trial:` first phase can be
+// executed on this rail (or#896). Unknown rails: false — a trial declared
+// against something we cannot classify is refused, never dropped.
+func SupportsCatalogTrial(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.SupportsCatalogTrial
+}
+
+// SupportsPaymentMethodCRUD reports whether OpenRails owns first-party
+// payment-instrument CRUD on this rail (or#896). Unknown rails: false.
+func SupportsPaymentMethodCRUD(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.SupportsPaymentMethodCRUD
 }
 
 // AutoBilled reports whether the provider rebills the subscription itself

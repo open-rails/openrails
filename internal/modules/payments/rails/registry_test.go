@@ -60,15 +60,17 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		autoBilledNilPM      bool
 		autoBilledWithMethod bool
 		remoteDeleteTerminal bool
+		catalogTrial         bool
+		paymentMethodCRUD    bool
 		activeCancelMode     CancelMode
 	}{
 		// 3 keys: security_key, webhook_signing_secret, custodian_api_key (or#879 custody).
-		{models.RailNMI, false, true, true, true, 3, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682
-		{models.RailCCBill, false, false, false, true, 3, true, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
+		{models.RailNMI, false, true, true, true, 3, true, false, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682; or#896: no first phase, owns the vault
+		{models.RailCCBill, false, false, false, true, 3, true, true, false, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
 		// 4 keys: secret_key, webhook_signing_secret, _thin, _previous (#856 rollover overlap).
-		{models.RailStripe, true, true, false, true, 4, false, false, false, CancelModeReversible},
-		{models.RailSolana, false, false, true, true, 0, false, false, false, CancelModeDestructive},
-		{models.RailPayPal, false, false, false, false, 0, false, false, false, CancelModeDestructive},
+		{models.RailStripe, true, true, false, true, 4, false, false, false, true, false, CancelModeReversible},
+		{models.RailSolana, false, false, true, true, 0, false, false, false, false, false, CancelModeDestructive},
+		{models.RailPayPal, false, false, false, false, 0, false, false, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer
 	// flips NMI to our-rebill; RebillDriver does.
@@ -101,6 +103,12 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		}
 		if d.RemoteDeleteOnTerminalCancel != c.remoteDeleteTerminal {
 			t.Errorf("%s: RemoteDeleteOnTerminalCancel = %v", c.rail, d.RemoteDeleteOnTerminalCancel)
+		}
+		if got := SupportsCatalogTrial(c.rail); got != c.catalogTrial {
+			t.Errorf("%s: SupportsCatalogTrial = %v", c.rail, got)
+		}
+		if got := SupportsPaymentMethodCRUD(c.rail); got != c.paymentMethodCRUD {
+			t.Errorf("%s: SupportsPaymentMethodCRUD = %v", c.rail, got)
 		}
 		if got := CancelModeFor(&models.Subscription{Rail: c.rail, Status: models.StatusActive}, time.Now()); got != c.activeCancelMode {
 			t.Errorf("%s: CancelModeFor(active) = %v, want %v", c.rail, got, c.activeCancelMode)

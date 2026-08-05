@@ -410,3 +410,41 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, w.Code, "Should return 403 Forbidden")
 	})
 }
+
+// or#896: a payment-method create on a rail OpenRails does not vault for used
+// to answer "PSP 'stripe' is not configured" — a credential complaint about a
+// surface that does not exist. It now names the rail and where the instrument
+// actually lives.
+func TestCreatePaymentMethodUnsupportedRailIsHonest(t *testing.T) {
+	suite, _ := SetupSuiteWithMockNMI(t)
+	userID := uuid.New().String()
+	token := suite.MintUserToken(userID, "pm-unsupported-"+uuid.NewString()+"@test.example.com")
+
+	cases := map[string]string{
+		"stripe": "Billing Portal",
+		"ccbill": "CCBill owns the vault",
+		"solana": "wallet",
+	}
+	for psp, expect := range cases {
+		t.Run(psp, func(t *testing.T) {
+			jsonBody, _ := json.Marshal(map[string]string{
+				"payment_token": "test-token-" + psp,
+				"first_name":    "Test",
+				"last_name":     "User",
+				"provider":      psp,
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/v1/me/payment-methods", bytes.NewReader(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			suite.Server.Handler().ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			body := w.Body.String()
+			assert.Contains(t, body, "not managed by OpenRails on this rail")
+			assert.Contains(t, body, expect)
+			assert.NotContains(t, body, "is not configured",
+				"an unsupported surface must never read as a misconfiguration")
+		})
+	}
+}

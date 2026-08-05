@@ -32,6 +32,19 @@ var (
 	ErrSubscriptionNotActive    = errors.New("subscription is not active")
 	ErrNotificationNotFound     = errors.New("notification not found")
 	ErrNotificationAccessDenied = errors.New("notification does not belong to user")
+
+	// ErrSolanaCancelNeedsWalletSignature refuses the rail-agnostic cancel on
+	// Solana (or#896). A Solana cancel is an on-chain transaction the
+	// SUBSCRIBER'S wallet must sign — OpenRails holds no authority to revoke
+	// the delegation and never DB-only "soft cancels" a chain-truth
+	// subscription. This used to fall through the worker's default branch into
+	// a facade with no Solana case and fail permanently, which read as a bug
+	// rather than a rail fact.
+	ErrSolanaCancelNeedsWalletSignature = errors.New(
+		"cancelling a Solana subscription requires the subscriber's wallet signature: " +
+			"POST /v1/me/subscriptions/{id}/solana-cancel-tx to build the unsigned cancel_subscription " +
+			"transaction, sign and send it from the wallet, then POST /v1/me/subscriptions/{id}/solana-cancel " +
+			"with the signature to confirm and mirror it")
 )
 
 // UserSubscriptionService handles user-facing subscription operations
@@ -534,6 +547,8 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
 			return s.ccbillCancel.WithTx(tx).ScheduleCCBillCancel(ctx, userID, subscription.ID)
 		}
+	case subscription.Rail == models.RailSolana:
+		return ErrSolanaCancelNeedsWalletSignature
 	default:
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}

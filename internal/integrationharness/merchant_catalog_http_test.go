@@ -518,6 +518,88 @@ SELECT aggregation FROM openrails.catalog_meters WHERE merchant_id = $1 AND key 
 	require.Equal(t, "sum", agg)
 }
 
+// or#896: a `trial:` first phase declared on a rail that cannot execute one
+// (NMI, Solana) is REFUSED at publish, naming the limitation — it used to be
+// accepted, dropped, and the subscriber charged the full amount immediately.
+// The rails that can execute one (Stripe, CCBill) still publish.
+func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+	token := surface.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-trials-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+	mid := dbtest.TestMerchantID.UUID()
+
+	publish := func(t *testing.T, psp string) (int, []byte, string) {
+		t.Helper()
+		productKey := "trial-guard-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		t.Cleanup(func() {
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, productKey)
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = $2", mid, productKey)
+		})
+		manifest := catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key:         productKey,
+				DisplayName: "Trial Guard",
+				TierGroup:   "trial-guard-" + psp,
+				Prices: []catalog.Price{{
+					Currency:   "USD",
+					UnitAmount: 23_000_000,
+					Duration:   "30d",
+					AutoRenew:  true,
+					PSPs:       []string{psp},
+					Trial:      &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"},
+				}},
+			}},
+		}
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+			"catalog": manifest,
+			"insert":  true,
+		})
+		return status, body, productKey
+	}
+
+	for _, psp := range []string{"nmi", "solana"} {
+		t.Run(psp+" is refused", func(t *testing.T) {
+			status, body, productKey := publish(t, psp)
+			require.Equal(t, http.StatusBadRequest, status, string(body))
+			require.Contains(t, string(body), "trial")
+			require.Contains(t, string(body), psp)
+			require.Contains(t, string(body), "silently dropped")
+
+			// The refusal is total: no price row was written for the product.
+			var priceCount int
+			require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT count(*) FROM openrails.prices pr
+JOIN openrails.products p ON p.id = pr.product_id
+WHERE p.merchant_id = $1 AND p.key = $2`, mid, productKey).Scan(&priceCount))
+			require.Zero(t, priceCount, "a refused trial must leave no price behind")
+		})
+	}
+
+	for _, psp := range []string{"stripe", "ccbill"} {
+		t.Run(psp+" still publishes", func(t *testing.T) {
+			status, body, productKey := publish(t, psp)
+			require.Equal(t, http.StatusOK, status, string(body))
+
+			var trialAmount *int64
+			var trialHours *int
+			require.NoError(t, h.Pool().QueryRow(ctx, `
+SELECT pr.trial_unit_amount, pr.trial_duration_hours FROM openrails.prices pr
+JOIN openrails.products p ON p.id = pr.product_id
+WHERE p.merchant_id = $1 AND p.key = $2`, mid, productKey).Scan(&trialAmount, &trialHours))
+			require.NotNil(t, trialAmount)
+			require.Equal(t, int64(0), *trialAmount)
+			require.NotNil(t, trialHours)
+			require.Equal(t, 7*24, *trialHours)
+		})
+	}
+}
+
 func ptrI64(v int64) *int64 { return &v }
 
 func TestNativeCatalogLifecycleHTTP(t *testing.T) {
