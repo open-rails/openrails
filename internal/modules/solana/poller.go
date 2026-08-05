@@ -613,7 +613,11 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 		refPtr = &ref
 	}
 	// #713: a present purchase memo must match the checkout session id
-	// (absence passes; uuid.Nil skips for non-session pendings).
+	// (uuid.Nil skips for non-session pendings). or#893 MemoPresenceOptional:
+	// the transfer-request transaction is built by the BUYER'S WALLET from the
+	// Solana Pay URL, and a wallet that drops the memo must not cost the buyer a
+	// payment that really settled — the memo is a discovery hint, never money
+	// truth. Only the transaction WE build is held to MemoRequired.
 	expectedMemo := uuid.Nil
 	if sid, err := uuid.Parse(strings.TrimSpace(pending.SessionID)); err == nil {
 		expectedMemo = sid
@@ -627,6 +631,7 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 		"",
 		refPtr,
 		expectedMemo,
+		solanarpc.MemoPresenceOptional,
 		solanaPaymentExpiryDeadline(pending),
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{

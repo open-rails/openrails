@@ -73,18 +73,42 @@ func PurchaseMemoLocalIDs(tx *solanago.Transaction) []uuid.UUID {
 	return ids
 }
 
-// VerifyPurchaseMemo applies the #713 verify rule: a present purchase memo
-// must name want (mismatch = verification failure), ABSENCE PASSES — pre-memo
-// transactions stay valid; the memo is a discovery hint, never money truth.
-// want == uuid.Nil skips the check.
-func VerifyPurchaseMemo(tx *solanago.Transaction, want uuid.UUID) error {
+// PurchaseMemoPolicy declares how strictly the #713 stamp is verified. It is a
+// property of WHO BUILT THE TRANSACTION, and or#893 makes it explicit rather
+// than leaving "absence passes" as an inherited pre-#713 tolerance:
+//
+//   - MemoPresenceOptional — a WALLET built the transaction from a Solana Pay
+//     URL. The spec asks the wallet to attach the memo, but the wallet is not
+//     ours and a payment that really settled must not be rejected because a
+//     wallet dropped a discovery hint. A present memo must still match.
+//   - MemoRequired — OPENRAILS built and stamped the transaction (the
+//     transaction-request flow, the recurring crank). We know the memo is
+//     there, so its absence means the signature is not the transaction we
+//     built, and that is a verification failure.
+type PurchaseMemoPolicy int
+
+const (
+	MemoPresenceOptional PurchaseMemoPolicy = iota
+	MemoRequired
+)
+
+// VerifyPurchaseMemo applies the #713 verify rule under policy. A present
+// purchase memo must always name want (mismatch = verification failure);
+// absence fails only under MemoRequired. want == uuid.Nil skips the check
+// entirely (no local record to recognise).
+func VerifyPurchaseMemo(tx *solanago.Transaction, want uuid.UUID, policy PurchaseMemoPolicy) error {
 	if want == uuid.Nil {
 		return nil
 	}
+	found := false
 	for _, got := range PurchaseMemoLocalIDs(tx) {
 		if got != want {
 			return fmt.Errorf("purchase memo mismatch: transaction stamped for local record %s, expected %s", got, want)
 		}
+		found = true
+	}
+	if !found && policy == MemoRequired {
+		return fmt.Errorf("purchase memo missing: expected the openrails stamp for local record %s on a transaction we built", want)
 	}
 	return nil
 }

@@ -119,8 +119,15 @@ type SolanaCrankWorker struct {
 	// Intents is the write-through provider-intent runner (#674): each due row
 	// posts a durable solana_pull intent (keyed on the persisted next_pull_at)
 	// and executes it inline through SolanaPullIntentHandler; ambiguity resolves
-	// via the recorded pre-submit signature instead of a blind re-pull. nil =
-	// legacy direct crank (unit-test harnesses).
+	// via the recorded pre-submit signature instead of a blind re-pull.
+	//
+	// or#893: REQUIRED by Work. It used to be optional, with a "legacy direct
+	// crank (unit-test harnesses only)" branch below — an unstamped pull with no
+	// durable record, so a crash between signing and finalize left a subscriber
+	// charged and unrenewed with nothing to recover from. Tests drive crankOne
+	// (the production seam the intent handler itself calls) instead. The one
+	// legitimate runner-less SolanaCrankWorker is the intent HANDLER's own core:
+	// it is never registered as a River worker, so Work never runs on it.
 	Intents *intents.Runner
 
 	// resolvePlanFn loads the billing terms for a row. nil in production (the
@@ -147,6 +154,12 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		log.WithContext(ctx).Warn("Solana cranker not fully wired (no cranker/lifecycle); skipping run")
 		return nil
 	}
+	// or#893: a pull without a durable intent is a charge nothing can recover.
+	// This is a wiring defect, not a runtime condition — fail the job loudly
+	// rather than quietly pulling money on the unrecoverable path.
+	if w.Intents == nil {
+		return fmt.Errorf("solana crank: no intent runner wired; a recurring pull must post a durable intent first (#674)")
+	}
 	batch := w.BatchSize
 	if batch <= 0 {
 		batch = solanaCrankBatchSize
@@ -168,38 +181,29 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		default:
 		}
 		// Per-row isolation: a failure on one subscriber never aborts the batch.
-		if w.Intents != nil {
-			// #674 write-through: durable intent first (keyed on the persisted
-			// next_pull_at anchor), inline execution, pre-submit signature
-			// write-ahead. Crash at any point ⇒ verify-then-resolve off the
-			// recorded signature, never a paid-but-unrenewed subscriber.
-			if _, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
-				MerchantID:     row.MerchantID,
-				Provider:       string(models.RailSolana),
-				PspID:          row.PspID,
-				IntentType:     TypeSolanaPull,
-				SubscriptionID: &row.SubscriptionID,
-				Payload: SolanaPullPayload{
-					SubscriptionPDA: row.SubscriptionPDA,
-					RowID:           row.ID,
-					NextPullAt:      row.NextPullAt.UTC(),
-				},
-				IdempotencyKey: SolanaPullIdempotencyKey(row.ID, row.NextPullAt),
-				NextAttemptAt:  w.now(),
-				Origin:         intents.OriginSystem,
-				OriginReason:   "solana recurring pull (cranking)",
-			}); err != nil {
-				log.WithContext(ctx).WithError(err).WithField("subscription_pda", row.SubscriptionPDA).
-					Warn("Solana cranker: post pull intent failed")
-			}
-			continue
-		}
-		// Legacy direct crank (unit-test harnesses only): no intent exists, so the
-		// pull goes unstamped (uuid.Nil). Production always routes through the
-		// intent handler above, which stamps the intent id as the #713 memo.
-		if _, err := w.crankOne(ctx, repo, row, uuid.Nil, nil); err != nil {
+		//
+		// #674 write-through: durable intent first (keyed on the persisted
+		// next_pull_at anchor), inline execution, pre-submit signature
+		// write-ahead. Crash at any point ⇒ verify-then-resolve off the
+		// recorded signature, never a paid-but-unrenewed subscriber.
+		if _, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+			MerchantID:     row.MerchantID,
+			Provider:       string(models.RailSolana),
+			PspID:          row.PspID,
+			IntentType:     TypeSolanaPull,
+			SubscriptionID: &row.SubscriptionID,
+			Payload: SolanaPullPayload{
+				SubscriptionPDA: row.SubscriptionPDA,
+				RowID:           row.ID,
+				NextPullAt:      row.NextPullAt.UTC(),
+			},
+			IdempotencyKey: SolanaPullIdempotencyKey(row.ID, row.NextPullAt),
+			NextAttemptAt:  w.now(),
+			Origin:         intents.OriginSystem,
+			OriginReason:   "solana recurring pull (cranking)",
+		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_pda", row.SubscriptionPDA).
-				Warn("Solana cranker: subscription crank failed")
+				Warn("Solana cranker: post pull intent failed")
 		}
 	}
 	return nil

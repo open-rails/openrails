@@ -351,17 +351,24 @@ func pendingReferenceMember(mid merchant.ID, reference string) string {
 }
 
 // parsePendingReferenceMember splits a set member back into merchant + ref.
-// ok=false = a pre-#728 bare-reference member (unattributable; dropped).
-func parsePendingReferenceMember(member string) (merchant.ID, string, bool) {
+// or#893: `<merchant_id>|<reference>` is the ONLY shape. A member that does not
+// parse is not history — the bare pre-#728 form has long since aged out of any
+// live set through its own TTL — it is corruption of a live poller input, and
+// the poller must say so rather than quietly discarding somebody's payment
+// reference.
+func parsePendingReferenceMember(member string) (merchant.ID, string, error) {
 	midStr, ref, cut := strings.Cut(member, "|")
 	if !cut {
-		return merchant.ID{}, "", false
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: expected <merchant_id>|<reference>", member)
 	}
 	id, err := uuid.Parse(midStr)
-	if err != nil || id == uuid.Nil || strings.TrimSpace(ref) == "" {
-		return merchant.ID{}, "", false
+	if err != nil || id == uuid.Nil {
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: %q is not a merchant id", member, midStr)
 	}
-	return merchant.ID(id), strings.TrimSpace(ref), true
+	if strings.TrimSpace(ref) == "" {
+		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: empty reference", member)
+	}
+	return merchant.ID(id), strings.TrimSpace(ref), nil
 }
 
 // storePendingPayment stores a pending payment in Redis
@@ -428,9 +435,14 @@ func (s *SolanaPayService) GetPendingPayment(ctx context.Context, reference stri
 }
 
 // PendingReferencesByMerchant returns the pending payment references grouped
-// by merchant (#728) — the poller's per-merchant fan-out input. Pre-#728 bare
-// members carry no merchant attribution and are dropped with a WARN (their
-// Redis records expire on their own TTL).
+// by merchant (#728) — the poller's per-merchant fan-out input.
+//
+// or#893: a member that does not parse FAILS the pass. Every writer
+// (storePendingPayment, RegisterPendingReference) requires a merchant and emits
+// the canonical form, so an unparseable member means the set was written by
+// something else — and silently SREMing it, as the pre-#728 compatibility lane
+// did, deletes a buyer's pending payment reference and with it the poller's
+// only chance to credit a payment that may already be on chain.
 func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map[merchant.ID][]string, error) {
 	if s.redis == nil {
 		return nil, nil
@@ -442,11 +454,9 @@ func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map
 	}
 	out := make(map[merchant.ID][]string, len(members))
 	for _, member := range members {
-		mid, ref, ok := parsePendingReferenceMember(member)
-		if !ok {
-			log.WithField("member", member).Warn("Dropping merchant-unattributed Solana pending reference (#728)")
-			s.redis.SRem(ctx, pendingSolanaPaymentsKey, member)
-			continue
+		mid, ref, err := parsePendingReferenceMember(member)
+		if err != nil {
+			return nil, fmt.Errorf("solana pending set is corrupt: %w", err)
 		}
 		out[mid] = append(out[mid], ref)
 	}
@@ -491,13 +501,16 @@ func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference s
 	key := solanaPayKeyPrefix + reference
 	var removeErr error
 
-	// Remove from set. Members are merchant-attributed (#728); the bare form is
-	// removed too so pre-#728 leftovers self-clean.
-	members := []interface{}{reference}
-	if mid, err := merchant.Require(ctx); err == nil {
-		members = append(members, pendingReferenceMember(mid, reference))
+	// Remove from set. or#893: only the canonical merchant-attributed member —
+	// the bare form is not a shape this set can hold, and SREMing a bare
+	// `<reference>` on a set that only ever holds `<merchant>|<reference>` was
+	// always a no-op dressed as cleanup. A removal with no merchant on ctx
+	// cannot name the member and must say so.
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("solana pending reference removal requires a merchant: %w", err)
 	}
-	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, members...).Err(); err != nil {
+	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
 		removeErr = fmt.Errorf("failed to remove from pending set: %w", err)
 	}
 

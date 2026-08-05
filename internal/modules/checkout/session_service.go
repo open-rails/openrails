@@ -23,10 +23,10 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -115,7 +115,7 @@ type solanaPaymentService interface {
 
 type solanaTransactionService interface {
 	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error
+	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solana.PurchaseMemoPolicy, processedNotAfter *time.Time) error
 }
 
 type CheckoutSessionService struct {
@@ -900,9 +900,14 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutSessionValidation)
 	}
 
+	// or#893: the flow is DECLARED, never defaulted. transfer_request (wallet
+	// builds the tx from a Solana Pay URL) and transaction_request (OpenRails
+	// builds and returns an unsigned tx) diverge in what is written, what is
+	// verified and who signs — a session whose flow was inferred is a session
+	// whose confirm path was guessed.
 	flow := strings.TrimSpace(payment.Flow)
 	if flow == "" {
-		flow = "transfer_request"
+		return fmt.Errorf("%w: payment.flow is required for solana (transfer_request | transaction_request)", ErrCheckoutSessionValidation)
 	}
 
 	if solanaProc.Solana == nil {
@@ -1980,6 +1985,16 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	referenceValue := strings.TrimSpace(*session.Reference)
 	reference := &referenceValue
 
+	// or#893: the memo policy follows WHO BUILT the transaction. In the
+	// transaction-request flow OpenRails builds and stamps it (BuildSolanaPay
+	// refuses to build without a session id), so absence means the signature is
+	// not our transaction. In the transfer-request flow the buyer's wallet
+	// builds it from the Solana Pay URL and may drop the memo — a settled
+	// payment must not be rejected over a discovery hint.
+	memoPolicy := solana.MemoRequired
+	if isSolanaTransferRequestFlow(session) {
+		memoPolicy = solana.MemoPresenceOptional
+	}
 	if err := s.solanaTransactionService.VerifyTransactionWithContent(
 		ctx,
 		strings.TrimSpace(req.Payment.Signature),
@@ -1988,7 +2003,8 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		storedTokenMint,
 		expectedPayer,
 		reference,
-		session.ID, // #713: a present purchase memo must name THIS session; absence passes
+		session.ID, // #713: the purchase memo must name THIS session
+		memoPolicy,
 		session.ExpiresAt,
 	); err != nil {
 		return nil, err
@@ -2288,16 +2304,15 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 	return 0
 }
 
+// or#893: no missing-flow default. Every Solana session records its flow in
+// rail_state at creation, so an absent one is not "the old kind of session" —
+// it is a session whose rail_state was not written by this code path, and
+// treating it as transfer_request would run the wrong finalize.
 func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
 	if session == nil {
 		return false
 	}
-	flow := strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow")))
-	if flow == "" {
-		// Legacy default for Solana checkout sessions.
-		return true
-	}
-	return flow == "transfer_request"
+	return strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow"))) == "transfer_request"
 }
 
 func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Context, session *models.CheckoutSession, transactionID string) error {

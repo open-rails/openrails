@@ -220,8 +220,8 @@ The response's `next_action` tells the frontend what to do next:
    token is consumed once and never stored.
 
 **Solana** (`flow: "wallet"`; one-off only — `mode: "subscription"` is a 400):
-1. POST with `rail: "solana"`, `token_symbol`, optional `flow`.
-2. `flow: "transfer_request"` (default) returns `payment.transaction_url` +
+1. POST with `rail: "solana"`, `token_symbol`, and `flow` — **required**, no default.
+2. `flow: "transfer_request"` returns `payment.transaction_url` +
    `payment.reference` — render as a QR code (`next_action.type: "solana_qr"`).
    `flow: "transaction_request"` returns `payment.transaction_data` for the connected
    wallet to sign (`next_action.type: "solana_transaction"`).

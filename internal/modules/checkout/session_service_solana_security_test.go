@@ -190,11 +190,14 @@ func TestIsSolanaTransferRequestFlow(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "empty session defaults to transfer request",
+			// or#893: no missing-flow default. Every Solana session records its
+			// flow at creation, so an absent one is a session this code path did
+			// not write — the transfer-request finalize must not claim it.
+			name: "missing flow is not transfer request",
 			session: &models.CheckoutSession{
 				RailState: map[string]any{},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "explicit transfer request",
@@ -350,7 +353,7 @@ func (s *stubSolanaTransactionService) BuildPaymentTransactionFromQuote(ctx cont
 	return nil, nil
 }
 
-func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, processedNotAfter *time.Time) error {
+func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanaint.PurchaseMemoPolicy, processedNotAfter *time.Time) error {
 	return nil
 }
 
