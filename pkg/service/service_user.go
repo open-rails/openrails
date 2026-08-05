@@ -173,6 +173,12 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 
 // CreateCheckoutSession creates a new checkout session.
 func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	return s.CreateCheckoutSessionForCustomer(ctx, CheckoutCustomerIdentity{ID: userID}, req)
 }
 
@@ -234,6 +240,27 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 	}
 
 	return checkoutSessionFromResponse(resp), nil
+}
+
+// CreateCheckoutSessionWithCustomerResolver resolves the customer through the
+// embedding host's identity system before creating the checkout session.
+func (s *Service) CreateCheckoutSessionWithCustomerResolver(
+	ctx context.Context,
+	customerRef string,
+	resolver CheckoutCustomerIdentityResolver,
+	req CreateCheckoutSessionRequest,
+) (*CheckoutSession, error) {
+	customer, err := resolveCheckoutCustomerIdentity(ctx, customerRef, resolver)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.CreateCheckoutSessionForCustomer(ctx, customer, req)
 }
 
 func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIdentity, error) {
