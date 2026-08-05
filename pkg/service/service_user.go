@@ -173,13 +173,19 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 
 // CreateCheckoutSession creates a new checkout session.
 func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	return s.CreateCheckoutSessionForCustomer(ctx, CheckoutCustomerIdentity{ID: userID}, req)
+}
+
+// CreateCheckoutSessionForCustomer creates a checkout session with host-resolved
+// identity attributes for rails that require them.
+func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
 	checkoutSessions, err := s.requireCheckoutSessionService()
 	if err != nil {
 		return nil, err
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, fmt.Errorf("user_id required")
+	user, err := checkoutUserIdentity(customer)
+	if err != nil {
+		return nil, err
 	}
 
 	svcReq := &checkout.CheckoutSessionCreateRequest{
@@ -210,7 +216,6 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 		},
 	}
 
-	user := &checkout.UserIdentity{ID: userID}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -229,6 +234,23 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 	}
 
 	return checkoutSessionFromResponse(resp), nil
+}
+
+func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIdentity, error) {
+	customer.ID = strings.TrimSpace(customer.ID)
+	if customer.ID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	var email *string
+	if verifiedEmail := strings.TrimSpace(customer.VerifiedEmail); verifiedEmail != "" {
+		email = &verifiedEmail
+	}
+	return &checkout.UserIdentity{
+		ID:       customer.ID,
+		Email:    email,
+		Username: strings.TrimSpace(customer.Username),
+	}, nil
 }
 
 // GetCheckoutSession retrieves a checkout session by ID.
