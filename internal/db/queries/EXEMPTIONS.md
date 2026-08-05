@@ -183,15 +183,25 @@ production writes. Deliberately not started.
 
 ### The inline exemptions
 
-None. or#893 squashed the migration chain into `0001`, and every inline
+or#893 squashed the migration chain into `0001`, and every inline
 `-- squawk-ignore` lived in a file that squash deleted. Those exemptions were
 records of what one-time rename/backfill/hard-cut migrations actually did; the
-baseline states the result instead, so there is nothing left to excuse. The
-invariants they protected survive as constraints, indexes and COMMENTs on the
-objects themselves.
+baseline states the result instead. The invariants they protected survive as
+constraints, indexes and COMMENTs on the objects themselves. What follows is
+what has been earned since.
 
-The next inline exemption is written when a new migration earns one, at the
-statement, with its reason, and recorded here.
+**`0002_drop_credit_purchase_round.up.sql` — `ban-drop-column`.** or#823 drops
+`catalog_credit_purchase_prices.round`, a column written and never read: the
+runtime credit-purchase quote (`money.loadCatalogCreditPurchase`) lists its
+columns explicitly and this was not among them. The rule guards against a client
+that still names a dropped column, and squawk cannot see who reads what — every
+client that named this one is in this repo and stops naming it in the same
+commit (the sidecar INSERT, and the embedded manifest dump that echoed it back
+out). The residual case the rule really covers, an older binary INSERTing it
+against the new schema, is a catalog-apply/dump path rather than the money path,
+and migratekit applies at boot ahead of the binary that needs it. The rounding
+that IS read lives inside the offer's `price` jsonb as `per_unit.round` and is
+untouched.
 
 Because the baseline is the only file and the only excluded path, squawk has
 nothing to check and exits non-zero on the empty glob. `scripts/migration-lint.sh`

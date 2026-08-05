@@ -119,7 +119,6 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 						PSPs:       append([]string(nil), price.PSPs...),
 						InputMin:   price.InputMin,
 						InputMax:   price.InputMax,
-						Round:      price.Round,
 						Price:      priceJSON,
 					})
 				}

@@ -397,7 +397,7 @@ ORDER BY product_id, ordinal`, merchantID)
 
 func dumpCatalogCreditPurchasePrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT product_id, credit_key, currency, rails, input_min, input_max, COALESCE(round, ''), price
+SELECT product_id, credit_key, currency, rails, input_min, input_max, price
 FROM openrails.catalog_credit_purchase_prices
 WHERE merchant_id = $1
 ORDER BY product_id, ordinal`, merchantID)
@@ -412,7 +412,7 @@ ORDER BY product_id, ordinal`, merchantID)
 			price     catalog.Price
 			priceRaw  []byte
 		)
-		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.PSPs, &price.InputMin, &price.InputMax, &price.Round, &priceRaw); err != nil {
+		if err := rows.Scan(&productID, &creditKey, &price.Currency, &price.PSPs, &price.InputMin, &price.InputMax, &priceRaw); err != nil {
 			return err
 		}
 		if err := json.Unmarshal(priceRaw, &price); err != nil {

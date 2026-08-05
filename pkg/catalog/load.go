@@ -483,10 +483,6 @@ func validateCreditTopUpOffer(productKey string, price *Price, idx int) error {
 	if price.InputMax > 0 && price.InputMin > price.InputMax {
 		return fmt.Errorf("%s input_min %d exceeds input_max %d", where, price.InputMin, price.InputMax)
 	}
-	price.Round = strings.ToLower(strings.TrimSpace(price.Round))
-	if _, ok := validRoundModes[price.Round]; !ok {
-		return fmt.Errorf("%s round must be up, down or half_up, got %q", where, price.Round)
-	}
 	rp := price.ratePrice()
 	if err := validateRatePrice(where, &rp); err != nil {
 		return err
