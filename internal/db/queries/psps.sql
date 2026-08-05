@@ -3,7 +3,7 @@
 -- name: UpsertPSP :one
 INSERT INTO openrails.psps (
     id, merchant_id, rail, environment, account_id, key,
-    archived, evidence, last_verified_at
+    archived, evidence, last_verified_at, custodian_id
 ) VALUES (
     -- #662: the id column keeps its uuidv7() default. The production write paths
     -- (merchant payment-provider config + manifest bootstrap) supply a
@@ -20,11 +20,16 @@ INSERT INTO openrails.psps (
     sqlc.narg(key),
     COALESCE(sqlc.narg(archived)::boolean, false),
     sqlc.narg(evidence),
-    sqlc.narg(last_verified_at)::timestamptz
+    sqlc.narg(last_verified_at)::timestamptz,
+    sqlc.narg(custodian_id)::uuid
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     key = COALESCE(EXCLUDED.key, openrails.psps.key),
     archived = EXCLUDED.archived,
+    -- or#880: custody is DECLARATIVE — a re-apply that no longer names a
+    -- custodian must un-arm the arrangement, not leave a stale pointer that
+    -- keeps routing charges through a vault the operator stopped declaring.
+    custodian_id = EXCLUDED.custodian_id,
     replaced_at = CASE
         WHEN EXCLUDED.archived THEN COALESCE(openrails.psps.replaced_at, now())
         ELSE NULL
@@ -120,14 +125,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND archived = false
 ORDER BY account_id;
 
--- or#879: the custody sibling of ResolvePSPOwnerByRailIdentity. A custodian
--- (Basis Theory) sends its own instrument events carrying ITS tenant id, with
--- no merchant context — same problem, same SECURITY DEFINER answer. The
--- identity lives in the PSP's settings, indexed by uq_psps_custodian_identity.
--- name: ResolvePSPOwnerByCustodianIdentity :one
-SELECT id, merchant_id, rail, environment, account_id
-FROM openrails.psp_owner_by_custodian_identity(
-    lower(sqlc.arg(custodian)::text),
-    COALESCE(sqlc.narg(environment)::text, 'live'),
-    sqlc.arg(account_id)::text
-);
+-- or#880: the custody sibling moved to internal/db/queries/custodians.sql
+-- (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
+-- a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
+-- well-defined answer.
+
+-- One merchant's PSPs that reference a custodian, read inside that merchant's
+-- scope. Custody arrangements are rare, so this is the small side of the join.
+-- name: ListPSPsForCustodian :many
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+ORDER BY rail, account_id;

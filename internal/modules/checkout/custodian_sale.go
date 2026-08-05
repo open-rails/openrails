@@ -87,14 +87,14 @@ type custodianInstrumentStore interface {
 // custodialPSP is the resolved arrangement one custodian sale charges through:
 // the PSP's own gateway credentials plus the custodian that holds the card.
 type custodialPSP struct {
-	Custody            *config.CustodyConfig
+	Custody            *config.CustodianConfig
 	GatewaySecurityKey string
 	// GatewayDirectPostURL: "" = the NMI client default.
 	GatewayDirectPostURL string
 }
 
 // resolveConfig arms the ctx merchant's custodian-held-card credentials (#788):
-// the NMI PSP that charges, and the custody block declared on it (or#879).
+// the NMI PSP that charges, and the custodian it references (or#879/or#880).
 func (s *CheckoutCustodianSaleService) resolveConfig(ctx context.Context) (*custodialPSP, error) {
 	if s.Rails == nil {
 		return nil, errors.New("rail resolution not configured")

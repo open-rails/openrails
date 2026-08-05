@@ -3,214 +3,125 @@ package config
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/custodians"
 )
 
-// Custody settings (or#879/or#880) — declared in a PSP's `settings` block:
+// Custody declaration (or#880 phase 3).
 //
-//	merchants.<slug>.psps.<key>.<rail>.settings.custodian = basis_theory
+// A custodian is declared ONCE, as an account the merchant holds with a
+// third-party vault:
 //
-// Custody is the axis orthogonal to the rail: the rail says WHO CHARGES the
-// card, custody says WHO HOLDS it. Absent (or `psp`) means the PSP holds its
-// own instruments — Stripe's pm_…, NMI's customer vault — which needs no
-// configuration at all. A third-party custodian needs its own identity and
-// credentials, and they hang off the PSP whose gateway the charges land on.
+//	merchants.<slug>.custodians.<key>.<kind>
+//	    account_id: <custodian-native tenant id>
+//	    settings:   { public_api_key: …, network_tokens: false }
+//	    secrets:    { api_key: … }
 //
-// The custodian's private API key is a PSP secret named `custodian_api_key`.
-const (
-	// PSPSettingCustodian names the custodian holding instruments charged
-	// through this PSP. Absent = models.CustodianPSP.
-	PSPSettingCustodian = "custodian"
-	// PSPSettingCustodianAccountID is the custodian-native tenant identity
-	// (Basis Theory: the tenant id). Operator-declared, no-whoami doctrine.
-	PSPSettingCustodianAccountID = "custodian_account_id"
-	// PSPSettingCustodianPublicAPIKey is the custodian's PUBLIC key served to
-	// the checkout page (config, not a secret).
-	PSPSettingCustodianPublicAPIKey = "custodian_public_api_key"
-	// PSPSettingCustodianNetworkTokens arms network-token provisioning at
-	// instrument creation (the $-add-on; never load-bearing — provisioning
-	// failure warns and the instrument stays pan_proxy).
-	PSPSettingCustodianNetworkTokens = "custodian_network_tokens"
-)
+// and each PSP whose gateway those cards are charged through REFERENCES it:
+//
+//	merchants.<slug>.psps.<key>.<rail>.custodian: <custodian key>
+//
+// Phase 2 kept the whole arrangement inside each PSP's settings map. That was
+// right about where custody hangs and wrong about whose credentials those are:
+// copied per PSP, one custodian silently became two.
 
-// CustodianSecretAPIKey is the PSP secret slot holding the custodian's PRIVATE
-// application key — the only custodial secret.
-const CustodianSecretAPIKey = "custodian_api_key"
-
-// retiredCustodySettingKeys fail LOUDLY rather than being ignored: they were
-// keys of the `vaulted_card` fake rail, and silently accepting them would arm a
-// PSP that charges through nothing.
-var retiredCustodySettingKeys = map[string]string{
-	"gateway_account": "removed (or#879): a vaulted_card account pointed at the NMI PSP it charged through. Declare custody ON that NMI PSP instead — settings.custodian=basis_theory — and drop this key",
+// retiredPSPCustodySettingKeys fail LOUDLY rather than being ignored. Every one
+// of them named a credential that now belongs to the custodian entry, and a
+// custody knob accepted-but-inert sits on a money path reading as "this works".
+var retiredPSPCustodySettingKeys = map[string]string{
+	"custodian":                "moved (or#880): custody is a REFERENCE now — declare merchants.<slug>.custodians.<key>.<kind> once and point this PSP at it with `custodian: <key>` on the PSP entry (a sibling of account_id), not a settings key",
+	"custodian_account_id":     "moved (or#880): the custodian-native tenant id is the custodian entry's account_id",
+	"custodian_public_api_key": "moved (or#880): declare it as the custodian entry's settings." + custodians.SettingPublicAPIKey,
+	"custodian_network_tokens": "moved (or#880): declare it as the custodian entry's settings." + custodians.SettingNetworkTokens,
+	"custodian_api_key":        "moved (or#880): the custodian's private application key is the custodian entry's `" + custodians.SecretAPIKey + "` secret, not a PSP setting",
+	// or#879's own retirements, still loud: they were keys of the fake
+	// `vaulted_card` rail, and accepting one would arm a PSP charging nothing.
+	"gateway_account": "removed (or#879): a vaulted_card account pointed at the NMI PSP it charged through. Declare the custodian once and reference it from that NMI PSP instead",
 	"nt_charges":      "removed (or#879): it was only ever a hard error (NMI documents no external DPAN+cryptogram acceptance). charge_via routing is decided per instrument, not per account",
-	"api_key":         "not a setting: the custodian private application key is the PSP secret " + CustodianSecretAPIKey,
-	"public_api_key":  "renamed to " + PSPSettingCustodianPublicAPIKey,
-	"network_tokens":  "renamed to " + PSPSettingCustodianNetworkTokens,
 }
 
-var custodySettingKeys = map[string]bool{
-	PSPSettingCustodian:              true,
-	PSPSettingCustodianAccountID:     true,
-	PSPSettingCustodianPublicAPIKey:  true,
-	PSPSettingCustodianNetworkTokens: true,
-}
-
-// IsCustodySettingKey reports whether key belongs to the custody block — so a
-// rail's own strict settings validator can leave it alone.
-func IsCustodySettingKey(key string) bool {
-	return custodySettingKeys[strings.ToLower(strings.TrimSpace(key))]
-}
-
-// CustodySettings is the typed view of a PSP's custody settings.
-type CustodySettings struct {
-	// Custodian is always stated: models.CustodianPSP when the PSP holds its
-	// own instruments (the same no-absence rule as payment_methods.custodian).
-	Custodian string
-	// AccountID is the custodian-native tenant identity. "" for CustodianPSP.
-	AccountID string
-	// PublicAPIKey is checkout-page config (not a secret).
-	PublicAPIKey string
-	// NetworkTokens arms NT provisioning on instrument creation.
-	NetworkTokens bool
-}
-
-// ThirdParty reports whether a custodian other than the PSP holds the card.
-func (c CustodySettings) ThirdParty() bool {
-	return c.Custodian != "" && c.Custodian != models.CustodianPSP
-}
-
-// ParseCustodySettings reads the custody block out of any PSP's settings map.
-// Retired keys and unknown custodians error loudly (#651 — never silently pick
-// a behavior); a settings map with no custody block yields CustodianPSP.
-func ParseCustodySettings(settings map[string]any) (CustodySettings, error) {
-	out := CustodySettings{Custodian: models.CustodianPSP}
+// RejectRetiredCustodySettings refuses a PSP settings map that still carries an
+// inline custody block. It runs on both ingestion planes — manifest push and
+// stored-settings resolution — so neither can arm one.
+func RejectRetiredCustodySettings(settings map[string]any) error {
+	var retired []string
 	for key := range settings {
-		norm := strings.ToLower(strings.TrimSpace(key))
-		if why, retired := retiredCustodySettingKeys[norm]; retired {
-			return CustodySettings{}, fmt.Errorf("psp settings: %q is %s", key, why)
+		if _, ok := retiredPSPCustodySettingKeys[strings.ToLower(strings.TrimSpace(key))]; ok {
+			retired = append(retired, key)
 		}
 	}
-	if raw, ok := settings[PSPSettingCustodian]; ok {
-		v, err := custodySettingString(PSPSettingCustodian, raw)
-		if err != nil {
-			return CustodySettings{}, err
-		}
-		out.Custodian = strings.ToLower(strings.TrimSpace(v))
-	}
-	if !isDeclaredCustodian(out.Custodian) {
-		return CustodySettings{}, fmt.Errorf("psp settings: unknown custodian %q (known: %s)", out.Custodian, strings.Join(models.Custodians(), ", "))
-	}
-	if raw, ok := settings[PSPSettingCustodianAccountID]; ok {
-		v, err := custodySettingString(PSPSettingCustodianAccountID, raw)
-		if err != nil {
-			return CustodySettings{}, err
-		}
-		out.AccountID = strings.TrimSpace(v)
-	}
-	if raw, ok := settings[PSPSettingCustodianPublicAPIKey]; ok {
-		v, err := custodySettingString(PSPSettingCustodianPublicAPIKey, raw)
-		if err != nil {
-			return CustodySettings{}, err
-		}
-		out.PublicAPIKey = strings.TrimSpace(v)
-	}
-	var err error
-	if out.NetworkTokens, err = custodySettingBool(PSPSettingCustodianNetworkTokens, settings); err != nil {
-		return CustodySettings{}, err
-	}
-
-	if !out.ThirdParty() {
-		// A PSP that holds its own instruments must not carry custodian config:
-		// half-declared custody is how an arrangement ends up armed by accident.
-		for _, key := range []string{PSPSettingCustodianAccountID, PSPSettingCustodianPublicAPIKey, PSPSettingCustodianNetworkTokens} {
-			if _, ok := settings[key]; ok {
-				return CustodySettings{}, fmt.Errorf("psp settings: %s is only meaningful with a third-party %s (got %q)", key, PSPSettingCustodian, out.Custodian)
-			}
-		}
-		return out, nil
-	}
-	if out.AccountID == "" {
-		return CustodySettings{}, fmt.Errorf("psp settings: custodian %q requires %s (the custodian-native tenant id)", out.Custodian, PSPSettingCustodianAccountID)
-	}
-	// The browser tokenizes against the CUSTODIAN, so the rail's own browser
-	// tokenizer key is dead config here — and dead config on a checkout path
-	// reads as "this works" to the next operator.
-	for _, key := range custodianDisplacedRailSettingKeys {
-		if _, ok := settings[key]; ok {
-			return CustodySettings{}, fmt.Errorf("psp settings: %s is meaningless when custodian %q holds the cards — the browser tokenizes against the custodian (%s), not the rail", key, out.Custodian, PSPSettingCustodianPublicAPIKey)
-		}
-	}
-	return out, nil
-}
-
-// custodianDisplacedRailSettingKeys are rail settings a third-party custodian
-// takes over. Declaring both is a contradiction, not a preference.
-var custodianDisplacedRailSettingKeys = []string{"tokenization_key", "tokenization_url"}
-
-func isDeclaredCustodian(v string) bool {
-	for _, c := range models.Custodians() {
-		if c == v {
-			return true
-		}
-	}
-	return false
-}
-
-// ValidateCustodySettings is the strict manifest-push variant: known keys must
-// parse and any key that is neither custody nor rail-known fails the push.
-func ValidateCustodySettings(settings map[string]any, railKnown func(string) bool) error {
-	if _, err := ParseCustodySettings(settings); err != nil {
-		return err
-	}
-	var unknown []string
-	for key := range settings {
-		norm := strings.ToLower(strings.TrimSpace(key))
-		if custodySettingKeys[norm] {
-			continue
-		}
-		if railKnown != nil && railKnown(norm) {
-			continue
-		}
-		unknown = append(unknown, key)
-	}
-	if len(unknown) == 0 {
+	if len(retired) == 0 {
 		return nil
 	}
-	sort.Strings(unknown)
-	known := make([]string, 0, len(custodySettingKeys))
-	for key := range custodySettingKeys {
-		known = append(known, key)
-	}
-	sort.Strings(known)
-	return fmt.Errorf("psp settings: unknown key(s) %s (custody keys: %s)", strings.Join(unknown, ", "), strings.Join(known, ", "))
+	sort.Strings(retired)
+	first := strings.ToLower(strings.TrimSpace(retired[0]))
+	return fmt.Errorf("psp settings: %q is %s", retired[0], retiredPSPCustodySettingKeys[first])
 }
 
-func custodySettingBool(key string, settings map[string]any) (bool, error) {
-	raw, ok := settings[key]
-	if !ok {
-		return false, nil
+// CustodianEntry is ONE declared custodian, in the shape both ingestion planes
+// converge on: the manifest block and a mode-2 API write validate through
+// exactly this struct, so a value one plane accepts is never one the other
+// silently drops.
+type CustodianEntry struct {
+	// Key is the merchant's name for this custodian (custodians.key) — the
+	// value a PSP's `custodian:` field references.
+	Key string
+	// Kind is the vendor (custodians registry): basis_theory today.
+	Kind string
+	// AccountID is the custodian-native tenant identity. Operator-declared —
+	// there is no runtime whoami (#592).
+	AccountID string
+	// Settings are the declared non-secret knobs, validated against Kind.
+	Settings map[string]any
+	// Archived drains the custodian: instruments it holds stay chargeable, no
+	// new arrangement may reference it.
+	Archived bool
+	// SecretKeys are the secret slots the declaration supplies values for.
+	// Validation only — the values themselves never enter this struct.
+	SecretKeys []string
+	// CredentialVersions carries or#812 rotation watermarks for the slots this
+	// write rotated. Empty on the manifest plane, which seeds rather than
+	// rotates — an empty map never clears a floor another writer recorded.
+	CredentialVersions map[string]int
+}
+
+// ValidateCustodianEntry is THE custodian validator, shared by the manifest
+// plane and the store plane. Everything it checks is registry data, so a second
+// vendor is a Descriptor and not another branch here.
+func ValidateCustodianEntry(e CustodianEntry) error {
+	key := strings.TrimSpace(e.Key)
+	if key == "" {
+		return fmt.Errorf("custodian: key is required")
 	}
-	switch v := raw.(type) {
-	case bool:
-		return v, nil
-	case string:
-		b, err := strconv.ParseBool(strings.TrimSpace(v))
-		if err != nil {
-			return false, fmt.Errorf("psp settings: %s must be a boolean (got %q)", key, v)
+	d, err := custodians.Require(e.Kind)
+	if err != nil {
+		return fmt.Errorf("custodian %q: %w", key, err)
+	}
+	if strings.TrimSpace(e.AccountID) == "" {
+		return fmt.Errorf("custodian %q (%s): account_id is required (the custodian-native tenant id)", key, d.Kind)
+	}
+	if _, err := custodians.ParseSettings(d.Kind, e.Settings); err != nil {
+		return fmt.Errorf("custodian %q: %w", key, err)
+	}
+	declared := map[string]bool{}
+	for _, name := range e.SecretKeys {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if _, ok := d.Secret(name); !ok {
+			return fmt.Errorf("custodian %q (%s): unknown secret %q (known: %s)", key, d.Kind, name, strings.Join(d.SecretNames(), ", "))
 		}
-		return b, nil
-	default:
-		return false, fmt.Errorf("psp settings: %s must be a boolean (got %T)", key, raw)
+		declared[name] = true
 	}
-}
-
-func custodySettingString(key string, raw any) (string, error) {
-	v, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("psp settings: %s must be a string (got %T)", key, raw)
+	if e.SecretKeys == nil {
+		// A caller that does not carry the secret set (store plane, where
+		// secrets live in the secret store and are checked at arm time) skips
+		// the requiredness check rather than failing on an unknown.
+		return nil
 	}
-	return strings.TrimSpace(v), nil
+	for _, slot := range d.Secrets {
+		if slot.Required && !declared[slot.Name] {
+			return fmt.Errorf("custodian %q (%s): secret %s is required (its private application key)", key, d.Kind, slot.Name)
+		}
+	}
+	return nil
 }

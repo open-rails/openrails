@@ -22,6 +22,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
 )
@@ -670,10 +671,15 @@ type PSPConfig struct {
 	Stripe *StripeRailConfig
 	Solana *SolanaRailConfig
 
-	// Custody (or#879) is the axis orthogonal to the rail: nil / CustodianPSP
-	// means the PSP holds its own instruments. A third-party custodian holds
-	// the card and proxies it into THIS PSP's gateway.
-	Custody *CustodyConfig
+	// Custodian names the declared custodian (custodians.<key>) holding the
+	// instruments charged through this PSP. "" = the PSP holds its own.
+	// DECLARATION input; Custody below is what it resolves to.
+	Custodian string
+
+	// Custody (or#879/or#880) is the axis orthogonal to the rail: nil means
+	// the PSP holds its own instruments. A third-party custodian holds the
+	// card and proxies it into THIS PSP's gateway.
+	Custody *CustodianConfig
 }
 
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
@@ -717,12 +723,16 @@ type SolanaRailConfig struct {
 	Network string
 }
 
-// CustodyConfig (#795 / or#879) is the RESOLVED runtime shape of a PSP's
-// third-party custody arrangement: who holds the card, under what tenant
-// identity, and the credentials to detokenize it into THIS PSP's gateway. The
-// gateway credentials themselves stay on the rail block — one source of truth.
-type CustodyConfig struct {
-	// Custodian is the declared holder (models.CustodianBasisTheory).
+// CustodianConfig (#795 / or#879 / or#880) is the RESOLVED runtime shape of a
+// declared custodian: who holds the card, under what tenant identity, and the
+// credentials to detokenize it into a gateway. It is resolved from ONE
+// custodians row and may be shared by every PSP that references it — the
+// gateway credentials themselves stay on the rail block, one source of truth.
+type CustodianConfig struct {
+	// Key is the merchant's name for this custodian (custodians.key).
+	Key string
+	// Custodian is the vendor KIND (models.CustodianBasisTheory) — the value
+	// stamped on payment_methods.custodian.
 	Custodian string
 	// AccountID is the custodian-native tenant id (operator-declared).
 	AccountID string
@@ -852,6 +862,14 @@ func (p *PSPConfig) IsSolana(name string) bool {
 // the instruments charged through this PSP (or#879).
 func (p *PSPConfig) HasThirdPartyCustody() bool {
 	return p != nil && p.Custody != nil && p.Custody.Custodian != "" && p.Custody.Custodian != models.CustodianPSP
+}
+
+// CustodianKey is the declared custodian reference for this PSP, normalized.
+func (p *PSPConfig) CustodianKey() string {
+	if p == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(p.Custodian))
 }
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
@@ -1586,26 +1604,33 @@ func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
 	return nil
 }
 
-// validateCustody validates a PSP's third-party custody arrangement (or#879).
-// Custody is a MODIFIER on a rail, so it is checked for every rail: only rails
-// with a proxy charge path may declare one, and a declared custodian must be
-// fully armed or the checkout it backs is silently dead.
+// validateCustody validates a PSP's third-party custody arrangement
+// (or#879/or#880). Custody is a MODIFIER on a rail, so it is checked for every
+// rail: only rails the custodian's registry entry names as proxy rails may
+// reference it, and a referenced custodian must be fully armed or the checkout
+// it backs is silently dead.
 func validateCustody(name string, proc *PSPConfig, isDev bool) error {
 	if !proc.HasThirdPartyCustody() {
 		return nil
 	}
+	d, err := custodians.Require(proc.Custody.Custodian)
+	if err != nil {
+		return fmt.Errorf("rail '%s': %w", name, err)
+	}
 	rail := proc.EffectiveRail(name)
-	if rail != models.RailNMI {
-		return fmt.Errorf("rail '%s' (%s): custodian %q is not supported on this rail — only nmi has a detokenizing proxy charge path", name, rail, proc.Custody.Custodian)
+	if !d.SupportsRail(rail) {
+		return fmt.Errorf("rail '%s' (%s): custodian %q is not supported on this rail — it can only be charged through %s, which has a detokenizing proxy path", name, rail, d.Kind, d.RailNames())
 	}
 	if strings.TrimSpace(proc.Custody.AccountID) == "" {
-		return fmt.Errorf("rail '%s': custodian %q requires custodian_account_id (the custodian-native tenant id)", name, proc.Custody.Custodian)
+		return fmt.Errorf("rail '%s': custodian %q requires account_id (the custodian-native tenant id)", name, d.Kind)
 	}
 	if isDev {
 		return nil
 	}
-	if strings.TrimSpace(proc.Custody.APIKey) == "" {
-		return fmt.Errorf("rail '%s': custodian %q requires the %s secret (its private application key)", name, proc.Custody.Custodian, CustodianSecretAPIKey)
+	for _, slot := range d.Secrets {
+		if slot.Required && slot.Name == custodians.SecretAPIKey && strings.TrimSpace(proc.Custody.APIKey) == "" {
+			return fmt.Errorf("rail '%s': custodian %q requires the %s secret (its private application key)", name, d.Kind, slot.Name)
+		}
 	}
 	return nil
 }

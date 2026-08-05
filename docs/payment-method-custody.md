@@ -56,8 +56,9 @@ separate. `payments.token_type` records which form actually went out
 
 ## Declaring a custodian
 
-Custody is a modifier on a PSP, not a PSP of its own. The merchant manifest
-declares it in the settings of the PSP whose gateway the proxy charges land on:
+A custodian is an account the merchant holds with a third party, exactly like a
+PSP is an account it holds with a gateway — so it is declared once, in its own
+block, and REFERENCED by every PSP whose gateway charges the cards it holds:
 
 ```yaml
 merchants:
@@ -66,28 +67,66 @@ merchants:
       mobius-bt:
         nmi:
           account_id: "7654322"          # the NMI gateway id — the PSP still charges
-          settings:
-            custodian: basis_theory
-            custodian_account_id: <BT tenant id>
-            custodian_public_api_key: <BT public application key>   # checkout-page config
-            custodian_network_tokens: false
+          custodian: bt                  # ← the reference
           secrets:
             security_key: <NMI security key>
-            custodian_api_key: <BT private application key>         # the only custodial secret
+      mobius-bt-backup:
+        nmi:
+          account_id: "7654323"
+          custodian: bt                  # same vault, second gateway
+          secrets:
+            security_key: <NMI security key>
+
+    custodians:
+      bt:
+        basis_theory:
+          account_id: <BT tenant id>     # the custodian-native tenant identity
+          settings:
+            public_api_key: <BT public application key>   # checkout-page config
+            network_tokens: false
+          secrets:
+            api_key: <BT private application key>         # the only custodial secret
 ```
+
+`custodians.<key>.<kind>` is to a custodian what `psps.<key>.<rail>` is to a
+PSP. Everything a kind needs — its secret slots, its declared settings, which
+rails can charge its instruments, how a browser tokenizes against it — is data
+in the custodian registry (`internal/custodians`), so a second vendor
+(HyperSwitch, JusPay, Spreedly) is a descriptor plus its implementation, not a
+new branch in the validator, the reconciler, the browser projection and the
+webhook router.
 
 Consequences, all enforced rather than documented:
 
-* Only `nmi` may declare a custodian today — it is the one rail with a
-  detokenizing-proxy charge path. Any other rail refuses the push.
-* The PSP must not also declare `tokenization_key` / `tokenization_url`: the
-  browser tokenizes against the **custodian**, so the rail's own tokenizer key
-  would be dead config on a checkout path.
+* Only rails the custodian's registry entry names may reference it — today
+  `nmi`, the one rail with a detokenizing-proxy charge path. Any other rail
+  refuses the push.
+* A PSP referencing an undeclared custodian key fails the push, and the DB
+  carries a composite foreign key so it cannot reference another merchant's.
+* A custodial PSP must not also declare `tokenization_key` / `tokenization_url`:
+  the browser tokenizes against the **custodian**, so the rail's own tokenizer
+  key would be dead config on a checkout path.
 * `GET /checkout/config` reports `custodian` alongside `rail` and serves the
   custodian's public key — a frontend drives whoever holds the card.
-* The retired `vaulted_card` keys (`gateway_account`, `nt_charges`, `api_key`,
-  `public_api_key`, `network_tokens`) fail the push with a rename error. There
-  are no aliases.
+* Secrets are scoped by custodian IDENTITY, not by the merchant's nickname for
+  it: `custodians/<kind>/<environment>/<account_id>/<key>`, the exact shape
+  `psps/<rail>/<environment>/<account_id>/<key>` already has — and they are read
+  through the same or#812 version floor (`custodians.credential_versions`), so a
+  rotated custodial key cuts over on every node at once.
+* The retired inline keys (`settings.custodian_account_id`,
+  `custodian_public_api_key`, `custodian_network_tokens`, the
+  `custodian_api_key` secret) and the retired `vaulted_card` keys
+  (`gateway_account`, `nt_charges`) fail the push with a move/rename error.
+  There are no aliases.
+
+### Why custody is not a PSP setting (or#880 phase 3)
+
+Phase 2 parked the arrangement in the settings of the PSP whose gateway the
+charges land on. That was right about where custody *hangs* and wrong about
+whose credentials those are. One vault routinely backs several gateways — a
+live acquirer and a sandbox, or two acquirers fronting the same card file — and
+copied per PSP the tenant id and the application key drift, so the *same*
+custodian silently becomes two. The reference model states it once.
 
 ### Why `vaulted_card` was not a rail (or#879)
 

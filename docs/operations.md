@@ -204,6 +204,29 @@ Rules:
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
 
+### Custodians (or#880)
+
+`openrails.custodians` is the same kind of catalog, one axis over: a row is
+one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
+today). A PSP references it by `psps.custodian_id`, so one custodian can back
+several gateways — its tenant id and its private application key exist once,
+not once per PSP.
+
+Custodial credentials are scoped by the custodian's own identity,
+`custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
+credentials are scoped by theirs, and are read through the same rotation
+version floor (or#812) — recorded on `custodians.credential_versions` rather
+than on a PSP's evidence document. Rotation and archival follow the PSP rules
+above verbatim: rotate in place under the same row; to move to a different
+custodian account, declare a NEW one and archive the old one for drain — an
+instrument the old custodian holds is never re-vaulted or destroyed
+(or#870/or#655).
+
+Inbound custodian webhooks route by `(kind, environment, account_id)` through
+the `custodian_owner_by_identity` directory function. They resolve the
+CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
+which of several referencing PSPs it belongs to has no answer.
+
 ## Provider Pull (#107, #511)
 
 Manual-only — **never scheduled**. It never writes to a provider.

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -152,6 +153,10 @@ func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc
 		}
 		return merchants.PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
+			// or#880: the custody reference travels with the stamped account —
+			// a renewal on a custodian-held card must arm the SAME vault the
+			// original sale did, not whatever the merchant declares today.
+			CustodianID: row.CustodianID,
 		}, true, nil
 	}
 	return svc.PullRailMerchantAccountScope(ctx, mid, rail, b.environment())
@@ -244,17 +249,22 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 }
 
 // custodianProxyAdapter arms the #795 detokenizing-proxy collection adapter:
-// the custodian's private app key and THIS PSP's own gateway security key —
-// one PSP row, both halves (or#879 folded the old cross-account pointer away).
+// the custodian's private app key and THIS PSP's own gateway security key. The
+// gateway half is the PSP's (or#879 folded the old cross-account pointer away);
+// the custodial half is the referenced custodian's (or#880), so several PSPs
+// charging the same vault share ONE credential rather than a copy each.
 func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
-	custody, err := config.ParseCustodySettings(scope.Settings)
+	if scope.CustodianID == nil {
+		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP references none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
+	}
+	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
 	if err != nil {
-		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
+		return nil, err
 	}
-	if !custody.ThirdParty() {
-		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP declares none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
+	if !ok {
+		return nil, fmt.Errorf("psp %s/%s: %w (%s)", scope.Rail, scope.AccountID, merchants.ErrCustodianNotDeclared, *scope.CustodianID)
 	}
-	apiKey, err := b.requireSecret(ctx, svc, mid, scope, config.CustodianSecretAPIKey)
+	apiKey, err := b.requireCustodianSecret(ctx, svc, mid, custodian, custodians.SecretAPIKey)
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +357,31 @@ func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, sv
 	}
 	if !found {
 		return "", fmt.Errorf("merchant %s rail %s: secret %s missing (#725: a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
+	}
+	return value, nil
+}
+
+// requireCustodianSecret is the custody sibling: the credential is scoped to
+// the CUSTODIAN's identity, not to the PSP that happens to charge through it.
+func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, custodian merchants.CustodianScope, key string) (string, error) {
+	// or#812: same versioned read as every other provider credential.
+	ref, err := custodian.SecretRef(key)
+	if err != nil {
+		return "", err
+	}
+	if svc == nil || svc.Secrets() == nil {
+		return "", fmt.Errorf("merchant %s custodian %s: secret store is not armed", mid.String(), custodian.Key)
+	}
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
+	if errors.Is(err, merchants.ErrSecretNotFound) {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s missing (#725: a declared custodian never falls back to boot rails)", mid.String(), custodian.Key, ref.Name)
+	}
+	if err != nil {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s backend failed: %w", mid.String(), custodian.Key, ref.Name, err)
+	}
+	value := strings.TrimSpace(sec.Value)
+	if value == "" {
+		return "", fmt.Errorf("merchant %s custodian %s: secret %s is empty", mid.String(), custodian.Key, ref.Name)
 	}
 	return value, nil
 }

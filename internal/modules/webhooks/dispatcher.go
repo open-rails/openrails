@@ -50,6 +50,10 @@ type WebhookMessage struct {
 	// PspID (#641) is the account_id the event was routed to, so
 	// dispatch selects that account's rail client. Empty = primary.
 	PspID string
+	// CustodianAccountID (or#880) is the CUSTODIAN-native account id a custody
+	// event was routed by (Basis Theory: the tenant id). Custody is not a
+	// rail, so it is a field of its own and never overloads PspID.
+	CustodianAccountID string
 }
 
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.

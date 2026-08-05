@@ -174,6 +174,7 @@ type pspSecretScope struct {
 	key                string
 	settings           map[string]any
 	credentialVersions map[string]int
+	custodianID        *uuid.UUID
 }
 
 // applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
@@ -233,6 +234,7 @@ func (s pspSecretScope) exported() PSPScope {
 		Key:                s.key,
 		Settings:           settings,
 		CredentialVersions: versions,
+		CustodianID:        s.custodianID,
 	}
 }
 
@@ -339,6 +341,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 		rail:        row.Rail,
 		environment: row.Environment,
 		accountID:   row.AccountID,
+		custodianID: row.CustodianID,
 	}
 	scope.applyEvidence(row.Evidence)
 	if row.Key != nil {
@@ -392,7 +395,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	var evidence []byte
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND lower(key) = lower($2)
@@ -401,7 +404,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 				 ORDER BY created_at DESC, id DESC
 				 LIMIT 1
 			`, id.String(), strings.TrimSpace(key), environment).
-			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence)
+			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -428,7 +431,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 	var out []PSPScope
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
@@ -444,7 +447,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 		for rows.Next() {
 			var scope pspSecretScope
 			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID); err != nil {
 				return err
 			}
 			scope.applyEvidence(evidence)
@@ -472,7 +475,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 	var out []PSPScope
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND environment = $2
@@ -487,7 +490,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 		for rows.Next() {
 			var scope pspSecretScope
 			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID); err != nil {
 				return err
 			}
 			scope.applyEvidence(evidence)
@@ -516,13 +519,13 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	var evidence []byte
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-				SELECT rail, environment, account_id, COALESCE(key, ''), evidence
+				SELECT rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND account_id = $3
 				 LIMIT 1
-			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence)
+			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pspSecretScope{}, false, nil
@@ -781,44 +784,9 @@ func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail
 	return resolvePSPOwner(ctx, gen.New(s.pool), rail, environment, strings.TrimSpace(accountID))
 }
 
-// ResolvePSPByCustodianIdentity resolves the PSP a CUSTODIAN's tenant identity
-// belongs to (or#879). Custody is not a rail, so a Basis Theory webhook cannot
-// route through the rail directory — but the problem is identical (an inbound
-// event with a global provider-side id and no merchant context) and so is the
-// answer: the SECURITY DEFINER directory function, which raises rather than
-// returning empty when it cannot read across merchants.
-func (s *Service) ResolvePSPByCustodianIdentity(ctx context.Context, custodian, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
-	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
-		return RailMerchantAccountIdentity{}, false, nil
-	}
-	custodian = strings.ToLower(strings.TrimSpace(custodian))
-	environment = normalizeProviderSecretEnvironment(environment)
-	if environment == "" {
-		return RailMerchantAccountIdentity{}, false, errors.New("merchants: provider account environment must be live or test")
-	}
-	env := environment
-	row, err := gen.New(s.pool).ResolvePSPOwnerByCustodianIdentity(ctx, gen.ResolvePSPOwnerByCustodianIdentityParams{
-		Custodian:   custodian,
-		Environment: &env,
-		AccountID:   strings.TrimSpace(accountID),
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return RailMerchantAccountIdentity{}, false, nil
-	}
-	if err != nil {
-		return RailMerchantAccountIdentity{}, false, err
-	}
-	if row.ID == nil || row.MerchantID == nil {
-		return RailMerchantAccountIdentity{}, false, nil
-	}
-	return RailMerchantAccountIdentity{
-		ID:          *row.ID,
-		MerchantID:  merchant.ID(*row.MerchantID),
-		Rail:        derefString(row.Rail),
-		Environment: derefString(row.Environment),
-		AccountID:   derefString(row.AccountID),
-	}, true, nil
-}
+// or#880: the custody sibling of ResolveRailMerchantAccountByIdentity moved to
+// custodians.go (ResolveCustodianByIdentity). It resolves the CUSTODIAN, not a
+// PSP — one custodian may back several, so "the" PSP was never well defined.
 
 // resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
 // made. q may be bound to anything (pool, merchant-pinned conn, tx): the

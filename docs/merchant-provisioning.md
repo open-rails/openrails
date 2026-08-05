@@ -126,11 +126,13 @@ runtime — details in `docs/rails/*.md`):
 | ccbill | `clientAccnum-clientSubacc`, dash-joined (`900000-0000`) — [rails/ccbill.md](rails/ccbill.md) |
 | solana | derived from the signer public key; a declared value is ignored — [rails/solana.md](rails/solana.md) |
 
-A PSP may additionally declare a **custodian** — a third party that holds the
-cards it charges (`settings.custodian`, today `basis_theory` on `nmi` only).
-That is a modifier on the rail, not a rail: the `account_id` above is still the
-gateway's, and the custodian's own tenant id is `settings.custodian_account_id`.
-See [payment-method-custody.md](payment-method-custody.md).
+A PSP may additionally reference a **custodian** — a third party that holds the
+cards it charges (`custodian: <key>`, resolved against the merchant's
+`custodians:` block; today `basis_theory` on `nmi` only). That is a modifier on
+the rail, not a rail: the `account_id` above is still the gateway's, and the
+custodian's own tenant id is declared once on the custodian entry. Several PSPs
+may reference the same custodian. See
+[payment-method-custody.md](payment-method-custody.md).
 
 ### Env and secret-file overlays
 
@@ -141,7 +143,9 @@ manifest tree, with precedence `yaml < secret files < env`:
   `VAULT_SECRETS_PATH`) of files named like env vars, content = value.
 - **Env vars**: `BILLING_MERCHANTS_<MERCHANT>_PSPS_<KEY>_<RAIL>_…`, e.g.
   `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY` →
-  `merchants.myapp.psps.mobius.nmi.secrets.security_key`.
+  `merchants.myapp.psps.mobius.nmi.secrets.security_key`. Custodians overlay the
+  same way: `BILLING_MERCHANTS_MYAPP_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY`
+  → `merchants.myapp.custodians.bt.basis_theory.secrets.api_key`.
 
 Both fail loudly on retired anchors (`_ACCOUNTS_`, `_RAIL_MERCHANT_ACCOUNTS_`,
 `_PROVIDER_ACCOUNTS_` → "renamed to PSPS") and on any `BILLING_MERCHANTS_*`

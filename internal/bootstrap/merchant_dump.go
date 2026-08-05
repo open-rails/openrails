@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/config"
@@ -128,6 +129,39 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		}
 	}
 
+	// custodians (or#880) — dumped BEFORE the PSPs that reference them, and
+	// keyed by row id so each PSP can emit its `custodian:` reference. Omitting
+	// them would round-trip a custody arrangement into an unarmed one.
+	var declaredCustodians []gen.OpenrailsCustodian
+	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		var lerr error
+		declaredCustodians, lerr = database.Gen(ctx).ListCustodiansForMerchant(ctx, mid.UUID())
+		return lerr
+	}); err != nil {
+		return nil, fmt.Errorf("list custodians: %w", err)
+	}
+	custodianSecrets, err := custodianSecretValues(ctx, secretStore, mid, opts.IncludeSecrets)
+	if err != nil {
+		return nil, err
+	}
+	custodianKeyByID := map[uuid.UUID]string{}
+	if len(declaredCustodians) > 0 {
+		mt.Custodians = map[string]CustodianConfig{}
+	}
+	for _, c := range declaredCustodians {
+		key := strings.TrimSpace(c.Key)
+		custodianKeyByID[c.ID] = key
+		entry := CustodianAccountConfig{AccountID: c.AccountID, Archived: c.Archived}
+		var settings map[string]any
+		if len(c.Settings) > 0 && json.Unmarshal(c.Settings, &settings) == nil && len(settings) > 0 {
+			entry.Settings = settings
+		}
+		if values := custodianSecrets[custodianSecretGroupKey(c.Kind, c.Environment, c.AccountID)]; len(values) > 0 {
+			entry.Secrets = values
+		}
+		mt.Custodians[key] = CustodianConfig{c.Kind: entry}
+	}
+
 	// provider accounts (identity + lifecycle + secret references).
 	var accounts []gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
@@ -139,9 +173,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}); err != nil {
 		return nil, fmt.Errorf("list provider accounts: %w", err)
 	}
-	secretValuesByAccount, err := railMerchantAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
-	if err != nil {
-		return nil, err
+	secretValuesByAccount, err2 := railMerchantAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
+	if err2 != nil {
+		return nil, err2
 	}
 	mt.PSPs = map[string]PSPConfig{}
 	for _, a := range accounts {
@@ -157,6 +191,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		account := ProviderRailAccountConfig{
 			AccountID: a.AccountID,
 			Archived:  a.Archived,
+		}
+		if a.CustodianID != nil {
+			account.Custodian = custodianKeyByID[*a.CustodianID]
 		}
 		if signer := railMerchantAccountSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
@@ -242,6 +279,39 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 
 func railMerchantAccountSecretGroupKey(rail, environment, accountID string) string {
 	return strings.ToLower(rail) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
+}
+
+// custodianSecretValues is the custody sibling of railMerchantAccountSecrets,
+// grouped by the custodian's (kind, environment, account_id) identity.
+func custodianSecretValues(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+	if secretStore == nil || !includeValues {
+		return nil, nil
+	}
+	names, err := secretStore.List(ctx, mid)
+	if err != nil {
+		return nil, fmt.Errorf("list merchant secrets: %w", err)
+	}
+	out := map[string]map[string]string{}
+	for _, name := range names {
+		kind, environment, accountID, key, ok, perr := merchants.ParseCustodianSecretName(name)
+		if perr != nil || !ok {
+			continue
+		}
+		secret, err := secretStore.Get(ctx, mid, name)
+		if err != nil {
+			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
+		}
+		gk := custodianSecretGroupKey(kind, environment, accountID)
+		if out[gk] == nil {
+			out[gk] = map[string]string{}
+		}
+		out[gk][key] = secret.Value
+	}
+	return out, nil
+}
+
+func custodianSecretGroupKey(kind, environment, accountID string) string {
+	return strings.ToLower(kind) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
 func railMerchantAccountDumpKey(rail, environment, accountID string) string {

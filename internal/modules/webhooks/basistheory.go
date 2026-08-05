@@ -82,7 +82,7 @@ func (h BasisTheoryWebhookHandler) Apply(ctx context.Context, d *WebhookDispatch
 	if strings.TrimSpace(evt.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory webhook has no event id"))
 	}
-	svc := &basisTheoryWebhookService{d: d, accountID: msg.PspID}
+	svc := &basisTheoryWebhookService{d: d, accountID: msg.CustodianAccountID}
 	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.EventSourceBasisTheory, msg.Payload, func(ctx context.Context) error {
 		return svc.apply(ctx, evt)
 	})
@@ -93,24 +93,25 @@ type basisTheoryWebhookService struct {
 	accountID string
 }
 
-// btClient arms the merchant's BT client from the resolved PSP state (#788).
-// accountID is the routed PSP's rail account id (or#879): custody hangs off the
-// NMI PSP whose gateway the proxy charges land on.
+// btClient arms the merchant's BT client from the resolved CUSTODIAN (or#880).
+// accountID is the custodian's own tenant id — the identity the event carries.
+// It deliberately does not go through a PSP: one custodian may back several,
+// and a token/network-token event is about the instrument, not a gateway.
 func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.Client, error) {
 	if s.d.RailConfigs == nil {
-		return nil, fmt.Errorf("basistheory webhook rejected: rail resolution is not configured")
+		return nil, fmt.Errorf("basistheory webhook rejected: custodian resolution is not configured")
 	}
-	rc, err := s.d.RailConfigs.RailConfig(ctx, string(models.RailNMI), s.accountID)
+	cc, err := s.d.RailConfigs.CustodianConfig(ctx, models.CustodianBasisTheory, s.accountID)
 	if err != nil {
 		return nil, err
 	}
-	if rc.Custody == nil || rc.Custody.Custodian != models.CustodianBasisTheory {
-		return nil, fmt.Errorf("psp %s declares no basis_theory custodian", s.accountID)
+	if cc == nil || cc.Custodian != models.CustodianBasisTheory {
+		return nil, fmt.Errorf("custodian tenant %s is not declared as basis_theory", s.accountID)
 	}
 	return basistheory.New(basistheory.Config{
-		APIKey:        rc.Custody.APIKey,
-		BaseURL:       rc.Custody.APIBaseURL,
-		WebhookKeyURL: rc.Custody.WebhookKeyURL,
+		APIKey:        cc.APIKey,
+		BaseURL:       cc.APIBaseURL,
+		WebhookKeyURL: cc.WebhookKeyURL,
 		ReadOnly:      s.d.Config != nil && s.d.Config.IsProviderReadOnly(),
 	})
 }

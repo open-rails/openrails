@@ -99,9 +99,27 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
 );
 
 
+CREATE TABLE IF NOT EXISTS openrails.custodians (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    key text NOT NULL,
+    kind text NOT NULL,
+    environment text DEFAULT 'live' NOT NULL,
+    account_id text NOT NULL,
+    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    credential_versions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
+    created_at timestamptz DEFAULT current_timestamp NOT NULL,
+    updated_at timestamptz DEFAULT current_timestamp NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (id, merchant_id),
+    UNIQUE (kind, environment, account_id)
+);
+
 CREATE TABLE IF NOT EXISTS openrails.psps (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
+    custodian_id uuid REFERENCES openrails.custodians(id),
     rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,

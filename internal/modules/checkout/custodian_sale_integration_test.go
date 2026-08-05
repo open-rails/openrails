@@ -173,7 +173,8 @@ func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFix
 			Rail:      models.RailNMI,
 			AccountID: "579145",
 			NMI:       &config.NMIRailConfig{SecurityKey: "sk_gateway_test"},
-			Custody: &config.CustodyConfig{
+			Custody: &config.CustodianConfig{
+				Key:           "bt",
 				Custodian:     models.CustodianBasisTheory,
 				AccountID:     "tnt_test",
 				APIKey:        "key_private_test",
