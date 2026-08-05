@@ -48,7 +48,7 @@ ISSUER_KEY_FILE=e2e/.state/issuer_key.pem go run .
 
 Verified against commit `fc3ebc41`; each has a precise pointer.
 
-1. **`openrails server` never loads the MODE-1 boot merchant manifest.**
+1. **`openrails run-server` never loads the MODE-1 boot merchant manifest.**
    `reconcileBootMerchantManifest` exists only in
    `internal/bootstrap/serverboot/serverboot.go:109` (used by the test
    harness); the shipped CLI path (`cmd/openrails/main.go:runServer` →

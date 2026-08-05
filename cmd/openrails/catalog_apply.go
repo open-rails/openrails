@@ -16,7 +16,6 @@ const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
 // catalogOptions holds the flags for `openrails push-merchant-catalog`.
 type catalogOptions struct {
 	file      string
-	dryRun    bool
 	insert    bool
 	overwrite bool
 	prune     bool
@@ -25,16 +24,15 @@ type catalogOptions struct {
 // newPushCatalogCmd builds the `openrails push-merchant-catalog` command — a terraform-style
 // declarative apply of a YAML catalog manifest
 // (issue #162). It mirrors cozy-art's sync-product-catalog pipeline:
-// load -> validate -> plan -> print -> (dry-run? stop : apply).
+// load -> validate -> plan -> print -> (no mutation flags? stop : apply).
 //
 // The command runs in-process through a catalog-sized runtime: Postgres plus the
 // catalog/provider facades, without starting the server runtime.
 func newPushCatalogCmd() *cobra.Command {
 	opts := catalogOptions{file: defaultCatalogManifestPath}
 	cmd := &cobra.Command{
-		Use:     "push-merchant-catalog",
-		Aliases: []string{"push-catalog"},
-		Short:   "Push a YAML merchant catalog manifest into OpenRails and configured providers",
+		Use:   "push-merchant-catalog",
+		Short: "Push a YAML merchant catalog manifest into OpenRails and configured providers",
 		Long: "Loads a declarative catalog manifest (catalogs[] > products > prices), " +
 			"computes a terraform-style plan per merchant, and prints it. A bare command is plan-only. " +
 			"Mutation classes are explicit and compose: --insert creates missing products/prices/provider objects; " +
@@ -47,8 +45,6 @@ func newPushCatalogCmd() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
-	flags.BoolVar(&opts.dryRun, "dry-run", false, "deprecated alias for the default plan-only behavior")
-	_ = flags.MarkHidden("dry-run")
 	flags.BoolVar(&opts.insert, "insert", false, "Create missing OpenRails/provider catalog objects from the manifest")
 	flags.BoolVar(&opts.overwrite, "overwrite", false, "Update existing OpenRails-owned catalog objects from the manifest")
 	flags.BoolVar(&opts.prune, "prune", false, "archive OpenRails-owned provider objects absent from the local catalog; foreign provider objects are never touched")
@@ -83,7 +79,6 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 		Config:    cfg,
 		File:      opts.file,
 		Out:       cmd.OutOrStdout(),
-		DryRun:    opts.dryRun,
 		Insert:    opts.insert,
 		Overwrite: opts.overwrite,
 		Prune:     opts.prune,

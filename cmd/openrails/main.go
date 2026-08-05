@@ -80,10 +80,9 @@ func newRootCmd() *cobra.Command {
 		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; sandbox is development-only")
 
 	serverCmd := &cobra.Command{
-		Use:     "run-server",
-		Aliases: []string{"server"},
-		RunE:    runServer,
-		Short:   "Start the OpenRails server",
+		Use:   "run-server",
+		RunE:  runServer,
+		Short: "Start the OpenRails server",
 	}
 	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
 	serverCmd.Flags().String("merchant-manifest", "", "MODE-1 (#723) merchant manifest converged at boot (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
@@ -134,6 +133,7 @@ func newRootCmd() *cobra.Command {
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newPushCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd())
+	rootCmd.AddCommand(newRetiredCommands()...)
 	return rootCmd
 }
 

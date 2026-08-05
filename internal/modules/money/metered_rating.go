@@ -29,9 +29,9 @@ type catalogRateCardRow struct {
 	ValueKey    string
 	Aggregation string
 	GroupBy     map[string]string
-	Filter         map[string][]string
-	Allowance      *pricing.Allowance
-	Price          pricing.RatePrice
+	Filter      map[string][]string
+	Allowance   *pricing.Allowance
+	Price       pricing.RatePrice
 }
 
 func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {

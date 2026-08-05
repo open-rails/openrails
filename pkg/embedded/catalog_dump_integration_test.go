@@ -93,7 +93,7 @@ catalogs:
 	require.Contains(t, firstDump.String(), "expires: 30d")
 	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
-	require.NoError(t, err, "dump should parse as push-catalog YAML")
+	require.NoError(t, err, "dump should parse as push-merchant-catalog YAML")
 	require.Len(t, targets, 1)
 	require.Equal(t, merchantSlug, targets[0].Merchant)
 

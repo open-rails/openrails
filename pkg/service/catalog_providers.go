@@ -52,7 +52,7 @@ var errPendingManualLink = errors.New("provider requires a manual link")
 // (find-or-create inside Attach, AutoCreate) when catalog provider writes are
 // blocked by the operating mode (mode=limited/readonly, #346). The dispatcher
 // converts it to pending_manual_link — the price still applies locally and the
-// provider slot converges on a later push-catalog once writes are allowed.
+// provider slot converges on a later push-merchant-catalog once writes are allowed.
 // Verification reads always run.
 var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (mode=limited/readonly)")
 
