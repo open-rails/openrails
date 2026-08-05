@@ -643,7 +643,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			return e
 		}
 		// Off-rail manual invoice settlement is recorded under the manual channel.
-		// or#893: no psp_id — a channel has no provider account, and
+		// or#893: no psp_id — a channel has no PSP, and
 		// invoice_payments_psp_required_on_rail states exactly that exemption.
 		rail := string(models.ChannelManual)
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{

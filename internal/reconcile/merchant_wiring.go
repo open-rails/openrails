@@ -52,7 +52,7 @@ type PSPCoverage struct {
 	// Pulled is how many of them this pass read (a fetcher arms from one).
 	Pulled int
 	// Binding is the PSP the pass armed from.
-	Binding RailMerchantAccountBinding
+	Binding PSPBinding
 }
 
 // Complete reports whether the pass read every active PSP on the rail — the
@@ -106,7 +106,7 @@ func (b MerchantFetcherBuilder) readOnly() bool {
 	return b.Config != nil && b.Config.IsProviderReadOnly()
 }
 
-// environment is the deployment's provider-account environment: test under
+// environment is the deployment's PSP environment: test under
 // test_mode, live otherwise (#681) — the test_mode credential filter.
 func (b MerchantFetcherBuilder) environment() string {
 	return config.ExpectedProviderEnvironment(b.testMode())
@@ -139,7 +139,7 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid me
 	out.Coverage[provider] = PSPCoverage{
 		Declared: declared,
 		Pulled:   1,
-		Binding:  RailMerchantAccountBinding{ID: scope.ID, Rail: scope.Rail, AccountID: scope.AccountID},
+		Binding:  PSPBinding{ID: scope.ID, Rail: scope.Rail, AccountID: scope.AccountID},
 	}
 	return scope, true
 }
@@ -158,11 +158,11 @@ func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid merch
 		if !ok {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": rail, "account_id": pin,
-			}).Warn("provider pull: pinned provider account is not declared for this merchant")
+			}).Warn("provider pull: pinned PSP is not declared for this merchant")
 		}
 		return scope, ok
 	}
-	scope, ok, err := b.Merchants.PullRailMerchantAccountScope(ctx, mid, rail, b.environment())
+	scope, ok, err := b.Merchants.PullPSPScope(ctx, mid, rail, b.environment())
 	if err != nil {
 		b.warnScopeError(ctx, mid, provider, err)
 		return merchants.PSPScope{}, false
@@ -173,7 +173,7 @@ func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid merch
 func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid merchant.ID, provider Provider, err error) {
 	log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 		"merchant_id": mid.String(), "rail": string(provider),
-	}).Warn("provider pull: rail not armed — provider-account resolution failed")
+	}).Warn("provider pull: rail not armed — PSP resolution failed")
 }
 
 // secret loads one scoped secret. found=false with nil err means the secret is

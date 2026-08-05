@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type railMerchantAccountIDCtxKey struct{}
+type pspIDCtxKey struct{}
 
 // ErrNoPSPInContext is returned when a provider-bound write reaches the repo
 // without a resolved PSP. or#893: `psp_id` is NOT NULL on every provider-bound
@@ -21,12 +21,12 @@ func WithPSPID(ctx context.Context, id uuid.UUID) context.Context {
 	if id == uuid.Nil {
 		return ctx
 	}
-	return context.WithValue(ctx, railMerchantAccountIDCtxKey{}, id)
+	return context.WithValue(ctx, pspIDCtxKey{}, id)
 }
 
 // PSPIDFromContext returns the pinned PSP, or uuid.Nil when none was pinned.
 func PSPIDFromContext(ctx context.Context) uuid.UUID {
-	v, ok := ctx.Value(railMerchantAccountIDCtxKey{}).(uuid.UUID)
+	v, ok := ctx.Value(pspIDCtxKey{}).(uuid.UUID)
 	if !ok {
 		return uuid.Nil
 	}

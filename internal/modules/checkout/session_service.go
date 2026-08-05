@@ -694,7 +694,7 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 		return nil, ErrCheckoutSessionExpired
 	}
 
-	// #704: carry the session's pinned provider-account provenance into the
+	// #704: carry the session's pinned PSP provenance into the
 	// confirm flow (falling back to a fresh resolution for older sessions).
 	ctx = db.WithPSPID(ctx, session.PspID)
 

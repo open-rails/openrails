@@ -36,7 +36,7 @@ type pruneFixture struct {
 	customer uuid.UUID
 	railSub  string
 	railTxn  string
-	binding  RailMerchantAccountBinding
+	binding  PSPBinding
 }
 
 func seedPruneFixture(t *testing.T, appDB *db.DB, baseCtx context.Context) pruneFixture {
@@ -97,7 +97,7 @@ func seedPruneFixture(t *testing.T, appDB *db.DB, baseCtx context.Context) prune
 			return nil
 		})
 	})
-	f.binding = RailMerchantAccountBinding{ID: f.pspID, Rail: "nmi", AccountID: "acct-sd-" + suffix}
+	f.binding = PSPBinding{ID: f.pspID, Rail: "nmi", AccountID: "acct-sd-" + suffix}
 	return f
 }
 
@@ -130,12 +130,12 @@ func TestPruneRefusesEmptyRemoteSet(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// Refuses even as a dry-run: a plan that says "prune the whole book" is
 		// itself the dangerous artifact.
-		_, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, f.binding, PruneParams{Since: since, Until: until})
+		_, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, f.binding, PruneParams{Since: since, Until: until})
 		require.Error(t, err)
 		require.IsType(t, &ErrPruneEmptyRemoteSet{}, err)
 		require.ErrorContains(t, err, "listed ZERO subscriptions")
 
-		_, err = PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
+		_, err = PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
 			PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(1)})
 		require.IsType(t, &ErrPruneEmptyRemoteSet{}, err)
 
@@ -173,7 +173,7 @@ func TestPruneRefusesWrongExpectedRowCount(t *testing.T) {
 	fetcher := &fakeFetcher{provider: ProviderNMI, snap: snap}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
+		_, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
 			PruneParams{Apply: true, ExpectedRows: intp(5)})
 		require.IsType(t, &ErrPruneCountMismatch{}, err)
 		require.ErrorContains(t, err, "says 5, this pass found 1")
@@ -207,7 +207,7 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 
 	var runID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
+		res, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, f.binding,
 			PruneParams{Apply: true, ExpectedRows: intp(1), Actor: "tester"})
 		require.NoError(t, err)
 		runID = res.RunID

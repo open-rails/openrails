@@ -141,3 +141,12 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// permissionGroupUniqueIndex is the org<->merchant 1:1 index (#843).
+const permissionGroupUniqueIndex = "uq_merchants_permission_group_id"
+
+// isUniqueViolationOn reports a 23505 raised by one named unique index.
+func isUniqueViolationOn(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
+}

@@ -30,7 +30,7 @@ func TestPublicStripeWebhookURL(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestReconcileManagedStripeWebhookStoresRailMerchantAccountSecret(t *testing.T) {
+func TestReconcileManagedStripeWebhookStoresPSPSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)

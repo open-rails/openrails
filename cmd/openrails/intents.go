@@ -56,25 +56,25 @@ func newIntentsCmd() *cobra.Command {
 
 func newIntentsLogCmd() *cobra.Command {
 	var (
-		provider        string
-		intent          string
-		providerAccount string
-		phase           string
-		format          string
-		merchant        string
-		limit           int
+		provider string
+		intent   string
+		psp      string
+		phase    string
+		format   string
+		merchant string
+		limit    int
 	)
 	cmd := &cobra.Command{
 		Use:   "intents-log",
 		Short: "List provider mutation attempts/results (#533)",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsMutationLog(c, provider, intent, providerAccount, phase, format, merchant, limit)
+			return runIntentsMutationLog(c, provider, intent, psp, phase, format, merchant, limit)
 		},
 	}
 	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
-	cmd.Flags().StringVar(&providerAccount, "provider-account", "", "Provider account id filter")
+	cmd.Flags().StringVar(&psp, "provider-account", "", "PSP id filter")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
@@ -252,7 +252,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 	})
 }
 
-func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccountID, phase, format, merchantSlug string, limit int) error {
+func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase, format, merchantSlug string, limit int) error {
 	var providerFilter *string
 	if p := strings.ToLower(strings.TrimSpace(provider)); p != "" {
 		providerFilter = &p
@@ -266,7 +266,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		intentFilter = &id
 	}
 	var accountFilter *uuid.UUID
-	if raw := strings.TrimSpace(providerAccountID); raw != "" {
+	if raw := strings.TrimSpace(pspID); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
 			return fmt.Errorf("invalid --provider-account %q: %w", raw, err)

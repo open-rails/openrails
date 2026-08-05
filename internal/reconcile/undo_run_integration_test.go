@@ -45,7 +45,7 @@ func runEnforcingPass(t *testing.T, appDB *db.DB, baseCtx context.Context, f con
 			Mode:        ModeEnforce,
 			Mutations:   &LocalMutationPolicy{Overwrite: true},
 			Providers:   []Provider{ProviderNMI},
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: f.binding},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: f.binding},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 1, Pulled: 1, Binding: f.binding}},
 		})
 		if err != nil {

@@ -113,7 +113,7 @@ func TestCredentialValidatedAtOnlyMarksLiveProbedCredentials(t *testing.T) {
 	}
 }
 
-func TestRailMerchantAccountSecretNameRejectsMerchantWritableSolanaPrivateKey(t *testing.T) {
+func TestPSPSecretNameRejectsMerchantWritableSolanaPrivateKey(t *testing.T) {
 	name, err := PSPSecretName("solana", "live", "authority", "private_key")
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +140,6 @@ func TestValidateScopedStripeCredentialDoesNotPersist(t *testing.T) {
 	if statuses, err := svc.ListSecretStatuses(context.Background(), id); err != nil {
 		t.Fatal(err)
 	} else if len(statuses) != 0 {
-		t.Fatalf("validation should not create provider-account secrets, got %d statuses", len(statuses))
+		t.Fatalf("validation should not create PSP secrets, got %d statuses", len(statuses))
 	}
 }

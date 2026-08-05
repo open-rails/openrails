@@ -359,7 +359,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Empty(t, stalled)
 }
 
-func TestRailMerchantAccountIdentityIsGlobal(t *testing.T) {
+func TestPSPIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)

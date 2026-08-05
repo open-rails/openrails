@@ -9,7 +9,7 @@ func TestRailHasRemoteCustomer(t *testing.T) {
 		// #682: NMI vault ids are per-card instrument containers, not persons —
 		// no rail_customer_accounts rows for NMI anymore.
 		"stripe": true, "nmi": false, " stripe ": true,
-		// #630: mobius is a provider-account name on rail nmi, not a rail.
+		// #630: mobius is a PSP name on rail nmi, not a rail.
 		"mobius": false, "ccbill": false, "solana": false, "paypal": false, "admin": false, "manual": false, "": false,
 	}
 	for rail, want := range cases {

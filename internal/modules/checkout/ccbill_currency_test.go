@@ -25,7 +25,7 @@ func ccbillCheckoutService(t *testing.T) (context.Context, *CheckoutService) {
 
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{
 		rail:        "ccbill",
 		environment: "live",
 		accountID:   "945280-0000",

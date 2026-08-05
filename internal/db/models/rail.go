@@ -6,12 +6,12 @@ import "strings"
 
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
 // adapter per rail under internal/integrations/<rail>. A rail hosts 1..N
-// credentialed provider accounts (openrails.psps); e.g. "mobius"
-// and "paykings" are provider-account NAMES on rail "nmi", not rails themselves.
+// credentialed PSPs (openrails.psps); e.g. "mobius"
+// and "paykings" are PSP NAMES on rail "nmi", not rails themselves.
 type Rail string
 
 const (
-	RailNMI    Rail = "nmi"    // Card payments via the NMI gateway (provider accounts: mobius, paykings, …)
+	RailNMI    Rail = "nmi"    // Card payments via the NMI gateway (PSPs: mobius, paykings, …)
 	RailCCBill Rail = "ccbill" // CCBill gateway (self-contained)
 	RailSolana Rail = "solana" // Solana crypto payments (self-contained)
 	RailStripe Rail = "stripe" // Stripe gateway (subscriptions + one-time)
@@ -34,7 +34,7 @@ const EventSourceBasisTheory EventSource = EventSource(CustodianBasisTheory)
 // Channel is an off-rail mechanism for RECORDING a payment that never flowed
 // through a gateway integration — admin comps and manually-entered payments
 // (cash, bank transfer, etc.). A channel is NOT a rail: it has no adapter, no
-// credentials, and no provider account. Off-rail payments are recorded in the
+// credentials, and no PSP. Off-rail payments are recorded in the
 // same source column as the rail (payments.rail), so a value there is either a
 // Rail or a Channel; the two enums keep the senses distinct in Go.
 type Channel string

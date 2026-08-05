@@ -14,7 +14,7 @@ import (
 type PaymentProviderConfig = merchants.PaymentProviderConfig
 type UpsertPaymentProviderConfigRequest = merchants.UpsertPaymentProviderConfigRequest
 
-// GetPaymentProviderConfig returns one system-owned merchant provider account
+// GetPaymentProviderConfig returns one system-owned merchant PSP
 // with credential values redacted.
 func GetPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
 	if strings.TrimSpace(rail) == "" {
@@ -31,7 +31,7 @@ func GetPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, r
 	return provider, nil
 }
 
-// UpsertPaymentProviderConfig configures one provider account for a
+// UpsertPaymentProviderConfig configures one PSP for a
 // system-owned merchant through the existing merchant-secret backend.
 func UpsertPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	providerService, err := paymentProviderService(a)

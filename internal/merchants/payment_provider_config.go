@@ -34,7 +34,7 @@ type PaymentProviderCredentialStatus struct {
 	RotationVersion int `json:"rotation_version,omitempty"`
 }
 
-// PaymentProviderConfig is one merchant-owned payment-provider account.
+// PaymentProviderConfig is one merchant-owned payment-PSP.
 type PaymentProviderConfig struct {
 	ID              uuid.UUID                                  `json:"id"`
 	Rail            string                                     `json:"rail"`
@@ -60,7 +60,7 @@ type PaymentProviderDefinition struct {
 	CredentialKeys []string `json:"credential_keys"`
 }
 
-// UpsertPaymentProviderConfigRequest creates or replaces one provider account.
+// UpsertPaymentProviderConfigRequest creates or replaces one PSP.
 // There is no `environment` field (#882): a deployment is all-test or all-live,
 // so the environment is derived from the deployment's test_mode posture.
 type UpsertPaymentProviderConfigRequest struct {
@@ -73,7 +73,7 @@ type UpsertPaymentProviderConfigRequest struct {
 	LegacyEnvironment string `json:"environment,omitempty"`
 }
 
-type railMerchantAccountEvidence struct {
+type pspEvidence struct {
 	PublicConfig         map[string]string `json:"public_config,omitempty"`
 	CredentialsValidated bool              `json:"credentials_validated,omitempty"`
 	// CredentialVersions is the or#812 cross-node rotation watermark: the
@@ -90,7 +90,7 @@ func PaymentProviderDefinitions() []PaymentProviderDefinition {
 	descriptors := rails.All()
 	definitions := make([]PaymentProviderDefinition, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		if !descriptor.HasRailMerchantAccounts {
+		if !descriptor.HasPSPs {
 			continue
 		}
 		credentialKeys := rails.MerchantCredentialKeyNames(descriptor.Rail)
@@ -106,7 +106,7 @@ func PaymentProviderDefinitions() []PaymentProviderDefinition {
 	return definitions
 }
 
-// ListPaymentProviderConfigs returns provider-account configs for a merchant.
+// ListPaymentProviderConfigs returns PSP configs for a merchant.
 func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID, rail, environment, status string) ([]PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
@@ -190,7 +190,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 }
 
 // UpsertPaymentProviderConfig validates credentials first, then stores the
-// provider account and scoped secrets.
+// PSP and scoped secrets.
 func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil || s.secrets == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
@@ -268,7 +268,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 			credentialVersions[NormalizeCredentialVersionKey(key)] = sec.Version
 		}
 	}
-	row, err := s.upsertRailMerchantAccount(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt, credentialVersions)
+	row, err := s.upsertPSP(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt, credentialVersions)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -295,7 +295,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	row, err := s.disableRailMerchantAccount(ctx, id, current.ID)
+	row, err := s.disablePSP(ctx, id, current.ID)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -312,7 +312,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return cfg, nil
 }
 
-func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.OpenrailsPsp, error) {
+func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.OpenrailsPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation under RLS).
 	queries := gen.New(s.pool)
@@ -372,7 +372,7 @@ func (s *Service) upsertRailMerchantAccount(ctx context.Context, id merchant.ID,
 	return row, err
 }
 
-func (s *Service) disableRailMerchantAccount(ctx context.Context, id merchant.ID, accountID uuid.UUID) (gen.OpenrailsPsp, error) {
+func (s *Service) disablePSP(ctx context.Context, id merchant.ID, accountID uuid.UUID) (gen.OpenrailsPsp, error) {
 	var row gen.OpenrailsPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
@@ -543,9 +543,9 @@ func pspLifecycleMatches(archived bool, status string) bool {
 }
 
 // supportedPaymentProvider is registry-backed (#669): the rail participates in
-// the provider-account catalog.
+// the PSP catalog.
 func supportedPaymentProvider(provider string) bool {
-	return rails.SupportsRailMerchantAccounts(models.Rail(provider))
+	return rails.SupportsPSPs(models.Rail(provider))
 }
 
 // paymentProviderCredentialKeys returns the MERCHANT-visible credential slots
@@ -644,11 +644,11 @@ func mergeCredentialVersions(existing, rotated map[string]int) map[string]int {
 	return out
 }
 
-func unmarshalProviderEvidence(raw []byte) railMerchantAccountEvidence {
+func unmarshalProviderEvidence(raw []byte) pspEvidence {
 	if len(raw) == 0 {
-		return railMerchantAccountEvidence{}
+		return pspEvidence{}
 	}
-	var out railMerchantAccountEvidence
+	var out pspEvidence
 	_ = json.Unmarshal(raw, &out)
 	return out
 }

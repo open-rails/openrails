@@ -24,7 +24,7 @@ import (
 
 // #699 precedence rule: merchant-store first, boot-config rails fallback,
 // conflict = store wins with a WARN. Exercised against a real Postgres
-// (rail_merchant_accounts scope resolution) with a memory secret store.
+// (psps scope resolution) with a memory secret store.
 
 func newWiringMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	t.Helper()

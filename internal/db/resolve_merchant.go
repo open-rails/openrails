@@ -66,7 +66,7 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 
 // RegisterMerchantOptions is the billing-only descriptor for RegisterMerchant.
 // It carries NO auth/issuer/JWKS — auth is the host's (embedded) or AuthKit's
-// (standalone). Provider account identity is owned by psps, not
+// (standalone). PSP identity is owned by psps, not
 // merchants.
 type RegisterMerchantOptions struct {
 	Slug string

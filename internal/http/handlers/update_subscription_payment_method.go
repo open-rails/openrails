@@ -113,7 +113,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(paymentMethod, subscription) {
-		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different payment provider account")
+		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different PSP")
 		return
 	}
 
@@ -121,12 +121,12 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	// 503 immediately (the intent handler re-resolves at execution time).
 	_, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.CollectionResolver, subscription)
 	if err != nil {
-		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI provider account for subscription")
+		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI PSP for subscription")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to resolve payment rail")
 		return
 	}
 	if !ok {
-		log.WithFields(log.Fields{"rail": subscription.Rail, "provider_account": providerKey}).Error("NMI client not found for subscription provider account")
+		log.WithFields(log.Fields{"rail": subscription.Rail, "psp": providerKey}).Error("NMI client not found for subscription PSP")
 		r.ErrorJSON(http.StatusServiceUnavailable, "Payment rail not available")
 		return
 	}

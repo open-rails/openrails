@@ -168,7 +168,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 // seedLocalCCBillSub seeds one local ACTIVE ccbill subscription matching the
 // fake DataLink roster (so the pull observes zero drift). periodEnd must equal
 // the roster's rebill date at midnight UTC. pspID is the psps row the ccbill
-// provider account seeded (or#893: subscriptions.psp_id is required).
+// PSP seeded (or#893: subscriptions.psp_id is required).
 func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UUID, railSubID string, periodEnd time.Time) {
 	t.Helper()
 	ctx := merchant.WithID(context.Background(), mid)
@@ -191,10 +191,10 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UU
 	}))
 }
 
-// seedProviderAccount declares one provider account + scoped secrets through
+// seedPSP declares one PSP + scoped secrets through
 // the SAME service surface the merchant manifest funnels into. Returns the
 // psps row id.
-func seedProviderAccount(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) uuid.UUID {
+func seedPSP(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) uuid.UUID {
 	t.Helper()
 	cfg, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{
 		AccountID:   accountID,
@@ -278,12 +278,12 @@ func TestProviderRefresh_ArmsFromMerchantStore_NoBootRails(t *testing.T) {
 	midB := seedPullMerchant(t, dbi, "pull-b-"+sfx)
 
 	keyA, keyB := "sec-key-a-"+sfx, "sec-key-b-"+sfx
-	seedProviderAccount(t, svc, midA, "nmi", "9911"+sfx, map[string]string{"security_key": keyA})
-	ccbillPspID := seedProviderAccount(t, svc, midA, "ccbill", "945281-0000", map[string]string{
+	seedPSP(t, svc, midA, "nmi", "9911"+sfx, map[string]string{"security_key": keyA})
+	ccbillPspID := seedPSP(t, svc, midA, "ccbill", "945281-0000", map[string]string{
 		"datalink_username": "dl-user-" + sfx,
 		"datalink_password": "dl-pass-" + sfx,
 	})
-	seedProviderAccount(t, svc, midB, "nmi", "9922"+sfx, map[string]string{"security_key": keyB})
+	seedPSP(t, svc, midB, "nmi", "9922"+sfx, map[string]string{"security_key": keyB})
 
 	// Fake roster member matching a seeded local sub → drift-free pull.
 	railSubID := "0125" + sfx
@@ -343,8 +343,8 @@ func TestProviderRefresh_MissingSecret_RailAbsentWithWarn(t *testing.T) {
 
 	mid := seedPullMerchant(t, dbi, "pull-miss-"+sfx)
 	// NMI account declared with NO security_key seeded; ccbill fully seeded.
-	seedProviderAccount(t, svc, mid, "nmi", "9933"+sfx, nil)
-	ccbillPspID := seedProviderAccount(t, svc, mid, "ccbill", "945282-0000", map[string]string{
+	seedPSP(t, svc, mid, "nmi", "9933"+sfx, nil)
+	ccbillPspID := seedPSP(t, svc, mid, "ccbill", "945282-0000", map[string]string{
 		"datalink_username": "dl-user2-" + sfx,
 		"datalink_password": "dl-pass2-" + sfx,
 	})
@@ -396,7 +396,7 @@ func TestProviderRefresh_ReadonlySkipsStoreArmedPulls(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 
 	mid := seedPullMerchant(t, dbi, "pull-ro-"+sfx)
-	seedProviderAccount(t, svc, mid, "nmi", "9944"+sfx, map[string]string{"security_key": "sec-ro-" + sfx})
+	seedPSP(t, svc, mid, "nmi", "9944"+sfx, map[string]string{"security_key": "sec-ro-" + sfx})
 
 	nmiSrv := newFakeNMIPullServer(t)
 

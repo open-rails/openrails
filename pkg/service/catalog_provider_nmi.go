@@ -14,7 +14,7 @@ import (
 )
 
 // nmiAdapter implements providerAdapter for the NMI rail's recurring plans. The
-// provider-account name a plan lives under (e.g. "mobius") is recorded in the
+// PSP name a plan lives under (e.g. "mobius") is recorded in the
 // link's provider field; the rail key in provider_links is always "nmi".
 //
 // As of issue #207, NMI is a first-class create-capable provider: OpenRails

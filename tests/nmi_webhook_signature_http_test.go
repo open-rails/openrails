@@ -71,7 +71,7 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	// exact secret LoadNMIWebhookSigningSecret resolves on the merchant surface.
 	const signingSecret = "nmi-e2e-webhook-signing-secret"
 	nmiEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	secretName, err := merchants.PSPSecretName("nmi", nmiEnv, testNMIRailMerchantAccountID(), "webhook_signing_secret")
+	secretName, err := merchants.PSPSecretName("nmi", nmiEnv, testNMIPSPID(), "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, secretName, signingSecret)
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 
 	body := []byte(fmt.Sprintf(
 		`{"event_id":"evt_nmi_sig_%s","event_type":"recurring.subscription.delete","event_body":{"merchant":{"id":"%s"},"subscription_id":"%s"}}`,
-		uuid.New().String()[:8], testNMIRailMerchantAccountID(), railSubID))
+		uuid.New().String()[:8], testNMIPSPID(), railSubID))
 
 	t.Run("missing signature rejected", func(t *testing.T) {
 		w := postNMIMerchantWebhook(t, suite, body, "")

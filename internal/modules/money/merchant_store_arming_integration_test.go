@@ -22,7 +22,7 @@ import (
 
 // This file is the store-arming seam for the live rail tests (#699): rail
 // credentials reach the charge path the way production arms them — a
-// rail_merchant_accounts row plus a scoped secret in the merchant-secrets
+// psps row plus a scoped secret in the merchant-secrets
 // store, resolved back through the production resolvers — never a raw env
 // value injected into a boot-plane PSPSet.
 
@@ -39,13 +39,13 @@ func merchantsServiceForTest(t *testing.T, dbi *db.DB) *merchants.Service {
 	return svc
 }
 
-// seedRailMerchantAccountSecrets arms one rail for the shared test merchant
+// seedPSPSecrets arms one rail for the shared test merchant
 // exactly the way the merchant manifest does (bootstrap
-// reconcileManifestRailMerchantAccount): each secret is Put under its canonical
+// reconcileManifestPSP): each secret is Put under its canonical
 // scoped name (merchants.PSPSecretName) and the
 // operator-declared account row is upserted via gen.UpsertPSP
 // in a merchant-scoped connection. Cleanup removes both.
-func seedRailMerchantAccountSecrets(t *testing.T, dbi *db.DB, svc *merchants.Service, rail, accountID string, secrets map[string]string) {
+func seedPSPSecrets(t *testing.T, dbi *db.DB, svc *merchants.Service, rail, accountID string, secrets map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	env := config.ExpectedProviderEnvironment(true)
@@ -92,7 +92,7 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	// Stripe leg.
 	stripeKey := "sk_test_store_arming_" + sfx
 	stripeAccount := "acct_arming" + sfx
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), stripeAccount, map[string]string{"secret_key": stripeKey})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailStripe), stripeAccount, map[string]string{"secret_key": stripeKey})
 	creds, err := msvc.LoadStripeCredentials(ctx, dbtest.TestMerchantID)
 	require.NoError(t, err)
 	require.Equal(t, stripeKey, creds.SecretKey, "LoadStripeCredentials must resolve the seeded scoped secret")
@@ -110,7 +110,7 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	// NMI leg (checkout's resolution seam).
 	nmiKey := "store-arming-security-key-" + sfx
 	nmiAccount := "arming-" + sfx
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccount, map[string]string{"security_key": nmiKey})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccount, map[string]string{"security_key": nmiKey})
 	name, found, err := msvc.ActivePSPSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
 	require.NoError(t, err)
 	require.True(t, found, "seeded NMI rail account must resolve to a scoped secret name")

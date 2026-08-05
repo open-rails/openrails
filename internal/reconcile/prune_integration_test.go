@@ -18,7 +18,7 @@ import (
 // provider snapshot is excess. A bare excess sub is SOFT-deleted (with its
 // checkout sessions + entitlements, or#858); an excess sub that fed the #514
 // grant ledger is SKIPPED (retracted via convergence). Dry-run writes nothing.
-func TestPruneRailMerchantAccountExcess(t *testing.T) {
+func TestPrunePSPExcess(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -82,7 +82,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 		},
 	}
 	fetcher := &fakeFetcher{provider: ProviderNMI, snap: snap}
-	binding := RailMerchantAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-" + suffix}
+	binding := PSPBinding{ID: paID, Rail: "nmi", AccountID: "acct-" + suffix}
 
 	// or#858: "exists" means VISIBLE to a live read. The row itself is never
 	// removed — subRowPresent proves that separately.
@@ -103,7 +103,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	incompleteSnap.Coverage = SnapshotCoverage{}
 	incompleteFetcher := &fakeFetcher{provider: ProviderNMI, snap: &incompleteSnap}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, incompleteFetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
+		res, err := PrunePSPExcess(ctx, appDB, incompleteFetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Subscriptions)
 		require.Equal(t, 3, res.SubscriptionsSkipped)
@@ -116,7 +116,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 
 	// Dry-run: discovers excess, writes nothing.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: false})
+		res, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: false})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Subscriptions, "subGone would be pruned")
 		require.Equal(t, 1, res.SubscriptionsSkipped, "subGrant is entangled -> skipped")
@@ -128,7 +128,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 
 	// Apply without the typed confirmation: refuses, writes nothing.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true})
+		_, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true})
 		require.ErrorContains(t, err, "--expect-rows")
 		require.True(t, subExists(ctx, subGone), "a refused prune writes nothing")
 		return nil
@@ -137,7 +137,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 	// Apply: soft-deletes the bare excess sub, skips the grant-entangled one.
 	var runID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(1)})
+		res, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(1)})
 		require.NoError(t, err)
 		runID = res.RunID
 		require.NotEqual(t, uuid.Nil, runID, "an applied prune records a reversible run")
@@ -152,7 +152,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 
 	// Idempotent: subGone already gone; only the skipped grant sub remains excess.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
+		res, err := PrunePSPExcess(ctx, appDB, fetcher, ProviderNMI, binding, PruneParams{Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Subscriptions, "nothing left to prune")
 		require.Equal(t, 1, res.SubscriptionsSkipped)
@@ -175,7 +175,7 @@ func TestPruneRailMerchantAccountExcess(t *testing.T) {
 
 func intp(n int) *int { return &n }
 
-func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing.T) {
+func TestPrunePSPExcess_PaymentsRequireCompleteWindow(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -224,7 +224,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 		return n == 1
 	}
-	binding := RailMerchantAccountBinding{ID: paID, Rail: "nmi", AccountID: "acct-pay-" + suffix}
+	binding := PSPBinding{ID: paID, Rail: "nmi", AccountID: "acct-pay-" + suffix}
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
 		FetchedAt:    time.Now().UTC(),
@@ -233,7 +233,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 	}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: snap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(0)})
+		res, err := PrunePSPExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: snap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(0)})
 		require.NoError(t, err)
 		require.Equal(t, 0, res.Payments)
 		require.Equal(t, 2, res.PaymentsSkipped)
@@ -251,7 +251,7 @@ func TestPruneRailMerchantAccountExcess_PaymentsRequireCompleteWindow(t *testing
 		TransactionWindowUntil:        timePtrIfSet(until),
 	}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := PruneRailMerchantAccountExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: &completeSnap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(1)})
+		res, err := PrunePSPExcess(ctx, appDB, &fakeFetcher{provider: ProviderNMI, snap: &completeSnap}, ProviderNMI, binding, PruneParams{Since: since, Until: until, Apply: true, ExpectedRows: intp(1)})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Payments)
 		require.Equal(t, 0, res.PaymentsSkipped)

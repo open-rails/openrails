@@ -107,7 +107,7 @@ type RunParams struct {
 	// credentials armed its fetcher. REQUIRED (or#893): the engine scopes local
 	// mirror reads and stamps local materialization writes with it, and a
 	// provider with no binding is refused rather than run account-agnostically.
-	PSPs map[Provider]RailMerchantAccountBinding
+	PSPs map[Provider]PSPBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
@@ -138,10 +138,10 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 	}
 }
 
-// RailMerchantAccountBinding is the account row a provider-pull is authorized to
+// PSPBinding is the account row a provider-pull is authorized to
 // treat as authoritative. ID is openrails.psps.id; AccountID is
 // the raw provider-returned account identifier.
-type RailMerchantAccountBinding struct {
+type PSPBinding struct {
 	ID        uuid.UUID `json:"id"`
 	Rail      string    `json:"rail"`
 	AccountID string    `json:"account_id"`
@@ -682,7 +682,7 @@ func countStateOverwrites(applyByID map[uuid.UUID]*Finding) int {
 // nothing. It is the no-bypass gate (or#859 §5.1 obligation 4): an enforce pass
 // with state transitions and no recorder is refused outright rather than run
 // without an undo.
-func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, binding RailMerchantAccountBinding, snap *RemoteSnapshot, plannedOverwrites int) (uuid.UUID, error) {
+func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, binding PSPBinding, snap *RemoteSnapshot, plannedOverwrites int) (uuid.UUID, error) {
 	if plannedOverwrites == 0 {
 		return uuid.Nil, nil
 	}

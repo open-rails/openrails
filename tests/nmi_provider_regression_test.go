@@ -154,9 +154,9 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	// #788: the secondary account arms as rail_merchant_accounts state; every
+	// #788: the secondary account arms as psps state; every
 	// consumer resolves it through the ONE seam. The mock gateway serves it.
-	suite.SeedNMIProviderAccount(t, provider, "test-security-key-"+provider)
+	suite.SeedNMIPSP(t, provider, "test-security-key-"+provider)
 	suite.SetNMIGateway(mock.URL())
 
 	price := suite.GetPrice(priceID)

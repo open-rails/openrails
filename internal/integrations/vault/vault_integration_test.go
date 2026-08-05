@@ -30,8 +30,8 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	kv := NewKVv2Adapter(liveClient(t), "secret")
 
-	pathA := "secret/openrails/merchants/tenant-a/provider_accounts/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
-	pathB := "secret/openrails/merchants/tenant-b/provider_accounts/solana/live/9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu/private_key"
+	pathA := "secret/openrails/merchants/merchant-a/psps/solana/live/AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9/private_key"
+	pathB := "secret/openrails/merchants/merchant-b/psps/solana/live/9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu/private_key"
 
 	if _, err := kv.WriteSecret(ctx, pathA, map[string]string{"value": "keyA"}); err != nil {
 		t.Fatalf("write A: %v", err)
@@ -50,7 +50,7 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 		t.Fatalf("merchant A value = %q, want keyA (isolation/round-trip broken)", got["value"])
 	}
 
-	missing, _, err := kv.ReadSecret(ctx, "secret/openrails/merchants/tenant-a/does/not/exist")
+	missing, _, err := kv.ReadSecret(ctx, "secret/openrails/merchants/merchant-a/does/not/exist")
 	if err != nil {
 		t.Fatalf("read missing: %v", err)
 	}

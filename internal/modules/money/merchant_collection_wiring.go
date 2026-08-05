@@ -97,7 +97,7 @@ func (b *MerchantCollectionAdapterBuilder) testMode() bool {
 	return b.Config != nil && b.Config.IsTestMode()
 }
 
-// environment is the deployment's provider-account environment (#681).
+// environment is the deployment's PSP environment (#681).
 func (b *MerchantCollectionAdapterBuilder) environment() string {
 	return config.ExpectedProviderEnvironment(b.testMode())
 }
@@ -146,10 +146,10 @@ func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc
 	if stamped != nil {
 		row, err := b.DB.Gen(ctx).GetPSP(ctx, *stamped)
 		if err != nil {
-			return merchants.PSPScope{}, false, fmt.Errorf("load stamped provider account: %w", err)
+			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
-			return merchants.PSPScope{}, false, fmt.Errorf("stamped provider account %s is on rail %s, not %s", row.ID, row.Rail, rail)
+			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", row.ID, row.Rail, rail)
 		}
 		return merchants.PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
@@ -159,7 +159,7 @@ func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc
 			CustodianID: row.CustodianID,
 		}, true, nil
 	}
-	return svc.PullRailMerchantAccountScope(ctx, mid, rail, b.environment())
+	return svc.PullPSPScope(ctx, mid, rail, b.environment())
 }
 
 // ResolveNMIClient arms the store-scoped NMI client for one charge (#727 —

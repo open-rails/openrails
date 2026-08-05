@@ -156,7 +156,7 @@ type Price struct {
 
 	// PSPLinks is a JSONB map of PSP key -> link entry (rail recorded inside).
 	// Keys: "nmi", "ccbill", "solana", "stripe" (the gateway rail).
-	// Values: rail-specific data (e.g., plan_id, price_id, provider account name)
+	// Values: rail-specific data (e.g., plan_id, price_id, PSP name)
 	// Example: {"nmi": {"plan_id": "123", "provider": "mobius"}, "ccbill": {"price_id": "456"}}
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 

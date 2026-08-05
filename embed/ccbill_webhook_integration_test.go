@@ -26,7 +26,7 @@ import (
 
 // #788 end-to-end pins for the merchant-scoped CCBill webhook leg: the
 // dispatcher builds its CCBill client PER MERCHANT at dispatch time from the
-// armed rail state (rail_merchant_accounts + scoped secrets) — the SAME
+// armed rail state (psps + scoped secrets) — the SAME
 // resolution seam regardless of whether MODE 1 (manifest) or MODE 2 (API)
 // armed it — and an unarmed rail fails closed.
 

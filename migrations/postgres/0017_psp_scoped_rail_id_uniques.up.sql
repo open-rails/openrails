@@ -5,7 +5,7 @@
 -- provider accounts configured") can legitimately both issue id "12345". They are two
 -- different subscriptions. 0012 made that unrepresentable and would fail the insert.
 -- The invariant is asserted by
--- TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs.
+-- TestPSPScopedLocalStateDoesNotBlendCollidingProviderIDs.
 --
 -- The real defect 0012 aimed at survives and is still closed here: pre-0012 the two
 -- partial indexes were DISJOINT on `psp_id IS NULL`, so one legacy unstamped row and

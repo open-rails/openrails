@@ -57,7 +57,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana provider-account signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC by default; set psp_links.solana.token to use another supported stablecoin)",
+		Hint:     "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC by default; set psp_links.solana.token to use another supported stablecoin)",
 	}
 }
 

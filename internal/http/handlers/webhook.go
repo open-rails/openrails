@@ -85,15 +85,15 @@ func Webhook(r *httprequest.Request) {
 	// surface a generic error (audit OR-API-C2).
 	mid, err := merchant.Require(r.Request.Context())
 	if err != nil {
-		if handled, accepted := processRailMerchantAccountWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
+		if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 			if accepted {
 				r.SuccessJSON(map[string]string{"status": "accepted"})
 			}
 			return
 		}
 		log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).
-			Warn("global webhook surface hit with no configured merchant and no resolvable provider account")
-		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no provider account could be resolved from the webhook")
+			Warn("global webhook surface hit with no configured merchant and no resolvable PSP")
+		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no PSP could be resolved from the webhook")
 		return
 	}
 	// #788: ONE ingestion seam — the pinned-merchant global surface routes
@@ -163,7 +163,7 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 //
 // The webhook surfaces resolve their merchant INSIDE the handler — from the URL
 // slug (MerchantWebhook), the Host header (HostWebhook) or the payload's account
-// identity (processRailMerchantAccountWebhook) — so middleware.MerchantDBConnMW
+// identity (processPSPWebhook) — so middleware.MerchantDBConnMW
 // cannot have run: at middleware time there is no merchant to pin. Without this,
 // every RLS-forced read the dispatch performs outside a MerchantTx (the price
 // lookup behind a CCBill NewSaleSuccess, subscription/customer lookups) runs on
@@ -238,7 +238,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		var found bool
 		creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
 		if err == nil && !found {
-			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 			return
 		}
 		if err == nil && found {
@@ -334,7 +334,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
-func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
+func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
 	if r.State == nil || r.State.Merchants == nil {
 		return false, false
 	}
@@ -350,7 +350,7 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 			r.ErrorJSON(http.StatusBadRequest, "NMI webhook payload is missing merchant account identity")
 			return true, false
 		}
-		account, release, ok := resolveWebhookRailMerchantAccount(r, string(models.RailNMI), environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, string(models.RailNMI), environment, accountID)
 		if !ok {
 			return true, false
 		}
@@ -369,7 +369,7 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		if !ok {
 			return true, false
 		}
-		account, release, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailCCBill, environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailCCBill, environment, accountID)
 		if !ok {
 			return true, false
 		}
@@ -395,7 +395,7 @@ func processRailMerchantAccountWebhook(r *httprequest.Request, rail, routeAccoun
 		defer release()
 		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, release, ok := resolveWebhookRailMerchantAccount(r, subscriptions.RailStripe, environment, routeAccountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailStripe, environment, routeAccountID)
 		if !ok {
 			return true, false
 		}
@@ -437,13 +437,13 @@ var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 	}
 }
 
-// resolveWebhookRailMerchantAccount resolves the merchant + PSP a payload-identified
+// resolveWebhookPSP resolves the merchant + PSP a payload-identified
 // account belongs to, pins BOTH on the request (merchant id, psp id) and pins the
 // merchant's DB connection. The returned release must be deferred by the caller —
 // see pinWebhookMerchantConn for why the pin cannot live in middleware.
-func resolveWebhookRailMerchantAccount(r *httprequest.Request, rail, environment, accountID string) (merchants.RailMerchantAccountIdentity, func(), bool) {
+func resolveWebhookPSP(r *httprequest.Request, rail, environment, accountID string) (merchants.PSPIdentity, func(), bool) {
 	return pinWebhookAccount(r, rail, environment, accountID,
-		r.State.Merchants.ResolveRailMerchantAccountByIdentity)
+		r.State.Merchants.ResolvePSPByIdentity)
 }
 
 // resolveWebhookCustodianAccount is the custody sibling: it resolves the
@@ -476,25 +476,25 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, t
 }
 
 func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
-	resolve func(context.Context, string, string, string) (merchants.RailMerchantAccountIdentity, bool, error),
-) (merchants.RailMerchantAccountIdentity, func(), bool) {
+	resolve func(context.Context, string, string, string) (merchants.PSPIdentity, bool, error),
+) (merchants.PSPIdentity, func(), bool) {
 	noop := func() {}
 	account, ok, err := resolve(r.Request.Context(), rail, environment, accountID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook provider-account resolution failed")
-		r.ErrorJSON(http.StatusInternalServerError, "Provider account resolution failed")
-		return merchants.RailMerchantAccountIdentity{}, noop, false
+		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook PSP resolution failed")
+		r.ErrorJSON(http.StatusInternalServerError, "PSP resolution failed")
+		return merchants.PSPIdentity{}, noop, false
 	}
 	if !ok {
-		r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
-		return merchants.RailMerchantAccountIdentity{}, noop, false
+		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		return merchants.PSPIdentity{}, noop, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
 	ctx = db.WithPSPID(ctx, account.ID)
 	r.Request = r.Request.WithContext(ctx)
 	release, ok := pinWebhookMerchantConn(r, account.MerchantID)
 	if !ok {
-		return merchants.RailMerchantAccountIdentity{}, noop, false
+		return merchants.PSPIdentity{}, noop, false
 	}
 	return account, release, true
 }
@@ -516,7 +516,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		var found bool
 		signingKey, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
 		if err == nil && !found {
-			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 			return false
 		}
 		// Pin the routed account so records this event creates are stamped with it
@@ -646,7 +646,7 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		return false
 	}
 	// Stamp the routed PSP so every row this event materialises is attributable
-	// (or#893). The per-account route pins it in resolveWebhookRailMerchantAccount;
+	// (or#893). The per-account route pins it in resolveWebhookPSP;
 	// the merchant-slug route resolves it from the payload's own account identity.
 	ctx := r.Request.Context()
 	if accountID != "" && r.State.Merchants != nil {

@@ -28,7 +28,7 @@ type guardCohort struct {
 	suffix   string
 	// psp is the PSP the cohort's mirror rows carry — a pull must be bound to
 	// it to see them at all (or#893).
-	psp RailMerchantAccountBinding
+	psp PSPBinding
 }
 
 // seedGuardCohort creates n NMI subscriptions in `status`, each with a live
@@ -40,7 +40,7 @@ func seedGuardCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int,
 
 // seedGuardCohortForPSP seeds the cohort under a NAMED PSP (or#893: mirror rows
 // carry the PSP that produced them, and a pull only ever sees its own).
-func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time, psp RailMerchantAccountBinding) guardCohort {
+func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time, psp PSPBinding) guardCohort {
 	t.Helper()
 	merchantID := dbtest.TestMerchantID.UUID()
 	c := guardCohort{suffix: uuid.NewString()[:8], psp: psp}
@@ -326,7 +326,7 @@ func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 			// or#893: the pass is BOUND to the PSP it armed from, so the sibling's
 			// book is not even in the local set it diffs. #841's coverage strip is
 			// the second belt: two PSPs declared active, this pass read one.
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: armed},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: armed},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 2, Pulled: 1, Binding: armed}},
 		})
 		return err

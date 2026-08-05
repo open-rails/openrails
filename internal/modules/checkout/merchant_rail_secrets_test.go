@@ -107,7 +107,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"})
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"})
 
 	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
@@ -127,11 +127,11 @@ func TestCheckoutWithoutScopedResolutionFailsClosed(t *testing.T) {
 	require.Contains(t, err.Error(), "not configured")
 }
 
-func TestCheckoutRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
+func TestCheckoutPSPResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
-	svc.SetRailMerchantAccountSecretResolver(checkoutMissingProviderSecretResolver{})
+	svc.SetPSPSecretResolver(checkoutMissingProviderSecretResolver{})
 
 	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
@@ -142,7 +142,7 @@ func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(unavailableSecretStore{})
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"})
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"})
 
 	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
@@ -159,7 +159,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{
 		rail:        "ccbill",
 		environment: "live",
 		accountID:   "945280-0000",
@@ -182,15 +182,15 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	require.NotEmpty(t, parsed.Query().Get("signature"))
 }
 
-func TestCheckoutRailMerchantAccountResolverMissingCCBillSecretDoesNotUseStaticConfig(t *testing.T) {
+func TestCheckoutPSPResolverMissingCCBillSecretDoesNotUseStaticConfig(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
-	svc.SetRailMerchantAccountSecretResolver(checkoutMissingProviderSecretResolver{})
+	svc.SetPSPSecretResolver(checkoutMissingProviderSecretResolver{})
 
 	_, err := svc.resolveCCBillClient(ctx)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing scoped merchant CCBill provider account")
+	require.Contains(t, err.Error(), "missing scoped merchant CCBill PSP")
 }
 
 // #697: the composite CCBill identity is dash-joined; a legacy slash-form
@@ -199,7 +199,7 @@ func TestCheckoutCCBillSlashAccountIDRejected(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280/0000"})
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280/0000"})
 
 	_, err := svc.resolveCCBillClient(ctx)
 	require.Error(t, err)
@@ -216,7 +216,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280-0000"})
+	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280-0000"})
 
 	email := "alice@example.com"
 	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, &UserIdentity{

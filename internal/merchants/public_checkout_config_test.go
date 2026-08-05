@@ -19,7 +19,7 @@ import (
 // decides — deliberately — how a browser drives it.
 func TestPublicRailProfilesCoverEveryCatalogRail(t *testing.T) {
 	for _, d := range rails.All() {
-		if !d.HasRailMerchantAccounts {
+		if !d.HasPSPs {
 			// Not armable — must NOT have a profile either.
 			if _, ok := publicRailProfiles[string(d.Rail)]; ok {
 				t.Errorf("rail %q declares no PSP catalog participation but has a public profile", d.Rail)

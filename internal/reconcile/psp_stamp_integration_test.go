@@ -75,7 +75,7 @@ func TestRepoCreateRequiresObservedPSPProvenance(t *testing.T) {
 		_, err = payments.NewPaymentRepo(appDB).GetByID(ctx, pmt.ID)
 		require.Error(t, err, "the refused charge left no row")
 
-		// Off-rail money genuinely has no provider account, so it writes without
+		// Off-rail money genuinely has no PSP, so it writes without
 		// one — the exemption payments_psp_required_on_rail names.
 		manual := &models.Payment{
 			ID: uuid.New(), CustomerID: customerID, PriceID: priceID,

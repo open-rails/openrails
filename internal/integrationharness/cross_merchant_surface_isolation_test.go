@@ -297,7 +297,7 @@ func TestCrossMerchantWebhookIsolationHTTP(t *testing.T) {
 
 	arm := func(m OwnedMerchant, tag, secret string) {
 		t.Helper()
-		SeedRailMerchantAccounts(ctx, t, rt, m.MerchantID, config.PSPSet{
+		SeedPSPs(ctx, t, rt, m.MerchantID, config.PSPSet{
 			"stripe-iso-" + tag: {
 				Rail:      models.RailStripe,
 				AccountID: "acct_iso_" + tag + "_" + suffix,

@@ -17,7 +17,7 @@ import (
 // early on a rotation (a changed secret value resolves on the next miss).
 const DefaultSignerCacheTTL = 60 * time.Second
 
-// keypairSigner is the "give me the key" Signer: it loads the provider-account
+// keypairSigner is the "give me the key" Signer: it loads the PSP
 // private_key from a MerchantSecretGetter, parses it, and signs in-process.
 // Works with any secret backend (DB+envelope self-hosted, or Vault KV managed).
 // The plaintext key briefly lives in memory (cached up to ttl); for stronger

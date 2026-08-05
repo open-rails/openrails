@@ -195,8 +195,8 @@ func (s *PlanMigrationService) classifyMigrationCapability(ctx context.Context, 
 		}
 		// #815: a gateway-native NMI recurring record CAN be mutated
 		// server-side (classic update_subscription). CanPush is the
-		// resolver-driven NMI-family detector, so custom-named NMI provider
-		// accounts classify without code changes. Everything else stays a
+		// resolver-driven NMI-family detector, so custom-named NMI PSPs
+		// classify without code changes. Everything else stays a
 		// record OpenRails only observes — the gateway would keep charging
 		// the old plan.
 		if s.nmi != nil && s.nmi.CanPush(ctx, sub) {

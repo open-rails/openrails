@@ -20,7 +20,7 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		return
 	}
 
-	solanaSigner := recurring.NewSignerFromRailMerchantAccounts(
+	solanaSigner := recurring.NewSignerFromPSPs(
 		secretStore,
 		solanaTransit,
 		r.DB,

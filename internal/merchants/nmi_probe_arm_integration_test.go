@@ -55,7 +55,7 @@ func countNMIAccounts(t *testing.T, svc *Service, accountID string) int {
 // TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode reinstates #348
 // at the MODE-2 (API) arm boundary: under test_mode, arming an NMI account
 // whose credentials belong to a LIVE gateway must be refused, and nothing
-// may be persisted (no rail_merchant_accounts row, no stored secret).
+// may be persisted (no psps row, no stored secret).
 func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	pool := newTestPool(t)
 	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
@@ -75,7 +75,7 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "PRODUCTION NMI credentials detected while test_mode is enabled")
-	require.Equal(t, 0, countNMIAccounts(t, svc, "arm-348-live"), "a refused arm must never persist the provider account row")
+	require.Equal(t, 0, countNMIAccounts(t, svc, "arm-348-live"), "a refused arm must never persist the PSP row")
 
 	_, err = svc.GetPaymentProviderConfig(ctx, tn.ID, "nmi", "test")
 	require.ErrorIs(t, err, ErrSecretNotFound, "a refused arm must not create a resolvable provider config")

@@ -54,7 +54,7 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 	}
 	{
 		// #650: the canonical provider-only global webhook surface IS mounted on
-		// standalone (payload/route resolves the provider account + merchant).
+		// standalone (payload/route resolves the PSP + merchant).
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)

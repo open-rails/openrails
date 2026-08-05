@@ -29,8 +29,8 @@ type DumpMerchantConfigOptions struct {
 }
 
 // DumpMerchantConfig reads a merchant's OpenRails-owned configuration (identity,
-// profile, invoice/collection policy, delegated-invoker windows, and provider
-// accounts) and returns it in the push-merchant-config YAML shape (#646/#653).
+// profile, invoice/collection policy, delegated-invoker windows, and PSPs)
+// and returns it in the push-merchant-config YAML shape (#646/#653).
 // Secret fields are omitted entirely by default (so a redacted dump can be
 // re-applied without a placeholder overwriting real secrets); IncludeSecrets
 // emits plaintext from the configured secret backend for operator-controlled exports.
@@ -201,7 +201,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		})
 	}
 
-	// provider accounts (identity + lifecycle + secret references).
+	// PSPs (identity + lifecycle + secret references).
 	var accounts []gen.OpenrailsPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
@@ -210,9 +210,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		})
 		return lerr
 	}); err != nil {
-		return nil, fmt.Errorf("list provider accounts: %w", err)
+		return nil, fmt.Errorf("list PSPs: %w", err)
 	}
-	secretValuesByAccount, err2 := railMerchantAccountSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
+	secretValuesByAccount, err2 := pspSecrets(ctx, secretStore, mid, opts.IncludeSecrets)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -223,7 +223,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			localKey = strings.TrimSpace(*a.Key)
 		}
 		if localKey == "" {
-			localKey = railMerchantAccountDumpKey(a.Rail, a.Environment, a.AccountID)
+			localKey = pspDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
 		// #882: environment is derived from test_mode, so it is never emitted —
 		// dumping it would round-trip into the removal error on apply.
@@ -234,13 +234,13 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if a.CustodianID != nil {
 			account.Custodian = custodianKeyByID[*a.CustodianID]
 		}
-		if signer := railMerchantAccountSignerFromEvidence(a.Evidence); signer != nil {
+		if signer := pspSignerFromEvidence(a.Evidence); signer != nil {
 			account.Signer = signer
 		}
-		if settings := railMerchantAccountSettingsFromEvidence(a.Evidence); len(settings) > 0 {
+		if settings := pspSettingsFromEvidence(a.Evidence); len(settings) > 0 {
 			account.Settings = settings
 		}
-		key := railMerchantAccountSecretGroupKey(a.Rail, a.Environment, a.AccountID)
+		key := pspSecretGroupKey(a.Rail, a.Environment, a.AccountID)
 		if values := secretValuesByAccount[key]; len(values) > 0 {
 			account.Secrets = values
 		}
@@ -250,7 +250,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
 }
 
-func railMerchantAccountSignerFromEvidence(raw []byte) *RailMerchantAccountSignerConfig {
+func pspSignerFromEvidence(raw []byte) *PSPSignerConfig {
 	var evidence struct {
 		Signer struct {
 			Mode string `json:"mode"`
@@ -264,13 +264,13 @@ func railMerchantAccountSignerFromEvidence(raw []byte) *RailMerchantAccountSigne
 	if mode == "" || mode == "local_keypair" {
 		return nil
 	}
-	return &RailMerchantAccountSignerConfig{
+	return &PSPSignerConfig{
 		Mode: mode,
 		Key:  strings.TrimSpace(evidence.Signer.Key),
 	}
 }
 
-func railMerchantAccountSettingsFromEvidence(raw []byte) map[string]any {
+func pspSettingsFromEvidence(raw []byte) map[string]any {
 	var evidence struct {
 		Settings map[string]any `json:"settings"`
 	}
@@ -285,11 +285,11 @@ func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 	return yaml.Marshal(m)
 }
 
-// railMerchantAccountSecrets lists the merchant's provider-account secret VALUES
+// pspSecrets lists the merchant's PSP secret VALUES
 // grouped by (rail, environment, account_id). It returns nothing unless
 // includeValues is set: a redacted dump omits secret fields entirely rather than
 // emitting a placeholder that a re-apply (--overwrite) could store as the real value.
-func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+func pspSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
 		return nil, nil
 	}
@@ -307,7 +307,7 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 		if err != nil {
 			return nil, fmt.Errorf("read merchant secret %s for dump: %w", name, err)
 		}
-		gk := railMerchantAccountSecretGroupKey(rail, environment, accountID)
+		gk := pspSecretGroupKey(rail, environment, accountID)
 		if out[gk] == nil {
 			out[gk] = map[string]string{}
 		}
@@ -316,11 +316,11 @@ func railMerchantAccountSecrets(ctx context.Context, secretStore merchants.Merch
 	return out, nil
 }
 
-func railMerchantAccountSecretGroupKey(rail, environment, accountID string) string {
+func pspSecretGroupKey(rail, environment, accountID string) string {
 	return strings.ToLower(rail) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
-// custodianSecretValues is the custody sibling of railMerchantAccountSecrets,
+// custodianSecretValues is the custody sibling of pspSecrets,
 // grouped by the custodian's (kind, environment, account_id) identity.
 func custodianSecretValues(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
@@ -353,7 +353,7 @@ func custodianSecretGroupKey(kind, environment, accountID string) string {
 	return strings.ToLower(kind) + "\x00" + strings.ToLower(environment) + "\x00" + accountID
 }
 
-func railMerchantAccountDumpKey(rail, environment, accountID string) string {
+func pspDumpKey(rail, environment, accountID string) string {
 	parts := []string{rail, environment, accountID}
 	var b strings.Builder
 	for i, p := range parts {

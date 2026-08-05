@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 )
 
-// seedArmedRailWithBillableSub arms rail "nmi" (rail_merchant_accounts row) and
+// seedArmedRailWithBillableSub arms rail "nmi" (psps row) and
 // gives it one active auto-renewing subscription — the webhook_silence
 // expectation gate (#786).
 func seedArmedRailWithBillableSub(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {

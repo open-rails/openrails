@@ -497,7 +497,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	// #788: rails arm as psps rows + scoped secrets — the
 	// canonical armed state every consumer resolves through the ONE seam.
 	if len(sc.rails) > 0 {
-		SeedRailMerchantAccounts(h.ctx, h.t, app.Runtime, dbtest.TestMerchantID, sc.rails)
+		SeedPSPs(h.ctx, h.t, app.Runtime, dbtest.TestMerchantID, sc.rails)
 	}
 
 	// Real control-plane bootstrap: ensures the merchant permission-group, links

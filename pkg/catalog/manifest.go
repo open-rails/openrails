@@ -78,7 +78,7 @@ type Product struct {
 	TierGroup   string `json:"tier_group,omitempty" yaml:"tier_group,omitempty"`
 	TierRank    *int   `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
 	// Archived maps to status=archived. Omitted/false = active (matches the
-	// merchant-manifest provider-account `archived` key).
+	// merchant-manifest PSP `archived` key).
 	Archived     bool          `json:"archived,omitempty" yaml:"archived,omitempty"`
 	Entitlements []string      `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
 	Credits      []CreditGrant `json:"credits,omitempty" yaml:"credits,omitempty"`

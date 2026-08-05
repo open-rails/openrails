@@ -262,7 +262,7 @@ func newSvc(t *testing.T) *Service {
 	return svc
 }
 
-func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
@@ -272,7 +272,7 @@ func seedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID,
 	require.NoError(t, err)
 }
 
-func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
+func seedArchivedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
@@ -282,21 +282,21 @@ func seedArchivedRailMerchantAccount(t *testing.T, svc *Service, merchantID merc
 	require.NoError(t, err)
 }
 
-func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *testing.T) {
+func TestArchivedPSPRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-rail", PermissionGroupID: "group-archived-rail"})
 	require.NoError(t, err)
 
 	const accountID = "archived-nmi-account"
-	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 	secretName, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
 	_, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "live", "security_key")
-	require.ErrorIs(t, err, ErrNoActiveRailMerchantAccount)
+	require.ErrorIs(t, err, ErrNoActivePSP)
 	require.False(t, ok)
 
 	got, ok, err := svc.LoadNMIWebhookSigningSecretForAccount(ctx, tn.ID, accountID)
@@ -305,14 +305,14 @@ func TestArchivedRailMerchantAccountRejectsNewWorkButResolvesByAccountID(t *test
 	require.Equal(t, "archived-webhook-secret", got)
 }
 
-func TestArchivedRailMerchantAccountDrainState(t *testing.T) {
+func TestArchivedPSPDrainState(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "archived-drain", PermissionGroupID: "group-archived-drain"})
 	require.NoError(t, err)
 
 	const accountID = "draining-nmi-account"
-	seedArchivedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", accountID)
+	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 
 	items, err := svc.ListPaymentProviderConfigs(ctx, tn.ID, "nmi", "live", "archived")
 	require.NoError(t, err)
@@ -447,13 +447,13 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.True(t, errors.Is(err, ErrMerchantNotFound))
 }
 
-func TestCredentialRotation_LoadsRailMerchantAccountScopedSecret(t *testing.T) {
+func TestCredentialRotation_LoadsPSPScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_test")
 	secretName, err := PSPSecretName("stripe", "live", "acct_test", "secret_key")
 	require.NoError(t, err)
 	sec, err := svc.secrets.Put(ctx, tn.ID, secretName, "sk_1")
@@ -488,7 +488,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 
 	// After resolution the caller loads THAT merchant's signing secret (the trust
 	// boundary), which is namespaced to the merchant.
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_acme")
 	secretName, err := PSPSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "whsec_acme")

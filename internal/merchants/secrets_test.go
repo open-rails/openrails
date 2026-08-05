@@ -202,7 +202,7 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	}
 }
 
-func TestRailMerchantAccountSecretNameRejectsNMITokenizationKey(t *testing.T) {
+func TestPSPSecretNameRejectsNMITokenizationKey(t *testing.T) {
 	if _, err := PSPSecretName("nmi", "live", "mobius", "tokenization_key"); err == nil {
 		t.Fatal("NMI tokenization_key is public provider settings, not a secret")
 	}
@@ -214,7 +214,7 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	// #630/#641: the loader takes the RAIL ("nmi"), not a provider-account name
+	// #630/#641: the loader takes the RAIL ("nmi"), not a PSP name
 	// like "mobius".
 	cfg, err := svc.LoadNMITokenizationConfig(ctx, id, "nmi")
 	if err != nil {
@@ -225,7 +225,7 @@ func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
 	}
 
 	// Broad merchant-level NMI secrets are no longer runtime credential sources;
-	// the loader needs a rail_merchant_accounts row so it can read provider
+	// the loader needs a psps row so it can read provider
 	// settings.
 }
 

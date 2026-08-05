@@ -96,7 +96,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 
 	var enforce *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		enforce = res
 		return err
 	}))
@@ -151,7 +151,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	// to fix the provider's card back to our old copy.
 	var second *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(snapshot()).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		second = res
 		return err
 	}))
@@ -170,4 +170,3 @@ func findingsOfType(findings []FindingRecord, t FindingType) []FindingRecord {
 	}
 	return out
 }
-

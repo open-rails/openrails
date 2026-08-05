@@ -28,7 +28,7 @@ type MerchantSecretGetter interface {
 // the private key to callers. It is resolved PER MERCHANT (via merchant.ID); there
 // is no process-global signer. Two implementations exist:
 //
-//   - keypairSigner: loads the provider-account scoped private_key secret and
+//   - keypairSigner: loads the PSP scoped private_key secret and
 //     signs in-process. Works with any secret backend; the key briefly lives in
 //     memory.
 //   - transitSigner: signs through Vault Transit — the key never leaves Vault.

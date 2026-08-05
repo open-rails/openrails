@@ -11,10 +11,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 )
 
-// #681: a test_mode (sandbox) deployment declares environment=test provider
-// accounts. The Service — built with providerEnvironment "test" — must resolve
+// #681: a test_mode (sandbox) deployment declares environment=test PSPs.
+// The Service — built with providerEnvironment "test" — must resolve
 // scoped Stripe/NMI credentials from those test rows through the real DB path
-// (rail_merchant_accounts + merchant_secrets rows; no mocks), and must NOT
+// (psps + merchant_secrets rows; no mocks), and must NOT
 // resolve environment=live rows.
 func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	ctx := context.Background()
@@ -29,7 +29,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	// Stripe: test-env account + real secret rows.
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "test", "acct_sandbox681")
+	seedPSP(t, svc, tn.ID, "stripe", "test", "acct_sandbox681")
 	for key, value := range map[string]string{
 		"secret_key":                  "sk_test_681",
 		"webhook_signing_secret":      "whsec_681",
@@ -77,7 +77,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	// test posture (no silent cross-environment bleed).
 	liveOnly, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "live-only-681", PermissionGroupID: "group-live-only-681"})
 	require.NoError(t, err)
-	seedRailMerchantAccount(t, svc, liveOnly.ID, "stripe", "live", "acct_liveonly681")
+	seedPSP(t, svc, liveOnly.ID, "stripe", "live", "acct_liveonly681")
 	liveSecretName, err := PSPSecretName("stripe", "live", "acct_liveonly681", "secret_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, liveOnly.ID, liveSecretName, "sk_live_681")

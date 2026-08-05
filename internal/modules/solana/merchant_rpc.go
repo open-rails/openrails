@@ -57,7 +57,7 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid merchant.ID) (*sol
 	if svc == nil {
 		return nil, nil // nothing arms without the merchants service (#788)
 	}
-	scope, ok, err := svc.PullRailMerchantAccountScope(ctx, mid, "solana", config.ExpectedProviderEnvironment(b.testMode()))
+	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana", config.ExpectedProviderEnvironment(b.testMode()))
 	if err != nil {
 		return nil, fmt.Errorf("solana: resolve merchant %s rail account: %w", mid.String(), err)
 	}

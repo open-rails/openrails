@@ -15,9 +15,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #681: a test_mode deployment declares environment=test provider accounts. The
+// #681: a test_mode deployment declares environment=test PSPs. The
 // checkout money paths must resolve NMI and CCBill scoped credentials from those
-// test rows end-to-end: real Postgres rail_merchant_accounts + merchant_secrets
+// test rows end-to-end: real Postgres psps + merchant_secrets
 // rows, resolved through the REAL merchants.Service (no fake resolvers).
 func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
@@ -61,7 +61,7 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 
 	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(msvc)
+	svc.SetPSPSecretResolver(msvc)
 
 	client, err := svc.resolveNMIClient(ctx, nmiKey)
 	require.NoError(t, err)

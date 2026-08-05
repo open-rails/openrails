@@ -11,7 +11,7 @@ import (
 // Solana rail-account `settings` keys (#711). These are the per-merchant home
 // of the Solana runtime knobs: standalone operators declare them in the
 // merchant config manifest under merchants.<slug>.accounts.<key>.solana.settings,
-// and they are stored on the rail_merchant_accounts row (same mechanism as the
+// and they are stored on the psps row (same mechanism as the
 // NMI tokenization_key). Store settings win over the embedded boot plane (#699).
 const (
 	SolanaSettingRPCProvider = "rpc_provider"

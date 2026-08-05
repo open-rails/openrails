@@ -18,13 +18,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SeedRailMerchantAccounts is the test-side Layer-A writer (#788): it converges
+// SeedPSPs is the test-side Layer-A writer (#788): it converges
 // the given rail credential set into the SAME armed state production writers
 // (MODE 1 manifest convergence / MODE 2 API writes) produce —
 // psps rows + scoped secrets in the runtime's merchant
 // secret store. Everything downstream (checkout, webhooks, pulls, rebills)
 // then resolves it through the ONE Layer-C seam exactly like production.
-func SeedRailMerchantAccounts(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {
+func SeedPSPs(ctx context.Context, t *testing.T, rt *app.Runtime, mid merchant.ID, set config.PSPSet) {
 	t.Helper()
 	if len(set) == 0 {
 		return

@@ -6,7 +6,7 @@ package tests
 // ⇒ handler invoked, proven by its observable effects. The apply path for
 // inbound Stripe events is covered elsewhere; THIS job is the managed
 // webhook-endpoint reconciler (jobs_stripe_webhooks.go): for every active
-// stripe rail_merchant_accounts row it find-or-creates the OpenRails-managed
+// stripe psps row it find-or-creates the OpenRails-managed
 // Stripe webhook endpoint and persists the returned signing secret into the
 // merchant secret store. Real River (in-process workers on real Postgres),
 // real merchant catalog + secret store; the only fake is the Stripe wire
@@ -37,12 +37,12 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 	ctx := suite.MerchantCtx()
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	const accountID = "acct_river_e2e"
-	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")
+	suite.seedPSPWithEvidence(ctx, "stripe", env, accountID, "")
 	// Self-cleaning: a SECOND armed stripe PSP left behind makes every later
 	// bare-rail checkout in this package ambiguous ("multiple armed PSPs").
 	// Archive, don't delete — rows stamped with the psp id hold FK references.
 	t.Cleanup(func() {
-		// By natural key: seedRailMerchantAccountWithEvidence lets the DB assign
+		// By natural key: seedPSPWithEvidence lets the DB assign
 		// the row id, so PSPNaturalKey's deterministic id would match nothing.
 		_, _ = suite.MerchantPool().Exec(context.Background(),
 			`UPDATE openrails.psps SET archived = true

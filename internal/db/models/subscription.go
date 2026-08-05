@@ -62,7 +62,7 @@ type Subscription struct {
 	// Payment rail information
 	Rail               Rail   `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
-	// PspID is the provider account that owns this subscription (#641).
+	// PspID is the PSP that owns this subscription (#641).
 	PspID           uuid.UUID  `json:"psp_id"`
 	UserEmail       *string    `json:"user_email,omitempty"`
 	PaymentMethodID *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method

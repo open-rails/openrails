@@ -30,7 +30,7 @@ type Options struct {
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
-	// value derived from configured provider accounts.
+	// value derived from configured PSPs.
 	ProviderRoutes *routesurface.ProviderRoutes
 
 	// APIKeys is the #757 merchant self-serve API-key manager (mint/list/revoke
@@ -877,7 +877,7 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // payload. This is the EMBEDDED surface only — a host that pins one merchant
 // has no payload-derived identity to resolve. or#893 removed the standalone
 // mount: there the canonical RegisterWebhookRoutes surface derives the merchant
-// from provider account identity, and a URL slug was a second way to say the
+// from PSP identity, and a URL slug was a second way to say the
 // same thing.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))

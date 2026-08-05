@@ -34,7 +34,7 @@ type PruneParams struct {
 	Actor string
 }
 
-// PruneResult tallies one provider account's prune pass.
+// PruneResult tallies one PSP's prune pass.
 type PruneResult struct {
 	// RunID is the destructive_runs id when Apply wrote anything — the handle
 	// `openrails undo-run --run <id>` reverses.
@@ -84,8 +84,8 @@ func (e *ErrPruneCountMismatch) Error() string {
 		e.Expected, e.Found)
 }
 
-// PruneRailMerchantAccountExcess fetches the provider's current snapshot for the
-// bound account and prunes local mirror rows attributed to that provider account
+// PrunePSPExcess fetches the provider's current snapshot for the
+// bound account and prunes local mirror rows attributed to that PSP
 // that are ABSENT from the snapshot. It is account-bound and FAILS CLOSED
 // (or#893: every provider row is attributed now, so a row whose PSP this pass
 // did not pull is out of scope, never "maybe ours") and safe by construction:
@@ -105,7 +105,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //
 // Dry-run (Apply=false) only discovers and counts; it writes nothing. Must be
 // called inside a merchant-scoped connection (the CLI's RunInMerchantConn).
-func PruneRailMerchantAccountExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, provider Provider, binding RailMerchantAccountBinding, params PruneParams) (PruneResult, error) {
+func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, provider Provider, binding PSPBinding, params PruneParams) (PruneResult, error) {
 	var res PruneResult
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {

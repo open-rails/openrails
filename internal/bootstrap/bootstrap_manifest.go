@@ -67,7 +67,7 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 			return fmt.Errorf("merchant %q %w", slug, err)
 		}
 		for key, account := range t.PSPs {
-			if err := validateManifestRailMerchantAccount(slug, key, account); err != nil {
+			if err := validateManifestPSP(slug, key, account); err != nil {
 				return err
 			}
 		}
@@ -163,7 +163,7 @@ func validateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 	return nil
 }
 
-func validateManifestRailMerchantAccount(slug string, key string, account PSPConfig) error {
+func validateManifestPSP(slug string, key string, account PSPConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("merchant %q accounts key is required", slug)

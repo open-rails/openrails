@@ -49,7 +49,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	// The raw env value is never handed to the service directly.
 	msvc := merchantsServiceForTest(t, dbi)
 	stripeAccountID := stripeAccountIdentity(t, secretKey)
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), stripeAccountID, map[string]string{"secret_key": secretKey})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailStripe), stripeAccountID, map[string]string{"secret_key": secretKey})
 	storeCreds, err := msvc.LoadStripeCredentials(ctx, dbtest.TestMerchantID)
 	require.NoError(t, err)
 	require.Equal(t, secretKey, storeCreds.SecretKey, "production store resolution must return the seeded rail credential")
@@ -130,7 +130,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	// the account_id is an opaque per-run label rather than self-discovered.
 	msvc := merchantsServiceForTest(t, dbi)
 	nmiAccountID := "live-invoice-" + uuid.NewString()[:8]
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccountID, map[string]string{"security_key": securityKey})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), nmiAccountID, map[string]string{"security_key": securityKey})
 	secretName, found, err := msvc.ActivePSPSecretName(ctx, dbtest.TestMerchantID, string(models.RailNMI), config.ExpectedProviderEnvironment(true), "security_key")
 	require.NoError(t, err)
 	require.True(t, found, "seeded NMI rail account must resolve")

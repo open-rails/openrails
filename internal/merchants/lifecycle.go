@@ -102,7 +102,7 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
 // directory). secrets may be nil (credential management disabled).
-// providerEnvironment is the deployment's provider-account environment —
+// providerEnvironment is the deployment's PSP environment —
 // derive it via config.ExpectedProviderEnvironment(cfg.IsTestMode()).
 func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment string) (*Service, error) {
 	if pool == nil {
@@ -116,7 +116,7 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
-// lookup over openrails.merchants, with no secret store and no provider-account
+// lookup over openrails.merchants, with no secret store and no PSP
 // environment (scoped credential lookups are unavailable). It is the lifecycle
 // slice the control-plane provisioning seam needs (#738).
 func NewDirectoryService(pool *db.Pool) (*Service, error) {
@@ -179,24 +179,45 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 		RETURNING id::text
 	`, slug, groupID).Scan(&insertedID)
 	created := true
+	settledOnGroupConflict := false
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		created = false
+	case isUniqueViolationOn(err, permissionGroupUniqueIndex):
+		// #898: ON CONFLICT (slug) arbitrates the slug index ONLY. Two
+		// concurrent first-provisions of one slug converge on the same
+		// permission group (authkit's group create is unique on
+		// (persona, instance_slug)), so the loser's speculative insert can
+		// reach uq_merchants_permission_group_id before the slug arbiter and
+		// raise 23505 instead of settling. The unique check already waited out
+		// the winner's transaction, so the winner's row is committed: settle
+		// under the conflict by converging on it below, exactly as
+		// db.EnsureCustomerRow does for its own first-touch race (#889).
+		// A group bound to a DIFFERENT slug is a genuine 1:1 violation and
+		// still fails — that is the no-row-for-this-slug branch.
+		created, settledOnGroupConflict = false, true
 	case err != nil:
 		return nil, false, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
 	}
 
-	t, err := s.merchantBySlug(ctx, slug)
-	if err != nil {
-		return nil, false, err
+	t, rerr := s.merchantBySlug(ctx, slug)
+	if rerr != nil {
+		if settledOnGroupConflict {
+			return nil, false, fmt.Errorf("merchants: permission group %q is already bound to another merchant: %w", groupID, err)
+		}
+		return nil, false, rerr
 	}
 
-	// 2. Record the merchant's own permission-group id (#567). Idempotent.
+	// 2. Record the merchant's own permission-group id (#567). Idempotent — and
+	//    a no-op on the settle path, where the winner already wrote it.
 	if _, uerr := s.pool.Exec(ctx, `
 			UPDATE openrails.merchants
 			   SET permission_group_id = $2, updated_at = current_timestamp
 			 WHERE id = $1::uuid AND permission_group_id IS DISTINCT FROM $2
 		`, t.ID.String(), groupID); uerr != nil {
+		if isUniqueViolationOn(uerr, permissionGroupUniqueIndex) {
+			return nil, false, fmt.Errorf("merchants: permission group %q is already bound to another merchant: %w", groupID, uerr)
+		}
 		return nil, false, fmt.Errorf("merchants: record permission group on merchant: %w", uerr)
 	}
 	t.PermissionGroupID = groupID

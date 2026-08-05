@@ -27,7 +27,7 @@ func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)    { ret
 func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
 	// host-app remote_application (registered as owner of its permission-group),
-	// provider accounts + secrets, and profile. No auth/users/groups section.
+	// PSPs + secrets, and profile. No auth/users/groups section.
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
@@ -190,13 +190,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 
 	// A declared account_id is IGNORED (warned), never an error — derived from the key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", exampleAccountID, ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
+		Signer: &PSPSignerConfig{Mode: "local_keypair"},
 	}, secrets, nil)
 	require.NoError(t, err)
 	require.Equal(t, exampleAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
 
 	_, _, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, secrets, fakeTransit{pub: pub})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot also set secrets.private_key")
@@ -205,13 +205,13 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	require.NoError(t, err)
 	// vault_transit with a declared account_id: ignored (warned); derives from the Transit key.
 	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, accountID, gotAccountID, "declared account_id ignored; derived from the Transit key")
 
 	got, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
-		Signer: &RailMerchantAccountSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
+		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
 	}, emptySecrets, fakeTransit{pub: pub})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}, got)
@@ -328,17 +328,17 @@ merchants:
 			want: "merchants.cozy-art.provider_accounts was renamed to psps",
 		},
 		{
-			name: "provider account routing removed",
+			name: "PSP routing removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
 			want: "unknown field \"routing\"",
 		},
 		{
-			name: "provider account mode removed",
+			name: "PSP mode removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
 			want: "unknown field \"mode\"",
 		},
 		{
-			name: "provider account role removed",
+			name: "PSP role removed",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
 			want: "unknown field \"role\"",
 		},
@@ -350,19 +350,19 @@ merchants:
 			want: "psps.stripe.stripe.environment was removed (#882)",
 		},
 		{
-			name: "solana network is not a provider-account knob",
+			name: "solana network is not a PSP knob",
 			body: base("    psps:\n      solana:\n        solana:\n          network: devnet\n"),
 			want: "unknown field \"network\"",
 		},
 		{
 			name: "invalid provider secret alias",
 			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
-			want: "unknown provider account secret",
+			want: "unknown PSP secret",
 		},
 		{
 			name: "nmi tokenization key is a setting",
 			body: base("    psps:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
-			want: "unknown provider account secret",
+			want: "unknown PSP secret",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,9 +373,8 @@ merchants:
 	}
 }
 
-// The dump emits the renamed `psps:` key and round-trips through the
-// strict parser. The DB table / secret-name prefix keep `rail_merchant_accounts`
-// on purpose — only the config surface is short.
+// The dump emits the canonical `psps:` key and round-trips through the strict
+// parser. The retired key is rejected, never emitted.
 func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 	encoded, err := MarshalMerchantManifest(&BillingConfig{
 		Version: 1,

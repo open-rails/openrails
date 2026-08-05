@@ -539,12 +539,12 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 		return nil, fmt.Errorf("payment method belongs to a different payment provider")
 	}
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
-		return nil, fmt.Errorf("payment method belongs to a different payment provider account")
+		return nil, fmt.Errorf("payment method belongs to a different PSP")
 	}
 	// Pre-flight: resolve the rail read-only so misconfiguration surfaces
 	// immediately (the intent handler re-resolves at execution time).
 	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.CollectionResolver, sub); err != nil {
-		return nil, fmt.Errorf("resolve subscription provider account: %w", err)
+		return nil, fmt.Errorf("resolve subscription PSP: %w", err)
 	} else if !ok {
 		return nil, fmt.Errorf("payment rail not available")
 	}

@@ -63,7 +63,7 @@ func (f *signerTestTransit) PublicKey(_ context.Context, name string) ([]byte, e
 	return pub[:], nil
 }
 
-func TestRailMerchantAccountSignerUsesVaultTransitEvidence(t *testing.T) {
+func TestPSPSignerUsesVaultTransitEvidence(t *testing.T) {
 	ctx := context.Background()
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(ctx, appDSN)
@@ -96,19 +96,19 @@ func TestRailMerchantAccountSignerUsesVaultTransitEvidence(t *testing.T) {
 	}))
 
 	transit := &signerTestTransit{key: key}
-	signer := NewSignerFromRailMerchantAccounts(signerTestSecrets{}, transit, appDB, 0, "live")
+	signer := NewSignerFromPSPs(signerTestSecrets{}, transit, appDB, 0, "live")
 	pub, err := signer.PublicKey(ctx, tid)
 	require.NoError(t, err)
 	require.True(t, pub.Equals(key.PublicKey()))
 
-	msg := []byte("solana provider account signer message")
+	msg := []byte("solana PSP signer message")
 	sig, err := signer.SignMessage(ctx, tid, msg)
 	require.NoError(t, err)
 	require.True(t, sig.Verify(pub, msg))
 	require.Equal(t, []string{vaultKey, vaultKey}, transit.names)
 }
 
-func TestRailMerchantAccountSignerUsesConfiguredEnvironment(t *testing.T) {
+func TestPSPSignerUsesConfiguredEnvironment(t *testing.T) {
 	ctx := context.Background()
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(ctx, appDSN)
@@ -143,13 +143,13 @@ func TestRailMerchantAccountSignerUsesConfiguredEnvironment(t *testing.T) {
 	secretName, err := merchants.PSPSecretName("solana", environment, key.PublicKey().String(), "private_key")
 	require.NoError(t, err)
 
-	signer := NewSignerFromRailMerchantAccounts(signerTestSecretMap{secretName: key.String()}, nil, appDB, 0, environment)
+	signer := NewSignerFromPSPs(signerTestSecretMap{secretName: key.String()}, nil, appDB, 0, environment)
 	pub, err := signer.PublicKey(ctx, tid)
 	require.NoError(t, err)
 	require.True(t, pub.Equals(key.PublicKey()))
 }
 
-func TestRailMerchantAccountSignerSignsForRecordedPublicKey(t *testing.T) {
+func TestPSPSignerSignsForRecordedPublicKey(t *testing.T) {
 	ctx := context.Background()
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(ctx, appDSN)
@@ -192,7 +192,7 @@ func TestRailMerchantAccountSignerSignsForRecordedPublicKey(t *testing.T) {
 	newSecret, err := merchants.PSPSecretName("solana", environment, newKey.PublicKey().String(), "private_key")
 	require.NoError(t, err)
 
-	signer := NewSignerFromRailMerchantAccounts(signerTestSecretMap{
+	signer := NewSignerFromPSPs(signerTestSecretMap{
 		oldSecret: oldKey.String(),
 		newSecret: newKey.String(),
 	}, nil, appDB, 0, environment)

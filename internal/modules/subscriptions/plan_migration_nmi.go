@@ -34,7 +34,7 @@ import (
 // NMIPusher is the #815 gateway-native NMI push seam (production impl:
 // NewNMIPlanPusher over the #788 per-merchant client resolver; faked in
 // tests). CanPush doubles as the NMI-family rail detector — it is resolver-
-// driven, so custom-named NMI provider accounts classify without code
+// driven, so custom-named NMI PSPs classify without code
 // changes.
 type NMIPusher interface {
 	// CanPush reports whether sub is an addressable gateway-native NMI

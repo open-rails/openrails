@@ -274,7 +274,7 @@ func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, in
 }
 
 // resolveClient resolves the account-aware NMI client for the subscription
-// (rows pinned to a provider account resolve by account key, #641/#655).
+// (rows pinned to a PSP resolve by account key, #641/#655).
 // ok=false carries the Parked outcome to return.
 func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.OpenrailsRailIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
 	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.Resolver, sub)
@@ -282,7 +282,7 @@ func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, inten
 		return nil, Parked(fmt.Sprintf("resolve nmi client for provider %q: %v", intent.Rail, err)), false
 	}
 	if !ok {
-		return nil, Parked(fmt.Sprintf("nmi rail is not armed for provider account %q", key)), false
+		return nil, Parked(fmt.Sprintf("nmi rail is not armed for PSP %q", key)), false
 	}
 	return client, Outcome{}, true
 }

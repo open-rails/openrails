@@ -608,14 +608,14 @@ func hasEnvPrefix(prefix string) bool {
 	return false
 }
 
-// Provider-account environments (#641): the credentials' nature. A deployment is
+// PSP environments (#641): the credentials' nature. A deployment is
 // all-test OR all-live; test_mode is the switch.
 const (
 	ProviderEnvironmentTest = "test"
 	ProviderEnvironmentLive = "live"
 )
 
-// ExpectedProviderEnvironment is the environment every provider account runs in
+// ExpectedProviderEnvironment is the environment every PSP runs in
 // for the given test_mode: test under sandbox, live in production. It is DERIVED
 // (#882) — a PSP never declares it.
 func ExpectedProviderEnvironment(testMode bool) string {
@@ -625,7 +625,7 @@ func ExpectedProviderEnvironment(testMode bool) string {
 	return ProviderEnvironmentLive
 }
 
-// ReservedPSPRails maps a provider-account name to the rail it implies, so a
+// ReservedPSPRails maps a PSP name to the rail it implies, so a
 // config entry named after a self-contained gateway need not restate its rail.
 var ReservedPSPRails = map[string]models.Rail{
 	"ccbill": models.RailCCBill,
@@ -633,7 +633,7 @@ var ReservedPSPRails = map[string]models.Rail{
 	"solana": models.RailSolana,
 }
 
-// PSPConfig is one configured provider account: the rail (gateway) it
+// PSPConfig is one configured PSP: the rail (gateway) it
 // is on plus that rail's credentials. The map key in a PSPSet is the
 // operator-chosen account NAME (e.g. "mobius", "paykings" on rail nmi).
 //
@@ -1663,7 +1663,7 @@ func (set PSPSet) RailKeysByType(rail models.Rail) []string {
 	return keys
 }
 
-// ActiveRailByType returns a deterministic non-archived provider account for a
+// ActiveRailByType returns a deterministic non-archived PSP for a
 // rail. Database-backed new-work selection uses created_at to pick the newest
 // active account; config-only callers do not have that timestamp, so they use
 // sorted config keys.
@@ -1691,7 +1691,7 @@ func (set PSPSet) ActiveRailKeysByType(rail models.Rail) []string {
 }
 
 // FindByAccountID returns the configured account on a rail whose EffectiveAccountID
-// matches accountID (#641), used to target a specific provider account.
+// matches accountID (#641), used to target a specific PSP.
 func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfig, bool) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
