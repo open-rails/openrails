@@ -54,7 +54,10 @@ type EnqueueParams struct {
 	SubscriptionID *uuid.UUID
 	PaymentID      *uuid.UUID
 	PriceID        *uuid.UUID
-	PspID          *uuid.UUID
+	// PspID is the PSP the outbound write is addressed to. Required (or#893):
+	// rail_intents.psp_id is NOT NULL, and an intent nobody can attribute cannot
+	// be executed against the right credentials.
+	PspID          uuid.UUID
 	Payload        any
 	IdempotencyKey string
 	NextAttemptAt  time.Time
@@ -73,6 +76,9 @@ type EnqueueParams struct {
 func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+	}
+	if p.PspID == uuid.Nil {
+		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, db.ErrNoPSPInContext)
 	}
 	var payload []byte
 	if p.Payload != nil {

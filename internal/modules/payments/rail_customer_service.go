@@ -44,6 +44,15 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	if !railHasRemoteCustomer(rail) {
 		return nil
 	}
+	// or#893: the mapping is per-PSP, so the caller must have resolved which of
+	// the merchant's accounts on this rail owns the remote customer object. Every
+	// live caller does (the webhook plane pins it on ctx; checkout stamps it from
+	// the routed target) — an unresolved one would silently overwrite a sibling
+	// account's mapping.
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("upsert rail customer %s/%s: %w", rail, customerID, err)
+	}
 	now := time.Now().UTC()
 	// Resolve the payable merchant subject for this (merchant, user) so the row carries
 	// customer_id alongside the legacy user_id (#317).
@@ -56,12 +65,13 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 		return err
 	}
 	// id is generated explicitly: the upsert targets the merchant-scoped
-	// (merchant_id, customer_id, rail) unique, not the pk.
+	// (merchant_id, customer_id, rail, psp_id) unique, not the pk.
 	return s.DB.Gen(ctx).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: tid.UUID(),
 		CustomerID: customerRowID,
 		Rail:       rail,
+		PspID:      pspID,
 		AccountID:  customerID,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -87,14 +97,25 @@ func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail st
 	if err != nil {
 		return "", err
 	}
-	return s.DB.Gen(ctx).GetRailCustomerAccountID(ctx, gen.GetRailCustomerAccountIDParams{
-		CustomerID: tsid, Rail: rail,
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Rail-scoped, not PSP-scoped: this is the portal/collection read, whose
+	// callers legitimately hold no PSP. The query orders by recency so two
+	// accounts on one rail resolve deterministically instead of arbitrarily.
+	return s.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
+		MerchantID: tid.UUID(), CustomerID: tsid, Rail: rail,
 	})
 }
 
 // GetUserIDByCustomerID reverses GetCustomerID: it resolves the platform user from a
 // rail customer id. Used by webhook handlers (e.g. subscription invoices) whose
 // payloads carry the customer id but not the user_id metadata.
+//
+// PSP-scoped (or#893): a remote customer id is only unique WITHIN the gateway
+// account that minted it, so the reverse lookup must be told which account's
+// payload it is reading. The webhook plane pins that on ctx when it routes.
 func (s *RailCustomerService) GetUserIDByCustomerID(ctx context.Context, rail, customerID string) (string, error) {
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("rail customer service not initialized")
@@ -104,7 +125,15 @@ func (s *RailCustomerService) GetUserIDByCustomerID(ctx context.Context, rail, c
 	if rail == "" || customerID == "" {
 		return "", fmt.Errorf("invalid rail customer args")
 	}
-	return s.DB.Gen(ctx).GetRailCustomerAccountSubject(ctx, gen.GetRailCustomerAccountSubjectParams{
-		AccountID: customerID, Rail: rail,
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reverse rail customer %s/%s: %w", rail, customerID, err)
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	return s.DB.Gen(ctx).GetRailCustomerAccountSubjectForPSP(ctx, gen.GetRailCustomerAccountSubjectForPSPParams{
+		MerchantID: tid.UUID(), PspID: pspID, AccountID: customerID, Rail: rail,
 	})
 }

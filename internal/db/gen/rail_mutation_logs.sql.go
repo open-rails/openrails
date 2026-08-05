@@ -61,7 +61,7 @@ INSERT INTO openrails.rail_mutation_logs (
 type InsertRailMutationLogParams struct {
 	MerchantID     uuid.UUID
 	Rail           string
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 	RailIntentID   *uuid.UUID
 	IntentType     *string
 	IdempotencyKey *string

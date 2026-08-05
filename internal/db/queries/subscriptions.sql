@@ -23,7 +23,7 @@ INSERT INTO openrails.subscriptions (
     sqlc.narg(deletion_scheduled_at), sqlc.narg(gateway_response),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(psp_id)
+    sqlc.arg(psp_id)::uuid
 );
 
 -- name: UpdateSubscriptionAt :execrows

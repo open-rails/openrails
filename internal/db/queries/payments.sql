@@ -26,7 +26,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
-    sqlc.narg(psp_id),
+    sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
     sqlc.arg(money_movement)::text
@@ -52,7 +52,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id),
-    sqlc.narg(psp_id),
+    sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
     sqlc.arg(money_movement)::text

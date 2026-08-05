@@ -1755,7 +1755,7 @@ INSERT INTO openrails.payments (
     $6,
     'completed', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10, $11,
+    $10, $11::uuid,
     -- or#827: the row mirrors a charge the rail actually settled.
     'rail'
 )
@@ -2166,7 +2166,7 @@ SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $6::timestamptz,
        $7::timestamptz,
        COALESCE($8::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, $9, $10
+       p.entitlements_spec, p.credits_spec, $9, $10::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = $11
@@ -2175,10 +2175,10 @@ WHERE pr.id = $11
       WHERE s.rail_subscription_id = $4
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
-        -- narg here NARROWS nothing: a nil PSP (the declared legacy-book
-        -- import) dedupes against EVERY PSP, which is the conservative side.
-        -- The read queries above are where nil-wide matching was dangerous.
-        AND ($10::uuid IS NULL OR s.psp_id = $10::uuid)
+        -- or#893: every writer resolves a PSP now, including the declared
+        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
+        -- provider subscription id is only unique within a gateway account.
+        AND s.psp_id = $10::uuid
   )
 RETURNING id, entitlements_spec_snapshot
 `
@@ -2193,7 +2193,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 	PeriodEndsAt       *time.Time
 	StartedAt          *time.Time
 	CustomerID         uuid.UUID
-	PspID              *uuid.UUID
+	PspID              uuid.UUID
 	PriceID            uuid.UUID
 	Rails              []string
 }
@@ -2258,7 +2258,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     -- or#827: a refund is real (negative) money movement at the rail; the
     -- settlement feed excludes it on amount/refunded_payment_id, not on this.
-    $11, $12, 'refund', 'rail'
+    $11, $12::uuid, 'refund', 'rail'
 )
 ON CONFLICT DO NOTHING
 `

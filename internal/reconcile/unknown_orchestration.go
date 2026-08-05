@@ -346,6 +346,9 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
+			// or#893: a charge belongs to the account that took it, which is the
+			// account that owns the subscription it renewed.
+			PspID: &sub.PspID,
 			// or#827: a mirrored success IS money the rail moved; a mirrored
 			// decline moved nothing and must never reach the host feed.
 			MoneyMovement: string(models.MoneyMovementNone),

@@ -60,7 +60,7 @@ INSERT INTO openrails.checkout_sessions (
     $10, $11, $12,
     $13, $14, $15,
     $16, $17, $18,
-    $19,
+    $19::uuid,
     COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($21::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
@@ -85,7 +85,7 @@ type CreateCheckoutSessionParams struct {
 	RailFields     []byte
 	RailState      []byte
 	RoutingReason  []byte
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -360,7 +360,7 @@ UPDATE openrails.checkout_sessions SET
     metadata = $14,
     rail_fields = $15,
     rail_state = $16,
-    psp_id = $17,
+    psp_id = $17::uuid,
     updated_at = $18
 WHERE id = $1
   AND deleted_at IS NULL
@@ -383,7 +383,7 @@ type UpdateCheckoutSessionParams struct {
 	Metadata       []byte
 	RailFields     []byte
 	RailState      []byte
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 	UpdatedAt      time.Time
 }
 

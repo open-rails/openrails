@@ -96,7 +96,7 @@ func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
 	// PSP-id provenance pins the exact row for each key.
 	idA := svc.ResolvePSPID(ctx, keyA)
 	idB := svc.ResolvePSPID(ctx, keyB)
-	require.NotNil(t, idA)
-	require.NotNil(t, idB)
-	require.NotEqual(t, *idA, *idB)
+	require.NotEqual(t, uuid.Nil, idA)
+	require.NotEqual(t, uuid.Nil, idB)
+	require.NotEqual(t, idA, idB)
 }

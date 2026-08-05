@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -40,9 +41,13 @@ type UndoScope struct {
 	PspScoped bool `json:"psp_scoped"`
 }
 
-// NullPSPBlindSpot is the coverage hole a PSP-scoped operation cannot see
-// (or#859 §3.2, hole 1). Reported, never silently excluded.
-type NullPSPBlindSpot struct {
+// UnattributedRows counts live provider-bound rows carrying no PSP. or#859
+// §3.2, hole 1 reported this as a coverage BLIND SPOT because psp_id was
+// nullable; or#893 made it NOT NULL everywhere, so every count here is
+// structurally zero and this is now an INVARIANT rather than a report. A
+// non-zero total means the schema was reopened underneath this code, and the
+// undo refuses instead of silently under-covering.
+type UnattributedRows struct {
 	Subscriptions    int64 `json:"subscriptions"`
 	Payments         int64 `json:"payments"`
 	CheckoutSessions int64 `json:"checkout_sessions"`
@@ -51,10 +56,13 @@ type NullPSPBlindSpot struct {
 }
 
 // Total is how many live rows this merchant holds that no PSP-scoped predicate
-// can reach.
-func (b NullPSPBlindSpot) Total() int64 {
+// can reach. Always zero under the or#893 schema.
+func (b UnattributedRows) Total() int64 {
 	return b.Subscriptions + b.Payments + b.CheckoutSessions + b.PaymentMethods + b.UnfiredIntents
 }
+
+// ErrUnattributedRows is the undo's refusal when the invariant does not hold.
+var ErrUnattributedRows = errors.New("provider rows carry no PSP: a PSP-scoped rollback cannot cover them")
 
 // UndoPlan is what an undo WOULD do, computed without mutating anything.
 type UndoPlan struct {
@@ -82,7 +90,9 @@ type UndoPlan struct {
 	IntentsUnfired      int                `json:"intents_unfired"`
 	IntentsIrreversible []IntentDivergence `json:"intents_irreversible,omitempty"`
 	IntentsAmbiguous    []IntentDivergence `json:"intents_ambiguous,omitempty"`
-	BlindSpot           NullPSPBlindSpot   `json:"null_psp_blind_spot"`
+	// Unattributed is the or#893 invariant, asserted and carried in the plan so
+	// the operator sees the zero rather than trusting it.
+	Unattributed UnattributedRows `json:"unattributed_rows"`
 }
 
 // ExpectedRows is the typed confirmation `--apply` must be given.
@@ -199,14 +209,17 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		}
 	}
 
-	blind, err := q.CountNullPSPBlindSpot(ctx, mid)
+	unattributed, err := q.CountUnattributedProviderRows(ctx, mid)
 	if err != nil {
-		return plan, fmt.Errorf("count NULL-psp blind spot: %w", err)
+		return plan, fmt.Errorf("assert PSP attribution invariant: %w", err)
 	}
-	plan.BlindSpot = NullPSPBlindSpot{
-		Subscriptions: blind.Subscriptions, Payments: blind.Payments,
-		CheckoutSessions: blind.CheckoutSessions, PaymentMethods: blind.PaymentMethods,
-		UnfiredIntents: blind.UnfiredIntents,
+	plan.Unattributed = UnattributedRows{
+		Subscriptions: unattributed.Subscriptions, Payments: unattributed.Payments,
+		CheckoutSessions: unattributed.CheckoutSessions, PaymentMethods: unattributed.PaymentMethods,
+		UnfiredIntents: unattributed.UnfiredIntents,
+	}
+	if n := plan.Unattributed.Total(); n > 0 {
+		return plan, fmt.Errorf("%w: %d live row(s) for merchant %s", ErrUnattributedRows, n, mid)
 	}
 	return plan, nil
 }

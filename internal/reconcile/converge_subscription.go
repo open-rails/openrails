@@ -138,6 +138,10 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 			ID:         uuid.New(),
 			CustomerID: sub.CustomerID,
 			Rail:       string(sub.Rail),
+			// or#893: the mapping belongs to the account that owns the
+			// subscription, which is the account whose remote customer id this
+			// is. The subscription's own provenance answers it — no resolution.
+			PspID:      sub.PspID,
 			AccountID:  d.RemoteCustomerID,
 			CreatedAt:  now,
 			UpdatedAt:  now,

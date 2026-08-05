@@ -32,7 +32,7 @@ INSERT INTO openrails.rail_intents (
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(expires_at),
-    sqlc.narg(psp_id)
+    sqlc.arg(psp_id)::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE

@@ -400,6 +400,9 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			return nil
 		}
 		paymentMethodID := options.paymentMethodID
+		// or#893: the attempt is charged through an instrument, and the account
+		// that vaulted that instrument is the account that will take the money.
+		var pspID *uuid.UUID
 		if paymentMethodID != nil {
 			method, err := q.GetPaymentMethodByID(ctx, *paymentMethodID)
 			if err != nil {
@@ -415,6 +418,7 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			if !ok || !descriptor.SupportsChargeSavedMethod {
 				return ErrCollectionPaymentMethodInvalid
 			}
+			pspID = &method.PspID
 		} else {
 			settingsRow, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
 				MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: invoice.Currency,
@@ -439,6 +443,14 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 				}
 				return nil
 			}
+			method, err := q.GetPaymentMethodByID(ctx, *paymentMethodID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrCollectionPaymentMethodInvalid
+				}
+				return fmt.Errorf("load collection payment method: %w", err)
+			}
+			pspID = &method.PspID
 		}
 		attempts, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
@@ -464,7 +476,7 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
 			Currency: invoice.Currency, Amount: invoice.AmountDue, Status: "attempted",
 			AttemptedAt: options.now, CreatedAt: options.now, UpdatedAt: options.now,
-			PaymentMethodID: paymentMethodID, IdempotencyKey: &key,
+			PaymentMethodID: paymentMethodID, IdempotencyKey: &key, PspID: pspID,
 		}); err != nil {
 			return fmt.Errorf("record invoice collection claim: %w", err)
 		}

@@ -1744,8 +1744,7 @@ func TestApplyActionsCarryThePullsPSP(t *testing.T) {
 	assert.Equal(t, psp, *findings[0].Apply.BackfillPayment.PspID)
 	require.NotNil(t, findings[1].Apply.RecordRefund.PspID)
 	assert.Equal(t, psp, *findings[1].Apply.RecordRefund.PspID)
-	require.NotNil(t, findings[2].Apply.Materialize.PspID)
-	assert.Equal(t, psp, *findings[2].Apply.Materialize.PspID)
+	assert.Equal(t, psp, findings[2].Apply.Materialize.PspID)
 	require.NotNil(t, findings[2].Apply.Materialize.Backfill.PspID)
 	assert.Equal(t, psp, *findings[2].Apply.Materialize.Backfill.PspID)
 }

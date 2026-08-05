@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -99,8 +100,10 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	if params.PspID == uuid.Nil {
+		if params.PspID, err = db.RequirePSPID(ctx); err != nil {
+			return fmt.Errorf("create subscription %s/%s: %w", s.Rail, s.RailSubscriptionID, err)
+		}
 	}
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {

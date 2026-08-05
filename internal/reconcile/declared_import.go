@@ -50,7 +50,10 @@ type DeclaredSubscriptionFact struct {
 	PriceID            uuid.UUID
 	Rail               string
 	RailSubscriptionID string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
-	PspID              *uuid.UUID
+	// PspID is the PSP that owns the declared row. Required (or#893): the
+	// import must state which of the merchant's accounts the legacy book came
+	// from — there is no unbound lane left to fall into.
+	PspID              uuid.UUID
 	UserEmail          *string
 	StartedAt          time.Time
 	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)

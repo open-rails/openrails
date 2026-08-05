@@ -59,13 +59,14 @@ SELECT
         AND b.restored_at IS NULL
         AND s.deleted_at IS NOT NULL)::bigint AS subscriptions_tombstoned;
 
--- name: CountNullPSPBlindSpot :one
--- or#859 §3.2, hole 1: `psp_id` is NULLABLE on all eight PSP-tagged tables, so a
--- PSP-scoped predicate silently SKIPS legacy rows. For a prune that nullability
--- is a safety property; for a rollback it is a coverage hole, and the rule is
--- that the undo reports it as an explicit count rather than excluding it in
--- silence. Live rows only — a tombstoned row is already accounted for by
--- whichever run took it.
+-- name: CountUnattributedProviderRows :one
+-- or#859 §3.2, hole 1, CLOSED by or#893: `psp_id` is NOT NULL on every
+-- provider-bound table, so a PSP-scoped predicate can no longer skip anything.
+-- This is therefore no longer a blind-spot count to report — it is the
+-- INVARIANT, asserted where the rollback relies on it. Every column below is
+-- NOT NULL, so every count is structurally zero; a non-zero answer means the
+-- schema was reopened underneath this code and the undo refuses rather than
+-- silently under-covering. Live rows only.
 SELECT
     (SELECT count(*) FROM openrails.subscriptions
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,

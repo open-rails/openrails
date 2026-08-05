@@ -239,6 +239,14 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 	} else {
 		creds, err = r.State.Merchants.LoadStripeCredentials(r.Request.Context(), merchantID)
+		// or#893: stamp with the account whose secret verifies this event — the
+		// same scope LoadStripeCredentials just resolved. Rows this event creates
+		// must be attributed, and this is the only account it can have come from.
+		if err == nil {
+			if pid, ok, rerr := r.State.Merchants.ResolveActivePSPIDForRail(r.Request.Context(), merchantID, provider); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
@@ -506,6 +514,13 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		}
 	} else {
 		signingKey, err = r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)
+		// or#893: see the Stripe branch — attribute with the account whose secret
+		// verifies the event.
+		if err == nil {
+			if pid, ok, rerr := r.State.Merchants.ResolveActivePSPIDForRail(r.Request.Context(), merchantID, provider); rerr == nil && ok {
+				r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {

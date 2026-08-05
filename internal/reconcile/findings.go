@@ -159,9 +159,9 @@ type DecideAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// PspID is openrails.psps.id for account-bound
-	// provider-pull materialization.
-	PspID *uuid.UUID
+	// PspID is openrails.psps.id for the pull that materialized this row.
+	// Required (or#893): subscriptions.psp_id is NOT NULL.
+	PspID uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
 	// "stripe"), so the new row joins the same roster future reconciles load.

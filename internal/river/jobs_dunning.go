@@ -117,7 +117,7 @@ func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscripti
 	if w.NMIResolver == nil {
 		return false
 	}
-	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, sub.PspID)
+	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, &sub.PspID)
 	return ok || err != nil
 }
 

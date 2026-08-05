@@ -40,11 +40,36 @@ type DeclaredCustomer struct {
 	Email    string    `json:"email,omitempty"`
 }
 
+// PSPRef names the PSP a declared row belongs to: either the openrails.psps
+// row id, or the merchant's manifest PSP key (e.g. "mobius"). Exactly one form
+// is set. or#893 removed the "unbound legacy lane" — an imported provider row
+// carries the same attribution a pulled one does, because it is the same row
+// and the same prune/rollback/uniqueness rules apply to it.
+type PSPRef struct {
+	ID  *uuid.UUID `json:"id,omitempty"`
+	Key string     `json:"key,omitempty"`
+}
+
+// IsZero reports whether the ref names nothing.
+func (r PSPRef) IsZero() bool {
+	return (r.ID == nil || *r.ID == uuid.Nil) && strings.TrimSpace(r.Key) == ""
+}
+
+func (r PSPRef) String() string {
+	if r.ID != nil && *r.ID != uuid.Nil {
+		return r.ID.String()
+	}
+	return strings.TrimSpace(r.Key)
+}
+
 // DeclaredPaymentMethod is a stored instrument fact (e.g. an NMI vault entry).
 // Idempotent by (rail, rail_customer_ref, rail_method_ref).
 type DeclaredPaymentMethod struct {
-	Customer             uuid.UUID `json:"customer"`
-	Rail                 string    `json:"rail"`
+	Customer uuid.UUID `json:"customer"`
+	Rail     string    `json:"rail"`
+	// PSP is the account that holds the vault entry. Falls back to
+	// Options.DefaultPSP; missing both refuses the import.
+	PSP                  PSPRef    `json:"psp,omitzero"`
 	RailCustomerRef      string    `json:"rail_customer_ref"` // e.g. NMI customer_vault_id
 	RailMethodRef        string    `json:"rail_method_ref"`   // e.g. NMI billing_id; "" for one-instrument vaults
 	InitialTransactionID string    `json:"initial_transaction_id,omitempty"`
@@ -104,9 +129,10 @@ type DeclaredSubscription struct {
 	Price              uuid.UUID `json:"price"`
 	Rail               string    `json:"rail"`
 	RailSubscriptionID string    `json:"rail_subscription_id"` // required; synthesize a stable id for rail-less legacy rows
-	// PspID binds the row to its operator-declared
-	// openrails.psps row (nil = unbound legacy lane).
-	PspID         *uuid.UUID        `json:"psp_id,omitempty"`
+	// PSP binds the row to the merchant's PSP that owns this subscription at
+	// the provider. Falls back to Options.DefaultPSP; missing both refuses the
+	// import (or#893 — the nullable psp_id lane is gone).
+	PSP           PSPRef            `json:"psp,omitzero"`
 	UserEmail     string            `json:"user_email,omitempty"`
 	StartedAt     time.Time         `json:"started_at"`
 	PaidThrough   *time.Time        `json:"paid_through,omitempty"`
@@ -147,6 +173,11 @@ type Options struct {
 	MerchantSlug string
 	MerchantID   merchant.ID
 	Book         DeclaredBilling
+	// DefaultPSP attributes every declared row that names no PSP of its own.
+	// A whole legacy book usually came from ONE gateway account, so stating it
+	// once is the ordinary shape; per-row PSP is for a mixed book. An import
+	// where a row resolves to neither is REFUSED, not written unattributed.
+	DefaultPSP PSPRef
 }
 
 // Result reports per-SourceID outcomes (subscriptions only; customers/payment
@@ -205,6 +236,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		qx := database.Qx(ctx)
 		q := database.Gen(ctx)
 
+		// or#893: every provider-bound row the import writes carries a PSP.
+		// Resolve the merchant's catalog ONCE, then attribute each declared row
+		// from its own PSP ref, falling back to the whole-import default.
+		psps, err := newPSPResolver(ctx, q, merchantID.UUID(), opts.DefaultPSP)
+		if err != nil {
+			return err
+		}
+
 		// Customers first (subscriptions FK them).
 		seen := map[uuid.UUID]struct{}{}
 		for _, c := range opts.Book.Customers {
@@ -236,8 +275,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer == uuid.Nil {
 				return fmt.Errorf("declared payment method requires rail, rail_customer_ref and customer")
 			}
+			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
+			if err != nil {
+				return err
+			}
 			var id uuid.UUID
-			err := qx.QueryRow(ctx,
+			err = qx.QueryRow(ctx,
 				`SELECT id FROM openrails.payment_methods
 				 WHERE merchant_id = $1 AND rail = $2 AND rail_customer_ref = $3 AND rail_method_ref = $4`,
 				merchantID.UUID(), pm.Rail, pm.RailCustomerRef, pm.RailMethodRef).Scan(&id)
@@ -254,6 +297,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 					Rail:                 pm.Rail,
 					RailCustomerRef:      pm.RailCustomerRef,
 					RailMethodRef:        pm.RailMethodRef,
+					PspID:                pmPSP,
 					InitialTransactionID: pm.InitialTransactionID,
 					LastFour:             nilIfEmpty(pm.LastFour),
 					CardType:             nilIfEmpty(pm.CardType),
@@ -290,13 +334,17 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
 		for _, s := range opts.Book.Subscriptions {
+			subPSP, err := psps.resolve(s.PSP, s.Rail, fmt.Sprintf("subscription %s", s.SourceID))
+			if err != nil {
+				return err
+			}
 			f := reconcile.DeclaredSubscriptionFact{
 				SourceID:           s.SourceID,
 				Customer:           s.Customer,
 				PriceID:            s.Price,
 				Rail:               s.Rail,
 				RailSubscriptionID: s.RailSubscriptionID,
-				PspID:              s.PspID,
+				PspID:              subPSP,
 				UserEmail:          nilIfEmpty(s.UserEmail),
 				StartedAt:          s.StartedAt.UTC(),
 				PaidThrough:        s.PaidThrough,

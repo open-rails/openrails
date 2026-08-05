@@ -109,7 +109,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = &accountRowID // #704 provenance stamp (what dunning enqueues)
+	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = &accountRowID
+	params.PspID = accountRowID
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)

@@ -387,7 +387,7 @@ INSERT INTO openrails.rail_intents (
     $7, $8, 'pending',
     $9::timestamptz, $10,
     $11, $12, $13,
-    $14
+    $14::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -448,7 +448,7 @@ type EnqueueRailIntentParams struct {
 	OriginReason   *string
 	Actor          *string
 	ExpiresAt      *time.Time
-	PspID          *uuid.UUID
+	PspID          uuid.UUID
 }
 
 // #358 phase A: provider intent ledger queries — idempotent enqueue, the

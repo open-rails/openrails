@@ -231,10 +231,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			if row.LastFailureReason != nil {
 				reason = *row.LastFailureReason
 			}
-			account := ""
-			if row.PspID != nil {
-				account = row.PspID.String()
-			}
+			account := row.PspID.String()
 			if row.Status == intents.StatusPending {
 				byMode[executesUnder(row.Origin)]++
 			}
@@ -352,10 +349,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccou
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
 		for _, row := range rows {
-			account := ""
-			if row.PspID != nil {
-				account = row.PspID.String()
-			}
+			account := row.PspID.String()
 			intent := ""
 			if row.RailIntentID != nil {
 				intent = row.RailIntentID.String()

@@ -273,8 +273,8 @@ type OpenrailsCheckoutSession struct {
 	UpdatedAt      time.Time
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
-	// PSP selected for this provider checkout/session.
-	PspID *uuid.UUID
+	// PSP selected for this provider checkout/session. Required (or#893).
+	PspID uuid.UUID
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID
@@ -602,7 +602,7 @@ type OpenrailsInvoicePayment struct {
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// PSP used for this invoice payment attempt or settled provider payment.
+	// PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement — or#893.
 	PspID           *uuid.UUID
 	FailureReason   *string
 	PaymentMethodID *uuid.UUID
@@ -851,7 +851,7 @@ type OpenrailsPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
-	// PSP that produced this payment/charge mirror row.
+	// PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider — or#893.
 	PspID *uuid.UUID
 	// #733 initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string
@@ -884,8 +884,8 @@ type OpenrailsPaymentMethod struct {
 	UpdatedAt            time.Time
 	MerchantID           uuid.UUID
 	CustomerID           uuid.UUID
-	// PSP that produced this vaulted payment method mirror row.
-	PspID *uuid.UUID
+	// PSP that vaulted this payment method. Required (or#893).
+	PspID uuid.UUID
 	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customers (Stripe).
 	RailCustomerRef string
 	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
@@ -1060,7 +1060,7 @@ type OpenrailsPsp struct {
 	CustodianID *uuid.UUID
 }
 
-// customer <-> rail customer-id mapping. Keyed per (merchant, customer, rail); rail_merchant_account_id provenance was dropped (#704) — no writer ever set it.
+// customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings (or#893 supersedes #704, which dropped psp_id when no writer set it).
 type OpenrailsRailCustomerAccount struct {
 	ID         uuid.UUID
 	Rail       string
@@ -1069,6 +1069,8 @@ type OpenrailsRailCustomerAccount struct {
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+	// PSP whose remote customer object this row maps. Required (or#893).
+	PspID uuid.UUID
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
@@ -1104,18 +1106,19 @@ type OpenrailsRailIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
-	PspID *uuid.UUID
+	// PSP the outbound intent was enqueued against. Required (or#893).
+	PspID uuid.UUID
 	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
 type OpenrailsRailMutationLog struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	Rail           string
-	PspID          *uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Rail       string
+	// PSP the logged mutation was addressed to. Required (or#893).
+	PspID          uuid.UUID
 	RailIntentID   *uuid.UUID
 	IntentType     *string
 	IdempotencyKey *string
@@ -1269,8 +1272,8 @@ type OpenrailsSubscription struct {
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
-	// PSP that produced this remote subscription mirror row.
-	PspID *uuid.UUID
+	// PSP that produced this remote subscription mirror row. Required (or#893).
+	PspID uuid.UUID
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt        *time.Time
 	DestructiveRunID *uuid.UUID

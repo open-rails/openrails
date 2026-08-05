@@ -87,10 +87,10 @@ type checkoutSessionExecutor interface {
 }
 
 // railMerchantAccountIDResolver is the OPTIONAL executor capability (#704):
-// resolve the active provider account for new work on a rail, or nil.
-// Satisfied by *CheckoutService; test fakes may omit it.
+// resolve the active PSP for new work on a rail, or uuid.Nil when nothing is
+// armed. Satisfied by *CheckoutService; test fakes may omit it.
 type railMerchantAccountIDResolver interface {
-	ResolvePSPID(ctx context.Context, rail string) *uuid.UUID
+	ResolvePSPID(ctx context.Context, rail string) uuid.UUID
 }
 
 type solanaPaymentService interface {
@@ -448,7 +448,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// explains the choice.
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
 	pspSelector := rail
-	var pspID *uuid.UUID
+	var pspID uuid.UUID
 	var routingReason *models.CheckoutRoutingReason
 	if _, ok := s.checkoutService.(*CheckoutService); ok {
 		decision, err := s.Route(ctx, RoutingInput{
@@ -470,9 +470,8 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		pspSelector = decision.Target.PSP
 		routingReason = decision.Reason()
 		// #704: pin provenance with the REAL resolved account — never invented.
-		if decision.Target.Scope != nil && decision.Target.Scope.ID != uuid.Nil {
-			id := decision.Target.Scope.ID
-			pspID = &id
+		if decision.Target.Scope != nil {
+			pspID = decision.Target.Scope.ID
 		}
 	} else {
 		// Executors without the concrete checkout service (test fakes) cannot
@@ -485,9 +484,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 			pspID = resolver.ResolvePSPID(ctx, rail)
 		}
 	}
-	if pspID != nil {
-		ctx = db.WithPSPID(ctx, *pspID)
+	// or#893: checkout_sessions.psp_id is NOT NULL. A session nobody can
+	// attribute would be invisible to a PSP-scoped prune and would collide with
+	// a sibling account's reference/transaction id under the nil-uuid lane the
+	// 0063 uniques deleted. Refuse before anything is written.
+	if pspID == uuid.Nil {
+		return nil, fmt.Errorf("%w: no PSP is armed for rail %q", ErrCheckoutSessionValidation, rail)
 	}
+	ctx = db.WithPSPID(ctx, pspID)
 
 	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutSessionValidation)
@@ -603,7 +607,7 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		existing.PriceID == requested.PriceID &&
 		existing.Mode == requested.Mode &&
 		existing.Rail == requested.Rail &&
-		equalOptionalUUID(existing.PspID, requested.PspID) &&
+		existing.PspID == requested.PspID &&
 		storedFingerprint != "" &&
 		storedFingerprint == requestedFingerprint
 	if !parametersMatch {
@@ -694,15 +698,7 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 
 	// #704: carry the session's pinned provider-account provenance into the
 	// confirm flow (falling back to a fresh resolution for older sessions).
-	stampID := session.PspID
-	if stampID == nil {
-		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-			stampID = resolver.ResolvePSPID(ctx, rail)
-		}
-	}
-	if stampID != nil {
-		ctx = db.WithPSPID(ctx, *stampID)
-	}
+	ctx = db.WithPSPID(ctx, session.PspID)
 
 	switch rail {
 	case "solana":

@@ -270,9 +270,11 @@ type ListExcessSubscriptionsForPSPParams struct {
 // #511 pull-provider --prune: account-bound EXCESS detection + or#858 reversible
 // soft deletion.
 // "Excess" = a local row attributed to the pulled psp_id whose
-// provider key is ABSENT from the freshly fetched provider snapshot. Only rows
-// stamped with the provider account are considered; legacy NULL-binding import
-// rows are never pruned (NULL <> arg).
+// provider key is ABSENT from the freshly fetched provider snapshot. or#893
+// made psp_id NOT NULL everywhere, so there is no unattributed lane left to
+// preserve: every row belongs to exactly one PSP and is reachable by exactly
+// one PSP-scoped pass. Matching FAILS CLOSED — a row whose PSP was not pulled
+// is out of scope, never "maybe ours".
 //
 // or#858: nothing here DELETEs. A prune sets deleted_at and stamps the row with
 // the prune run that took it, so the whole pass reverses in one step.

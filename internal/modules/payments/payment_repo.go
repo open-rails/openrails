@@ -144,8 +144,15 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
+	// the account that took it. Off-rail channels (admin comp, manual entry)
+	// legitimately have none — there was no provider.
+	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+		psp, perr := db.RequirePSPID(ctx)
+		if perr != nil {
+			return fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
+		}
+		params.PspID = &psp
 	}
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
@@ -170,8 +177,15 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		return false, terr
 	}
 	params.MerchantID = tid.UUID()
-	if params.PspID == nil {
-		params.PspID = db.ResolveRailMerchantAccountIDForStamp(ctx)
+	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
+	// the account that took it. Off-rail channels (admin comp, manual entry)
+	// legitimately have none — there was no provider.
+	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+		psp, perr := db.RequirePSPID(ctx)
+		if perr != nil {
+			return false, fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
+		}
+		params.PspID = &psp
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
