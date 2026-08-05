@@ -56,6 +56,12 @@ func resolvePriceKey(product *models.Product, req CreatePriceRequest) string {
 // row for that key. Used wherever checkout/API accept a price_key alongside a
 // price UUID.
 func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err
@@ -86,6 +92,12 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
 func (s *Service) SetPriceKey(ctx context.Context, priceID uuid.UUID, key string) (*CatalogPrice, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err
@@ -148,6 +160,12 @@ type PriceKeyHistoryEntry struct {
 // wrong for a REACTIVATED row: its created_at is its ORIGINAL creation, not
 // the date it most recently became current again).
 func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKeyHistoryEntry, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err
@@ -184,6 +202,12 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 // does not parse as a UUID, so a key that happens to collide with UUID syntax
 // can never occur (uuid.Parse is total over its own format).
 func (s *Service) ResolvePriceReference(ctx context.Context, ref string) (*CatalogPrice, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, fmt.Errorf("price reference required")

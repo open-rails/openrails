@@ -23,6 +23,12 @@ import (
 
 // AdminGetSubscriptions returns a paginated list of all subscriptions.
 func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscriptionsOptions) (*PaginatedResult[Subscription], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	adminSubscriptions, err := s.requireAdminSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -67,6 +73,12 @@ func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscr
 
 // AdminGetSubscription returns a single subscription by ID.
 func (s *Service) AdminGetSubscription(ctx context.Context, subscriptionID uuid.UUID) (*Subscription, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	adminSubscriptions, err := s.requireAdminSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -87,6 +99,12 @@ func (s *Service) AdminGetSubscription(ctx context.Context, subscriptionID uuid.
 // AdminCancelSubscription cancels a subscription by ID. revokeAccess controls
 // whether subscription/grace entitlements are revoked immediately.
 func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	adminSubscriptions, err := s.requireAdminSubscriptionService()
 	if err != nil {
 		return err
@@ -102,6 +120,12 @@ func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uu
 
 // AdminGetPayments returns a paginated list of all payments.
 func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOptions) (*PaginatedResult[Payment], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	paymentsService, err := s.requirePaymentService()
 	if err != nil {
 		return nil, err
@@ -155,6 +179,12 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 
 // AdminGetPayment returns a single payment by ID with refund details.
 func (s *Service) AdminGetPayment(ctx context.Context, paymentID uuid.UUID) (*Payment, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	paymentsService, err := s.requirePaymentService()
 	if err != nil {
 		return nil, err
@@ -180,6 +210,12 @@ func (s *Service) AdminGetPayment(ctx context.Context, paymentID uuid.UUID) (*Pa
 
 // AdminRefundPayment issues a refund for a payment.
 func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, req RefundPaymentRequest) (*Payment, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	paymentsService, err := s.requirePaymentService()
 	if err != nil {
 		return nil, err
@@ -205,6 +241,12 @@ func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, r
 
 // AdminGetUserPayments returns payments for a specific user.
 func (s *Service) AdminGetUserPayments(ctx context.Context, userID string, opts AdminGetPaymentsOptions) (*PaginatedResult[Payment], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if _, err := s.requirePaymentService(); err != nil {
 		return nil, err
 	}
@@ -219,6 +261,12 @@ func (s *Service) AdminGetUserPayments(ctx context.Context, userID string, opts 
 
 // AdminCreateOffChannelPayment creates a payment record for an off-channel payment.
 func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCreateOffChannelPaymentRequest) (*Payment, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	paymentsService, err := s.requirePaymentService()
 	if err != nil {
 		return nil, err
@@ -287,6 +335,12 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 
 // AdminGetUserBillingProfile returns a user's complete billing profile.
 func (s *Service) AdminGetUserBillingProfile(ctx context.Context, userID string) (*AdminUserProfile, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -336,6 +390,12 @@ func (s *Service) AdminGetUserBillingProfile(ctx context.Context, userID string)
 
 // AdminGetUserEntitlements returns entitlements for a user.
 func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, at *time.Time) ([]EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	entitlements := s.entitlementService()
 	if entitlements == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
@@ -365,6 +425,12 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 
 // EntitlementGrantEntitlement grants an entitlement to a user.
 func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID string, req EntitlementGrantEntitlementRequest) (*EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if _, dbErr := s.requireDB(); dbErr != nil {
 		return nil, dbErr
 	}
@@ -429,6 +495,12 @@ func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID s
 
 // AdminRevokeEntitlement revokes an entitlement.
 func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, entitlementID uuid.UUID, req AdminRevokeEntitlementRequest) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	entitlements := s.entitlementService()
 	if entitlements == nil {
 		return fmt.Errorf("billing service: not initialized")

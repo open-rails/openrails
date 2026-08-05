@@ -134,6 +134,12 @@ type CreateProductRequest struct {
 }
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	products, err := s.requireProductService()
 	if err != nil {
 		return nil, err
@@ -196,6 +202,12 @@ type UpdateProductRequest struct {
 }
 
 func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	products, err := s.requireProductService()
 	if err != nil {
 		return nil, err
@@ -483,6 +495,12 @@ func (req CreatePriceRequest) RecurringCycleDays() *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	products, prices, err := s.requireCatalogServices()
 	if err != nil {
 		return nil, err
@@ -681,6 +699,12 @@ type UpdatePriceRequest struct {
 }
 
 func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err

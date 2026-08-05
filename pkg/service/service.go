@@ -47,6 +47,14 @@ func (s *Service) now() time.Time {
 
 var ErrInsufficientCredits = money.ErrInsufficientCredits
 
+// ErrIdempotencyKeyReused is the money-write refusal a caller can act on: the
+// key already committed, and THIS retry carries different charging terms
+// (or#891). It is re-exported here because the rule lives in internal/ — a host
+// could see the failure but not name it, so it could not tell a caller bug
+// apart from an engine fault. Wrapped errors carry the detail
+// (money.IdempotencyConflict: which field, committed vs retried).
+var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
+
 type CaptureHoldRequest struct {
 	RequestID string
 	Amount    int64
@@ -115,6 +123,12 @@ type WithdrawCreditsRequest struct {
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	req.Invoker = strings.TrimSpace(req.Invoker)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
@@ -188,6 +202,12 @@ type DepositCreditsRequest struct {
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	req.Invoker = strings.TrimSpace(req.Invoker)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
@@ -241,6 +261,12 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 }
 
 func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
@@ -386,6 +412,12 @@ type ServiceUsageRollupRequest struct {
 // window (#311) — the OpenRails-sourced data behind the platform's
 // /budget-usage + revenue analytics. Service-scoped (operator API key).
 func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
@@ -415,6 +447,12 @@ type ResourceRevenueDailyRow struct {
 // attribution column) across all payers in the merchant over [from, to) — powers
 // tensorhub endpoint revenue analytics (#410).
 func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	currency, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
@@ -465,6 +503,12 @@ func serviceMerchantID(ctx context.Context) (string, error) {
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -476,6 +520,12 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 }
 
 func (s *Service) ListActiveEntitlementsForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, at time.Time) ([]string, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
@@ -486,6 +536,12 @@ func (s *Service) ListActiveEntitlementsForCustomer(ctx context.Context, tenantS
 }
 
 func (s *Service) IsCustomerEntitled(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return false, pinErr
+	}
+	defer release()
+
 	if tenantSubjectID.IsZero() {
 		return false, fmt.Errorf("customer_id required")
 	}
@@ -500,6 +556,12 @@ func (s *Service) IsCustomerEntitled(ctx context.Context, tenantSubjectID identi
 }
 
 func (s *Service) HasActiveIndefiniteEntitlementForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return false, pinErr
+	}
+	defer release()
+
 	if tenantSubjectID.IsZero() {
 		return false, fmt.Errorf("customer_id required")
 	}
@@ -514,6 +576,12 @@ func (s *Service) HasActiveIndefiniteEntitlementForCustomer(ctx context.Context,
 }
 
 func (s *Service) LatestFiniteEntitlementWindowForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (*EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
@@ -548,6 +616,12 @@ type EntitlementRecord struct {
 }
 
 func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID string, at time.Time) ([]EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -585,6 +659,12 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 }
 
 func (s *Service) ListActiveEntitlementRecordsForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, at time.Time) ([]EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
@@ -632,6 +712,12 @@ const EntitlementsBatchMaxSubjects = 500
 // an active window of `entitlement` for the merchant, keyset-paginated (afterID
 // exclusive; uuid.Nil starts). A zero `at` means now.
 func (s *Service) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
@@ -639,6 +725,12 @@ func (s *Service) ListCustomersWithEntitlement(ctx context.Context, entitlement 
 }
 
 func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if len(subjects) == 0 {
 		return map[string][]EntitlementRecord{}, nil
 	}

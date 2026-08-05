@@ -33,6 +33,12 @@ type ProductAccessRecord struct {
 
 // ListProductAccess lists active product-access grants for a host subject.
 func (s *Service) ListProductAccess(ctx context.Context, userID string) ([]ProductAccessRecord, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -49,6 +55,12 @@ func (s *Service) ListProductAccess(ctx context.Context, userID string) ([]Produ
 
 // HasProductAccess reports whether a host subject can access a product.
 func (s *Service) HasProductAccess(ctx context.Context, userID string, productID uuid.UUID) (bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return false, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false, fmt.Errorf("user_id required")
