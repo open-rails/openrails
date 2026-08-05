@@ -1,10 +1,17 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import {
+  activatePrice,
+  activateProduct,
+  cancelReprice,
   changeTeamRole,
   createAlertRule,
   createApiKey,
+  createPrice,
+  createProduct,
   createWebhook,
+  deactivatePrice,
+  deactivateProduct,
   deleteAlertRule,
   deletePaymentProvider,
   deleteWebhook,
@@ -13,13 +20,18 @@ import {
   inviteTeamMember,
   putMerchantSettings,
   putPaymentProvider,
+  previewRepriceAllPriorVersions,
   removeTeamMember,
+  repriceAllPriorVersions,
   revokeApiKey,
   revokeTeamInvite,
   setCreditLimit,
   testAlertRule,
   updateAlertRule,
+  updateProduct,
   type AlertRuleRequest,
+  type PriceRequest,
+  type ProductRequest,
   type UpsertProviderRequest,
   type WebhookRequest,
 } from "@/lib/api/endpoints"
@@ -40,6 +52,81 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  createProduct: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "products", "create"],
+      mutationFn: (product: ProductRequest) => createProduct(product),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  updateProduct: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "products", "update"],
+      mutationFn: ({
+        id,
+        product,
+      }: {
+        id: string
+        product: Partial<ProductRequest> & { set_entitlements?: boolean }
+      }) => updateProduct(id, product),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  setProductActive: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "products", "set-active"],
+      mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+        active ? activateProduct(id) : deactivateProduct(id),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  createPrice: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "prices", "create"],
+      mutationFn: (price: PriceRequest) => createPrice(price),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  setPriceActive: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "prices", "set-active"],
+      mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+        active ? activatePrice(id) : deactivatePrice(id),
+      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  previewPriceChange: () =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "prices", "preview-change"],
+      mutationFn: (priceKey: string) =>
+        previewRepriceAllPriorVersions(priceKey),
+    }),
+  changePrice: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "prices", "change"],
+      mutationFn: async ({
+        price,
+        migration,
+      }: {
+        price: PriceRequest
+        migration?: { priceKey: string; effectiveAt: string }
+      }) => {
+        const created = await createPrice(price)
+        if (migration) {
+          await repriceAllPriorVersions(
+            migration.priceKey,
+            migration.effectiveAt
+          )
+        }
+        return created
+      },
+      // The price can be created before scheduling fails. Always refresh so
+      // the UI reflects that partial server-side success.
+      onSettled: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
+  cancelReprices: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.catalog(), "reprices", "cancel"],
+      mutationFn: (repriceIds: string[]) =>
+        Promise.all(repriceIds.map((id) => cancelReprice(id))),
+      // A batch can be partially canceled before one request fails.
+      onSettled: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
+    }),
   updateMerchantSettings: (queryClient: QueryClient) =>
     mutationOptions({
       mutationKey: [...queryKeys.settings(), "update"],

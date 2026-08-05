@@ -7,8 +7,10 @@ import {
 import * as React from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,17 +45,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
-import {
-  activatePrice,
-  activateProduct,
-  createPrice,
-  createProduct,
-  deactivatePrice,
-  deactivateProduct,
-  publishCatalog,
-  refreshCatalogDrift,
-  updateProduct,
-} from "@/lib/api/endpoints"
+import { publishCatalog, refreshCatalogDrift } from "@/lib/api/endpoints"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
   formatDate,
@@ -62,6 +54,7 @@ import {
   shortId,
 } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminMutations } from "@/lib/mutations"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
@@ -151,7 +144,7 @@ function ProductsTab() {
     <div className="flex flex-col gap-3">
       <div className="flex justify-end gap-2">
         <PublishDialog onDone={reload} />
-        <ProductDialog onDone={reload} />
+        <ProductDialog />
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
@@ -174,7 +167,7 @@ function ProductsTab() {
             </TableHeader>
             <TableBody>
               {(data?.items ?? []).map((p) => (
-                <ProductRow key={p.id} product={p} onDone={reload} />
+                <ProductRow key={p.id} product={p} />
               ))}
               {!data?.items?.length && (
                 <TableRow>
@@ -194,27 +187,22 @@ function ProductsTab() {
   )
 }
 
-function ProductRow({
-  product,
-  onDone,
-}: {
-  product: CatalogProduct
-  onDone: () => void
-}) {
-  const [busy, setBusy] = React.useState(false)
+function ProductRow({ product }: { product: CatalogProduct }) {
+  const queryClient = useQueryClient()
+  const setProductActive = useMutation(
+    adminMutations.setProductActive(queryClient)
+  )
   const toggle = async () => {
-    setBusy(true)
     try {
-      if (product.archived) await activateProduct(product.id)
-      else await deactivateProduct(product.id)
+      await setProductActive.mutateAsync({
+        id: product.id,
+        active: product.archived,
+      })
       toast.success(
         product.archived ? "Product activated" : "Product deactivated"
       )
-      onDone()
     } catch (err) {
       toastApiError(err, "Toggle product")
-    } finally {
-      setBusy(false)
     }
   }
   return (
@@ -246,8 +234,13 @@ function ProductRow({
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-2">
-          <ProductDialog product={product} onDone={onDone} />
-          <Button variant="outline" size="sm" disabled={busy} onClick={toggle}>
+          <ProductDialog product={product} />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={setProductActive.isPending}
+            onClick={toggle}
+          >
             {product.archived ? "Activate" : "Deactivate"}
           </Button>
         </div>
@@ -256,69 +249,73 @@ function ProductRow({
   )
 }
 
-function ProductDialog({
-  product,
-  onDone,
-}: {
-  product?: CatalogProduct
-  onDone: () => void
-}) {
-  const [open, setOpen] = React.useState(false)
-  const [key, setKey] = React.useState(product?.key ?? "")
-  const [name, setName] = React.useState(product?.display_name ?? "")
-  const [description, setDescription] = React.useState(
-    product?.description ?? ""
-  )
-  const [tierGroup, setTierGroup] = React.useState(product?.tier_group ?? "")
-  const [tierRank, setTierRank] = React.useState(
-    String(product?.tier_rank ?? 0)
-  )
-  const [entitlements, setEntitlements] = React.useState(
-    Object.keys(product?.entitlements_spec ?? {}).join(", ")
-  )
-  const [busy, setBusy] = React.useState(false)
+function productFormValues(product?: CatalogProduct) {
+  return {
+    key: product?.key ?? "",
+    name: product?.display_name ?? "",
+    description: product?.description ?? "",
+    tierGroup: product?.tier_group ?? "",
+    tierRank: String(product?.tier_rank ?? 0),
+    entitlements: Object.keys(product?.entitlements_spec ?? {}).join(", "),
+  }
+}
 
-  const save = async () => {
-    setBusy(true)
-    try {
+function ProductDialog({ product }: { product?: CatalogProduct }) {
+  const [open, setOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const createProduct = useMutation(adminMutations.createProduct(queryClient))
+  const updateProduct = useMutation(adminMutations.updateProduct(queryClient))
+  const form = useForm({
+    defaultValues: productFormValues(product),
+    onSubmit: async ({ value }) => {
       const spec: Record<string, number | null> = {}
-      for (const e of entitlements
+      for (const entitlement of value.entitlements
         .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean))
-        spec[e] = null
-      if (product) {
-        await updateProduct(product.id, {
-          display_name: name,
-          description,
-          tier_group: tierGroup || undefined,
-          tier_rank: Number(tierRank) || 0,
-          entitlements_spec: spec,
-          set_entitlements: true,
-        })
-        toast.success("Product updated")
-      } else {
-        await createProduct({
-          key,
-          display_name: name,
-          description,
-          tier_group: tierGroup || undefined,
-          tier_rank: Number(tierRank) || 0,
-          entitlements_spec: spec,
-        })
-        toast.success("Product created")
+        .map((item) => item.trim())
+        .filter(Boolean)) {
+        spec[entitlement] = null
       }
-      setOpen(false)
-      onDone()
-    } catch (err) {
-      toastApiError(err, product ? "Update product" : "Create product")
-    } finally {
-      setBusy(false)
-    }
+
+      try {
+        if (product) {
+          await updateProduct.mutateAsync({
+            id: product.id,
+            product: {
+              display_name: value.name,
+              description: value.description,
+              tier_group: value.tierGroup || undefined,
+              tier_rank: Number(value.tierRank) || 0,
+              entitlements_spec: spec,
+              set_entitlements: true,
+            },
+          })
+          toast.success("Product updated")
+        } else {
+          await createProduct.mutateAsync({
+            key: value.key,
+            display_name: value.name,
+            description: value.description,
+            tier_group: value.tierGroup || undefined,
+            tier_rank: Number(value.tierRank) || 0,
+            entitlements_spec: spec,
+          })
+          toast.success("Product created")
+        }
+        form.reset(value)
+        setOpen(false)
+      } catch (err) {
+        toastApiError(err, product ? "Update product" : "Create product")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) form.reset(productFormValues(product))
+    setOpen(next)
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           product ? (
@@ -339,82 +336,157 @@ function ProductDialog({
             Entitlements are plain strings; comma-separate several.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          {!product && (
-            <Field label="Key" id="p-key">
-              <Input
-                id="p-key"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                placeholder="premium-monthly"
-              />
-            </Field>
-          )}
-          <Field label="Display name" id="p-name">
-            <Input
-              id="p-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-          <Field label="Description" id="p-desc">
-            <Input
-              id="p-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Tier group (optional)" id="p-tg">
-              <Input
-                id="p-tg"
-                value={tierGroup}
-                onChange={(e) => setTierGroup(e.target.value)}
-              />
-            </Field>
-            <Field label="Tier rank" id="p-tr">
-              <Input
-                id="p-tr"
-                type="number"
-                value={tierRank}
-                onChange={(e) => setTierRank(e.target.value)}
-              />
-            </Field>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            {!product && (
+              <form.Field
+                name="key"
+                validators={{
+                  onBlur: ({ value }) =>
+                    value.trim() ? undefined : "Enter a product key",
+                }}
+              >
+                {(field) => (
+                  <Field label="Key" id="p-key">
+                    <Input
+                      id="p-key"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                      placeholder="premium-monthly"
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    />
+                    <FormFieldErrors errors={field.state.meta.errors} />
+                  </Field>
+                )}
+              </form.Field>
+            )}
+            <form.Field
+              name="name"
+              validators={{
+                onBlur: ({ value }) =>
+                  value.trim() ? undefined : "Enter a display name",
+              }}
+            >
+              {(field) => (
+                <Field label="Display name" id="p-name">
+                  <Input
+                    id="p-name"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </Field>
+              )}
+            </form.Field>
+            <form.Field name="description">
+              {(field) => (
+                <Field label="Description" id="p-desc">
+                  <Input
+                    id="p-desc"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                </Field>
+              )}
+            </form.Field>
+            <div className="grid grid-cols-2 gap-3">
+              <form.Field name="tierGroup">
+                {(field) => (
+                  <Field label="Tier group (optional)" id="p-tg">
+                    <Input
+                      id="p-tg"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                    />
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="tierRank">
+                {(field) => (
+                  <Field label="Tier rank" id="p-tr">
+                    <Input
+                      id="p-tr"
+                      type="number"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                    />
+                  </Field>
+                )}
+              </form.Field>
+            </div>
+            <form.Field name="entitlements">
+              {(field) => (
+                <Field label="Entitlements (comma-separated)" id="p-ents">
+                  <Input
+                    id="p-ents"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="premium, downloads"
+                  />
+                </Field>
+              )}
+            </form.Field>
           </div>
-          <Field label="Entitlements (comma-separated)" id="p-ents">
-            <Input
-              id="p-ents"
-              value={entitlements}
-              onChange={(e) => setEntitlements(e.target.value)}
-              placeholder="premium, downloads"
-            />
-          </Field>
-        </div>
-        <DialogFooter>
-          <Button disabled={busy || !name || (!product && !key)} onClick={save}>
-            {busy ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.key,
+                  state.values.name,
+                  state.isSubmitting,
+                ] as const
+              }
+            >
+              {([key, name, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={
+                    isSubmitting || !name.trim() || (!product && !key.trim())
+                  }
+                >
+                  {isSubmitting ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
 }
 
 function PricesTab() {
-  const queryClient = useQueryClient()
   const { data: products } = useQuery(adminQueries.products())
   const { data, isPending: loading } = useQuery(
     adminQueries.prices({ errorAction: "Load prices" })
   )
-  const reload = () =>
-    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
   const productName = (id: string) =>
     products?.items.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <PriceDialog products={products?.items ?? []} onDone={reload} />
+        <PriceDialog products={products?.items ?? []} />
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
@@ -442,7 +514,6 @@ function PricesTab() {
                   key={price.id}
                   price={price}
                   productName={productName(price.product_id)}
-                  onDone={reload}
                 />
               ))}
               {!data?.items?.length && (
@@ -466,24 +537,21 @@ function PricesTab() {
 function PriceRow({
   price,
   productName,
-  onDone,
 }: {
   price: CatalogPrice
   productName: string
-  onDone: () => void
 }) {
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const setPriceActive = useMutation(adminMutations.setPriceActive(queryClient))
   const toggle = async () => {
-    setBusy(true)
     try {
-      if (price.archived) await activatePrice(price.id)
-      else await deactivatePrice(price.id)
+      await setPriceActive.mutateAsync({
+        id: price.id,
+        active: price.archived,
+      })
       toast.success(price.archived ? "Price activated" : "Price deactivated")
-      onDone()
     } catch (err) {
       toastApiError(err, "Toggle price")
-    } finally {
-      setBusy(false)
     }
   }
   return (
@@ -530,12 +598,13 @@ function PriceRow({
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-2">
-          <PriceChangeWizard
-            price={price}
-            productName={productName}
-            onDone={onDone}
-          />
-          <Button variant="outline" size="sm" disabled={busy} onClick={toggle}>
+          <PriceChangeWizard price={price} productName={productName} />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={setPriceActive.isPending}
+            onClick={toggle}
+          >
             {price.archived ? "Activate" : "Deactivate"}
           </Button>
         </div>
@@ -544,22 +613,45 @@ function PriceRow({
   )
 }
 
-function PriceDialog({
-  products,
-  onDone,
-}: {
-  products: CatalogProduct[]
-  onDone: () => void
-}) {
+function PriceDialog({ products }: { products: CatalogProduct[] }) {
   const [open, setOpen] = React.useState(false)
-  const [productId, setProductId] = React.useState("")
-  const [amount, setAmount] = React.useState("")
-  const [currency, setCurrency] = React.useState("usd")
-  const [durationHours, setDurationHours] = React.useState("")
-  const [autoRenew, setAutoRenew] = React.useState(true)
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const createPrice = useMutation(adminMutations.createPrice(queryClient))
+  const form = useForm({
+    defaultValues: {
+      productId: "",
+      amount: "",
+      currency: "usd",
+      durationHours: "",
+      autoRenew: true,
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        await createPrice.mutateAsync({
+          product_id: value.productId,
+          unit_amount: microsFromInput(value.amount) ?? 0,
+          currency: value.currency,
+          ...(value.durationHours
+            ? { access_duration_hours: Number(value.durationHours) }
+            : {}),
+          auto_renew: value.autoRenew,
+        })
+        form.reset()
+        toast.success("Price created")
+        setOpen(false)
+      } catch (err) {
+        toastApiError(err, "Create price")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) form.reset()
+    setOpen(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button size="sm">
@@ -575,95 +667,140 @@ function PriceDialog({
             new price plus archiving the old one.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <Field label="Product" id="pr-prod">
-            <Select
-              items={products.map((p) => ({
-                value: p.id,
-                label: `${p.display_name} (${p.key})`,
-              }))}
-              value={productId || null}
-              onValueChange={(v) => setProductId(v ?? "")}
-            >
-              <SelectTrigger id="pr-prod" className="w-full">
-                <SelectValue placeholder="Pick a product…" />
-              </SelectTrigger>
-              <SelectContent>
-                {products.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.display_name} ({p.key})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Amount (major units)" id="pr-amount">
-              <Input
-                id="pr-amount"
-                type="number"
-                step="any"
-                min="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-            </Field>
-            <Field label="Currency" id="pr-cur">
-              <Input
-                id="pr-cur"
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Access duration (hours, empty = durable)" id="pr-dur">
-              <Input
-                id="pr-dur"
-                type="number"
-                min="1"
-                value={durationHours}
-                onChange={(e) => setDurationHours(e.target.value)}
-              />
-            </Field>
-            <div className="flex items-end gap-2 pb-1">
-              <Switch
-                id="pr-renew"
-                checked={autoRenew}
-                onCheckedChange={setAutoRenew}
-              />
-              <Label htmlFor="pr-renew">Auto-renew</Label>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            <form.Field name="productId">
+              {(field) => (
+                <Field label="Product" id="pr-prod">
+                  <Select
+                    items={products.map((product) => ({
+                      value: product.id,
+                      label: `${product.display_name} (${product.key})`,
+                    }))}
+                    value={field.state.value || null}
+                    onValueChange={(value) => field.handleChange(value ?? "")}
+                  >
+                    <SelectTrigger id="pr-prod" className="w-full">
+                      <SelectValue placeholder="Pick a product…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>
+                          {product.display_name} ({product.key})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            </form.Field>
+            <div className="grid grid-cols-2 gap-3">
+              <form.Field
+                name="amount"
+                validators={{
+                  onBlur: ({ value }) =>
+                    microsFromInput(value)
+                      ? undefined
+                      : "Enter an amount greater than zero",
+                }}
+              >
+                {(field) => (
+                  <Field label="Amount (major units)" id="pr-amount">
+                    <Input
+                      id="pr-amount"
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    />
+                    <FormFieldErrors errors={field.state.meta.errors} />
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="currency">
+                {(field) => (
+                  <Field label="Currency" id="pr-cur">
+                    <Input
+                      id="pr-cur"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                    />
+                  </Field>
+                )}
+              </form.Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <form.Field name="durationHours">
+                {(field) => (
+                  <Field
+                    label="Access duration (hours, empty = durable)"
+                    id="pr-dur"
+                  >
+                    <Input
+                      id="pr-dur"
+                      type="number"
+                      min="1"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                    />
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="autoRenew">
+                {(field) => (
+                  <div className="flex items-end gap-2 pb-1">
+                    <Switch
+                      id="pr-renew"
+                      checked={field.state.value}
+                      onCheckedChange={field.handleChange}
+                    />
+                    <Label htmlFor="pr-renew">Auto-renew</Label>
+                  </div>
+                )}
+              </form.Field>
             </div>
           </div>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={busy || !productId || !microsFromInput(amount)}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await createPrice({
-                  product_id: productId,
-                  unit_amount: microsFromInput(amount) ?? 0,
-                  currency,
-                  ...(durationHours
-                    ? { access_duration_hours: Number(durationHours) }
-                    : {}),
-                  auto_renew: autoRenew,
-                })
-                toast.success("Price created")
-                setOpen(false)
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Create price")
-              } finally {
-                setBusy(false)
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.productId,
+                  state.values.amount,
+                  state.isSubmitting,
+                ] as const
               }
-            }}
-          >
-            {busy ? "Creating…" : "Create"}
-          </Button>
-        </DialogFooter>
+            >
+              {([productId, amount, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={
+                    isSubmitting || !productId || !microsFromInput(amount)
+                  }
+                >
+                  {isSubmitting ? "Creating…" : "Create"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

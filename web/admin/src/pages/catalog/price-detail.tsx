@@ -3,7 +3,7 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
 import { Badge } from "@/components/ui/badge"
@@ -17,13 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cancelReprice } from "@/lib/api/endpoints"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminQueries } from "@/lib/queries"
 
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
 // log, with dates) and any pending scheduled migration (progress + cancel)
@@ -32,7 +32,6 @@ import { adminQueries, queryKeys } from "@/lib/queries"
 export function PriceDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
   // against every attached provider, which is a network round trip per PSP.
   const [verify, setVerify] = React.useState(false)
@@ -46,15 +45,11 @@ export function PriceDetailPage() {
   const { data: history } = useQuery(adminQueries.priceHistory(price?.key))
   const { data: batches } = useQuery(adminQueries.repriceBatches(price?.key))
   const latestBatch = batches?.items?.[0]
-  const { data: batchReprices, refetch: reloadBatchReprices } = useQuery(
+  const { data: batchReprices } = useQuery(
     adminQueries.reprices(
       latestBatch ? { reprice_batch_id: latestBatch.id } : undefined
     )
   )
-
-  const reloadAll = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog() })
-  }
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
@@ -95,7 +90,6 @@ export function PriceDetailPage() {
           <PriceChangeWizard
             price={price}
             productName={product?.display_name ?? "…"}
-            onDone={reloadAll}
           />
         </div>
       </div>
@@ -183,13 +177,7 @@ export function PriceDetailPage() {
               {isPending ? "Pending migration" : "Last migration"}
             </CardTitle>
             {isPending && (
-              <CancelMigrationButton
-                repriceIds={scheduled.map((r) => r.id)}
-                onDone={() => {
-                  reloadBatchReprices()
-                  reloadAll()
-                }}
-              />
+              <CancelMigrationButton repriceIds={scheduled.map((r) => r.id)} />
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
@@ -212,35 +200,26 @@ export function PriceDetailPage() {
   )
 }
 
-function CancelMigrationButton({
-  repriceIds,
-  onDone,
-}: {
-  repriceIds: string[]
-  onDone: () => void
-}) {
-  const [busy, setBusy] = React.useState(false)
+function CancelMigrationButton({ repriceIds }: { repriceIds: string[] }) {
+  const queryClient = useQueryClient()
+  const cancelReprices = useMutation(adminMutations.cancelReprices(queryClient))
   return (
     <Button
       variant="destructive"
       size="sm"
-      disabled={busy || !repriceIds.length}
+      disabled={cancelReprices.isPending || !repriceIds.length}
       onClick={async () => {
-        setBusy(true)
         try {
-          await Promise.all(repriceIds.map((id) => cancelReprice(id)))
+          await cancelReprices.mutateAsync(repriceIds)
           toast.success(
             `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
           )
-          onDone()
         } catch (err) {
           toastApiError(err, "Cancel migration")
-        } finally {
-          setBusy(false)
         }
       }}
     >
-      {busy ? "Canceling…" : "Cancel migration"}
+      {cancelReprices.isPending ? "Canceling…" : "Cancel migration"}
     </Button>
   )
 }
