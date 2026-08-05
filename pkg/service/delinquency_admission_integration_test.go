@@ -127,19 +127,19 @@ func seedOverdueInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 // nobody has seen work, so this pins the OTHER axis through the same production
 // entry point: an arrears payer whose overdue exposure has eaten its credit line
 // is refused with `insufficient_credit`, under the RLS-enforcing harness.
-func TestAdmitRefusesWhenOverdueExposureEatsTheCreditLine(t *testing.T) {
-	// or#878 follow-up: two DELIBERATE exposure models disagree — AuthorizeAndHold
-	// subtracts invoice-derived exposure; GetAdmissionCapacity documents that under
-	// Phase-H used credit is already a negative customer_balance and deliberately
-	// does not. Which view is authoritative is an owner ruling (money risk both
-	// ways: double-count refuses legitimate spend, status quo admits unpaid-invoice
-	// payers). Pinned aspiration, not behavior — skipped until the ruling lands.
-	t.Skip("or#878: awaiting owner ruling on the authoritative exposure model (see PR #224 body)")
+func TestAdmitRefusesWhenOutstandingOwedEatsTheCreditLine(t *testing.T) {
+	// or#878's open ruling, resolved by or#897: the LEDGER is the only exposure
+	// substrate. This test used to hand-INSERT an invoice row and assert the
+	// exposure read saw it — debt that no accrual path ever created, and so debt
+	// with no ledger leg. Under the ruling that fixture was the bug: every
+	// invoice line has an owed_accrual leg, so fabricating one bypassed the
+	// substrate rather than testing it. It now drives the debt through the real
+	// accrual path and asserts the ledger-measured cap.
 	svc, ms, _, ctx := wastedSvcEnv(t)
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
-	// A SECOND payer: unfunded, arrears, with a small credit line.
+	// An unfunded arrears payer with a small credit line.
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	t.Cleanup(func() {
@@ -159,24 +159,15 @@ func TestAdmitRefusesWhenOverdueExposureEatsTheCreditLine(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
 
-	// An open receivable larger than the whole credit line. Not yet due, so the
-	// TIME axis has nothing to say — only the amount does.
-	id := uuid.New()
-	now := time.Now().UTC()
-	future := now.Add(30 * 24 * time.Hour)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.invoices
-			(id, merchant_id, customer_id, currency, period_from, period_to,
-			 subtotal_amount, total_amount, amount_paid, amount_due, status, issued_at, due_at, finalized_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 0, $7, 'open', $6, $8, $6)`,
-		id, dbtest.TestMerchantID.UUID(), payer.UUID(), money.DefaultCurrency,
-		now.Add(-24*time.Hour), now, int64(5_000_000), future)
+	// Debt through the REAL accrual path: this posts the owed_accrual leg onto
+	// the payer's own arrears account, which is what the cap measures.
+	_, err = ms.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "or897-over-the-line", 5_000_000)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE id = $1", id) })
 
 	owed, err := ms.GetOutstandingOwed(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.EqualValues(t, 5_000_000, owed, "the exposure read must see the receivable; a zero here is the fail-open bug")
+	require.EqualValues(t, 5_000_000, owed,
+		"exposure is the arrears account balance; a zero here is the fail-open read")
 
 	denied, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
@@ -184,7 +175,7 @@ func TestAdmitRefusesWhenOverdueExposureEatsTheCreditLine(t *testing.T) {
 		SourceID: uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
-	require.False(t, denied.Allowed, "the amount cap must actually refuse")
-	require.Equal(t, money.DenyInsufficientCredit, denied.DenyCode,
-		"an over-the-line payer is `insufficient_credit`, never the delinquency code — the debt is not even due yet")
+	require.False(t, denied.Allowed, "unpaid arrears past the credit line must refuse new spend")
+	require.Equal(t, admission.DenyOutstandingCap, denied.DenyCode,
+		"the outstanding cap has its own code: not insufficient_credit, and not the delinquency code — the debt is not even due yet")
 }

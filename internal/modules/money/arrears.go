@@ -182,9 +182,15 @@ func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.Custom
 	return settings.CreditLimitAmount, nil
 }
 
-// GetOutstandingOwed returns current arrears exposure for payer in currency:
-// pending unbilled invoice items plus open/past-due invoice balances. The name
-// is retained for older callers, but the value is invoice-derived.
+// GetOutstandingOwed returns the payer's current arrears exposure in currency,
+// read O(1) from their arrears-liability account (or#897).
+//
+// It was invoice-derived (open invoices + pending items). Invoices are
+// presentation/collection artifacts that lag the ledger by a finalize cycle,
+// and EVERY invoice line already has an owed_accrual leg — verified: the only
+// pending-item writer is insertPendingInvoiceItemTx and all of its callers post
+// an accrual first — so the invoice view could only ever be a staler copy of
+// the ledger. One substrate, and it is the ledger.
 func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -200,14 +206,12 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	if err := RequireBillingCurrency(cur); err != nil {
 		return 0, err
 	}
-	// or#868 B2: pinned. Read on an unpinned handle the invoice/item predicates
-	// matched `merchant_id = NULL`, so this reported an exposure of ZERO — and a
-	// credit-limit check that believes a payer owes nothing is a fail-OPEN read,
-	// not a missing feature.
+	// or#868 B2: still pinned — ledger_accounts is RLS-forced, so an unpinned
+	// read sees no account and reports zero exposure, which is fail-OPEN.
 	var owed int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		owed, e = s.arrearsExposureTx(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), cur)
+		owed, e = s.moneyLedger(s.db.Gen(ctx), tid.UUID()).OutstandingOwed(ctx, payer.UUID(), cur)
 		return e
 	})
 	return owed, err
@@ -280,22 +284,6 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		}
 	}
 	return count, errors.Join(errs...)
-}
-
-func (s *MoneyService) arrearsExposureTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (int64, error) {
-	openDue, err := q.SumOpenInvoiceAmountDue(ctx, gen.SumOpenInvoiceAmountDueParams{
-		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
-	})
-	if err != nil {
-		return 0, err
-	}
-	pendingDue, err := q.SumPendingInvoiceItemAmount(ctx, gen.SumPendingInvoiceItemAmountParams{
-		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
-	})
-	if err != nil {
-		return 0, err
-	}
-	return openDue + pendingDue, nil
 }
 
 func (s *MoneyService) chargeClaimedInvoice(ctx context.Context, charger Charger, claim *invoiceCollectionClaim) (bool, error) {

@@ -241,12 +241,21 @@ type AdmissionCapacity struct {
 	Held        int64
 	BillingMode string
 	CreditLimit int64
+	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
+	// their own arrears account in the same lookup (or#897). The credit line is
+	// a ceiling on DEBT, so the line still available is CreditLimit - this.
+	OutstandingOwed int64
 }
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
-// customer_balance counters plus optional money_settings. It deliberately does
-// not subtract outstanding owed; under the Phase-H model used credit is already
-// represented by a negative customer_balance.
+// customer_balance counters, optional money_settings, and the payer's arrears
+// account.
+//
+// or#878 ruling / or#897: it now reports OutstandingOwed. Arrears debt does NOT
+// show up as a negative customer_balance — AccrueOwed debits the arrears
+// account, leaving the balance untouched — so a credit line that ignored
+// outstanding owed never bit at all: a payer could accrue past the line
+// indefinitely. Still one query, still O(1).
 func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
 	if s == nil || s.db == nil {
 		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
@@ -277,10 +286,11 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 		return AdmissionCapacity{}, err
 	}
 	return AdmissionCapacity{
-		Balance:     row.Balance,
-		Held:        row.Held,
-		BillingMode: row.BillingMode,
-		CreditLimit: row.CreditLimitAmount,
+		Balance:         row.Balance,
+		Held:            row.Held,
+		BillingMode:     row.BillingMode,
+		CreditLimit:     row.CreditLimitAmount,
+		OutstandingOwed: row.OutstandingOwed,
 	}, nil
 }
 

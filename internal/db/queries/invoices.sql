@@ -62,12 +62,6 @@ WHERE merchant_id = $1
   AND invoice_at >= sqlc.arg(period_from)::timestamptz
   AND invoice_at < sqlc.arg(period_to)::timestamptz;
 
--- name: SumPendingInvoiceItemAmount :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.invoice_items
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND invoice_id IS NULL AND status = 'pending';
-
 -- name: SumPendingInvoiceItemAmountInPeriod :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM openrails.invoice_items
@@ -75,12 +69,6 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
   AND invoice_at >= sqlc.arg(period_from)::timestamptz
   AND invoice_at < sqlc.arg(period_to)::timestamptz;
-
--- name: SumOpenInvoiceAmountDue :one
-SELECT COALESCE(SUM(amount_due), 0)::bigint
-FROM openrails.invoices
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND status IN ('open', 'past_due') AND amount_due > 0;
 
 -- name: ListInvoiceThresholdCandidates :many
 SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor

@@ -180,14 +180,26 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 // one O(1) money-service query: available = ledger customer_balance counters;
 // creditLine = the arrears credit line (0 for prepaid), used as the gate's
 // negative floor. In-flight request holds are enforced by Redis.
-func payerCapacity(ctx context.Context, moneySvc *money.MoneyService, payer identity.CustomerID, currency string) (available, creditLine int64, err error) {
+// payerCapacity is the affordability snapshot the spendgate is evaluated
+// against: spendable balance plus the arrears credit line STILL AVAILABLE.
+//
+// or#878 ruling / or#897: the line is a ceiling on DEBT, so outstanding owed is
+// subtracted. It used to pass the raw limit, and because arrears debt lives on
+// the arrears account rather than as a negative customer_balance, the cap never
+// bit — a payer could accrue past a $200 line without limit. Ledger-measured
+// and O(1): the exposure comes from the same point lookup.
+func payerCapacity(ctx context.Context, moneySvc *money.MoneyService, payer identity.CustomerID, currency string) (available, creditLine, outstanding int64, err error) {
 	capacity, err := moneySvc.GetAdmissionCapacity(ctx, payer, currency)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	available = capacity.Balance - capacity.Held
+	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode == money.BillingModeArrears && capacity.CreditLimit > 0 {
-		creditLine = capacity.CreditLimit
+		creditLine = capacity.CreditLimit - outstanding
+		if creditLine < 0 {
+			creditLine = 0
+		}
 	}
-	return available, creditLine, nil
+	return available, creditLine, outstanding, nil
 }

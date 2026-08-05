@@ -1604,46 +1604,6 @@ func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg Se
 	return result.RowsAffected(), nil
 }
 
-const sumOpenInvoiceAmountDue = `-- name: SumOpenInvoiceAmountDue :one
-SELECT COALESCE(SUM(amount_due), 0)::bigint
-FROM openrails.invoices
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-  AND status IN ('open', 'past_due') AND amount_due > 0
-`
-
-type SumOpenInvoiceAmountDueParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-func (q *Queries) SumOpenInvoiceAmountDue(ctx context.Context, arg SumOpenInvoiceAmountDueParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumOpenInvoiceAmountDue, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const sumPendingInvoiceItemAmount = `-- name: SumPendingInvoiceItemAmount :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.invoice_items
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-  AND invoice_id IS NULL AND status = 'pending'
-`
-
-type SumPendingInvoiceItemAmountParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-func (q *Queries) SumPendingInvoiceItemAmount(ctx context.Context, arg SumPendingInvoiceItemAmountParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumPendingInvoiceItemAmount, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const sumPendingInvoiceItemAmountBySourceInPeriod = `-- name: SumPendingInvoiceItemAmountBySourceInPeriod :many
 SELECT COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
        COALESCE(SUM(amount), 0)::bigint AS amount,

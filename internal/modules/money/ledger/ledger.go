@@ -57,10 +57,14 @@ const (
 	CreditReinstate TransferType = "credit_reinstate"
 	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> arrears liability
 	OwedPayment     TransferType = "owed_payment" // arrears settled by an external charge
+	// OwedWriteoff cancels accrued debt without money moving (or#897): the exact
+	// inverse of OwedAccrual, posted when an invoice is voided. Distinct from
+	// OwedPayment, which means a rail actually collected.
+	OwedWriteoff TransferType = "owed_writeoff"
 )
 
 // AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment}
+var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // idx_ledger_transfers_lot_once.
@@ -91,6 +95,7 @@ const (
 	OpMinimumSpendTrueUp Operation = "minimum_spend_trueup" // invoice close true-up
 	OpInvoicePayment     Operation = "invoice_payment"      // arrears settled by a rail charge
 	OpManualInvoicePay   Operation = "manual_invoice_payment"
+	OpInvoiceVoid        Operation = "invoice_void"
 
 	usageOpPrefix = "usage:"
 )
@@ -157,6 +162,62 @@ func (l *Ledger) EnsureSystemAccount(ctx context.Context, t AccountType, currenc
 func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
 	return l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
+}
+
+// EnsureCustomerArrears get-or-creates a customer's OWN arrears-liability
+// account (or#897). Receivables are per-debtor: a merchant-wide liability
+// account can only answer "how much is owed in total", so per-payer exposure
+// had to be summed over that payer's whole transfer history — O(records) on the
+// admission hot path, which is exactly the shape the work-scales-with-activity
+// law exists to prevent. With one account per debtor, outstanding owed is the
+// account's counter: O(1), symmetric with balance.
+//
+// NOT debits_must_not_exceed_credits: an arrears account is SUPPOSED to go
+// negative — that negative balance IS the debt.
+func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
+	c := customer
+	return l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
+}
+
+// CustomerArrearsAccountID returns the customer's arrears account id, and false
+// when it does not exist. Read-only: an exposure READ must never create an
+// account (#534), so a payer who has never accrued reads a clean zero.
+func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
+	c := customer
+	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
+		MerchantID: l.merchant, AccountType: string(ArrearsLiability), Currency: currency, CustomerID: &c,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, false, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("ledger: get arrears account: %w", err)
+	}
+	return acc.ID, true, nil
+}
+
+// OutstandingOwed is the payer's unpaid arrears in this currency, as a POSITIVE
+// amount, read O(1) from the arrears account's maintained counters. Debt makes
+// the account balance negative (accruals debit it, payments credit it), so the
+// exposure is its negation. Zero when the payer has no arrears account.
+//
+// This is the ONLY exposure substrate (or#878 ruling, or#897). It replaced an
+// invoice-derived sum: invoices are presentation/collection artifacts, they lag
+// the ledger by a finalize cycle, and every invoice line already has an
+// owed_accrual leg — so the invoice view could only ever be a stale copy.
+func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
+	acc, found, err := l.CustomerArrearsAccountID(ctx, customer, currency)
+	if err != nil || !found {
+		return 0, err
+	}
+	bal, err := l.Balance(ctx, acc)
+	if err != nil {
+		return 0, err
+	}
+	if bal >= 0 {
+		return 0, nil
+	}
+	return -bal, nil
 }
 
 // CustomerBalanceAccountID returns the customer's balance account id, and false
@@ -384,7 +445,7 @@ func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency st
 // AccrueOwedIdempotent is AccrueOwed reporting whether the accrual actually
 // posted, or replayed a coordinate already committed.
 func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, bool, error) {
-	liab, err := l.EnsureSystemAccount(ctx, ArrearsLiability, currency)
+	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, false, err
 	}
@@ -399,6 +460,28 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 	})
 }
 
+// WriteOffOwed cancels accrued arrears WITHOUT money moving (DR platform_revenue
+// / CR arrears_liability) — the exact inverse of AccrueOwed. Posted when an
+// invoice is voided: the debt is cancelled, so the revenue recognised at accrual
+// is given back and the payer's liability returns toward zero. Without this the
+// invoice says "voided" and the ledger says "still owed", and since the ledger
+// is the exposure substrate the payer stays capped for a bill nobody owes.
+func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	if err != nil {
+		return gen.OpenrailsLedgerTransfer{}, err
+	}
+	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
+	if err != nil {
+		return gen.OpenrailsLedgerTransfer{}, err
+	}
+	c := customer
+	return l.Apply(ctx, Transfer{
+		Debit: rev, Credit: liab, Amount: amount, Currency: currency, Type: OwedWriteoff,
+		Coord: coord, Customer: &c, Invoice: invoice,
+	})
+}
+
 // PayOwed settles accrued arrears via an external charge (DR processor_clearing /
 // CR arrears_liability), bringing the liability account back toward zero.
 func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
@@ -406,7 +489,7 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
 	}
-	liab, err := l.EnsureSystemAccount(ctx, ArrearsLiability, currency)
+	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
 		return gen.OpenrailsLedgerTransfer{}, err
 	}

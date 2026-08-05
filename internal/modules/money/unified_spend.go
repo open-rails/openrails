@@ -309,7 +309,11 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if settings.CreditLimitAmount <= 0 {
 				return 0, 0, false, ErrInsufficientCredits
 			}
-			exposure, eerr := s.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+			// or#878 ruling / or#897: exposure is LEDGER-measured. This used to sum
+			// open invoices + pending invoice items, which lag the ledger by a
+			// finalize cycle — so a payer could spend past the line in the window
+			// between accruing and being invoiced.
+			exposure, eerr := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
 			if eerr != nil {
 				return 0, 0, false, eerr
 			}

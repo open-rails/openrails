@@ -43,6 +43,12 @@ const DenyDelegatedSpendNotAllowed = "delegated_spend_not_allowed"
 // DenyBudgetExceeded is the deny code when a spend-cap window blocks the request.
 const DenyBudgetExceeded = "budget_exceeded"
 
+// DenyOutstandingCap is the or#897 outstanding_cap refusal: LEDGER-measured
+// unpaid arrears have reached the payer's credit line. Distinct from
+// insufficient_credit (which is "this one request does not fit") and from
+// delinquent (the TIME axis) — this is "your debt is at the cap".
+const DenyOutstandingCap = "outstanding_cap_reached"
+
 // DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
 // outlived the merchant's grace window. Deliberately DISTINCT from
 // insufficient_credit — "you are over your limit" and "you have an unpaid
@@ -223,9 +229,18 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// Unlocked balance + arrears credit line (the gate's affordability inputs).
 	// Phase H makes the settled balance an O(1) ledger account read, so this stays
 	// direct and avoids a staleness window.
-	available, creditLine, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
+	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
 	if err != nil {
 		return AdmitDecision{}, err
+	}
+
+	// or#897 outstanding cap: unpaid arrears have consumed the whole credit line,
+	// so nothing more may be spent on credit. Distinct from the affordability
+	// refusal below — a host must be able to tell "your debt is at the cap, pay
+	// it down" from "you are out of prepaid balance".
+	if creditLine == 0 && available <= 0 && outstanding > 0 {
+		a.recordDenial(ctx, merchantID, req.CustomerID, DenyOutstandingCap)
+		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyOutstandingCap}, nil
 	}
 
 	dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
