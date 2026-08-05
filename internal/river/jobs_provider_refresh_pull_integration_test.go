@@ -4,6 +4,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -235,8 +237,10 @@ func newStorePullWorker(dbi *db.DB, svc *merchants.Service, nmiSrv *fakeNMIPullS
 	return w
 }
 
-// loadPullWatermark returns the SUCCESSFUL watermark: a failure row (last_error
-// set, never succeeded) does not count as an advanced watermark.
+// loadPullWatermark returns the SUCCESSFUL watermark. or#823 dropped the
+// last_succeeded_at/last_error diagnostics this used to filter on, and the
+// filter is no longer needed: only a COMPLETED window writes a row, so the row's
+// existence is the success signal it was approximating.
 func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider string) (time.Time, bool) {
 	t.Helper()
 	var watermark time.Time
@@ -245,12 +249,14 @@ func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider strin
 	// helper reports "no watermark" for a watermark that exists.
 	err := dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(context.Background(), `
 		SELECT watermark_at FROM openrails.rail_refresh_watermarks
-		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'
-		   AND last_succeeded_at IS NOT NULL AND last_error IS NULL`,
+		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'`,
 		mid.UUID(), provider).Scan(&watermark)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false
 	}
+	// Anything else (a renamed column, a broken pool) must fail the test loudly:
+	// swallowing it would report "no watermark" for every schema drift.
+	require.NoError(t, err)
 	return watermark.UTC(), true
 }
 

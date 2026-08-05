@@ -490,7 +490,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		state := reconcile.SubscriptionState{
 			Status:             string(row.Status),
 			Rail:               row.Rail,
-			HasPaymentMethod:   row.Vaulted,
+			HasPaymentMethod:   row.HasPaymentMethod,
 			RailSubscriptionID: row.RailSubscriptionID,
 			PeriodEnd:          row.CurrentPeriodEndsAt,
 			GraceEndsAt:        row.GraceEndsAt,

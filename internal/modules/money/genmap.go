@@ -95,7 +95,6 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 		CollectionPaymentMethod:  r.CollectionPaymentMethodID,
 		DefaultCreditExpiryHours: expiry,
 		CreditLimitAmount:        r.CreditLimitAmount,
-		LastAlertAt:              r.LastAlertAt,
 		LastTopupAt:              r.LastTopupAt,
 		TrustLevel:               r.Tier,
 		TrustLevelSource:         r.TierSource,

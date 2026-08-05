@@ -34,7 +34,7 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 }
 
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
-SELECT id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
+SELECT id, merchant_id, customer_id, currency, rungs, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1
   AND currency = $3
   AND (customer_id = $2 OR customer_id IS NULL)
@@ -60,7 +60,6 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 		&i.CustomerID,
 		&i.Currency,
 		&i.Rungs,
-		&i.ScheduleVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -141,7 +140,7 @@ func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merc
 }
 
 const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
-SELECT id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at FROM openrails.invoker_spend_limits
+SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -168,7 +167,6 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 			&i.Scope,
 			&i.ScopeKey,
 			&i.Windows,
-			&i.PolicyVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -348,23 +346,22 @@ func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg Upsert
 
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
 INSERT INTO openrails.invoker_spend_limits (
-    id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertInvokerSpendLimitParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    uuid.UUID
-	Scope         string
-	ScopeKey      string
-	Windows       []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	ScopeKey   string
+	Windows    []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
@@ -377,7 +374,6 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 		arg.Scope,
 		arg.ScopeKey,
 		arg.Windows,
-		arg.PolicyVersion,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -386,11 +382,10 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 
 const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $6, $3, 1, $4, $5)
+    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
+) VALUES ($1, $2, NULL, $6, $3, $4, $5)
 ON CONFLICT (merchant_id, currency) WHERE (customer_id IS NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
-    schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 
@@ -419,11 +414,10 @@ func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierS
 
 const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, $3, $7, $4, 1, $5, $6)
+    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
+) VALUES ($1, $2, $3, $7, $4, $5, $6)
 ON CONFLICT (merchant_id, customer_id, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
-    schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 

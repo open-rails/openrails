@@ -103,7 +103,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -126,7 +126,6 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.AutoTopupAmount,
 		&i.AutoTopupPaymentMethodID,
 		&i.DefaultCreditExpiryHours,
-		&i.LastAlertAt,
 		&i.LastTopupAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -170,7 +169,7 @@ const listBelowThresholdMoneyAccounts = `-- name: ListBelowThresholdMoneyAccount
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
-           s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
+           s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
                SELECT a.credits_posted - a.debits_posted
                FROM openrails.ledger_accounts a
@@ -183,7 +182,7 @@ WITH avail AS (
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,
        auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id,
-       last_alert_at, last_topup_at
+       last_topup_at
 FROM avail
 WHERE available < low_balance_threshold
 `
@@ -197,7 +196,6 @@ type ListBelowThresholdMoneyAccountsRow struct {
 	AutoTopupEnabled         bool
 	AutoTopupAmount          *int64
 	AutoTopupPaymentMethodID *uuid.UUID
-	LastAlertAt              *time.Time
 	LastTopupAt              *time.Time
 }
 
@@ -222,7 +220,6 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantI
 			&i.AutoTopupEnabled,
 			&i.AutoTopupAmount,
 			&i.AutoTopupPaymentMethodID,
-			&i.LastAlertAt,
 			&i.LastTopupAt,
 		); err != nil {
 			return nil, err
@@ -277,7 +274,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_alert_at, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -300,7 +297,6 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.AutoTopupAmount,
 		&i.AutoTopupPaymentMethodID,
 		&i.DefaultCreditExpiryHours,
-		&i.LastAlertAt,
 		&i.LastTopupAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -395,29 +391,6 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 		arg.CustomerID,
 		arg.Tier,
 		arg.TierSource,
-		arg.Now,
-		arg.Currency,
-	)
-	return err
-}
-
-const stampMoneyAccountAlertAt = `-- name: StampMoneyAccountAlertAt :exec
-UPDATE openrails.money_settings
-SET last_alert_at = $3, updated_at = $3
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4
-`
-
-type StampMoneyAccountAlertAtParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Now        *time.Time
-	Currency   string
-}
-
-func (q *Queries) StampMoneyAccountAlertAt(ctx context.Context, arg StampMoneyAccountAlertAtParams) error {
-	_, err := q.db.Exec(ctx, stampMoneyAccountAlertAt,
-		arg.MerchantID,
-		arg.CustomerID,
 		arg.Now,
 		arg.Currency,
 	)

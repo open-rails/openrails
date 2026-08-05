@@ -68,20 +68,18 @@ SELECT EXISTS (
 -- name: CreateProductUsageLimitBinding :exec
 INSERT INTO openrails.product_usage_limit_bindings (
     id, merchant_id, customer_id, usage_limit_key, measure, windows,
-    source_type, source_id, product_key, grant_id, starts_at, ends_at, policy_version
+    grant_id, starts_at, ends_at
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid,
     sqlc.arg(usage_limit_key)::text, sqlc.arg(measure)::text, sqlc.arg(windows)::jsonb,
-    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(product_key)::text,
     sqlc.narg(grant_id)::uuid, sqlc.arg(starts_at)::timestamptz,
-    sqlc.narg(ends_at)::timestamptz, sqlc.arg(policy_version)::bigint
+    sqlc.narg(ends_at)::timestamptz
 );
 
 -- name: RevokeProductUsageLimitBindingsByGrant :exec
 UPDATE openrails.product_usage_limit_bindings
 SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
-    updated_at = now(),
-    policy_version = policy_version + 1
+    updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND grant_id = sqlc.arg(grant_id)::uuid
   AND revoked_at IS NULL;

@@ -92,8 +92,8 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.product_usage_limit_bindings
-			 (id, merchant_id, customer_id, usage_limit_key, measure, windows, source_type, product_key)
-			 VALUES ($1, $2, $3, $4, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb, 'catalog_product', 'pro')`,
+			 (id, merchant_id, customer_id, usage_limit_key, measure, windows)
+			 VALUES ($1, $2, $3, $4, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb)`,
 			uuid.New(), tA.UUID(), customerA, usageKey,
 		)
 		require.NoError(t, err)

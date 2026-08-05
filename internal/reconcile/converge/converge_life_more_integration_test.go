@@ -78,8 +78,8 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 	// repair proceeds.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.reconciliation_state (merchant_id, source_domain, fully_reconciled, last_full_pull_at)
-			 VALUES ($1,'subscriptions',true,now())
+			`INSERT INTO openrails.reconciliation_state (merchant_id, source_domain, fully_reconciled)
+			 VALUES ($1,'subscriptions',true)
 			 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET fully_reconciled = true`, merchantID)
 		return err
 	}))

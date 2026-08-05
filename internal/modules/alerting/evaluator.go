@@ -93,7 +93,7 @@ func (s *Service) evaluateRule(ctx context.Context, rule Rule, now time.Time, st
 	case outcome.Crossed && !firing:
 		s.deliverer.dispatch(ctx, rule, s.buildAlert(rule, outcome, now))
 		stats.Fired++
-		return s.store.markFired(ctx, rule.ID, now, now, outcome.Value, outcome.Dims)
+		return s.store.markFired(ctx, rule.ID, now, now, outcome.Value)
 	case !outcome.Crossed && firing:
 		stats.Cleared++
 		return s.store.markCleared(ctx, rule.ID, now, now, outcome.Value)

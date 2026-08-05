@@ -18,8 +18,16 @@ import (
 //
 // This test asserts BOTH halves on the enforcing role: the retired base-pool
 // shape still lies (that is the regression pin — it is what a superuser-backed
-// harness can never show), and migration 0021's SECURITY DEFINER reader tells
-// the truth across merchants.
+// harness can never show), and the SECURITY DEFINER readers the ceiling
+// ACTUALLY calls tell the truth.
+//
+// or#887 narrowed which truth that is. The ceiling's budget is PER-MERCHANT —
+// a shared deployment-wide wall let one busy tenant deny service to every
+// other — so the readers under test are the per-merchant leg and the per-actor
+// leg. The anti-theft property survives the narrowing: a forged-identity burst
+// is still walled inside the merchant it targets, and one credential operating
+// across merchants is still visible as ONE actor, which is what the second
+// assertion below pins.
 func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T) {
 	ctx, super, app := pools(t)
 
@@ -46,9 +54,8 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 			require.NoError(t, err)
 		}
 	}
-	_ = merchants
-
 	types := []string{intentType}
+	origins := []string{"user", "admin"}
 
 	// The retired shape: a GUC-less count on the app role. Zero, no error.
 	var basePool int64
@@ -60,14 +67,22 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 	require.EqualValues(t, 0, basePool,
 		"if this ever becomes non-zero the base pool has gained RLS bypass — re-read or#824 before 'fixing' this test")
 
-	// The fix: the definer reader sees all six.
-	var global, byActor int64
-	require.NoError(t, app.QueryRow(ctx,
-		`SELECT openrails.count_destructive_intents_since($1::text[], now() - interval '1 hour')`,
-		types).Scan(&global))
-	require.GreaterOrEqual(t, global, int64(6),
-		"or#860: the deployment-wide destructive count must span merchants, or the ceiling never trips")
+	// The fix, leg 1 (or#887): the per-merchant definer reader — the one the
+	// ceiling actually calls — sees each merchant's own three, from a pool that
+	// carries no app.merchant_id and would otherwise have counted zero.
+	for _, mid := range merchants {
+		var perMerchant int64
+		require.NoError(t, app.QueryRow(ctx,
+			`SELECT openrails.count_destructive_intents_for_merchant_since($1, $2::text[], $3::text[], now() - interval '1 hour')`,
+			mid, origins, types).Scan(&perMerchant))
+		require.EqualValues(t, 3, perMerchant,
+			"or#887: the ceiling's per-merchant count must see the merchant's own destructive intents, or the wall never trips")
+	}
 
+	// Leg 2: the per-actor reader still spans merchants. This is the anti-theft
+	// half — the budget is per-merchant, but ONE stolen credential must not be
+	// six invisible ones.
+	var byActor int64
 	require.NoError(t, app.QueryRow(ctx,
 		`SELECT openrails.count_destructive_intents_by_actor_since($1, $2::text[], now() - interval '1 hour')`,
 		actor, types).Scan(&byActor))
@@ -123,23 +138,25 @@ func TestOR861_ArmedMerchantScansSeeMerchantsUnderRLS(t *testing.T) {
 func TestCrossMerchantReadersRefuseAWeakDefiner(t *testing.T) {
 	ctx, super, app := pools(t)
 
+	const fn = `openrails.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz)`
+
 	role := "or860_weak_" + uuid.NewString()[:8]
 	_, err := super.Exec(ctx, `CREATE ROLE `+role+` NOLOGIN`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		bg := stdcontext.Background()
-		_, _ = super.Exec(bg, `ALTER FUNCTION openrails.count_destructive_intents_since(text[], timestamptz) OWNER TO CURRENT_USER`)
+		_, _ = super.Exec(bg, `ALTER FUNCTION `+fn+` OWNER TO CURRENT_USER`)
 		_, _ = super.Exec(bg, `DROP ROLE IF EXISTS `+role)
 	})
 	_, err = super.Exec(ctx, `GRANT USAGE ON SCHEMA openrails TO `+role)
 	require.NoError(t, err)
-	_, err = super.Exec(ctx,
-		`ALTER FUNCTION openrails.count_destructive_intents_since(text[], timestamptz) OWNER TO `+role)
+	_, err = super.Exec(ctx, `ALTER FUNCTION `+fn+` OWNER TO `+role)
 	require.NoError(t, err)
 
 	var n int64
 	err = app.QueryRow(ctx,
-		`SELECT openrails.count_destructive_intents_since(ARRAY['nmi_delete_subscription']::text[], now() - interval '1 hour')`).
+		`SELECT openrails.count_destructive_intents_for_merchant_since($1, ARRAY['user','admin']::text[], ARRAY['nmi_delete_subscription']::text[], now() - interval '1 hour')`,
+		uuid.New()).
 		Scan(&n)
 	require.Error(t, err,
 		"a definer that cannot bypass RLS must RAISE — returning 0 is how the ceiling silently stopped protecting anything")
