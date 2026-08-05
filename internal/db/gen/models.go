@@ -495,6 +495,7 @@ type OpenrailsFindingDigestState struct {
 	UpdatedAt      time.Time
 }
 
+// #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
 type OpenrailsFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
@@ -858,6 +859,7 @@ type OpenrailsNotificationQueue struct {
 	EmailedAt *time.Time
 }
 
+// #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
 type OpenrailsOrphanedEpisode struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID

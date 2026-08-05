@@ -579,11 +579,14 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"uq_payment_methods_customer_instrument_legacy",
+		"uq_payment_methods_psp_instrument",
 		"uq_subscriptions_customer_product_lifecycle",
 		"uq_entitlements_customer_active",
-		"uq_payments_merchant_rail_transaction",
-		"uq_rail_customer_accounts_customer_rail",
+		// A payment's provider identity is unique per PSP, with a separate
+		// partial index for the off-rail rows that carry no PSP.
+		"uq_payments_merchant_psp_transaction",
+		"uq_payments_merchant_offrail_transaction",
+		"uq_rail_customer_accounts_customer_psp",
 		"entitlements_customer_no_overlap",
 	} {
 		if !strings.Contains(c, want) {
@@ -598,7 +601,9 @@ func TestConsolidatedSchemaUsesMerchantPermissionGroup(t *testing.T) {
 	// The consolidated baseline reflects the final schema: permission_group_id.
 	for _, want := range []string{
 		"permission_group_id text",
-		"idx_merchants_permission_group_id",
+		// #843: unique, partial on live merchants — org ↔ merchant is 1:1, so
+		// merchant-from-group resolution cannot be ambiguous.
+		"uq_merchants_permission_group_id",
 		"COMMENT ON COLUMN openrails.merchants.permission_group_id",
 	} {
 		if !strings.Contains(c, want) {
@@ -670,8 +675,8 @@ func TestUniqueIndexesAreMerchantScoped(t *testing.T) {
 }
 
 // TestCurrencyColumnsCarryShapeCheck is the GAP-6 / or#832 guard. Every
-// currency column must carry the 0020 shape CHECK, so a new table cannot
-// re-open the drift that made a dev DB's payments.currency 100% lowercase.
+// currency column must carry the shape CHECK, so a new table cannot re-open
+// the drift that made a dev DB's payments.currency 100% lowercase.
 //
 // The CHECK constrains SHAPE (ISO-4217 alpha-3 upper, or a qualified
 // custom-credit unit slug/name); MEMBERSHIP stays in the Go registry, which is
@@ -695,21 +700,31 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 			len(withCurrency))
 	}
 
-	// 0020 adds the constraint in a DO loop over information_schema, so the
-	// coverage assertion is that the loop exists and is unconditional over
-	// every currency column — plus that nothing later drops one.
 	if !strings.Contains(schema, "_currency_shape") {
-		t.Fatal("no currency shape CHECK found in any migration (GAP-6): 0020 must add one per currency column")
+		t.Fatal("no currency shape CHECK found in any migration (GAP-6): every currency column must carry one")
 	}
 	reDropShape := regexp.MustCompile(`DROP CONSTRAINT (?:IF EXISTS )?([a-z0-9_]+_currency_shape)`)
 	for _, m := range reDropShape.FindAllStringSubmatch(schema, -1) {
 		t.Errorf("migration drops the currency shape CHECK %q — GAP-6 requires every currency column keep it", m[1])
 	}
-	// The loop must be driven by information_schema, not a hand-written list:
-	// a hand-written list is exactly how 0005's payment_settlement_events
-	// escaped the RLS guard (GAP-4).
-	if !strings.Contains(schema, "column_name = 'currency'") {
-		t.Error("the currency shape CHECK must be applied by iterating information_schema for column_name='currency', " +
-			"so a currency column added by a later migration is covered automatically (the lesson of GAP-4)")
+
+	// Coverage is asserted PER COLUMN, not by trusting that some loop ran: a
+	// hand-written list is exactly how 0005's payment_settlement_events escaped
+	// the RLS guard (GAP-4). Every table that declares a currency column must
+	// also declare its own <table>_currency_shape CHECK.
+	for _, tbl := range withCurrency {
+		if !strings.Contains(schema, tbl+"_currency_shape") {
+			t.Errorf("table %q declares a currency column with no %s_currency_shape CHECK (GAP-6): "+
+				"shape (upper-case alpha-3, or a qualified custom-credit slug/name) is a DATABASE fact", tbl, tbl)
+		}
+	}
+
+	// The same rule for a currency column bolted on later by ALTER TABLE: the
+	// migration that adds it must add the CHECK in the same file.
+	reAddCurrency := regexp.MustCompile(`ALTER TABLE (?:ONLY )?openrails\.([a-z0-9_]+)[^;]*?ADD COLUMN\s+(?:IF NOT EXISTS\s+)?currency\s+text`)
+	for _, m := range reAddCurrency.FindAllStringSubmatch(schema, -1) {
+		if !strings.Contains(schema, m[1]+"_currency_shape") {
+			t.Errorf("migration adds %s.currency without a %s_currency_shape CHECK (GAP-6)", m[1], m[1])
+		}
 	}
 }

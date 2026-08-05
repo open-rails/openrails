@@ -142,12 +142,14 @@ that with `psql -1`. Those are the only two apply paths — there is no
 non-transactional one — which is why migrations use `SET LOCAL` for their
 timeouts rather than `SET`.
 
-`0001` is excluded by path (the squashed baseline creates the schema from
-nothing, so lock-safety rules are vacuous) and `0002`-`0009` predate the gate.
-**Nothing else is excluded by path.** `0010`-`0033` were brought clean under
-or#887; everything still exempt is an inline `-- squawk-ignore <rule>` written
-at the statement with its reason on the lines above it, so the rest of the file
-stays linted and the reason sits where the next person edits.
+`0001` is the only path excluded, and the only one that ever should be. It is
+the squashed baseline (or#893): it creates the schema from nothing, so every
+lock-safety rule is vacuous against it — no existing table to lock, no client
+to break, no row to scan. **Nothing else is excluded by path.** Any migration
+after it edits a live schema and must pass the gate, or carry an inline
+`-- squawk-ignore <rule>` written at the statement with its reason on the lines
+above it, so the rest of the file stays linted and the reason sits where the
+next person edits.
 
 ### The two rules this migrator cannot satisfy
 
@@ -181,34 +183,24 @@ production writes. Deliberately not started.
 
 ### The inline exemptions
 
-Forty-eight statements, sixty-seven rule instances, all classified
-**PERMANENT**. All but `0048`, `0061`, `0063`, `0077` and `0078` are **history** —
-rewriting them changes no live database and the honest record is what actually
-ran. The rules stay armed for new migrations.
+None. or#893 squashed the migration chain into `0001`, and every inline
+`-- squawk-ignore` lived in a file that squash deleted. Those exemptions were
+records of what one-time rename/backfill/hard-cut migrations actually did; the
+baseline states the result instead, so there is nothing left to excuse. The
+invariants they protected survive as constraints, indexes and COMMENTs on the
+objects themselves.
 
-| where | rule(s) | why |
-|---|---|---|
-| `0014` ledger_transfers CHECK | `constraint-missing-not-valid` | `NOT VALID` buys nothing inside a single-transaction migrator — the ADD's `ACCESS EXCLUSIVE` lock is held to COMMIT either way. The two-step only pays off across two transactions, i.e. two migration files. |
-| `0018` ×4 destructive_run FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | The referencing columns were added `NULL` a few statements earlier and the referenced table is created by the same file, so the validating scan is over an all-NULL column. squawk suppresses both rules when the *referencing* table is new, but cannot see this case. |
-| `0025` vault_provider→custodian | `renaming-column` | Deliberate greenfield hard cut (or#880): no alias, no compatibility view. A caller still naming `vault_provider` must fail loudly. |
-| `0025` custodian CHECK | `constraint-missing-not-valid` | The `UPDATE` two lines above normalises the rows the CHECK then validates, in the same transaction. |
-| `0026` money_movement CHECK | `constraint-missing-not-valid` | Same as `0014`. |
-| `0027` merchant_exports→merchant_purge_inventories | `renaming-table`, `renaming-column` | Same hard-cut rationale as `0025`; breaking a client that still names `merchant_exports` is the point of or#858. |
-| `0031` vault_fingerprint→fingerprint | `renaming-column` | Same hard-cut rationale as `0025` (or#871): `vault` is reserved for HashiCorp Vault, and a caller still naming `vault_fingerprint` must fail loudly rather than read a stale alias. |
-| `0031` payments token_type CHECK | `constraint-missing-not-valid` | The two `UPDATE`s immediately above rewrite every row the re-added CHECK then validates, in the same transaction — the constraint is dropped and restored only to move `provider_vault`/`pan_via_vault` to their new names. |
-| `0044` host_lifecycle_events.currency | `adding-not-nullable-field` | The rule's own suggested fix — stay nullable, add a `CHECK` — provably cannot satisfy the invariant it exists for: CUR-1 reads `information_schema.columns.is_nullable`, so only the column attribute counts. The scan is inherent to `SET NOT NULL`, not the constraint two-step the sibling rule covers, so no file split reduces it. The table is a delivery feed created in `0037` and pruned after delivery, so the scan is over a small, short-lived table. |
-| `0060` rail_refresh_watermarks PSP cut | `ban-drop-column`, `adding-not-nullable-field`, `disallowed-unique-constraint`, `adding-foreign-key-constraint`, `constraint-missing-not-valid` | or#893 deletes the table's NULL/global lane. `psp_key` is a generated column that existed only to key that lane; the `DELETE … WHERE psp_id IS NULL` two statements earlier removes every row the `SET NOT NULL` and the re-keyed UNIQUE then validate. The table is a resumable cursor — one row per (merchant, rail, PSP, domain) — so every scan here is over a handful of rows, and `NOT VALID` buys nothing inside a single-transaction migrator (see `0014`). |
-| `0061` ×12 write-only column drops | `ban-drop-column` (×21) | **Deliberate hard cut, not history.** or#823 drops the columns that are written and read by nothing — the rule's concern is breaking a client that reads them, and the verified fact that qualified each column is that no such client exists (no sqlc query, no generated reader, no raw SQL). Prelaunch: no deployment holds rows, and a column kept "just in case" reads to the next person as evidence something consumes it. The lock is `ACCESS EXCLUSIVE` either way and `DROP COLUMN` is metadata-only in Postgres, so there is no cheaper shape to split this into. |
-| `0085` catalog_meters.kind drop | `ban-drop-column` | or#893 phase 5 makes the column dead **in its own change set**: the manifest loses `Meter.Kind`, the applier stops writing it, and the rating join loses the `missing_default` CASE that was its last reader. The rule's concern is breaking a client that reads the column; after this commit there is none, in this repo or in any consumer (the manifest field it mirrored no longer exists to send). Prelaunch, `DROP COLUMN` is metadata-only, and the CHECK dropped alongside it constrained nothing else. |
-| `0063` ×6 psp_id `SET NOT NULL` (subscriptions, payment_methods, checkout_sessions, rail_intents, rail_mutation_logs, rail_customer_accounts) | `adding-not-nullable-field` | **Deliberate hard cut, not history.** or#893 makes PSP provenance total. The rule's suggested fix — stay nullable, add a `CHECK` — cannot express a column attribute, and `information_schema.is_nullable` is what CUR-1 and the sqlc model shape both read; a nullable column with a CHECK still generates `*uuid.UUID` and still lets a caller pass nil. The `UPDATE`/`DELETE` block above each statement attributed or removed every row the scan validates, in the same transaction. |
-| `0063` payments + invoice_payments `psp_required_on_rail` CHECKs | `constraint-missing-not-valid` | These are the two tables where a CHECK is the RIGHT shape (both also record off-rail money), so only the lock argument applies: `NOT VALID` buys nothing inside a single-transaction migrator — see `0014`. The rows it validates were just rewritten by the same transaction. |
-| `0063` rail_mutation_logs + rail_customer_accounts psp FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | Both re-point at `openrails.psps` after the column closed: the mutation-log FK moves `ON DELETE SET NULL` → `CASCADE` (SET NULL is unrepresentable against NOT NULL — the same choice `0060` made for the watermark cursor), and rail_customer_accounts' is a brand-new column whose rows were attributed or deleted three statements earlier. Same single-transaction argument as `0014`. |
-| `0063` ×2 rail-transaction unique rebuilds | `disallowed-unique-constraint` | The rule wants a `UNIQUE` constraint rather than a unique index; every equivalent invariant in this schema is a PARTIAL unique index (`WHERE deleted_at IS NULL`, `WHERE rail_subscription_id <> ''`), which a table constraint cannot express at all. Dropping the partial predicate to satisfy the rule would change the invariant. |
-| `0077` ×2 rail_intents/rail_mutation_logs custodian FKs | `adding-foreign-key-constraint`, `constraint-missing-not-valid` | Composite `(custodian_id, merchant_id)` FKs, the same shape `psps_custodian_fk` carries, so the reference cannot cross a merchant boundary. The column is added in the statement above each, so every existing row is NULL and the validating scan is over an all-NULL column — the case `0018` records squawk cannot see. `NOT VALID` buys nothing inside a single-transaction migrator (`0014`). |
-| `0077` ×2 psp_id `DROP NOT NULL` | `ban-drop-not-null` | **Deliberate, and not a weakening.** or#795's batch account updater is addressed to a CUSTODIAN — one custodian backs many PSPs, so no single `psp_id` names the write. The `rail_intents_addressed` / `rail_mutation_logs_addressed` CHECKs added two lines below each restate `0063`'s actual invariant (*an outbound write names the account it will execute against*) over both kinds of account, so nothing becomes unattributable. The rule's concern is a client that assumes non-NULL; the readers were changed in the same PR and the CHECK is what they now rely on. |
-| `0077` ×2 addressed CHECKs | `constraint-missing-not-valid` | Every existing row has `psp_id` NOT NULL — it was the column attribute until two statements earlier — so the scan validates rows already known to satisfy the constraint. Same single-transaction argument as `0014`. |
-| `0078` ×3 subscription lifecycle retype | `changing-column-type` | **Deliberate hard cut, not history.** or#893 phase 2 removes `expired`/`failed` from `openrails.subscription_status`. Postgres cannot drop an enum label, so the only shape that exists is a new type plus three `ALTER COLUMN … TYPE` (subscriptions.status, subscription_status_transitions.from_status/to_status) — there is no split, `NOT VALID` two-step or lock-free variant to move to. The rule's other concern, breaking clients that read the column, is the intended effect: a caller still writing `'expired'` must fail loudly rather than store a state the lifecycle no longer has. Prelaunch, no deployment holds rows. |
-| `0048` DROP payer_spend_limits | `ban-drop-table` | **Deliberate hard cut, not history.** or#897 replaces the table with `billing_policies` + `billing_policy_bindings`; the rule's concern (breaking existing clients) is the intended effect, and prelaunch there is no deployment holding rows worth keeping. Leaving the table alongside its replacement would be the two-substrate disease or#878 removed from exposure. |
+The next inline exemption is written when a new migration earns one, at the
+statement, with its reason, and recorded here.
+
+Because the baseline is the only file and the only excluded path, squawk has
+nothing to check and exits non-zero on the empty glob. `scripts/migration-lint.sh`
+DERIVES that case — up-migrations minus excluded paths — and passes early only
+when the remainder is genuinely zero; the moment a `0002` exists the run happens
+and every guard applies. The baseline is excluded rather than linted because
+squawk cannot see that a table was created by the same file: it reports 102
+issues on a from-nothing schema, all of them `ADD CONSTRAINT … PRIMARY KEY` and
+friends against tables three statements old.
 
 A new migration that genuinely needs one of these must add the constraint
 `NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction

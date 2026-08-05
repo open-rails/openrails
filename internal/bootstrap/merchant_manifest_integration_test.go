@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
     key text,
+    custodian_id uuid,
     archived boolean DEFAULT false NOT NULL,
     evidence jsonb,
     first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -127,8 +128,8 @@ CREATE POLICY merchant_isolation ON openrails.psps
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
--- #824: migration 0016's directory function + index target customers; this
--- harness replays that migration verbatim, so the table must exist.
+-- #824: the subject-first directory function targets customers; this harness
+-- replays that function from the baseline, so the table must exist.
 CREATE TABLE IF NOT EXISTS openrails.customers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
@@ -861,29 +862,34 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
 
-	// #824: the PSP-ownership preflight goes through the SECURITY DEFINER
-	// directory function, so this hand-written schema replays the REAL text of
-	// migration 0016 rather than hand-copying (and eventually drifting from) it.
+	// #824 / or#880: the PSP-ownership preflight goes through the SECURITY
+	// DEFINER directory functions, and the manifest loader writes the custodian
+	// registry. Both are replayed from the REAL baseline definitions rather than
+	// hand-copied (and eventually drifted from) here.
 	_, err = pool.Exec(ctx, `DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
 			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
 		END IF;
 	END $$;`)
 	require.NoError(t, err)
-	directoryDDL, err := postgresmigrations.FS.ReadFile("0016_cross_merchant_directory.up.sql")
+	directoryDDL, err := postgresmigrations.BaselineObjects(
+		"current_merchant_id",
+		"assert_cross_merchant_reader",
+		"psp_owner_by_identity",
+		"customer_merchant_ids_for_subject",
+		"custodians",
+		"custodian_owner_by_identity",
+	)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, string(directoryDDL))
+	_, err = pool.Exec(ctx, directoryDDL)
 	require.NoError(t, err)
 
-	// or#880: same reasoning — the custodian registry, its composite FK onto
-	// psps and its SECURITY DEFINER directory function are replayed from the
-	// REAL migration text rather than hand-copied here.
-	for _, name := range []string{"0053_custodian_registry.up.sql", "0054_validate_psps_custodian_fk.up.sql"} {
-		ddl, rerr := postgresmigrations.FS.ReadFile(name)
-		require.NoError(t, rerr)
-		_, eerr := pool.Exec(ctx, string(ddl))
-		require.NoErrorf(t, eerr, "apply %s", name)
-	}
+	// The custody reference onto psps, which this harness's own psps table
+	// declares without it (custodians is created above, after psps).
+	_, err = pool.Exec(ctx, `ALTER TABLE openrails.psps
+		ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (custodian_id, merchant_id)
+		REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT`)
+	require.NoError(t, err)
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723

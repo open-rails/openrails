@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// loadBaselineMigration reads the raw SQL of the consolidated baseline (001) from the embedded FS.
-// Originally targeted migration 028; after squashing 001..029 the FK constraints live in 001.
+// loadBaselineMigration reads the raw SQL of the consolidated baseline from the embedded FS.
 func loadBaselineMigration(t *testing.T) string {
 	t.Helper()
 	b, err := FS.ReadFile("0001_schema.up.sql")
@@ -16,10 +15,8 @@ func loadBaselineMigration(t *testing.T) string {
 	return string(b)
 }
 
-// TestMerchantFKBackfillConstraintsPresent asserts that the consolidated baseline (001)
+// TestMerchantFKBackfillConstraintsPresent asserts that the consolidated baseline
 // contains ON DELETE RESTRICT merchant FKs for every core table.
-// Originally validated migration 028; after squashing 001..029 into a single
-// baseline the check now targets 0001_schema.up.sql.
 // This is a static SQL-text test (no live DB required); the integration test
 // suite (scripts/test_integration.sh) verifies the constraints actually apply.
 func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
@@ -57,15 +54,14 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 		{"custom_credit_types", "custom_credit_types_merchant_fk"},
 		{"notification_queue", "notification_queue_merchant_fk"},
 		{"tier_schedules", "tier_schedules_merchant_fk"},
-		// payer_spend_limits was dropped by 0048 (or#897). Its replacements
-		// (billing_policies / billing_policy_bindings) are created there, not in the
-		// baseline, so their FKs are pinned by the whole-schema guards in
-		// merchant_aware_schema_test.go rather than by this baseline-scoped list.
+		// payer_spend_limits is gone (or#897); billing_policies /
+		// billing_policy_bindings replaced it and carry the same FK doctrine.
+		{"billing_policies", "billing_policies_merchant_fk"},
 		{"invoker_spend_limits", "invoker_spend_limits_merchant_fk"},
 		{"solana_subscriptions", "solana_subscriptions_merchant_fk"},
 		{"merchant_deks", "merchant_deks_merchant_fk"},
 		{"merchant_secrets", "merchant_secrets_merchant_fk"},
-		{"merchant_exports", "merchant_exports_merchant_fk"},
+		{"merchant_purge_inventories", "merchant_purge_inventories_merchant_fk"},
 	}
 
 	for _, c := range cases {
@@ -150,7 +146,7 @@ func TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables(t *testing.T) {
 	alreadyCovered := []string{
 		"customers_merchant_id_fkey",
 		"merchant_configurations_merchant_fk",
-		"rail_merchant_accounts_merchant_fk",
+		"psps_merchant_fk",
 		"rail_mutation_logs_merchant_fk",
 		"rail_refresh_watermarks_merchant_fk",
 	}

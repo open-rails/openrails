@@ -35,31 +35,36 @@ func (allowAllDestructive) AllowDestructive(context.Context, uuid.UUID) (bool, s
 	return true, ""
 }
 
-// applyDirectoryFunctionMigration replays the REAL text of migration 0016 onto
-// this package's hand-written schema, so the #824 cross-merchant directory
-// functions cannot drift from what production runs. schemaDDL below is a
+// applyDirectoryFunctionMigration replays the REAL baseline definitions of the
+// #824 cross-merchant directory functions onto this package's hand-written
+// schema, so they cannot drift from what production runs. schemaDDL below is a
 // deliberate minimal subset of the migrated schema; a hand-copied function body
 // here would be exactly the divergence that let #824 hide behind
 // routes_merchant_webhook_integration_test.go's bespoke openrails.psps.
 func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	// 0016 GRANTs to openrails_app, which only 0001 creates.
+	// The functions GRANT to openrails_app, which only the baseline creates.
 	_, err := pool.Exec(ctx, `DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
 			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
 		END IF;
 	END $$;`)
 	require.NoError(t, err)
-	sql, err := postgresmigrations.FS.ReadFile("0016_cross_merchant_directory.up.sql")
+	sql, err := postgresmigrations.BaselineObjects(
+		"current_merchant_id",
+		"assert_cross_merchant_reader",
+		"psp_owner_by_identity",
+		"customer_merchant_ids_for_subject",
+	)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, string(sql))
+	_, err = pool.Exec(ctx, sql)
 	require.NoError(t, err)
 }
 
 // schemaDDL stands up the minimal openrails.* schema the merchant service touches:
 // the merchant directory (with #225 columns), one representative merchant-owned table
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
-// tables. It mirrors migrations 039 + 041 for the columns under test.
+// tables. The columns under test mirror the baseline's shapes.
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 
@@ -83,8 +88,7 @@ CREATE TABLE IF NOT EXISTS openrails.entitlements (
 CREATE TABLE IF NOT EXISTS openrails.customers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id UUID NOT NULL,
-    -- #824: the subject-first directory lookup and its index live in 0016,
-    -- which this harness replays verbatim.
+    -- #824: the subject-first directory lookup is replayed from the baseline.
     subject     TEXT
 );
 

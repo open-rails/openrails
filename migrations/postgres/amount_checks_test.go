@@ -7,14 +7,11 @@ import (
 	"testing"
 )
 
-// TestAmountValueChecks asserts that the consolidated baseline (001) contains
-// the non-negative CHECK constraint on prices.amount and explicitly does NOT
+// TestAmountValueChecks asserts that the consolidated baseline contains the
+// non-negative CHECK constraint on prices.amount and explicitly does NOT
 // contain CHECKs on payments.amount or payments.list_amount (those columns
 // legitimately hold negative values for refund rows — see reconciliation
 // comments and payments schema).
-//
-// Originally validated migration 029; after squashing 001..029 into a single
-// baseline the check now targets 0001_schema.up.sql.
 //
 // This is a static test: it validates the migration file content, not a live
 // database. Run `bash scripts/test_integration.sh ./migrations/postgres` to
