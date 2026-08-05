@@ -206,17 +206,39 @@ func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider
 	return out, nil
 }
 
+// autoResolveBatch bounds one auto-resolve statement (or#837). The whole
+// backlog still resolves — the loop below runs until a short batch — but as
+// many short transactions instead of one that holds the findings table for the
+// length of the backlog.
+const autoResolveBatch = 1000
+
 func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
 	names := make([]string, 0, len(types))
 	for _, t := range types {
 		names = append(names, string(t))
 	}
 	providerStr := string(provider)
-	return s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
-		Provider:     &providerStr,
-		RunID:        &runID,
-		FindingTypes: names,
-	})
+	var total int64
+	for {
+		n, err := s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
+			MerchantID:   tid.UUID(),
+			Provider:     &providerStr,
+			RunID:        &runID,
+			FindingTypes: names,
+			RowLimit:     autoResolveBatch,
+		})
+		total += n
+		if err != nil {
+			return total, err
+		}
+		if n < autoResolveBatch {
+			return total, nil
+		}
+	}
 }
 
 func (s *PGStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error {

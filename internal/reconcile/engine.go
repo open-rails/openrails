@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -428,7 +429,17 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// produces no absence findings to guard.
 	traits := traitsFor(provider)
 	if traits.absenceMeansCancelled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
-		if tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive); tripped {
+		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
+		// or#837: the ratio is emitted on EVERY absence-capable pass, not only
+		// when it trips. A breaker whose only trace is the moment it fires
+		// cannot be trended, so nobody sees the roster degrading toward the
+		// threshold until it has already halted a merchant.
+		opsmetric.Emit(ctx, opsmetric.MetricRosterRatio, log.Fields{
+			"provider": string(provider), "remote_live": len(snap.Subscriptions),
+			"local_live": localLive, "ratio": ratioOf(len(snap.Subscriptions), localLive),
+			"threshold": e.rosterBreaker().ratio(), "tripped": tripped,
+		})
+		if tripped {
 			rep.Aborted = true
 			return rep, nil, nil, nil, errors.New(reason)
 		}
@@ -461,6 +472,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// needs) and halts the merchant.
 	plannedCancels := countPlannedCancellations(findings)
 	capExceeded, capReason := e.CancelBudget.Exceeded(plannedCancels, localLive)
+	opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
+		"provider": string(provider), "planned_cancellations": plannedCancels,
+		"local_live": localLive, "allowed": e.CancelBudget.Limit(localLive),
+		"capped": capExceeded, "path": "pull",
+	})
 	if capExceeded {
 		findings = append(findings, cancellationCapFinding(provider, plannedCancels, localLive, len(snap.Subscriptions), capReason))
 	}

@@ -266,22 +266,38 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE evidence->>'provider' = $1
-  AND status IN ('reconcile_required', 'requires_review')
-  AND last_seen_run <> $2
-  AND finding_type = ANY ($3::text[])
+WHERE ctid IN (
+    SELECT f.ctid FROM openrails.reconciliation_findings f
+    WHERE f.merchant_id = $1::uuid
+      AND f.evidence->>'provider' = $2
+      AND f.status IN ('reconcile_required', 'requires_review')
+      AND f.last_seen_run <> $3
+      AND f.finding_type = ANY ($4::text[])
+    LIMIT $5::int
+)
 `
 
 type AutoResolveVanishedReconciliationFindingsParams struct {
+	MerchantID   uuid.UUID
 	Provider     *string
 	RunID        *uuid.UUID
 	FindingTypes []string
+	RowLimit     int32
 }
 
 // Findings of the given state-roster types absent from the just-completed run
 // covering their provider "vanished on their own" (design decision 1).
+// or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
+// no merchant predicate at all — a long transaction on a big backlog, and a
+// cross-merchant write the moment it ran on a BYPASSRLS connection.
 func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings, arg.Provider, arg.RunID, arg.FindingTypes)
+	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings,
+		arg.MerchantID,
+		arg.Provider,
+		arg.RunID,
+		arg.FindingTypes,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -931,13 +947,15 @@ WHERE s.merchant_id = $1::uuid
         AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
              OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
-ORDER BY s.id
+ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+LIMIT $4::int
 `
 
 type ListDeadSubsWithLiveEntitlementsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListDeadSubsWithLiveEntitlementsRow struct {
@@ -971,8 +989,15 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 //	terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
 //
 // customer_id nullable: NULL = merchant-wide sweep.
+// or#837: LONGEST-DEAD first, capped — the overrun that has been granting
+// unentitled access the longest is the one a truncated pass must repair.
 func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg ListDeadSubsWithLiveEntitlementsParams) ([]ListDeadSubsWithLiveEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1072,13 +1097,15 @@ WHERE s.merchant_id = $1::uuid
      OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
          AND s.grace_ends_at < $3::timestamptz AND s.next_retry_at IS NULL)
       )
-ORDER BY s.current_period_ends_at
+ORDER BY s.current_period_ends_at, s.id
+LIMIT $4::int
 `
 
 type ListLapsedSubscriptionsWithEvidenceParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListLapsedSubscriptionsWithEvidenceRow struct {
@@ -1109,8 +1136,17 @@ type ListLapsedSubscriptionsWithEvidenceRow struct {
 //	                           (billing DID happen; the advance path owns it)
 //	watermark_newer_than_period_end — provider truth synced since the lapse
 //	                           and saw no renewal (ownership)
+//
+// or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
+// gets a BOUNDED pass that drains from the front instead of one scan whose
+// size is the book; the transitions it applies remove rows from the cohort.
 func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg ListLapsedSubscriptionsWithEvidenceParams) ([]ListLapsedSubscriptionsWithEvidenceRow, error) {
-	rows, err := q.db.Query(ctx, listLapsedSubscriptionsWithEvidence, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listLapsedSubscriptionsWithEvidence,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1338,19 +1374,27 @@ WHERE merchant_id = $1::uuid
   AND deleted_at IS NULL
   AND status = 'pending'
   AND created_at < $3::timestamptz
-ORDER BY created_at
+ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListStalePendingSubscriptionsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Cutoff     time.Time
+	RowLimit   int32
 }
 
 // #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 // never confirmed within the threshold (cutoff = now - pendingStaleAfter).
+// or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
 func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStalePendingSubscriptions, arg.MerchantID, arg.CustomerID, arg.Cutoff)
+	rows, err := q.db.Query(ctx, listStalePendingSubscriptions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Cutoff,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1427,13 +1471,15 @@ WHERE e.merchant_id = $1::uuid
           AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
-ORDER BY e.id
+ORDER BY e.start_at, e.id
+LIMIT $4::int
 `
 
 type ListUnjustifiedEntitlementWindowsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListUnjustifiedEntitlementWindowsRow struct {
@@ -1484,8 +1530,15 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 // grouped by status comparing end_at against GREATEST(current_period_ends_at,
 // ended_at). This query is the union of both, restricted to proven-dead
 // sources. customer_id nullable: NULL = merchant-wide sweep.
+// or#837: oldest window first, capped. Surface-only findings, so truncation
+// delays an operator decision rather than losing one.
 func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg ListUnjustifiedEntitlementWindowsParams) ([]ListUnjustifiedEntitlementWindowsRow, error) {
-	rows, err := q.db.Query(ctx, listUnjustifiedEntitlementWindows, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listUnjustifiedEntitlementWindows,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

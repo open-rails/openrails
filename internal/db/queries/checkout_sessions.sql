@@ -75,13 +75,19 @@ LIMIT 1;
 -- Retention sweep (or#877 B4): one pass per merchant off the directory walk,
 -- with the merchant predicate written out so it stays scoped on a BYPASSRLS
 -- connection too.
+-- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL;
+WHERE deleted_at IS NULL
+  AND ctid IN (
+    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
+      AND cs.status IN ('created', 'requires_action')
+      AND cs.deleted_at IS NULL
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
 -- checkout sessions for a scope. Detection (read-only) for the Convergence Engine.

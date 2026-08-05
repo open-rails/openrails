@@ -57,15 +57,28 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 -- implied: the sweep walks the merchant directory and runs one pass per
 -- merchant, and an unqualified DELETE would be a cross-merchant delete the
 -- moment it ran on a BYPASSRLS connection (a superuser self-host, a test).
+--
+-- or#837: BATCHED. row_limit bounds one statement (and so one transaction);
+-- the caller loops until a short batch comes back. A merchant with a year of
+-- unswept notifications used to be one DELETE holding a transaction — and the
+-- table's dead tuples — open for as long as it took.
 -- name: DeleteSeenNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND seen = true AND created_at < sqlc.arg(cutoff)::timestamptz;
+WHERE ctid IN (
+    SELECT nq.ctid FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND nq.seen = true AND nq.created_at < sqlc.arg(cutoff)::timestamptz
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- name: DeleteNotificationsBefore :execrows
 DELETE FROM openrails.notification_queue
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND created_at < sqlc.arg(cutoff)::timestamptz;
+WHERE ctid IN (
+    SELECT nq.ctid FROM openrails.notification_queue nq
+    WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND nq.created_at < sqlc.arg(cutoff)::timestamptz
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- #789: dedupe guard for the converge NOTIFY pass — any premium_ended row
 -- created at/after the window close means the customer was already told.

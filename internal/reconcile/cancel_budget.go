@@ -149,6 +149,16 @@ func (r RosterBreaker) Implausible(provider Provider, remoteLive, localLive int)
 		provider, remoteLive, localLive, r.ratio()*100, localLive)
 }
 
+// ratioOf is the breaker's own quantity — remote live over local live — as a
+// number an alert rule can threshold. Zero local live has no ratio; report 1
+// (perfectly plausible) rather than a division by zero.
+func ratioOf(remoteLive, localLive int) float64 {
+	if localLive <= 0 {
+		return 1
+	}
+	return float64(remoteLive) / float64(localLive)
+}
+
 // countPlannedCancellations counts the decider transitions in a diff that would
 // terminally cancel a local subscription (and revoke its entitlements).
 func countPlannedCancellations(findings []Finding) int {

@@ -111,6 +111,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/reconcile/cancel_budget.go:Limit":                       "math.Floor over a COUNT of subscriptions the pass may cancel",
 		"internal/reconcile/cancel_budget.go:RosterBreaker":               "Ratio is a remote/local roster-size ratio",
 		"internal/reconcile/cancel_budget.go:ratio":                       "returns that ratio",
+		"internal/reconcile/cancel_budget.go:ratioOf":                      "remote/local roster-size ratio emitted as an alerting metric, not an amount",
 		"internal/reconcile/cancel_budget.go:Implausible":                 "compares two roster COUNTS against the ratio",
 		"internal/reconcile/engine.go:Engine":                             "CircuitBreakerRatio is the roster-size ratio above",
 		"internal/reconcile/store.go:EpisodeSummary":                      "TotalDays is an error-day DURATION total, not an amount",

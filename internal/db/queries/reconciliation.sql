@@ -169,6 +169,9 @@ ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
 -- covering their provider "vanished on their own" (design decision 1).
+-- or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
+-- no merchant predicate at all — a long transaction on a big backlog, and a
+-- cross-merchant write the moment it ran on a BYPASSRLS connection.
 -- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
@@ -176,10 +179,15 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE evidence->>'provider' = sqlc.arg(provider)
-  AND status IN ('reconcile_required', 'requires_review')
-  AND last_seen_run <> sqlc.arg(run_id)
-  AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
+WHERE ctid IN (
+    SELECT f.ctid FROM openrails.reconciliation_findings f
+    WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND f.evidence->>'provider' = sqlc.arg(provider)
+      AND f.status IN ('reconcile_required', 'requires_review')
+      AND f.last_seen_run <> sqlc.arg(run_id)
+      AND f.finding_type = ANY (sqlc.arg(finding_types)::text[])
+    LIMIT sqlc.arg(row_limit)::int
+);
 
 -- life.provider_intent.stuck findings recover subject-first: an open finding
 -- whose intent no longer meets the stuck criteria (executed, superseded, or
@@ -574,7 +582,11 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
      OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
          AND s.grace_ends_at < sqlc.arg(now)::timestamptz AND s.next_retry_at IS NULL)
       )
-ORDER BY s.current_period_ends_at;
+-- or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
+-- gets a BOUNDED pass that drains from the front instead of one scan whose
+-- size is the book; the transitions it applies remove rows from the cohort.
+ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 -- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
@@ -585,7 +597,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL
   AND status = 'pending'
   AND created_at < sqlc.arg(cutoff)::timestamptz
-ORDER BY created_at;
+-- or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
@@ -728,7 +742,10 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
              OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
   )
-ORDER BY s.id;
+-- or#837: LONGEST-DEAD first, capped — the overrun that has been granting
+-- unentitled access the longest is the one a truncated pass must repair.
+ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector
 -- (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
@@ -817,7 +834,10 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
           AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
-ORDER BY e.id;
+-- or#837: oldest window first, capped. Surface-only findings, so truncation
+-- delays an operator decision rather than losing one.
+ORDER BY e.start_at, e.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #690/#691 `verification_pressure` gauge input: subscriptions parked (or
 -- stuck) in `unknown` whose recorded paid-through has passed — standing access

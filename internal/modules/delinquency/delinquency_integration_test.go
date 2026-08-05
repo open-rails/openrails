@@ -431,7 +431,7 @@ func TestHostLifecycleFeedAckDiscipline(t *testing.T) {
 	// Pruning must not touch an UNACKED event: an unread shutoff instruction is
 	// undone work, not garbage.
 	n, err := q.DeleteDeliveredHostLifecycleEventsBefore(e.ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
-		MerchantID: e.merchant.UUID(), Cutoff: now.Add(365 * 24 * time.Hour),
+		MerchantID: e.merchant.UUID(), Cutoff: now.Add(365 * 24 * time.Hour), RowLimit: 100,
 	})
 	require.NoError(t, err)
 	require.Zero(t, n)
@@ -445,7 +445,7 @@ func TestHostLifecycleFeedAckDiscipline(t *testing.T) {
 	require.Empty(t, e.events(t), "an acked event leaves the pending feed")
 
 	n, err = q.DeleteDeliveredHostLifecycleEventsBefore(e.ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
-		MerchantID: e.merchant.UUID(), Cutoff: now.Add(time.Hour),
+		MerchantID: e.merchant.UUID(), Cutoff: now.Add(time.Hour), RowLimit: 100,
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)

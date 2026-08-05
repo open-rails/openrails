@@ -147,22 +147,29 @@ func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheck
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1
-WHERE merchant_id = $2::uuid
-  AND expires_at IS NOT NULL AND expires_at < $1::timestamptz
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
+WHERE deleted_at IS NULL
+  AND ctid IN (
+    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    WHERE cs.merchant_id = $2::uuid
+      AND cs.expires_at IS NOT NULL AND cs.expires_at < $1::timestamptz
+      AND cs.status IN ('created', 'requires_action')
+      AND cs.deleted_at IS NULL
+    LIMIT $3::int
+)
 `
 
 type ExpireCheckoutSessionsParams struct {
 	Now        time.Time
 	MerchantID uuid.UUID
+	RowLimit   int32
 }
 
 // Retention sweep (or#877 B4): one pass per merchant off the directory walk,
 // with the merchant predicate written out so it stays scoped on a BYPASSRLS
 // connection too.
+// or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckoutSessionsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID)
+	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

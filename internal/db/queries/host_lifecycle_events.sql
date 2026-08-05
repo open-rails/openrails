@@ -28,8 +28,13 @@ SET delivered_at = COALESCE(delivered_at, sqlc.arg(now)::timestamptz)
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND id = sqlc.arg(id);
 
+-- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
 DELETE FROM openrails.host_lifecycle_events
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND delivered_at IS NOT NULL
-  AND delivered_at < sqlc.arg(cutoff)::timestamptz;
+WHERE ctid IN (
+    SELECT hle.ctid FROM openrails.host_lifecycle_events hle
+    WHERE hle.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND hle.delivered_at IS NOT NULL
+      AND hle.delivered_at < sqlc.arg(cutoff)::timestamptz
+    LIMIT sqlc.arg(row_limit)::int
+);
