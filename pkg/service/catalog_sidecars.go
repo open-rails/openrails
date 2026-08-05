@@ -67,7 +67,6 @@ type CatalogCreditPurchasePriceSpec struct {
 	PSPs       []string        `json:"psps,omitempty"`
 	InputMin   int64           `json:"input_min,omitempty"`
 	InputMax   int64           `json:"input_max,omitempty"`
-	Round      string          `json:"round,omitempty"`
 	Price      json.RawMessage `json:"price"`
 }
 
@@ -291,10 +290,10 @@ func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_purchase_prices
-    (merchant_id, product_id, ordinal, credit_key, currency, rails, input_min, input_max, round, price)
-VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, NULLIF($9, ''), $10::jsonb)`,
+    (merchant_id, product_id, ordinal, credit_key, currency, rails, input_min, input_max, price)
+VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9::jsonb)`,
 			merchantID, productID, spec.Ordinal, strings.TrimSpace(spec.CreditKey), strings.TrimSpace(spec.Currency),
-			providers, spec.InputMin, spec.InputMax, strings.TrimSpace(spec.Round), string(spec.Price)); err != nil {
+			providers, spec.InputMin, spec.InputMax, string(spec.Price)); err != nil {
 			return fmt.Errorf("insert credit purchase %q #%d: %w", spec.ProductKey, spec.Ordinal, err)
 		}
 	}

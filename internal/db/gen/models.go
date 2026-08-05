@@ -202,7 +202,6 @@ type OpenrailsCatalogCreditPurchasePrice struct {
 	Rails      []string
 	InputMin   int64
 	InputMax   int64
-	Round      *string
 	Price      []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time

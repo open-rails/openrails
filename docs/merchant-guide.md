@@ -111,7 +111,6 @@ or credits → $):
             psps: [stripe]
             input_min: 5_000_000        # $5 minimum spend
             input_max: 500_000_000
-            round: down
             model: tiered
             tiered:
               mode: graduated
@@ -126,7 +125,7 @@ or credits → $):
 | Model | Cost | Use for |
 |---|---|---|
 | `flat` | fixed amount | base fees ("$5/mo includes…") |
-| `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
+| `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); `round: up\|down\|half_up` (default `half_up`) picks the mode, declared inside `per_unit` — the one place it is read; optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
 | `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; prefer graduated — volume has price cliffs and doesn't invert |
 | `package` | `ceil((qty − free_units)/package_size) × amount` | block pricing, round-up-to-next-unit |
 

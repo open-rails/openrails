@@ -212,7 +212,6 @@ products:
       - currency: usd
         psps: [stripe]
         input_min: 5_000_000
-        round: down
         model: tiered
         tiered:
           mode: graduated
@@ -258,6 +257,78 @@ products:
 	_, err := Load(writeManifest(t, body))
 	if err == nil || !strings.Contains(err.Error(), "graduated mode") {
 		t.Fatalf("want volume-mode rejection, got %v", err)
+	}
+}
+
+// or#823: the top-level `round:` on a credit top-up price was validated and
+// then dropped — ratePrice() never carried it, and the column it reached was
+// read by nothing. It is retired, and a manifest still declaring it must fail
+// to load rather than be silently ignored. Rounding is declared where it is
+// read: inside per_unit.
+func TestCreditPurchase_RejectsRetiredTopLevelRound(t *testing.T) {
+	body := `
+version: 1
+credit_balances:
+  - {key: ai-image-gen, unit: ai-image-credit}
+products:
+  - key: topup
+    display_name: Topup
+    credits: [{key: ai-image-gen}]
+    prices:
+      - currency: usd
+        round: down
+        model: per_unit
+        per_unit: {unit_amount: 10_000}
+`
+	_, err := Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "round") {
+		t.Fatalf("want the retired top-level round to fail the load, got %v", err)
+	}
+}
+
+// The rounding that IS read: per_unit.round reaches ChargeModel through
+// ratePrice()/ToChargeModel(), so a non-default mode changes the quoted micros.
+// Pinned here at the manifest boundary; the runtime quote path is pinned by
+// money's TestCatalogCreditPurchase_PerUnitRoundModeChangesTheQuote.
+func TestCreditPurchase_PerUnitRoundModeReachesTheChargeModel(t *testing.T) {
+	manifest := func(mode string) string {
+		return `
+version: 1
+credit_balances:
+  - {key: ai-image-gen, unit: ai-image-credit}
+products:
+  - key: topup
+    display_name: Topup
+    credits: [{key: ai-image-gen}]
+    prices:
+      - currency: usd
+        model: per_unit
+        per_unit: {unit_amount: 10_000, divide_by: 3, round: ` + mode + `}
+`
+	}
+	for _, c := range []struct {
+		mode string
+		want int64
+	}{
+		{"up", 3_333_334},
+		{"down", 3_333_333},
+		{"half_up", 3_333_333},
+	} {
+		m, err := Load(writeManifest(t, manifest(c.mode)))
+		if err != nil {
+			t.Fatalf("round %q: Load: %v", c.mode, err)
+		}
+		cm := productByKey(t, m, "topup").Prices[0].ratePrice().ToChargeModel()
+		if cm.Round != c.mode {
+			t.Fatalf("round %q did not reach the charge model, got %q", c.mode, cm.Round)
+		}
+		got, err := cm.Rate(1_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Fatalf("round %q rated 1000 units at %d micros, want %d", c.mode, got, c.want)
+		}
 	}
 }
 

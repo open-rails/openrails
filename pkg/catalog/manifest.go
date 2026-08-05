@@ -204,10 +204,11 @@ type Price struct {
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
 
 	// Variable credit top-up offer fields. Fixed catalog prices keep using the
-	// UnitAmount/Duration shape above.
+	// UnitAmount/Duration shape above. Rounding is declared where it applies —
+	// per_unit.round — not here (or#823: a top-level `round:` was validated and
+	// then never carried into the price, so it is retired and now fails to load).
 	InputMin int64         `json:"input_min,omitempty" yaml:"input_min,omitempty"`
 	InputMax int64         `json:"input_max,omitempty" yaml:"input_max,omitempty"`
-	Round    string        `json:"round,omitempty" yaml:"round,omitempty"`
 	Model    string        `json:"model,omitempty" yaml:"model,omitempty"`
 	Flat     *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
 	PerUnit  *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
