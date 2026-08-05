@@ -21,7 +21,7 @@ import (
 )
 
 // #730: manual dunning rebills arm NMI credentials the way production does —
-// a rail_merchant_accounts row + scoped secret in the merchant-secrets store,
+// a psps row + scoped secret in the merchant-secrets store,
 // resolved through the ONE #725 builder AT CHARGE TIME. Real Postgres store;
 // only the external NMI gateway is a fake HTTP server.
 

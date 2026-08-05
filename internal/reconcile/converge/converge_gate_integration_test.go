@@ -35,7 +35,7 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			for _, table := range []string{"reconciliation_state", "rail_merchant_accounts"} {
+			for _, table := range []string{"reconciliation_state", "psps"} {
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.`+table+` WHERE merchant_id=$1`, gateMerchant.UUID())
 			}
 			return nil

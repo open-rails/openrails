@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// or#890: SeedRailMerchantAccounts used to carry only the natural key
+// or#890: SeedPSPs used to carry only the natural key
 // (rail/environment/account_id), so psps.key stayed NULL on every seeded
 // account and the #848 wire selector — "declared PSP key wins, unambiguous
 // rail-kind fallback" — could never name one. A merchant's SECOND armed PSP
@@ -28,7 +28,7 @@ import (
 // This drives the real seeder into a real standalone runtime and asserts both
 // halves of the selector against two armed NMI PSPs: each declared key picks
 // ITS account, and the bare rail kind refuses with both keys named.
-func TestSeedRailMerchantAccountsStampsPSPKeyForWireSelection(t *testing.T) {
+func TestSeedPSPsStampsPSPKeyForWireSelection(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
@@ -55,7 +55,7 @@ func TestSeedRailMerchantAccountsStampsPSPKeyForWireSelection(t *testing.T) {
 	accountA := fmt.Sprintf("gw-a-%d", nano)
 	accountB := fmt.Sprintf("gw-b-%d", nano)
 
-	SeedRailMerchantAccounts(ctx, t, rt, mid, config.PSPSet{
+	SeedPSPs(ctx, t, rt, mid, config.PSPSet{
 		keyA: {Rail: models.RailNMI, AccountID: accountA, NMI: &config.NMIRailConfig{SecurityKey: "sk-" + accountA}},
 		keyB: {Rail: models.RailNMI, AccountID: accountB, NMI: &config.NMIRailConfig{SecurityKey: "sk-" + accountB}},
 	})

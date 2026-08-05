@@ -145,7 +145,7 @@ func TestSubscriptionTwinsOfOneProviderSubscriptionCannotCoexist(t *testing.T) {
 
 // Off-rail money is the one lane that legitimately carries no PSP, and it is
 // classified explicitly rather than defaulted: a channel has no adapter, no
-// credentials and no provider account, so there is nothing to attribute.
+// credentials and no PSP, so there is nothing to attribute.
 func TestOffRailChannelPaymentsMayCarryNoPSP(t *testing.T) {
 	f := newPSPFixture(t)
 

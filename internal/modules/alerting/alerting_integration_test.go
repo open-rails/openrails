@@ -66,7 +66,7 @@ func seedMerchant(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 	exec(t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid, slug)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		for _, tbl := range []string{"merchant_notifications", "alert_rules", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "rail_merchant_accounts", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs", "finding_digest_state"} {
+		for _, tbl := range []string{"merchant_notifications", "alert_rules", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "psps", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs", "finding_digest_state"} {
 			_, _ = pool.Exec(ctx, `DELETE FROM openrails.`+tbl+` WHERE merchant_id = $1`, mid)
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid)

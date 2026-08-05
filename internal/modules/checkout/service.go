@@ -279,7 +279,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		return nil, errors.New("rail is required")
 	}
 
-	// #704: pin the active provider account for this rail so payment /
+	// #704: pin the active PSP for this rail so payment /
 	// subscription / payment-method rows created by this flow carry
 	// psp_id provenance (nil when unresolvable — never invented).
 	ctx = s.stampPSP(ctx, rail)

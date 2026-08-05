@@ -28,7 +28,7 @@ import (
 
 type convergeRunFixture struct {
 	pspID    uuid.UUID
-	binding  RailMerchantAccountBinding
+	binding  PSPBinding
 	subs     []uuid.UUID
 	railSubs []string
 	customer []uuid.UUID
@@ -101,7 +101,7 @@ func seedConvergeCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n i
 			return nil
 		})
 	})
-	f.binding = RailMerchantAccountBinding{ID: f.pspID, Rail: "nmi", AccountID: "acct-cr-" + f.suffix}
+	f.binding = PSPBinding{ID: f.pspID, Rail: "nmi", AccountID: "acct-cr-" + f.suffix}
 	return f
 }
 
@@ -289,7 +289,7 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 			Mode:        ModeEnforce,
 			Mutations:   &LocalMutationPolicy{Overwrite: true},
 			Providers:   []Provider{ProviderNMI},
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: f.binding},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: f.binding},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 1, Pulled: 1, Binding: f.binding}},
 		})
 		if err != nil {
@@ -463,7 +463,7 @@ func TestConvergeEnforceRollback_ReportsFiredIntentsAsIrreversibleDivergence(t *
 			Mode:        ModeEnforce,
 			Mutations:   &LocalMutationPolicy{Overwrite: true},
 			Providers:   []Provider{ProviderNMI},
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: f.binding},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: f.binding},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 1, Pulled: 1, Binding: f.binding}},
 		})
 		if err != nil {
@@ -527,7 +527,7 @@ func TestConvergeEnforceRollback_InFlightIntentIsAmbiguousNotUndone(t *testing.T
 			Mode:        ModeEnforce,
 			Mutations:   &LocalMutationPolicy{Overwrite: true},
 			Providers:   []Provider{ProviderNMI},
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: f.binding},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: f.binding},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 1, Pulled: 1, Binding: f.binding}},
 		})
 		if err != nil {
@@ -582,7 +582,7 @@ func TestConvergeEnforce_RefusesWithoutARunRecorder(t *testing.T) {
 			Mode:        ModeEnforce,
 			Mutations:   &LocalMutationPolicy{Overwrite: true},
 			Providers:   []Provider{ProviderNMI},
-			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: f.binding},
+			PSPs:        map[Provider]PSPBinding{ProviderNMI: f.binding},
 			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 1, Pulled: 1, Binding: f.binding}},
 		})
 		require.ErrorContains(t, err, "DestructiveRunRecorder")

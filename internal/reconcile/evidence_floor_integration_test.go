@@ -82,14 +82,14 @@ func enforcingPullEngine(appDB *db.DB, snap *RemoteSnapshot, now time.Time) *Eng
 	}
 }
 
-func runEnforcingPull(t *testing.T, appDB *db.DB, baseCtx context.Context, eng *Engine, psp RailMerchantAccountBinding) {
+func runEnforcingPull(t *testing.T, appDB *db.DB, baseCtx context.Context, eng *Engine, psp PSPBinding) {
 	t.Helper()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := eng.Run(ctx, RunParams{
 			Mode:      ModeEnforce,
 			Mutations: &LocalMutationPolicy{Insert: false, Overwrite: true},
 			Providers: []Provider{ProviderNMI},
-			PSPs:      map[Provider]RailMerchantAccountBinding{ProviderNMI: psp},
+			PSPs:      map[Provider]PSPBinding{ProviderNMI: psp},
 		})
 		return err
 	}))

@@ -20,8 +20,8 @@ func TestLoadNMIWebhookSigningSecretForAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Two NMI accounts on one merchant (mobius primary, paykings secondary).
-	seedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", "100001")
-	seedRailMerchantAccount(t, svc, tn.ID, "nmi", "live", "100002")
+	seedPSP(t, svc, tn.ID, "nmi", "live", "100001")
+	seedPSP(t, svc, tn.ID, "nmi", "live", "100002")
 
 	putSecret := func(accountID, secret string) {
 		name, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
@@ -57,8 +57,8 @@ func TestLoadStripeCredentialsForAccount(t *testing.T) {
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
 
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_new")
-	seedRailMerchantAccount(t, svc, tn.ID, "stripe", "live", "acct_old")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_new")
+	seedPSP(t, svc, tn.ID, "stripe", "live", "acct_old")
 	put := func(accountID, val string) {
 		name, err := PSPSecretName("stripe", "live", accountID, "webhook_signing_secret")
 		require.NoError(t, err)

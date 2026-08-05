@@ -291,7 +291,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.Contains(t, ents, "pro-access")
 
 	// Runtime writes against the plane are refused: rotation is file+reboot.
-	_, err = runtime.Merchants.Secrets().Put(mctx, id, "rail_merchant_accounts/nmi/live/"+gatewayID+"/security_key", "sneaky")
+	_, err = runtime.Merchants.Secrets().Put(mctx, id, "psps/nmi/live/"+gatewayID+"/security_key", "sneaky")
 	require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
 
 	// ---- Rotate: new secret value in the file, new price in the catalog.

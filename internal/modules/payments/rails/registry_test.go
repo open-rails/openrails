@@ -90,8 +90,8 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		if d.OpenRailsDrivenDunning != c.openRailsDunning {
 			t.Errorf("%s: OpenRailsDrivenDunning = %v", c.rail, d.OpenRailsDrivenDunning)
 		}
-		if d.HasRailMerchantAccounts != c.psps {
-			t.Errorf("%s: HasRailMerchantAccounts = %v", c.rail, d.HasRailMerchantAccounts)
+		if d.HasPSPs != c.psps {
+			t.Errorf("%s: HasPSPs = %v", c.rail, d.HasPSPs)
 		}
 		if got := len(MerchantCredentialKeyNames(c.rail)); got != c.merchantKeyCount {
 			t.Errorf("%s: %d merchant-writable keys, want %d", c.rail, got, c.merchantKeyCount)
@@ -154,11 +154,11 @@ func TestLookupNormalizes(t *testing.T) {
 	if _, ok := Lookup(" STRIPE "); !ok {
 		t.Error("Lookup must normalize case/whitespace")
 	}
-	// #630: mobius is a provider-account name on rail nmi, not a rail.
+	// #630: mobius is a PSP name on rail nmi, not a rail.
 	if _, ok := Lookup("mobius"); ok {
 		t.Error("mobius must not resolve to a descriptor")
 	}
-	if HasRemoteCustomer("bogus") || SupportsRailMerchantAccounts("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") {
+	if HasRemoteCustomer("bogus") || SupportsPSPs("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") {
 		t.Error("unknown rails must default to false")
 	}
 	if got := CancelModeFor(&models.Subscription{Rail: "bogus"}, time.Now()); got != CancelModeDestructive {

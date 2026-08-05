@@ -79,7 +79,7 @@ func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID
 		MerchantID: merchantID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reconcile: list rail merchant accounts: %w", err)
+		return nil, fmt.Errorf("reconcile: list PSPs: %w", err)
 	}
 	if len(accounts) == 0 {
 		return nil, nil

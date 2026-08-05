@@ -659,9 +659,9 @@ type ProviderRailAccountConfig struct {
 	// instruments (Stripe pm_, NMI customer vault), which is the common case
 	// and needs no configuration. A key with no matching custodian entry is a
 	// hard error, never an unarmed default.
-	Custodian string                           `yaml:"custodian,omitempty" koanf:"custodian"`
-	Signer    *RailMerchantAccountSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
-	Secrets   map[string]string                `yaml:"secrets,omitempty" koanf:"secrets"`
+	Custodian string            `yaml:"custodian,omitempty" koanf:"custodian"`
+	Signer    *PSPSignerConfig  `yaml:"signer,omitempty" koanf:"signer"`
+	Secrets   map[string]string `yaml:"secrets,omitempty" koanf:"secrets"`
 	// Settings are per-account NON-SECRET runtime knobs, stored on the
 	// psps row (NMI: tokenization_key/tokenization_url;
 	// Solana: rpc_provider, rpc_api_key, tokens,
@@ -669,7 +669,7 @@ type ProviderRailAccountConfig struct {
 	Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
 }
 
-type RailMerchantAccountSignerConfig struct {
+type PSPSignerConfig struct {
 	Mode string `yaml:"mode,omitempty" koanf:"mode"`
 	Key  string `yaml:"key,omitempty" koanf:"key"`
 }
@@ -678,7 +678,7 @@ type RailMerchantAccountSignerConfig struct {
 // (both false) is additive + seed-once. Startup provisioning always uses the
 // default; the destructive tiers are opt-in via the CLI and never run on boot.
 type MerchantManifestReconcileOptions struct {
-	// Insert creates missing merchant/issuer/profile/provider-account/secret
+	// Insert creates missing merchant/issuer/profile/PSP/secret
 	// state declared by the manifest. Manual CLI runs default to plan-only until
 	// this or another mutation flag is set.
 	Insert bool
@@ -689,7 +689,7 @@ type MerchantManifestReconcileOptions struct {
 	// way (they are declarative identity, not rotated out of band).
 	Overwrite bool
 	// Prune deletes secrets that exist for a manifest merchant but are absent
-	// from the manifest, reconciling the secret set to the file. Provider-account
+	// from the manifest, reconciling the secret set to the file. PSP
 	// and issuer removal stay reversible/manual and are not pruned here.
 	Prune bool
 	// SecretStore overrides where manifest secrets reconcile to. MODE 1 (#723)
@@ -698,7 +698,7 @@ type MerchantManifestReconcileOptions struct {
 	// persistent backend, manifest mode uses an EPHEMERAL in-memory store
 	// (validation only; the long-running server seeds its own plane at boot).
 	SecretStore merchants.MerchantSecretStore
-	// IdentityResolver is an optional test/embedding seam for provider account
+	// IdentityResolver is an optional test/embedding seam for PSP
 	// discovery. Production uses the default resolver over provider read-only
 	// identity APIs.
 	IdentityResolver ManifestProviderIdentityResolver
@@ -710,7 +710,7 @@ type MerchantManifestReconcileOptions struct {
 }
 
 type ManifestProviderIdentityResolver interface {
-	ResolveManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error)
+	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error)
 }
 
 type manifestProviderIdentity struct {
@@ -727,7 +727,7 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // (#527). Standalone calls it with a control plane, which creates/ensures the
 // AuthKit permission-group and optional issuer-as-owner before recording
 // permission_group_id. Embedded calls it with only Database, which registers an
-// ownerless merchant row and applies the same profile/provider-account
+// ownerless merchant row and applies the same profile/PSP
 // configuration path without touching AuthKit or startup bootstrap markers.
 type ProvisionMerchantRequest struct {
 	Config        *config.Config
@@ -975,19 +975,19 @@ func sortedMerchantKeys(in map[string]MerchantConfig) []string {
 	return keys
 }
 
-type railMerchantAccountEntry struct {
+type pspEntry struct {
 	key    string
 	rail   string
 	config ProviderRailAccountConfig
 }
 
-func pspEntries(in map[string]PSPConfig) []railMerchantAccountEntry {
+func pspEntries(in map[string]PSPConfig) []pspEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	out := make([]railMerchantAccountEntry, 0, len(in))
+	out := make([]pspEntry, 0, len(in))
 	for _, key := range keys {
 		rails := make([]string, 0, len(in[key]))
 		for rail := range in[key] {
@@ -995,7 +995,7 @@ func pspEntries(in map[string]PSPConfig) []railMerchantAccountEntry {
 		}
 		sort.Strings(rails)
 		for _, rail := range rails {
-			out = append(out, railMerchantAccountEntry{key: key, rail: rail, config: in[key][rail]})
+			out = append(out, pspEntry{key: key, rail: rail, config: in[key][rail]})
 		}
 	}
 	return out
@@ -1330,13 +1330,13 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 
 	for _, entry := range pspEntries(mt.PSPs) {
 		if secretStore == nil {
-			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
+			return fmt.Errorf("merchant bootstrap: PSP secrets require a secret store")
 		}
 		custodianID, err := resolveManifestCustodianReference(entry.rail, entry.config, declaredCustodians)
 		if err != nil {
 			return err
 		}
-		if err := reconcileManifestRailMerchantAccount(ctx, cfg, database, merchantID, slug, entry.key, entry.rail, entry.config, custodianID, secretStore, transit, opts); err != nil {
+		if err := reconcileManifestPSP(ctx, cfg, database, merchantID, slug, entry.key, entry.rail, entry.config, custodianID, secretStore, transit, opts); err != nil {
 			return err
 		}
 	}
@@ -1490,7 +1490,7 @@ func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID me
 		accountID := strings.TrimSpace(entry.config.AccountID)
 		if accountID == "" {
 			if rail != string(models.RailSolana) {
-				return fmt.Errorf("provider account %q account_id is required before pruning secrets", rail)
+				return fmt.Errorf("PSP %q account_id is required before pruning secrets", rail)
 			}
 			if len(entry.config.Secrets) == 0 {
 				continue
@@ -1500,7 +1500,7 @@ func pruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID me
 				return err
 			}
 			if _, ok := secrets.sources["private_key"]; !ok {
-				return fmt.Errorf("provider account %q private_key is required before pruning secrets without account_id", rail)
+				return fmt.Errorf("PSP %q private_key is required before pruning secrets without account_id", rail)
 			}
 			accountID, err = solanaLocalKeypairPublicKey(secrets)
 			if err != nil {
@@ -1555,7 +1555,7 @@ type resolvedManifestRailAccount struct {
 func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (resolvedManifestRailAccount, error) {
 	out := resolvedManifestRailAccount{rail: normalizeManifestRail(rail)}
 	if out.rail == "" {
-		return out, fmt.Errorf("provider account rail is required")
+		return out, fmt.Errorf("PSP rail is required")
 	}
 	environment, err := manifestProviderEnvironment(cfg, account)
 	if err != nil {
@@ -1567,17 +1567,17 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	// instead of being stored inert.
 	if out.rail == string(models.RailSolana) {
 		if err := config.ValidateSolanaAccountSettings(account.Settings); err != nil {
-			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+			return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 		}
 		// or#881: the token declaration is resolved against the built-in mint
 		// registry for THIS account's network, so a restated built-in mint or a
 		// custom token with no mint fails the push instead of at arm time.
 		settings, err := config.ParseSolanaAccountSettings(account.Settings)
 		if err != nil {
-			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+			return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 		}
 		if _, err := solanatokens.ResolveDeclared(manifestSolanaNetwork(environment), settings.Tokens); err != nil {
-			return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+			return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 		}
 	}
 	// or#880: custody has its own declaration now (`custodians:` + the PSP's
@@ -1586,7 +1586,7 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	// on a money path — the reference itself is checked by the caller, which
 	// is the pass that holds the declared custodians.
 	if err := config.RejectRetiredCustodySettings(account.Settings); err != nil {
-		return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 	}
 	secrets, err := newManifestSecretValues(out.rail, account.Secrets)
 	if err != nil {
@@ -1596,13 +1596,13 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	if resolver == nil {
 		resolver = defaultManifestProviderIdentityResolver{}
 	}
-	identity, err := resolver.ResolveManifestRailMerchantAccount(ctx, cfg, out.rail, environment, account, secrets)
+	identity, err := resolver.ResolveManifestPSP(ctx, cfg, out.rail, environment, account, secrets)
 	if err != nil {
 		return out, err
 	}
 	out.identity = identity
 	accountID := strings.TrimSpace(identity.AccountID)
-	// For Solana, manifestProviderSignerEvidence derives the stored provider-account
+	// For Solana, manifestProviderSignerEvidence derives the stored PSP
 	// identity from the signer key; a declared account_id is ignored (warned).
 	signerEvidence, accountID, err := manifestProviderSignerEvidence(ctx, out.rail, accountID, account, secrets, transit)
 	if err != nil {
@@ -1611,13 +1611,13 @@ func resolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	out.signerEvidence = signerEvidence
 	if accountID == "" {
 		if out.rail == string(models.RailSolana) {
-			return out, fmt.Errorf("provider account %q requires signer-derived identity", out.rail)
+			return out, fmt.Errorf("PSP %q requires signer-derived identity", out.rail)
 		}
-		return out, fmt.Errorf("provider account %q requires account_id", out.rail)
+		return out, fmt.Errorf("PSP %q requires account_id", out.rail)
 	}
 	// #697: rail-specific format doctrine (CCBill ids are dash-joined).
 	if err := config.ValidateRailAccountID(models.Rail(out.rail), accountID); err != nil {
-		return out, fmt.Errorf("provider account %q: %w", out.rail, err)
+		return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 	}
 	out.accountID = accountID
 	return out, nil
@@ -1663,7 +1663,7 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	return nil
 }
 
-func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	ra, err := resolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err
@@ -1751,10 +1751,10 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 		found = true
 		return nil
 	}); err != nil {
-		return fmt.Errorf("lookup provider account %s:%s:%s: %w", rail, environment, accountID, err)
+		return fmt.Errorf("lookup PSP %s:%s:%s: %w", rail, environment, accountID, err)
 	}
 	if !found && !opts.Insert {
-		return fmt.Errorf("provider account %s:%s:%s is missing; rerun with --insert to create it", rail, environment, accountID)
+		return fmt.Errorf("PSP %s:%s:%s is missing; rerun with --insert to create it", rail, environment, accountID)
 	}
 	if found && !opts.Overwrite {
 		return reconcileStripeWebhook()
@@ -1775,9 +1775,9 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 	}
 	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
-		return fmt.Errorf("encode provider account evidence: %w", err)
+		return fmt.Errorf("encode PSP evidence: %w", err)
 	}
-	// #650: a provider account belongs to exactly one merchant. Fail with a clear
+	// #650: a PSP belongs to exactly one merchant. Fail with a clear
 	// error if another merchant already owns this identity, rather than letting the
 	// global-uniqueness upsert reject it with an opaque unique-violation under RLS.
 	if err := merchants.AssertPSPUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
@@ -1800,7 +1800,7 @@ func reconcileManifestRailMerchantAccount(ctx context.Context, cfg *config.Confi
 			CustodianID: custodianID,
 		})
 		if err != nil {
-			return fmt.Errorf("upsert provider account %s:%s: %w", rail, accountID, err)
+			return fmt.Errorf("upsert PSP %s:%s: %w", rail, accountID, err)
 		}
 		return nil
 	}); err != nil {
@@ -1834,7 +1834,7 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 		return nil // unconfigured; nothing to verify
 	}
 	if err != nil {
-		return fmt.Errorf("provider account %s:%s:%s: read security_key for test_mode probe: %w", rail, environment, accountID, err)
+		return fmt.Errorf("PSP %s:%s:%s: read security_key for test_mode probe: %w", rail, environment, accountID, err)
 	}
 	securityKey := strings.TrimSpace(sec.Value)
 	if securityKey == "" {
@@ -1860,30 +1860,30 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 	if decision.ProbeErr != nil {
 		log.WithError(decision.ProbeErr).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
-		}).Warnf("⚠️  provider account %s:%s: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)", rail, accountID)
+		}).Warnf("⚠️  PSP %s:%s: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)", rail, accountID)
 		return nil
 	}
 	if !decision.Refuse {
 		log.WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
-		}).Info("provider account: NMI account verified as simulating (test env, #348)")
+		}).Info("PSP: NMI account verified as simulating (test env, #348)")
 		return nil
 	}
 	if decision.Cached {
-		return fmt.Errorf("provider account %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to arm (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
+		return fmt.Errorf("PSP %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to arm (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
 			rail, environment, accountID, decision.CheckedAt.UTC().Format(time.RFC3339), nmi.ProbeVerdictCooldown)
 	}
-	return fmt.Errorf("provider account %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to arm (use the sandbox account credentials, or unset test_mode) (#348)",
+	return fmt.Errorf("PSP %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to arm (use the sandbox account credentials, or unset test_mode) (#348)",
 		rail, environment, accountID)
 }
 
 // manifestProviderSignerEvidence validates the Solana signer and returns signer
-// evidence plus the derived provider-account identity. Solana never needs
+// evidence plus the derived PSP identity. Solana never needs
 // account_id — the stored DB identity is always the signer public key; a declared
 // value is ignored (warned).
 func manifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account ProviderRailAccountConfig, secrets manifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
 	if rail == string(models.RailSolana) && strings.TrimSpace(accountID) != "" {
-		log.Warnf("solana provider account: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
+		log.Warnf("solana PSP: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
 		accountID = ""
 	}
 	if account.Signer == nil {
@@ -1897,7 +1897,7 @@ func manifestProviderSignerEvidence(ctx context.Context, rail, accountID string,
 		return nil, accountID, nil
 	}
 	if rail != string(models.RailSolana) {
-		return nil, "", fmt.Errorf("provider account signer is only supported for solana")
+		return nil, "", fmt.Errorf("PSP signer is only supported for solana")
 	}
 	mode := strings.ToLower(strings.TrimSpace(account.Signer.Mode))
 	switch mode {
@@ -2005,11 +2005,11 @@ func newManifestSecretValues(rail string, sources map[string]string) (manifestSe
 			return out, err
 		}
 		if _, exists := out.sources[canonical]; exists {
-			return out, fmt.Errorf("duplicate provider account secret key %q", canonical)
+			return out, fmt.Errorf("duplicate PSP secret key %q", canonical)
 		}
 		value = strings.TrimSpace(value)
 		if value == "" {
-			return out, fmt.Errorf("provider account secret %s.%s is empty", rail, canonical)
+			return out, fmt.Errorf("PSP secret %s.%s is empty", rail, canonical)
 		}
 		out.sources[canonical] = value
 	}
@@ -2030,7 +2030,7 @@ func (v manifestSecretValues) Resolve(key string, fallback string) (string, erro
 	}
 	value := strings.TrimSpace(source)
 	if value == "" {
-		return "", fmt.Errorf("provider account secret %s.%s is empty", v.rail, canonical)
+		return "", fmt.Errorf("PSP secret %s.%s is empty", v.rail, canonical)
 	}
 	v.values[canonical] = value
 	return value, nil
@@ -2054,7 +2054,7 @@ func (v manifestSecretValues) ResolveIfPresent(key string) (string, bool, error)
 
 type defaultManifestProviderIdentityResolver struct{}
 
-func (defaultManifestProviderIdentityResolver) ResolveManifestRailMerchantAccount(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error) {
+func (defaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets manifestSecretValues) (manifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
 		return manifestProviderIdentity{
 			AccountID: accountID,

@@ -86,7 +86,7 @@ func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
 	`).Scan(&count))
-	require.Zero(t, count, "a refused arm must never persist the provider account row")
+	require.Zero(t, count, "a refused arm must never persist the PSP row")
 }
 
 // TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode is the control:

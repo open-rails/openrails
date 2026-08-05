@@ -29,7 +29,7 @@ type CatalogPushOptions struct {
 	Config  *config.Config
 	PGXPool *pgxpool.Pool
 	// Runtime applies the catalog through an already-bootstrapped embedded
-	// engine. This preserves its armed per-merchant provider accounts and
+	// engine. This preserves its armed per-merchant PSPs and
 	// signers; without it the helper builds an isolated runtime from Config.
 	// The supplied runtime's config is authoritative.
 	Runtime  *Embedded

@@ -112,15 +112,15 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
     replaced_at timestamptz,
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT payment_provider_accounts_pkey PRIMARY KEY (id),
-    CONSTRAINT payment_provider_accounts_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
-    CONSTRAINT payment_provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT payment_provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
+    CONSTRAINT psps_pkey PRIMARY KEY (id),
+    CONSTRAINT psps_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
+    CONSTRAINT psps_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
+    CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
 );
 ALTER TABLE ONLY openrails.psps FORCE ROW LEVEL SECURITY;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_identity ON openrails.psps (merchant_id, rail, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_provider_accounts_global_identity ON openrails.psps (rail, environment, account_id);
-CREATE INDEX IF NOT EXISTS idx_payment_provider_accounts_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_merchant_identity ON openrails.psps (merchant_id, rail, environment, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_identity ON openrails.psps (rail, environment, account_id);
+CREATE INDEX IF NOT EXISTS idx_psps_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
 ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS merchant_isolation ON openrails.psps;
 CREATE POLICY merchant_isolation ON openrails.psps
@@ -354,7 +354,7 @@ func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
 	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
 }
 
-func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testing.T) {
+func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
@@ -375,7 +375,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 	mt.PSPs = map[string]PSPConfig{
 		"solana": {
 			"solana": {
-				Signer: &RailMerchantAccountSignerConfig{Mode: "local_keypair"},
+				Signer: &PSPSignerConfig{Mode: "local_keypair"},
 				Settings: map[string]any{
 					"recipient_wallet": recipientWallet,
 				},
@@ -415,7 +415,7 @@ func TestReconcileMerchantManifestStoresSolanaRailMerchantAccountConfig(t *testi
 }
 
 // #646: the merchant config round-trips — push the complete payload (profile +
-// invoice + delegated-invoker windows + named test/live provider accounts), then
+// invoice + delegated-invoker windows + named test/live PSPs), then
 // dump it back into the same struct shape, with secret VALUES never emitted.
 func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	ctx := context.Background()
@@ -517,7 +517,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		require.Equal(t, derivedEnv, e, "a deployment is all-test or all-live (#882)")
 	}
 
-	// The manifest PSP map key persists as the provider account key.
+	// The manifest PSP map key persists as the PSP key.
 	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT key FROM openrails.psps

@@ -257,11 +257,11 @@ func New(deps Dependencies) (*Server, error) {
 			}
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.CheckoutService.SetRailMerchantAccountSecretResolver(tsvc)
+				deps.Runtime.CheckoutService.SetPSPSecretResolver(tsvc)
 			}
 			if deps.Runtime.RailPaymentMethodService != nil {
 				deps.Runtime.RailPaymentMethodService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.RailPaymentMethodService.SetRailMerchantAccountSecretResolver(tsvc)
+				deps.Runtime.RailPaymentMethodService.SetPSPSecretResolver(tsvc)
 			}
 		}
 
@@ -306,13 +306,13 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Canonical provider-only webhook surface (#650): /v1/webhooks/:provider for NMI/CCBill
 	// (their payloads carry account identity) and /v1/webhooks/:provider/:account_id for
-	// direct Stripe. The handler resolves the provider account from the payload/route, derives
+	// direct Stripe. The handler resolves the PSP from the payload/route, derives
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
 	s.registerWebhookRoutes(mux)
 	// or#893: the merchant-scoped alias (/v1/merchants/:merchant/webhooks/...,
 	// #529) is NOT mounted here. It was a transition alias beside the canonical
-	// surface above; standalone resolves the merchant from provider account
+	// surface above; standalone resolves the merchant from PSP
 	// identity, so a URL slug is a second way to say the same thing. Embedded
 	// hosts still mount it — a pinned merchant has no payload-derived identity
 	// to resolve — via internal/http/embedhttp.

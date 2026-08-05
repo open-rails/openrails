@@ -12,9 +12,9 @@ import (
 
 // NMIClientForExistingSubscription resolves the NMI client that owns an already
 // recorded subscription. New-work selectors must not be used for rows pinned to
-// an archived provider account.
+// an archived PSP.
 // NMIClientSource arms the store-scoped NMI client for a subscription's
-// merchant + stamped provider account (#788 Layer C; satisfied by
+// merchant + stamped PSP (#788 Layer C; satisfied by
 // money.MerchantCollectionAdapterBuilder). ok=false with nil err = the
 // merchant declares no NMI account; err = declared but not armable (fail
 // closed).
@@ -23,7 +23,7 @@ type NMIClientSource interface {
 }
 
 // NMIClientForExistingSubscription resolves the NMI client that owns sub —
-// the #704 stamped provider account when present, else the merchant's pull
+// the #704 stamped PSP when present, else the merchant's pull
 // scope — from the armed psps state (#788).
 func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSource, sub *models.Subscription) (*nmi.NMIClient, string, bool, error) {
 	if sub == nil {

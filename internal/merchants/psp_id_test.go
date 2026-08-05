@@ -2,12 +2,12 @@ package merchants
 
 import "testing"
 
-// TestRailMerchantAccountID pins the #662 provider-account id derivation: a pure
+// TestPSPID pins the #662 PSP id derivation: a pure
 // function of the GLOBAL natural key (rail, environment, account_id), normalized
 // the SAME way the ownership guard and the (rail, environment, account_id)
 // unique index canonicalize it — so the id is identical across environments and
 // fresh rebuilds, and the returned components are exactly what the row stores.
-func TestRailMerchantAccountID(t *testing.T) {
+func TestPSPID(t *testing.T) {
 	base := PspID("nmi", "live", "945280-0000")
 
 	// Canonicalization: rail case/whitespace, and environment aliases, are

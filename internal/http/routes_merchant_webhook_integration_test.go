@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 //
 // It used to build a BESPOKE schema (CREATE TABLE openrails.psps … with no RLS
 // statements at all) on a superuser pool, which is why the #824 outage was
-// invisible here: in production, resolving a webhook by provider account is a
+// invisible here: in production, resolving a webhook by PSP is a
 // GUC-less read of a policy-bearing table, so it returned zero rows and no
 // error and EVERY account-routed webhook answered 404. A harness that cannot
 // reproduce the production posture cannot catch the regression.
@@ -64,7 +64,7 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	evil, _, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: evilSlug, PermissionGroupID: "group-evil-" + suffix})
 	require.NoError(t, err)
 
-	// PSP identities are GLOBALLY unique (uq_rail_merchant_accounts_identity),
+	// PSP identities are GLOBALLY unique (uq_psps_identity),
 	// and this runs against the shared migrated database — so they carry the
 	// run suffix. The CCBill pair keeps its clientAccnum-clientSubacc shape.
 	acctAcme, acctEvil := "acct_acme_"+suffix, "acct_evil_"+suffix
@@ -72,16 +72,16 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	nmiAcme, nmiEvil := "nmi_acme_account_"+suffix, "nmi_evil_account_"+suffix
 	nmiAcmeTest, nmiArchived := "nmi_acme_test_"+suffix, "nmi_acme_archived_"+suffix
 	ccbillAcct := "945282-0000"
-	seedRailMerchantAccount(t, seed, acme.ID.String(), "stripe", acctAcme)
-	seedRailMerchantAccount(t, seed, evil.ID.String(), "stripe", acctEvil)
-	seedRailMerchantAccount(t, seed, acme.ID.String(), "nmi", nmiAcme)
-	seedRailMerchantAccount(t, seed, evil.ID.String(), "nmi", nmiEvil)
-	seedArchivedRailMerchantAccountEnv(t, seed, acme.ID.String(), "nmi", "test", nmiArchived)
+	seedPSP(t, seed, acme.ID.String(), "stripe", acctAcme)
+	seedPSP(t, seed, evil.ID.String(), "stripe", acctEvil)
+	seedPSP(t, seed, acme.ID.String(), "nmi", nmiAcme)
+	seedPSP(t, seed, evil.ID.String(), "nmi", nmiEvil)
+	seedArchivedPSPEnv(t, seed, acme.ID.String(), "nmi", "test", nmiArchived)
 	// NO live ccbill rows anywhere: the #668 test_mode IP-allowlist bypass is
 	// refused while any environment=live ccbill account exists in the catalog.
-	seedRailMerchantAccountEnv(t, seed, acme.ID.String(), "stripe", "test", acctAcmeTest)
-	seedRailMerchantAccountEnv(t, seed, acme.ID.String(), "nmi", "test", nmiAcmeTest)
-	seedRailMerchantAccountEnv(t, seed, acme.ID.String(), "ccbill", "test", ccbillAcct)
+	seedPSPEnv(t, seed, acme.ID.String(), "stripe", "test", acctAcmeTest)
+	seedPSPEnv(t, seed, acme.ID.String(), "nmi", "test", nmiAcmeTest)
+	seedPSPEnv(t, seed, acme.ID.String(), "ccbill", "test", ccbillAcct)
 	putProviderSecret(t, ctx, secrets, acme.ID, "stripe", acctAcme, "webhook_signing_secret", "whsec_acme")
 	putProviderSecret(t, ctx, secrets, evil.ID, "stripe", acctEvil, "webhook_signing_secret", "whsec_evil")
 	putProviderSecret(t, ctx, secrets, acme.ID, "nmi", nmiAcme, "webhook_signing_secret", "nmi_acme")
@@ -181,15 +181,15 @@ func postMerchantWebhookWithHeader(t *testing.T, url string, body []byte, header
 	return resp.StatusCode
 }
 
-func seedRailMerchantAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
-	seedRailMerchantAccountEnv(t, pool, merchantID, provider, "live", accountID)
+func seedPSP(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedPSPEnv(t, pool, merchantID, provider, "live", accountID)
 }
 
-func seedArchivedRailMerchantAccount(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
-	seedArchivedRailMerchantAccountEnv(t, pool, merchantID, provider, "live", accountID)
+func seedArchivedPSP(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
+	seedArchivedPSPEnv(t, pool, merchantID, provider, "live", accountID)
 }
 
-func seedArchivedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
+func seedArchivedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
@@ -198,7 +198,7 @@ func seedArchivedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, mercha
 	require.NoError(t, err)
 }
 
-func seedRailMerchantAccountEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
+func seedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)

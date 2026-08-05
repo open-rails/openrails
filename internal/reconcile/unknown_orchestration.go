@@ -65,13 +65,13 @@ type UnknownReconcileResult struct {
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
 }
 
-// reconcilableRails returns the rails with provider accounts (registry-driven,
+// reconcilableRails returns the rails with PSPs (registry-driven,
 // #669) in stable order; their reconcile Provider is the rail name itself
-// (#630: mobius is a provider account on rail nmi, not a rail).
+// (#630: mobius is a PSP on rail nmi, not a rail).
 func reconcilableRails() []string {
 	var out []string
 	for _, d := range rails.All() {
-		if d.HasRailMerchantAccounts {
+		if d.HasPSPs {
 			out = append(out, string(d.Rail))
 		}
 	}

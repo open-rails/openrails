@@ -32,7 +32,7 @@ import (
 // a PSP key ("mobius") into names presented as rail-generic.
 
 // PSPSecretName returns the canonical secret-store name for a
-// provider-account-owned credential. The merchant id still namespaces the store;
+// PSP-owned credential. The merchant id still namespaces the store;
 // this path adds provider identity so one merchant can rotate or run multiple
 // accounts of the same provider without credential collisions.
 func PSPSecretName(rail, environment, accountID, key string) (string, error) {
@@ -44,13 +44,13 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 		return "", err
 	}
 	if rail == "" {
-		return "", fmt.Errorf("provider account secret requires rail")
+		return "", fmt.Errorf("PSP secret requires rail")
 	}
 	if environment == "" {
-		return "", fmt.Errorf("provider account secret environment must be live or test")
+		return "", fmt.Errorf("PSP secret environment must be live or test")
 	}
 	if accountID == "" {
-		return "", fmt.Errorf("provider account secret requires account id")
+		return "", fmt.Errorf("PSP secret requires account id")
 	}
 	// The prefix is part of the DURABLE canonical secret-name shape (persisted
 	// in the merchant-secret store, including HashiCorp Vault KV paths).
@@ -113,7 +113,7 @@ func ParseCustodianSecretName(name string) (kind, environment, accountID, key st
 	return d.Kind, environment, accountID, key, true, nil
 }
 
-// ParsePSPSecretName parses a provider-account-scoped secret name.
+// ParsePSPSecretName parses a PSP-scoped secret name.
 func ParsePSPSecretName(name string) (rail, environment, accountID, key string, ok bool, err error) {
 	name = cleanSecretName(name)
 	parts := strings.Split(name, "/")
@@ -124,14 +124,14 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 	environment = normalizeProviderSecretEnvironment(parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
-		return "", "", "", "", true, fmt.Errorf("invalid provider account id escape: %w", err)
+		return "", "", "", "", true, fmt.Errorf("invalid PSP id escape: %w", err)
 	}
 	key, err = NormalizePSPSecretKey(rail, parts[4])
 	if err != nil {
 		return "", "", "", "", true, err
 	}
 	if rail == "" || environment == "" || strings.TrimSpace(accountID) == "" {
-		return "", "", "", "", true, fmt.Errorf("invalid provider account secret name %q", name)
+		return "", "", "", "", true, fmt.Errorf("invalid PSP secret name %q", name)
 	}
 	return rail, environment, accountID, key, true, nil
 }
@@ -162,7 +162,7 @@ func SecretWritable(name string) bool {
 }
 
 // NormalizePSPSecretKey canonicalizes manifest/admin secret keys for
-// a provider account against the rail's registry-declared slots (#669). It
+// a PSP against the rail's registry-declared slots (#669). It
 // deliberately returns key fragments, not legacy broad merchant secret names.
 func NormalizePSPSecretKey(rail, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
@@ -170,7 +170,7 @@ func NormalizePSPSecretKey(rail, key string) (string, error) {
 	if k, ok := rails.CredentialKeyFor(models.Rail(rail), key); ok {
 		return k.Name, nil
 	}
-	return "", fmt.Errorf("unknown provider account secret %s.%s", rail, key)
+	return "", fmt.Errorf("unknown PSP secret %s.%s", rail, key)
 }
 
 func normalizeProviderSecretType(rail string) string {
@@ -283,7 +283,7 @@ func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant
 }
 
 // PSPSecretResolver resolves the canonical secret name for the
-// active provider account a merchant should use.
+// active PSP a merchant should use.
 type PSPSecretResolver interface {
 	ActivePSPSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
 }
@@ -294,7 +294,7 @@ type PSPSecretRefResolver interface {
 	ActivePSPSecretRef(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (SecretRef, bool, error)
 }
 
-// PSPScope is the configured provider account selected for a
+// PSPScope is the configured PSP selected for a
 // merchant rail/environment.
 type PSPScope struct {
 	ID          uuid.UUID
@@ -358,7 +358,7 @@ func NormalizeCredentialVersionKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
 }
 
-// PSPScopeResolver resolves the selected provider account without
+// PSPScopeResolver resolves the selected PSP without
 // requiring a particular secret key.
 type PSPScopeResolver interface {
 	ActivePSPScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (PSPScope, bool, error)

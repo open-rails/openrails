@@ -29,7 +29,7 @@ const (
 	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
-// CredentialKey is one provider-account secret slot on a rail.
+// CredentialKey is one PSP secret slot on a rail.
 // MerchantWritable=false marks operator-only secrets (e.g. the Solana signing
 // key): merchant admins may neither write them nor see them in the redacted
 // credential-status view.
@@ -47,9 +47,9 @@ type Descriptor struct {
 	// DisplayName is the subscriber-facing name (emails).
 	DisplayName string
 
-	// HasRailMerchantAccounts: the rail participates in the operator-declared
-	// provider-account catalog (openrails.psps).
-	HasRailMerchantAccounts bool
+	// HasPSPs: the rail participates in the operator-declared
+	// PSP catalog (openrails.psps).
+	HasPSPs bool
 
 	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer
 	// object worth materializing into rail_customer_accounts (#635) — Stripe cus_*
@@ -109,8 +109,8 @@ type Descriptor struct {
 	// management, set only for CancelModeExternalPortal rails. "" = none.
 	CancelPortalURL string
 
-	// CredentialKeys are the rail's provider-account secret slots, in display
-	// order. Nil = the rail holds no provider-account secrets.
+	// CredentialKeys are the rail's PSP secret slots, in display
+	// order. Nil = the rail holds no PSP secrets.
 	CredentialKeys []CredentialKey
 }
 
@@ -153,7 +153,7 @@ var descriptors = []Descriptor{
 	{
 		models.RailNMI,
 		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts
+		true,          // HasPSPs
 		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
 		true,          // SupportsChargeSavedMethod
 		false,         // SupportsCatalogTrial (add_subscription has no first phase — or#896 refuses the declaration)
@@ -172,7 +172,7 @@ var descriptors = []Descriptor{
 	{
 		models.RailCCBill,
 		"Credit Card", // DisplayName
-		true,          // HasRailMerchantAccounts
+		true,          // HasPSPs
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
 		true,          // SupportsCatalogTrial (FlexForm terms; OpenRails validates the billed amount)
@@ -187,7 +187,7 @@ var descriptors = []Descriptor{
 	{
 		models.RailStripe,
 		"Stripe", // DisplayName
-		true,     // HasRailMerchantAccounts
+		true,     // HasPSPs
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
 		true,     // SupportsCatalogTrial (subscription_data[trial_end]; a PAID intro is refused separately)
@@ -205,7 +205,7 @@ var descriptors = []Descriptor{
 	{
 		models.RailSolana,
 		"Solana", // DisplayName
-		true,     // HasRailMerchantAccounts
+		true,     // HasPSPs
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
 		false,    // SupportsCatalogTrial (the on-chain plan has one period price — or#896 refuses the declaration)
@@ -220,7 +220,7 @@ var descriptors = []Descriptor{
 	{
 		models.RailPayPal,
 		"PayPal", // DisplayName
-		false,    // HasRailMerchantAccounts (no integration; display-only vestige)
+		false,    // HasPSPs (no integration; display-only vestige)
 		false,    // HasRemoteCustomer
 		false,    // SupportsChargeSavedMethod
 		false,    // SupportsCatalogTrial
@@ -266,11 +266,11 @@ func HasRemoteCustomer(rail models.Rail) bool {
 	return ok && d.HasRemoteCustomer
 }
 
-// SupportsRailMerchantAccounts reports whether the rail participates in the
-// provider-account catalog. Unknown rails: false.
-func SupportsRailMerchantAccounts(rail models.Rail) bool {
+// SupportsPSPs reports whether the rail participates in the
+// PSP catalog. Unknown rails: false.
+func SupportsPSPs(rail models.Rail) bool {
 	d, ok := Lookup(rail)
-	return ok && d.HasRailMerchantAccounts
+	return ok && d.HasPSPs
 }
 
 // SupportsCatalogTrial reports whether a catalog `trial:` first phase can be

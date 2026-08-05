@@ -89,7 +89,7 @@ func (suite *TestContainerSuite) PinPSP(ctx context.Context, rail string) contex
 		tid, err = merchant.Require(ctx)
 		require.NoError(suite.t, err, "Failed to resolve merchant for PSP")
 	}
-	// Use the suite's OWN armed account for the rail (seedRailMerchantAccount*
+	// Use the suite's OWN armed account for the rail (seedPSP*
 	// wires real credentials against it) — routing to a second, credential-less
 	// PSP would make the merchant multi-account and change which one new work
 	// resolves to. Only seed one if the rail has none.

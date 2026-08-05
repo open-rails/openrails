@@ -1680,10 +1680,10 @@ func TestParseRebillOrderID(t *testing.T) {
 // testPSPs is the or#893 binding every pull now requires: a pass is bound to
 // the ONE PSP whose credentials armed its fetcher. Unit fakes ignore the id;
 // what matters is that the engine refuses to run without it.
-func testPSPs(providers ...Provider) map[Provider]RailMerchantAccountBinding {
-	out := make(map[Provider]RailMerchantAccountBinding, len(providers))
+func testPSPs(providers ...Provider) map[Provider]PSPBinding {
+	out := make(map[Provider]PSPBinding, len(providers))
 	for _, p := range providers {
-		out[p] = RailMerchantAccountBinding{ID: uuid.New(), Rail: string(p), AccountID: string(p) + "-test-account"}
+		out[p] = PSPBinding{ID: uuid.New(), Rail: string(p), AccountID: string(p) + "-test-account"}
 	}
 	return out
 }
@@ -1718,7 +1718,7 @@ func TestRunRefusesAProviderSectionWithNoPSPBinding(t *testing.T) {
 	_, err = eng.Run(ctx, RunParams{
 		Mode:      ModeEnforce,
 		Providers: []Provider{ProviderNMI},
-		PSPs:      map[Provider]RailMerchantAccountBinding{ProviderNMI: {Rail: "nmi", AccountID: "mobius"}},
+		PSPs:      map[Provider]PSPBinding{ProviderNMI: {Rail: "nmi", AccountID: "mobius"}},
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no PSP binding for provider nmi")

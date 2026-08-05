@@ -22,7 +22,7 @@ Postgres specifics worth knowing:
   bypasses RLS, because a privileged role does not just disable isolation, it
   hides bugs: an unscoped read of an RLS-forced table returns zero rows with no
   error, so the component logs success and does nothing. Also, the cross-merchant
-  directory functions (webhook routing by provider account, the hosted portal's
+  directory functions (webhook routing by PSP, the hosted portal's
   merchant list) are `SECURITY DEFINER` — they need an owner that can read
   across merchants, and they raise rather than return an empty result if it
   cannot.
@@ -152,7 +152,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   `secret/openrails/merchants/<merchant-slug>/<name>`. A 15-minute TTL cache
   fronts all backends — out-of-band Vault writes converge within one TTL, no
   restart needed.
-- **Rotation within the same provider account** is a non-event: the account
+- **Rotation within the same PSP** is a non-event: the account
   identity re-resolves under the new key and matches. Rotate through
   `PUT /v1/merchant/payment-providers/{rail}` or the console's **Rotate**
   action — the new credential is live-probed first (a failed probe writes
@@ -161,7 +161,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   cached credential below. Cutover is deployment-wide at the next credential
   read; the 15-minute TTL is only the backstop for writes made out of band.
 - **Pointing credentials at a different account** trips the account guard:
-  every provider intent is stamped with the provider-account row it was
+  every provider intent is stamped with the PSP row it was
   enqueued against, and the executor parks intents whose account no longer
   resolves — a queue built against one account never executes against another.
   Options: restore the old account's credentials so the queue drains, or let

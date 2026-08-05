@@ -76,7 +76,7 @@ func (s *MerchantsSource) service() *merchants.Service {
 	return s.MerchantsFn()
 }
 
-// environment is the deployment's provider-account environment: test under
+// environment is the deployment's PSP environment: test under
 // test_mode, live otherwise (#681).
 func (s *MerchantsSource) environment() string {
 	return config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
@@ -117,7 +117,7 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (me
 		return mid, scope, ok, err
 	}
 	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail, s.environment())
-	if errors.Is(err, merchants.ErrNoActiveRailMerchantAccount) {
+	if errors.Is(err, merchants.ErrNoActivePSP) {
 		return mid, merchants.PSPScope{}, false, nil
 	}
 	return mid, scope, ok, err

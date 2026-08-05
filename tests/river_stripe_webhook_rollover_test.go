@@ -142,7 +142,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	ctx := suite.MerchantCtx()
 	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
 	const accountID = "acct_rollover_856"
-	suite.seedRailMerchantAccountWithEvidence(ctx, "stripe", env, accountID, "")
+	suite.seedPSPWithEvidence(ctx, "stripe", env, accountID, "")
 	// The suite's merchant is SHARED with every other test in this package:
 	// leave no psps row behind for the next one to reconcile.
 	t.Cleanup(func() { dropPSP(t, suite, accountID) })

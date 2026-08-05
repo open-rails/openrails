@@ -169,7 +169,7 @@ func TestVaultWithoutArmedRailAccountFailsClosed(t *testing.T) {
 	require.Contains(t, err.Error(), "missing client")
 }
 
-func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
+func TestVaultPSPResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &RailPaymentMethodService{
 		MerchantSecrets: merchants.NewMemorySecretStore(),
@@ -179,7 +179,7 @@ func TestVaultRailMerchantAccountResolverMissingMobiusSecretDoesNotUseStaticClie
 
 	_, _, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing scoped merchant NMI provider account")
+	require.Contains(t, err.Error(), "missing scoped merchant NMI PSP")
 }
 
 func TestVaultMissingMerchantSecretAndNoStaticClientReturnsMissingClient(t *testing.T) {

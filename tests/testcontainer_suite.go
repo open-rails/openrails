@@ -85,10 +85,9 @@ type TestSuiteOption func(*TestContainerSuite)
 
 const testNMIProviderKey = "mobius"
 
-// testNMIRailMerchantAccountID is the suite's ONE active NMI provider
-// account (#788: the mobius gateway id from defaultSuiteRails — the harness
+// testNMIPSPID is the suite's ONE active NMI PSP (#788: the mobius gateway id from defaultSuiteRails — the harness
 // seeds it as the armed rail state every consumer resolves).
-func testNMIRailMerchantAccountID() string {
+func testNMIPSPID() string {
 	return envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145")
 }
 
@@ -173,7 +172,7 @@ func (suite *TestContainerSuite) boot() {
 	// same declaration embed's and internal/http's webhook suites make.
 	suite.Config.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32", "::1/128"}
 
-	suite.seedRailMerchantAccountFixtures()
+	suite.seedPSPFixtures()
 
 	// One real delegated issuer per suite (unique slug: suites share one DB and
 	// an upsert on a shared slug would rotate a live suite's keys mid-run).
@@ -299,7 +298,7 @@ func (suite *TestContainerSuite) MintUserToken(userID, email string) string {
 // Built-in symbols carry no mint: it comes from the registry.
 const suiteSolanaTokensJSON = `{"SOL":{},"USDC":{},"PYUSD":{}}`
 
-func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
+func (suite *TestContainerSuite) seedPSPFixtures() {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -312,17 +311,17 @@ func (suite *TestContainerSuite) seedRailMerchantAccountFixtures() {
 	// webhook path resolves accounts under environment=test.
 	ccbillAccountID := "945280-0000"
 	ccbillEnv := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	suite.seedRailMerchantAccountWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
+	suite.seedPSPWithEvidence(ctx, "ccbill", ccbillEnv, ccbillAccountID, `{"source":"test_fixture"}`)
 	ccbillSecret, err := merchants.PSPSecretName("ccbill", ccbillEnv, ccbillAccountID, "salt")
 	require.NoError(suite.t, err)
 	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, "test-salt")
 	require.NoError(suite.t, err)
 
-	suite.seedRailMerchantAccountWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+	suite.seedPSPWithEvidence(ctx, "solana", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 		`{"source":"test_fixture","settings":{"tokens":`+suiteSolanaTokensJSON+`}}`)
 }
 
-func (suite *TestContainerSuite) seedRailMerchantAccountWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
+func (suite *TestContainerSuite) seedPSPWithEvidence(ctx context.Context, rail, environment, accountID, evidence string) {
 	suite.t.Helper()
 	if evidence == "" {
 		evidence = `{"source":"test_fixture"}`
@@ -387,7 +386,7 @@ func (suite *TestContainerSuite) ResetMutableRuntimeState() {
 func (suite *TestContainerSuite) resetNMIClients() {
 	suite.t.Helper()
 	// #788: NMI clients arm per charge from the armed rail state (the seeded
-	// rail_merchant_accounts rows + secrets); the only per-test mutable state
+	// psps rows + secrets); the only per-test mutable state
 	// is the endpoint override, which resets to the real sandbox endpoints.
 	suite.SetNMIGateway("")
 }
@@ -414,13 +413,13 @@ func (suite *TestContainerSuite) SetNMIGateway(url string) {
 	suite.RearmIntentPlumbing()
 }
 
-// SeedNMIProviderAccount declares (or re-keys) an NMI provider account in the
+// SeedNMIPSP declares (or re-keys) an NMI PSP in the
 // armed rail state — the #788 Layer-A write every consumer then resolves.
 // The account is removed again at test cleanup so the suite's shared merchant
 // keeps its default active account for later tests.
-func (suite *TestContainerSuite) SeedNMIProviderAccount(t *testing.T, accountID, securityKey string) {
+func (suite *TestContainerSuite) SeedNMIPSP(t *testing.T, accountID, securityKey string) {
 	t.Helper()
-	integrationharness.SeedRailMerchantAccounts(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.PSPSet{
+	integrationharness.SeedPSPs(context.Background(), t, suite.App.Runtime, dbtest.TestMerchantID, config.PSPSet{
 		accountID: {
 			Rail:      models.RailNMI,
 			AccountID: accountID,

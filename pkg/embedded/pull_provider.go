@@ -126,9 +126,9 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	ctx = merchant.WithID(ctx, merchantID)
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		accountPins := map[reconcile.Provider]string{}
-		explicitBindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{}
+		explicitBindings := map[reconcile.Provider]reconcile.PSPBinding{}
 		if strings.TrimSpace(opts.PSP) != "" {
-			provider, binding, err := resolvePullRailMerchantAccountTarget(ctx, rt, opts.PSP)
+			provider, binding, err := resolvePullPSPTarget(ctx, rt, opts.PSP)
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		for _, p := range providers {
 			selected[p] = true
 		}
-		bindings := make(map[reconcile.Provider]reconcile.RailMerchantAccountBinding, len(armed.Coverage))
+		bindings := make(map[reconcile.Provider]reconcile.PSPBinding, len(armed.Coverage))
 		for provider, cov := range armed.Coverage {
 			if _, ok := fetchers[provider]; !ok {
 				continue
@@ -207,14 +207,14 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			// authorise 3 for every other account too. Applying is one PSP at a
 			// time; planning across all of them is fine.
 			if opts.PruneExpectRows != nil && len(bindings) > 1 {
-				return fmt.Errorf("refusing to apply a prune across %d provider accounts at once: --expect-rows is a per-account count. Scope it with --provider-account=<uuid> and apply one at a time", len(bindings))
+				return fmt.Errorf("refusing to apply a prune across %d PSPs at once: --expect-rows is a per-account count. Scope it with --provider-account=<uuid> and apply one at a time", len(bindings))
 			}
 			for provider, binding := range bindings {
 				fetcher, ok := fetchers[provider]
 				if !ok {
 					continue
 				}
-				pr, err := reconcile.PruneRailMerchantAccountExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
+				pr, err := reconcile.PrunePSPExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
 					Since: sinceT, Until: untilT,
 					Apply:        opts.PruneExpectRows != nil,
 					ExpectedRows: opts.PruneExpectRows,
@@ -478,16 +478,16 @@ func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug stri
 	return merchant.ParseID(id)
 }
 
-func resolvePullRailMerchantAccountTarget(ctx context.Context, rt *pullProviderRuntime, railMerchantAccountStr string) (reconcile.Provider, reconcile.RailMerchantAccountBinding, error) {
-	id, err := uuid.Parse(strings.TrimSpace(railMerchantAccountStr))
+func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {
+	id, err := uuid.Parse(strings.TrimSpace(pspStr))
 	if err != nil {
-		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
+		return "", reconcile.PSPBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
 	}
 	account, err := rt.DB.Gen(ctx).GetPSP(ctx, id)
 	if err != nil {
-		return "", reconcile.RailMerchantAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
+		return "", reconcile.PSPBinding{}, fmt.Errorf("load PSP %s: %w", id, err)
 	}
-	return reconcile.Provider(account.Rail), reconcile.RailMerchantAccountBinding{
+	return reconcile.Provider(account.Rail), reconcile.PSPBinding{
 		ID:        account.ID,
 		Rail:      account.Rail,
 		AccountID: account.AccountID,
@@ -517,7 +517,7 @@ type pullProviderMutationFlags struct {
 
 type pullProviderPruneLog struct {
 	Provider reconcile.Provider
-	Binding  reconcile.RailMerchantAccountBinding
+	Binding  reconcile.PSPBinding
 	Result   reconcile.PruneResult
 	// Applied=false is the default: a plan, nothing written (or#858).
 	Applied bool

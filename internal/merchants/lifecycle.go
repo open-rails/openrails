@@ -102,7 +102,7 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 
 // NewService builds the lifecycle service. pool is required (it owns the merchant
 // directory). secrets may be nil (credential management disabled).
-// providerEnvironment is the deployment's provider-account environment —
+// providerEnvironment is the deployment's PSP environment —
 // derive it via config.ExpectedProviderEnvironment(cfg.IsTestMode()).
 func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment string) (*Service, error) {
 	if pool == nil {
@@ -116,7 +116,7 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
-// lookup over openrails.merchants, with no secret store and no provider-account
+// lookup over openrails.merchants, with no secret store and no PSP
 // environment (scoped credential lookups are unavailable). It is the lifecycle
 // slice the control-plane provisioning seam needs (#738).
 func NewDirectoryService(pool *db.Pool) (*Service, error) {

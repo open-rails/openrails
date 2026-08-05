@@ -150,9 +150,9 @@ func TestMerchantFKBackfillDoesNotTouchAlreadyCoveredTables(t *testing.T) {
 	alreadyCovered := []string{
 		"customers_merchant_id_fkey",
 		"merchant_configurations_merchant_fk",
-		"provider_accounts_merchant_fk",
-		"external_provider_mutation_logs_merchant_fk",
-		"provider_refresh_watermarks_merchant_fk",
+		"rail_merchant_accounts_merchant_fk",
+		"rail_mutation_logs_merchant_fk",
+		"rail_refresh_watermarks_merchant_fk",
 	}
 	for _, name := range alreadyCovered {
 		addConstraint := "add constraint " + name

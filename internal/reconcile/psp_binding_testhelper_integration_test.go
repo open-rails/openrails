@@ -19,13 +19,13 @@ import (
 // binding a pull must now carry (or#893): the engine refuses a provider section
 // with no PSP, because an unbound pass read the whole rail's mirror — every
 // PSP's book at once — and wrote unattributed rows.
-func seedTestPSPBinding(t *testing.T, appDB *db.DB, baseCtx context.Context, rail string) RailMerchantAccountBinding {
+func seedTestPSPBinding(t *testing.T, appDB *db.DB, baseCtx context.Context, rail string) PSPBinding {
 	t.Helper()
 	return seedTestPSPBindingFor(t, appDB, baseCtx, dbtest.TestMerchantID.UUID(), rail)
 }
 
 // seedTestPSPBindingFor is seedTestPSPBinding for a test-owned merchant.
-func seedTestPSPBindingFor(t *testing.T, appDB *db.DB, baseCtx context.Context, merchantID uuid.UUID, rail string) RailMerchantAccountBinding {
+func seedTestPSPBindingFor(t *testing.T, appDB *db.DB, baseCtx context.Context, merchantID uuid.UUID, rail string) PSPBinding {
 	t.Helper()
 	accountID := rail + "-acct-" + uuid.NewString()[:8]
 	var row gen.OpenrailsPsp
@@ -46,5 +46,5 @@ func seedTestPSPBindingFor(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 			return nil
 		})
 	})
-	return RailMerchantAccountBinding{ID: row.ID, Rail: rail, AccountID: accountID}
+	return PSPBinding{ID: row.ID, Rail: rail, AccountID: accountID}
 }

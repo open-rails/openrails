@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
+func TestPSPScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
@@ -57,7 +57,7 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 		_, err = appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 			 VALUES ($1, $2, $2, $3, jsonb_build_object('premium', null), $4)`,
-			productID, "provider-account-scope-"+suffix, "provider-account-scope-"+suffix, dbtest.TestMerchantID.UUID())
+			productID, "psp-scope-"+suffix, "psp-scope-"+suffix, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
 			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
@@ -126,5 +126,5 @@ func TestRailMerchantAccountScopedLocalStateDoesNotBlendCollidingProviderIDs(t *
 		require.Len(t, paymentsB, 1)
 		require.Equal(t, customerB, paymentsB[0].CustomerID)
 		return nil
-	}), fmt.Sprintf("provider accounts should isolate colliding NMI ids: %s vs %s", accountA.ID, accountB.ID))
+	}), fmt.Sprintf("PSPs should isolate colliding NMI ids: %s vs %s", accountA.ID, accountB.ID))
 }

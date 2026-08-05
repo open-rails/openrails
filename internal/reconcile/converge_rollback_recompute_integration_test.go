@@ -141,7 +141,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 			RailSubscriptionID: railSubs[1], Status: reconcile.SubscriptionStatusActive, NextBillingAt: &next,
 		}},
 	}
-	binding := reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "nmi", AccountID: "acct-rc-" + suffix}
+	binding := reconcile.PSPBinding{ID: pspID, Rail: "nmi", AccountID: "acct-rc-" + suffix}
 	eng := &reconcile.Engine{
 		Fetchers:  map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: &rollbackFakeFetcher{snap: snap}},
 		Store:     &reconcile.PGStore{DB: appDB},
@@ -159,7 +159,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 			Mode:        reconcile.ModeEnforce,
 			Mutations:   &reconcile.LocalMutationPolicy{Overwrite: true},
 			Providers:   []reconcile.Provider{reconcile.ProviderNMI},
-			PSPs:        map[reconcile.Provider]reconcile.RailMerchantAccountBinding{reconcile.ProviderNMI: binding},
+			PSPs:        map[reconcile.Provider]reconcile.PSPBinding{reconcile.ProviderNMI: binding},
 			PSPCoverage: map[reconcile.Provider]reconcile.PSPCoverage{reconcile.ProviderNMI: {Declared: 1, Pulled: 1, Binding: binding}},
 		})
 		if e != nil {

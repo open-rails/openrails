@@ -15,7 +15,7 @@ type PaymentMethod struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	Rail       Rail      `json:"rail"` // Rail: nmi, ccbill, solana
 
-	// PspID is the provider account that vaulted this method (#641).
+	// PspID is the PSP that vaulted this method (#641).
 	PspID uuid.UUID `json:"psp_id"`
 
 	// Two-slot rail handle (#588): the customer-scope ref and the instrument-scope

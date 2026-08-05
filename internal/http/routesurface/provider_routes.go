@@ -10,7 +10,7 @@ type ProviderRoutes struct {
 	// key (#661); false drops those routes with a boot warning.
 	SolanaSigning bool
 	Webhooks      bool
-	// SecretWrite gates the provider-config WRITE surface (provider-account PUT,
+	// SecretWrite gates the provider-config WRITE surface (PSP PUT,
 	// secret push). False hides it (a write route with no write capability only 403s).
 	SecretWrite bool
 }

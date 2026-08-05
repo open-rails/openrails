@@ -35,7 +35,7 @@ What import does **not** do:
   payment methods are *references* into the provider's vault
   (`rail_customer_ref` / `rail_method_ref`), meaningful only within the PSP
   account that created them. You cannot import your way onto a different
-  provider account — see
+  PSP — see
   [PSP binding and credential rotation](operations.md#psp-binding-and-credential-rotation);
   between accounts, cards can only be re-captured when customers next pay.
 

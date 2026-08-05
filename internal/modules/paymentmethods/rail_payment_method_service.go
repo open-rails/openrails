@@ -67,7 +67,7 @@ func (s *RailPaymentMethodService) SetMerchantSecretStore(store merchants.Mercha
 	s.MerchantSecrets = store
 }
 
-func (s *RailPaymentMethodService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *RailPaymentMethodService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -268,14 +268,14 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 
 	if len(pspID) > 0 && pspID[0] != nil && *pspID[0] != uuid.Nil {
 		if s == nil || s.DB == nil {
-			return nil, nil, errors.New("provider account lookup unavailable")
+			return nil, nil, errors.New("PSP lookup unavailable")
 		}
 		row, err := s.DB.Gen(ctx).GetPSP(ctx, *pspID[0])
 		if err != nil {
 			return nil, nil, err
 		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
-			return nil, nil, fmt.Errorf("provider account %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
+			return nil, nil, fmt.Errorf("PSP %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
 		}
 		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScope{
 			ID:          row.ID,
@@ -307,7 +307,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
 		if !ok {
-			return nil, nil, errors.New("missing scoped merchant NMI provider account")
+			return nil, nil, errors.New("missing scoped merchant NMI PSP")
 		}
 		client, err := s.resolveNMIClientForScope(ctx, scope)
 		if err != nil {
@@ -373,7 +373,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 		return nil, errors.New("provider account_id required")
 	}
 	if s == nil || s.MerchantSecrets == nil {
-		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+		return nil, errors.New("missing scoped merchant NMI secret for PSP")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -388,11 +388,11 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 		if !errors.Is(err, merchants.ErrSecretNotFound) {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
-		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+		return nil, errors.New("missing scoped merchant NMI secret for PSP")
 	}
 	value := strings.TrimSpace(sec.Value)
 	if value == "" {
-		return nil, errors.New("missing scoped merchant NMI secret for provider account")
+		return nil, errors.New("missing scoped merchant NMI secret for PSP")
 	}
 	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
 	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
@@ -727,7 +727,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context
 }
 
 // ResolveClientForPaymentMethod resolves the per-merchant NMI client for the
-// payment method's rail + declared rail merchant account — the surface the
+// payment method's rail + declared PSP — the surface the
 // nmi_vault_delete intent handler executes through.
 func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error) {
 	rail := strings.ToLower(string(pm.Rail))

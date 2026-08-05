@@ -41,7 +41,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	var pspID uuid.UUID
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		pspID = seedRefreshPSPForTest(t, ctx, dbi, merchantID, "stripe")
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.PSPBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: successFetcher,
 		})
 		require.Equal(t, 2, res.Windows)
@@ -54,7 +54,7 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 	failingFetcher := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe, err: errors.New("provider offline")}
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		before := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.PSPBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: failingFetcher,
 		})
 		require.Zero(t, res.Windows)
@@ -135,7 +135,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(merchant.WithID(context.Background(), merchant.ID(merchantID)), func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.PSPBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: &providerRefreshSnapshotFetcher{provider: reconcile.ProviderStripe, snap: snap},
 		})
 		require.Equal(t, 1, res.Windows)
@@ -272,7 +272,7 @@ func TestProviderRefreshWatermarksAreScopedPerPSP(t *testing.T) {
 
 		fetcherA := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe}
 		resA := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil,
-			reconcile.RailMerchantAccountBinding{ID: pspA, Rail: "stripe"},
+			reconcile.PSPBinding{ID: pspA, Rail: "stripe"},
 			map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderStripe: fetcherA})
 		require.Equal(t, 2, resA.Windows)
 
@@ -280,7 +280,7 @@ func TestProviderRefreshWatermarksAreScopedPerPSP(t *testing.T) {
 		// lookback, NOT the point A advanced to.
 		fetcherB := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe}
 		resB := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil,
-			reconcile.RailMerchantAccountBinding{ID: pspB, Rail: "stripe"},
+			reconcile.PSPBinding{ID: pspB, Rail: "stripe"},
 			map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderStripe: fetcherB})
 		require.Equal(t, 2, resB.Windows)
 		require.Equal(t, fetcherA.calls[0].Since.UTC(), fetcherB.calls[0].Since.UTC(),

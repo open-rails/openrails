@@ -175,7 +175,7 @@ armed fails closed: its intents park (never execute against a different
 account) until the credentials return or the intent expires/supersedes.
 Rules:
 
-- **Rotating a credential within the SAME provider account**: replace the
+- **Rotating a credential within the SAME PSP**: replace the
   secret under the same PSP row — intents arm with the new value
   transparently. `PUT /v1/merchant/payment-providers/{rail}` (and the console's
   **Rotate** action) is atomic in the way that matters:
@@ -194,7 +194,7 @@ Rules:
     manual cache flushes are not part of the procedure.
   - omit a credential from the request to leave it (and its watermark) alone;
     re-submitting an identical value is a no-op, not a rotation.
-- **Moving to a DIFFERENT provider account**: never repoint an existing PSP
+- **Moving to a DIFFERENT PSP**: never repoint an existing PSP
   row's credentials (OpenRails cannot detect the swap — the declared
   `account_id` would silently lie). Declare a NEW `psps` entry and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects

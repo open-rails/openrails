@@ -22,7 +22,7 @@ import (
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
 // checkout money paths. Static rail config remains available only when no
-// provider-account resolver is configured; once scoped provider accounts are in
+// PSP resolver is configured; once scoped PSPs are in
 // use, missing scoped secrets fail closed instead of falling back across
 // accounts.
 func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
@@ -35,7 +35,7 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchants.MerchantSecretR
 	}
 }
 
-func (s *CheckoutService) SetRailMerchantAccountSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *CheckoutService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
 	if s == nil {
 		return
 	}
@@ -98,7 +98,7 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
-// pspEnvironment is the environment provider-account rows carry in
+// pspEnvironment is the environment PSP rows carry in
 // this deployment: test under test_mode, live otherwise (#641).
 func (s *CheckoutService) pspEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
@@ -189,7 +189,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 		scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
 		switch {
 		case err != nil:
-			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: PSP resolution failed; proceeding rail-scoped")
 		case len(scopes) == 1:
 			adopt(scopes[0])
 		case len(scopes) > 1:
@@ -209,7 +209,7 @@ func (s *CheckoutService) resolveRailTarget(ctx context.Context, requested strin
 	if scopes, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
 		scope, found, err := scopes.ActivePSPScope(ctx, tid, name, s.pspEnvironment())
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: provider-account resolution failed; proceeding rail-scoped")
+			log.WithContext(ctx).WithError(err).WithField("rail", strconv.Quote(name)).Debug("checkout: PSP resolution failed; proceeding rail-scoped")
 		} else if found {
 			adopt(scope)
 		}
@@ -295,7 +295,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 		}
 		value = v
 	} else {
@@ -305,7 +305,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 		}
 		value = v
 	}
@@ -340,7 +340,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
 	scopeResolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver)
 	if !ok {
-		return nil, errors.New("missing scoped merchant CCBill provider account resolver")
+		return nil, errors.New("missing scoped merchant CCBill PSP resolver")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -355,7 +355,7 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, err
 	}
 	if !ok {
-		return nil, errors.New("missing scoped merchant CCBill provider account")
+		return nil, errors.New("missing scoped merchant CCBill PSP")
 	}
 	cfg := &config.CCBillConfig{}
 	if base != nil {

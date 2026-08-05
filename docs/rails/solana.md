@@ -16,7 +16,7 @@ subscriptions use the official on-chain Subscriptions Delegation Program
 - **A signer for subscription pulls.** OpenRails must be able to sign
   `transfer_subscription` transactions each billing period. Two modes:
   - `local_keypair` — you provide the wallet's base58 private key as the
-    provider-account secret `private_key`. It is held in the merchant secret
+    PSP secret `private_key`. It is held in the merchant secret
     store and loaded into memory only to sign.
   - `vault_transit` — the key lives in HashiCorp Vault Transit under the named
     key; OpenRails sends the serialized transaction message to Vault for signing
@@ -29,7 +29,7 @@ subscriptions use the official on-chain Subscriptions Delegation Program
 ### PSP manifest entry
 
 Declared under `merchants.<slug>.psps.<key>.solana`. Unlike other rails,
-`account_id` is **not** declared — the provider-account identity is always
+`account_id` is **not** declared — the PSP identity is always
 derived from the signer's public key (a declared value is ignored with a warning).
 
 ```yaml

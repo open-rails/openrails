@@ -115,7 +115,7 @@ var Dimensions = []Dimension{
 	{Name: "time", Description: "bucket by the query grain (day|week|month|quarter|year, UTC calendar)"},
 	{Name: "currency", Description: "currency code; added implicitly when a money measure is grouped without a single-currency filter"},
 	{Name: "rail", Description: "payment rail (e.g. stripe, mobius, ccbill, solana)"},
-	{Name: "rail_account", Description: "operator-declared rail merchant account label; VAMP thresholds apply per account"},
+	{Name: "rail_account", Description: "operator-declared PSP label; VAMP thresholds apply per account"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time | usage", Values: []string{"subscription", "one_time", "usage"}},
 	{Name: "product_id", Description: "product UUID"},
 	{Name: "price_id", Description: "price UUID"},

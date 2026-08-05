@@ -139,7 +139,7 @@ func seedPaymentMethodWithRailCustomerRef(t *testing.T, pool *pgxpool.Pool, ctx 
 }
 
 // testPSPForRail resolves an existing armed PSP for (merchant, rail) — several
-// tests in this package arm a SPECIFIC account (seedRailMerchantAccountSecrets)
+// tests in this package arm a SPECIFIC account (seedPSPSecrets)
 // before seeding a payment method/rail-customer row, and that row's psp_id
 // must match the armed one or credential resolution 404s. Only mints a fresh
 // generic PSP via dbtest.EnsureTestPSP when nothing is armed yet.

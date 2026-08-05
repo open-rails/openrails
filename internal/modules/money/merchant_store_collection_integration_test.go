@@ -29,7 +29,7 @@ import (
 
 func storeCollectionTestConfig() *config.Config {
 	// TestMode=sandbox → provider environment "test", matching
-	// merchantsServiceForTest / seedRailMerchantAccountSecrets.
+	// merchantsServiceForTest / seedPSPSecrets.
 	return &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
@@ -69,7 +69,7 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
 	storeKey := "sk_test_store_only_" + sfx
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), "acct_store"+sfx, map[string]string{"secret_key": storeKey})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailStripe), "acct_store"+sfx, map[string]string{"secret_key": storeKey})
 
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_store_only_"+sfx)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_store_only_"+sfx)
@@ -120,7 +120,7 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	})
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailNMI), "gw-store-"+sfx, map[string]string{
+	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-store-"+sfx, map[string]string{
 		"security_key": "store-only-security-key-" + sfx,
 	})
 
@@ -187,7 +187,7 @@ func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
 	// Declared account row, NO secrets: never boot fallback, the charge errors.
-	seedRailMerchantAccountSecrets(t, dbi, msvc, string(models.RailStripe), "acct_secretless"+sfx, map[string]string{})
+	seedPSPSecrets(t, dbi, msvc, string(models.RailStripe), "acct_secretless"+sfx, map[string]string{})
 
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_fail_closed_"+sfx)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_fail_closed_"+sfx)

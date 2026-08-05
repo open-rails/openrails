@@ -242,7 +242,7 @@ type ProviderRefreshWorker struct {
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
-	// Merchants resolves per-merchant provider accounts + scoped secrets
+	// Merchants resolves per-merchant PSPs + scoped secrets
 	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
 	Merchants           *merchants.Service
 	DeferDelete         subscriptions.DeferredDeleteScheduler
@@ -504,10 +504,10 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	return providers
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.RailMerchantAccountBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
 	pspID := binding.ID
-	bindings := map[reconcile.Provider]reconcile.RailMerchantAccountBinding{provider: binding}
+	bindings := map[reconcile.Provider]reconcile.PSPBinding{provider: binding}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())
 	if !horizon.After(time.Time{}) {

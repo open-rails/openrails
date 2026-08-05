@@ -74,7 +74,7 @@ func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
 
 	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}}
 	svc.SetMerchantSecretStore(store)
-	svc.SetRailMerchantAccountSecretResolver(msvc)
+	svc.SetPSPSecretResolver(msvc)
 
 	// Each PSP key resolves ITS OWN security key — the charge lands on the
 	// requested account, never a kind-level re-resolution.

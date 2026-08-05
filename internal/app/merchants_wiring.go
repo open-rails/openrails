@@ -86,10 +86,10 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 	r.Merchants = svc
 	if r.CheckoutService != nil {
 		r.CheckoutService.SetMerchantSecretStore(store)
-		r.CheckoutService.SetRailMerchantAccountSecretResolver(svc)
+		r.CheckoutService.SetPSPSecretResolver(svc)
 	}
 	if r.RailPaymentMethodService != nil {
 		r.RailPaymentMethodService.SetMerchantSecretStore(store)
-		r.RailPaymentMethodService.SetRailMerchantAccountSecretResolver(svc)
+		r.RailPaymentMethodService.SetPSPSecretResolver(svc)
 	}
 }

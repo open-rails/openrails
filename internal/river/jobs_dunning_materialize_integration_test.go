@@ -147,16 +147,16 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	// (or#893: psp_id is now total provenance — the materialized intent carries
 	// the subscription's own PSP, stamped from sub.PspID at enqueue.)
 	var status, origin, intentType string
-	var providerAccountID uuid.UUID
+	var gotPSPID uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT status, origin, intent_type, psp_id, expires_at
 		 FROM openrails.rail_intents WHERE subscription_id = $1`, subID).
-		Scan(&status, &origin, &intentType, &providerAccountID, &expiresAt))
+		Scan(&status, &origin, &intentType, &gotPSPID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
 	assert.Equal(t, intents.TypeManualRebill, intentType)
-	assert.Equal(t, pspID, providerAccountID, "or#893: the materialized intent carries the subscription's PSP")
+	assert.Equal(t, pspID, gotPSPID, "or#893: the materialized intent carries the subscription's PSP")
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 
 	// No lifecycle movement, and the forensic retry fields are untouched

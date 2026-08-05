@@ -30,7 +30,7 @@ func TestProviderRefreshScheduler_UniquePerMerchantAcrossTicks(t *testing.T) {
 
 	midA := seedPullMerchant(t, dbi, "sched-a-"+sfx)
 	midB := seedPullMerchant(t, dbi, "sched-b-"+sfx)
-	seedProviderAccount(t, svc, midA, "nmi", "9955"+sfx, map[string]string{"security_key": "sec-" + sfx})
+	seedPSP(t, svc, midA, "nmi", "9955"+sfx, map[string]string{"security_key": "sec-" + sfx})
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{SkipUnknownJobCheck: true})
 	require.NoError(t, err)

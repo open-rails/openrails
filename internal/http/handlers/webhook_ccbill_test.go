@@ -157,7 +157,7 @@ func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 
 // #697: the composite CCBill account identity is dash-joined
 // (clientAccnum-clientSubacc), matching CCBill's own convention and the declared
-// rail_merchant_accounts.account_id format.
+// psps.account_id format.
 func TestCCBillWebhookAccountIDIsDashJoined(t *testing.T) {
 	require.Equal(t, "900000-0000",
 		ccbillWebhookAccountID([]byte(`{"clientAccnum":"900000","clientSubacc":"0000"}`)))

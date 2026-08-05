@@ -94,13 +94,13 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	})
 
 	t.Run("webhook routing resolves the owning merchant", func(t *testing.T) {
-		got, ok, err := svc.ResolveRailMerchantAccountByIdentity(ctx, "stripe", "live", accountID)
+		got, ok, err := svc.ResolvePSPByIdentity(ctx, "stripe", "live", accountID)
 		require.NoError(t, err)
 		require.True(t, ok, "an account-routed webhook must resolve its merchant under the production role")
 		require.Equal(t, merchant.ID(ownerID), got.MerchantID)
 		require.Equal(t, accountID, got.AccountID)
 
-		_, ok, err = svc.ResolveRailMerchantAccountByIdentity(ctx, "stripe", "live", accountID+"-nope")
+		_, ok, err = svc.ResolvePSPByIdentity(ctx, "stripe", "live", accountID+"-nope")
 		require.NoError(t, err)
 		require.False(t, ok, "an unknown account is still not found")
 	})
@@ -111,7 +111,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 			"the owner re-declaring its own account is not a conflict")
 
 		err := AssertPSPUnowned(ctx, q, otherID, "stripe", "live", accountID)
-		require.ErrorIs(t, err, ErrRailMerchantAccountOwnedByAnotherMerchant,
+		require.ErrorIs(t, err, ErrPSPOwnedByAnotherMerchant,
 			"a cross-merchant claim must be named, not pass silently")
 
 		require.NoError(t, AssertPSPUnowned(ctx, q, otherID, "stripe", "live", "acct_unclaimed_"+suffix))

@@ -197,7 +197,7 @@ func (e *Embedded) App() *app.App {
 }
 
 // ProviderRoutes selects provider-specific public routes for an embedded mount.
-// Leave nil to derive from configured provider accounts when possible.
+// Leave nil to derive from configured PSPs when possible.
 type ProviderRoutes struct {
 	StripePortal bool
 	Solana       bool

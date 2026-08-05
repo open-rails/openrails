@@ -19,9 +19,9 @@ import (
 // DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
 const DefaultNMICollectJSURL = "https://secure.networkmerchants.com/token/Collect.js"
 
-// ErrNoActiveRailMerchantAccount means the merchant has provider accounts on the
+// ErrNoActivePSP means the merchant has PSPs on the
 // requested rail/environment, but all are archived and therefore drain-only.
-var ErrNoActiveRailMerchantAccount = errors.New("merchants: no non-archived provider account available for new work")
+var ErrNoActivePSP = errors.New("merchants: no non-archived PSP available for new work")
 
 // StripeCredentials are a merchant's rail credentials, loaded by merchant id at
 // request time (NOT injected process-wide). Empty fields mean "not configured".
@@ -238,7 +238,7 @@ func (s pspSecretScope) exported() PSPScope {
 	}
 }
 
-// ActivePSPSecretName resolves the active provider account for a
+// ActivePSPSecretName resolves the active PSP for a
 // merchant rail/environment and returns that account's scoped secret
 // name for key.
 func (s *Service) ActivePSPSecretName(ctx context.Context, id merchant.ID, rail, environment, key string) (string, bool, error) {
@@ -269,7 +269,7 @@ func (s *Service) ActivePSPSecretRef(ctx context.Context, id merchant.ID, rail, 
 	return ref, true, nil
 }
 
-// ActivePSPScope resolves the active provider account for a merchant
+// ActivePSPScope resolves the active PSP for a merchant
 // rail/environment.
 func (s *Service) ActivePSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
@@ -285,7 +285,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return pspSecretScope{}, false, fmt.Errorf("provider account environment must be live or test")
+		return pspSecretScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
 	rail = normalizeProviderSecretType(rail)
 	var row gen.OpenrailsPsp
@@ -305,7 +305,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 				"rail":         rail,
 				"environment":  environment,
 				"active_count": count,
-			}).Warn("multiple active provider accounts configured; using newest for new work")
+			}).Warn("multiple active PSPs configured; using newest for new work")
 		}
 		if count == 0 {
 			total, err := q.CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
@@ -317,7 +317,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 				return err
 			}
 			if total > 0 {
-				return ErrNoActiveRailMerchantAccount
+				return ErrNoActivePSP
 			}
 		}
 		row, err = q.GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
@@ -330,11 +330,11 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pspSecretScope{}, false, nil
 	}
-	if errors.Is(err, ErrNoActiveRailMerchantAccount) {
+	if errors.Is(err, ErrNoActivePSP) {
 		return pspSecretScope{}, false, err
 	}
 	if err != nil {
-		return pspSecretScope{}, false, fmt.Errorf("load active provider account %s/%s: %w", rail, environment, err)
+		return pspSecretScope{}, false, fmt.Errorf("load active PSP %s/%s: %w", rail, environment, err)
 	}
 	scope := pspSecretScope{
 		id:          row.ID,
@@ -359,7 +359,7 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, envir
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return false, fmt.Errorf("provider account environment must be live or test")
+		return false, fmt.Errorf("PSP environment must be live or test")
 	}
 	archived := false
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -374,7 +374,7 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, envir
 			`, id.String(), strings.TrimSpace(key), environment).Scan(&archived)
 	})
 	if err != nil {
-		return false, fmt.Errorf("load archived provider account by key %s/%s: %w", key, environment, err)
+		return false, fmt.Errorf("load archived PSP by key %s/%s: %w", key, environment, err)
 	}
 	return archived, nil
 }
@@ -389,7 +389,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return PSPScope{}, false, fmt.Errorf("provider account environment must be live or test")
+		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
 	var scope pspSecretScope
 	var evidence []byte
@@ -410,13 +410,13 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 		return PSPScope{}, false, nil
 	}
 	if err != nil {
-		return PSPScope{}, false, fmt.Errorf("load provider account by key %s/%s: %w", key, environment, err)
+		return PSPScope{}, false, fmt.Errorf("load PSP by key %s/%s: %w", key, environment, err)
 	}
 	scope.applyEvidence(evidence)
 	return scope.exported(), true, nil
 }
 
-// ActivePSPScopesForRail lists every non-archived provider account declared on
+// ActivePSPScopesForRail lists every non-archived PSP declared on
 // rail/environment, newest first. Checkout uses it to accept a bare rail-kind
 // selector only when it is unambiguous (#848).
 func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, rail, environment string) ([]PSPScope, error) {
@@ -426,7 +426,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return nil, fmt.Errorf("provider account environment must be live or test")
+		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
 	var out []PSPScope
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -456,7 +456,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 		return rows.Err()
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list provider accounts %s/%s: %w", rail, environment, err)
+		return nil, fmt.Errorf("list PSPs %s/%s: %w", rail, environment, err)
 	}
 	return out, nil
 }
@@ -470,7 +470,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return nil, fmt.Errorf("provider account environment must be live or test")
+		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
 	var out []PSPScope
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -502,7 +502,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list provider accounts for %s: %w", environment, err)
+		return nil, fmt.Errorf("list PSPs for %s: %w", environment, err)
 	}
 	return out, nil
 }
@@ -531,7 +531,7 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 		return pspSecretScope{}, false, nil
 	}
 	if err != nil {
-		return pspSecretScope{}, false, fmt.Errorf("load provider account %s/%s: %w", rail, accountID, err)
+		return pspSecretScope{}, false, fmt.Errorf("load PSP %s/%s: %w", rail, accountID, err)
 	}
 	scope.applyEvidence(evidence)
 	return scope, true, nil
@@ -547,16 +547,16 @@ func pspSettings(raw []byte) map[string]any {
 	return evidence.Settings
 }
 
-// PullRailMerchantAccountScope resolves the provider account the PULL plane
+// PullPSPScope resolves the PSP the PULL plane
 // (provider refresh, unknown-cohort resolution, probes — #699) reads with: the
 // active account for new work when one exists, else the NEWEST archived
 // account. Archived accounts stay pull-addressable so existing obligations can
 // drain (#655) — only NEW checkout/subscription work excludes them. ok=false
 // when the merchant declares no account on the rail/environment at all.
-func (s *Service) PullRailMerchantAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
+func (s *Service) PullPSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
-	if errors.Is(err, ErrNoActiveRailMerchantAccount) {
-		return s.newestRailMerchantAccountScope(ctx, id, rail, environment)
+	if errors.Is(err, ErrNoActivePSP) {
+		return s.newestPSPScope(ctx, id, rail, environment)
 	}
 	if err != nil || !ok {
 		return PSPScope{}, ok, err
@@ -564,16 +564,16 @@ func (s *Service) PullRailMerchantAccountScope(ctx context.Context, id merchant.
 	return scope.exported(), true, nil
 }
 
-// newestRailMerchantAccountScope returns the newest declared account for
+// newestPSPScope returns the newest declared account for
 // rail/environment regardless of archived state (the #699 drain-pull leg).
-func (s *Service) newestRailMerchantAccountScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
+func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return PSPScope{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return PSPScope{}, false, fmt.Errorf("provider account environment must be live or test")
+		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
 	var scope pspSecretScope
 	var evidence []byte
@@ -592,7 +592,7 @@ func (s *Service) newestRailMerchantAccountScope(ctx context.Context, id merchan
 		return PSPScope{}, false, nil
 	}
 	if err != nil {
-		return PSPScope{}, false, fmt.Errorf("load newest provider account %s/%s: %w", rail, environment, err)
+		return PSPScope{}, false, fmt.Errorf("load newest PSP %s/%s: %w", rail, environment, err)
 	}
 	scope.applyEvidence(evidence)
 	return scope.exported(), true, nil
@@ -698,9 +698,9 @@ func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id merchant.ID,
 	return scope.id, scope.id != uuid.Nil, nil
 }
 
-// RailMerchantAccountIdentity is the globally unique rail-native provider
-// account identity plus the merchant that owns it.
-type RailMerchantAccountIdentity struct {
+// PSPIdentity is the globally unique rail-native PSP identity plus the
+// merchant that owns it.
+type PSPIdentity struct {
 	ID          uuid.UUID
 	MerchantID  merchant.ID
 	Rail        string
@@ -708,14 +708,14 @@ type RailMerchantAccountIdentity struct {
 	AccountID   string
 }
 
-// ErrRailMerchantAccountOwnedByAnotherMerchant signals that a (rail, environment,
-// account_id) is already registered to a DIFFERENT merchant. Provider accounts
+// ErrPSPOwnedByAnotherMerchant signals that a (rail, environment,
+// account_id) is already registered to a DIFFERENT merchant. PSPs
 // are globally unique to one merchant (#650) and are never shared or moved; the
 // upsert rejects a cross-merchant claim, but with an opaque no-rows /
 // unique-violation error — this names the conflict instead.
-var ErrRailMerchantAccountOwnedByAnotherMerchant = errors.New("provider account is already owned by another merchant")
+var ErrPSPOwnedByAnotherMerchant = errors.New("PSP is already owned by another merchant")
 
-// PSPNaturalKey canonicalizes a provider account's GLOBAL
+// PSPNaturalKey canonicalizes a PSP's GLOBAL
 // natural key (rail, environment, account_id) and derives its deterministic id
 // from it (#662). It is the SINGLE place this canonicalization lives — the same
 // normalization the ownership guard and secret layer use (lower(rail);
@@ -731,8 +731,7 @@ func PSPNaturalKey(rail, environment, accountID string) (id uuid.UUID, nRail, nE
 	return id, nRail, nEnv, nAccount
 }
 
-// PspID returns just the deterministic id for a provider
-// account's natural key (#662) — for callers that already hold the row and only
+// PspID returns just the deterministic id for a PSP's natural key (#662) — for callers that already hold the row and only
 // need to compute or match its id.
 func PspID(rail, environment, accountID string) uuid.UUID {
 	id, _, _, _ := PSPNaturalKey(rail, environment, accountID)
@@ -740,7 +739,7 @@ func PspID(rail, environment, accountID string) uuid.UUID {
 }
 
 // AssertPSPUnowned is a clear-error preflight for the
-// global-uniqueness upsert: it returns ErrRailMerchantAccountOwnedByAnotherMerchant
+// global-uniqueness upsert: it returns ErrPSPOwnedByAnotherMerchant
 // (wrapped with the conflicting identity) when (rail, environment, account_id)
 // already belongs to a merchant other than merchantID, and nil when the account
 // is unclaimed or already this merchant's.
@@ -759,19 +758,19 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return errors.New("merchants: provider account environment must be live or test")
+		return errors.New("merchants: PSP environment must be live or test")
 	}
 	owner, found, err := resolvePSPOwner(ctx, q, rail, environment, accountID)
 	if err != nil || !found {
 		return err
 	}
 	if uuid.UUID(owner.MerchantID) != merchantID {
-		return fmt.Errorf("provider account %s:%s (%s): %w", owner.Rail, owner.AccountID, owner.Environment, ErrRailMerchantAccountOwnedByAnotherMerchant)
+		return fmt.Errorf("PSP %s:%s (%s): %w", owner.Rail, owner.AccountID, owner.Environment, ErrPSPOwnedByAnotherMerchant)
 	}
 	return nil
 }
 
-// ResolveRailMerchantAccountByIdentity resolves an account globally by
+// ResolvePSPByIdentity resolves an account globally by
 // its rail-native identity. Use this at webhook/callback boundaries where the
 // provider payload or route carries account_id and the merchant should be derived
 // from the account row.
@@ -782,45 +781,45 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 // non-RLS role"; no such role exists (one pool, one DSN), so under the
 // production openrails_app role psps' FORCE'd merchant_isolation policy made it
 // return zero rows and no error, and EVERY account-routed CCBill/Basis
-// Theory/Stripe-account webhook answered 404 "Unknown provider account". It now
+// Theory/Stripe-account webhook answered 404 "Unknown PSP". It now
 // goes through the explicit SECURITY DEFINER directory function (migration
 // 0016), which raises instead of returning empty when it cannot see across
 // merchants.
-func (s *Service) ResolveRailMerchantAccountByIdentity(ctx context.Context, rail, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
+func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, accountID string) (PSPIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
-		return RailMerchantAccountIdentity{}, false, nil
+		return PSPIdentity{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return RailMerchantAccountIdentity{}, false, errors.New("merchants: provider account environment must be live or test")
+		return PSPIdentity{}, false, errors.New("merchants: PSP environment must be live or test")
 	}
 	return resolvePSPOwner(ctx, gen.New(s.pool), rail, environment, strings.TrimSpace(accountID))
 }
 
-// or#880: the custody sibling of ResolveRailMerchantAccountByIdentity moved to
+// or#880: the custody sibling of ResolvePSPByIdentity moved to
 // custodians.go (ResolveCustodianByIdentity). It resolves the CUSTODIAN, not a
 // PSP — one custodian may back several, so "the" PSP was never well defined.
 
 // resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
 // made. q may be bound to anything (pool, merchant-pinned conn, tx): the
 // definer function is what supplies cross-merchant visibility, not the handle.
-func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, accountID string) (RailMerchantAccountIdentity, bool, error) {
+func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, accountID string) (PSPIdentity, bool, error) {
 	row, err := q.ResolvePSPOwnerByRailIdentity(ctx, gen.ResolvePSPOwnerByRailIdentityParams{
 		Rail:        rail,
 		Environment: &environment,
 		AccountID:   accountID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return RailMerchantAccountIdentity{}, false, nil
+		return PSPIdentity{}, false, nil
 	}
 	if err != nil {
-		return RailMerchantAccountIdentity{}, false, err
+		return PSPIdentity{}, false, err
 	}
 	if row.ID == nil || row.MerchantID == nil {
-		return RailMerchantAccountIdentity{}, false, nil
+		return PSPIdentity{}, false, nil
 	}
-	return RailMerchantAccountIdentity{
+	return PSPIdentity{
 		ID:          *row.ID,
 		MerchantID:  merchant.ID(*row.MerchantID),
 		Rail:        derefString(row.Rail),
@@ -969,7 +968,7 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 	}
 	environment = normalizeProviderSecretEnvironment(environment)
 	if environment == "" {
-		return 0, fmt.Errorf("provider account environment must be live or test")
+		return 0, fmt.Errorf("PSP environment must be live or test")
 	}
 	rail = normalizeProviderSecretType(rail)
 	var count int64
@@ -983,7 +982,7 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 		return e
 	})
 	if err != nil {
-		return 0, fmt.Errorf("count active provider accounts %s/%s: %w", rail, environment, err)
+		return 0, fmt.Errorf("count active PSPs %s/%s: %w", rail, environment, err)
 	}
 	return int(count), nil
 }

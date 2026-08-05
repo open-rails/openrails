@@ -525,7 +525,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			if subscription.RailSubscriptionID != "" {
 				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
 				if err != nil {
-					return fmt.Errorf("resolve subscription provider account: %w", err)
+					return fmt.Errorf("resolve subscription PSP: %w", err)
 				}
 				if ok {
 					if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {

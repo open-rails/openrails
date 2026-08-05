@@ -94,7 +94,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	recipientWallet := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
-	suite.seedRailMerchantAccountWithEvidence(
+	suite.seedPSPWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),
@@ -139,13 +139,13 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	assert.NotEmpty(t, payment["reference"], "Should include reference")
 	transactionURL, ok := payment["transaction_url"].(string)
 	require.True(t, ok, "Should include transaction_url")
-	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+recipientWallet+"?"), "transaction_url should use provider-account recipient_wallet")
+	assert.True(t, strings.HasPrefix(transactionURL, "solana:"+recipientWallet+"?"), "transaction_url should use PSP recipient_wallet")
 }
 
 func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
 	accountID := "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
-	suite.seedRailMerchantAccountWithEvidence(
+	suite.seedPSPWithEvidence(
 		dbtest.WithTestMerchant(context.Background()),
 		"solana",
 		config.ExpectedProviderEnvironment(suite.Config.IsTestMode()),

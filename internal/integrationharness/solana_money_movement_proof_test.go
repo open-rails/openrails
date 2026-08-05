@@ -72,9 +72,9 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	// --- Merchant Solana key lives as a provider-account SECRET, not on-chain. ----
-	// The private key is scoped to the Solana provider account and resolved
-	// through the production provider-account signer — proving the money-signing
+	// --- Merchant Solana key lives as a PSP SECRET, not on-chain. ----
+	// The private key is scoped to the Solana PSP and resolved
+	// through the production PSP signer — proving the money-signing
 	// authority is internal OpenRails state, never carried in any Solana payload.
 	priv := solanago.MustPrivateKeyFromBase58(base58Key)
 	merchantPub := priv.PublicKey()
@@ -99,11 +99,11 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	secretName, err := merchants.PSPSecretName("solana", environment, merchantPub.String(), "private_key")
 	require.NoError(t, err)
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, base58Key)
-	require.NoError(t, err, "inject provider-account private_key secret")
+	require.NoError(t, err, "inject PSP private_key secret")
 
-	signer := recurring.NewSignerFromRailMerchantAccounts(secretStore, nil, surface.app.Runtime.DB, 0, environment)
+	signer := recurring.NewSignerFromPSPs(secretStore, nil, surface.app.Runtime.DB, 0, environment)
 	signerPub, err := signer.PublicKey(ctx, dbtest.TestMerchantID)
-	require.NoError(t, err, "production signer must resolve the provider-account key from the secret store")
+	require.NoError(t, err, "production signer must resolve the PSP key from the secret store")
 	require.Equal(t, merchantPub, signerPub, "secret-store-backed signer derives the merchant wallet")
 
 	// --- (b) DB is the source of truth: publish a Solana-priced catalog product.

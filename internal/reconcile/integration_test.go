@@ -202,7 +202,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- advisory: findings persisted, zero local writes -------------------
 	var advisory *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		advisory = res
 		return err
 	}))
@@ -245,7 +245,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- enforce: local state converges, findings auto_fixed ---------------
 	var enforce *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		enforce = res
 		return err
 	}))
@@ -301,7 +301,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- rerun enforce: stable -----------------------------------------------
 	var rerun *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		rerun = res
 		return err
 	}))
@@ -350,7 +350,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	fixedSnap := *snap
 	fixedSnap.Subscriptions = snap.Subscriptions[:1] // ghosts + dups disappear
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, res.Summary.Providers["nmi"].AutoResolved, int64(1), "PS-8 vanished")
 
@@ -460,7 +460,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- advisory: both PS-1 stay requires_review, nothing is created ----------
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			if f.Type == FindingRemoteSubMissingLocal {
@@ -477,7 +477,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	// ---- enforce: resolvable PS-1 materializes automatically ------------------
 	var matRun *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		matRun = res
 		return err
 	}))
@@ -547,7 +547,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- re-run: idempotent, no duplicate subscription ------------------------
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			assert.NotEqual(t, resolvablePSID, f.SubjectKey, "materialized PS-1 must not re-diff")
@@ -575,7 +575,7 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 	}
 	var res *RunResult
 	err := appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		r, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
+		r, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
 		res = r
 		return err
 	})

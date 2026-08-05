@@ -18,7 +18,7 @@ func NewV7() uuid.UUID {
 // DeterministicNamespace is the PERMANENT uuidv5 namespace for natural-key
 // derived ids (#662). It must NEVER change: the derived id is a pure function
 // of (this namespace, the natural key), so changing it re-mints every product,
-// price, and provider-account id and orphans every FK that references one.
+// price, and PSP id and orphans every FK that references one.
 var DeterministicNamespace = uuid.MustParse("6f2a1bc3-51cd-4daa-844f-99d170240561")
 
 // DeterministicID derives a stable uuidv5 from an entity's immutable natural
