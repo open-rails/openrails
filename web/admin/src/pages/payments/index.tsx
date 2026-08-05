@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { listCustomers } from "@/lib/api/endpoints"
 import type { PaymentObject } from "@/lib/api/types"
 import { formatMicros, formatUnix, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -90,6 +89,7 @@ export function PaymentsPage() {
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
   const navigate = useNavigate()
+  const customerLookup = useMutation(adminMutations.findCustomer())
   const exportPayments = useMutation(adminMutations.exportPayments())
 
   const filters = {
@@ -115,8 +115,7 @@ export function PaymentsPage() {
     const term = input.trim()
     if (!term) return
     try {
-      const res = await listCustomers(term, 1, 0)
-      const c = res.data[0]
+      const c = await customerLookup.mutateAsync(term)
       if (!c) {
         toast.info("No customer matches")
         return
@@ -193,6 +192,7 @@ export function PaymentsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <form
             className="relative"
+            aria-busy={customerLookup.isPending}
             onSubmit={(e) => {
               e.preventDefault()
               void searchCustomer()
@@ -206,6 +206,7 @@ export function PaymentsPage() {
               className="w-64 pl-8"
               placeholder="Search customer email, ref, or id…"
               value={input}
+              disabled={customerLookup.isPending}
               onChange={(e) => setInput(e.target.value)}
             />
           </form>

@@ -153,6 +153,27 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals())
 
+describe("customer lookup mutation", () => {
+  it("returns the first customer matching the submitted term", async () => {
+    const queryClient = new QueryClient()
+    vi.mocked(listCustomers).mockResolvedValueOnce({
+      data: [{ id: "customer-1", email: "alice@example.com" }],
+      total: 1,
+    } as never)
+
+    const customer = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.findCustomer())
+      .execute("alice@example.com")
+
+    expect(customer).toEqual({
+      id: "customer-1",
+      email: "alice@example.com",
+    })
+    expect(listCustomers).toHaveBeenCalledWith("alice@example.com", 1, 0)
+  })
+})
+
 describe("list export mutations", () => {
   it("exports every customer page for the current search", async () => {
     const queryClient = new QueryClient()

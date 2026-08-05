@@ -104,6 +104,16 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  findCustomer: () => {
+    const customersKey = queryKeys.customers()
+    return mutationOptions({
+      mutationKey: [...customersKey, "find"],
+      mutationFn: async (term: string) => {
+        const result = await listCustomers(term, 1, 0)
+        return result.data[0]
+      },
+    })
+  },
   exportCustomers: () => {
     const customersKey = queryKeys.customers()
     return mutationOptions({
