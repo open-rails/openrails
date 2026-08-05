@@ -180,9 +180,9 @@ func TestMerchantCancelSolanaNamesTheWalletEndpoints(t *testing.T) {
 	now := time.Now().UTC()
 	fx.exec(`INSERT INTO openrails.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
-	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	        VALUES ($1, $2, $3, 'active', 'solana', 'pda-merchant-cancel', $4, $5, $4, $6, $7)`,
-		subID, priceID, productID, now.Add(-24*time.Hour), now.Add(6*24*time.Hour), fx.customer, fx.merchant)
+	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	        VALUES ($1, $2, $3, 'active', 'solana', 'pda-merchant-cancel', $4, $5, $4, $6, $7, $8)`,
+		subID, priceID, productID, now.Add(-24*time.Hour), now.Add(6*24*time.Hour), fx.customer, fx.merchant, fx.pspFor("solana"))
 
 	err := fx.adminSubscriptionService().CancelSubscription(fx.ctx, subID, "merchant request", true)
 	require.ErrorIs(t, err, subscriptions.ErrSolanaCancelNeedsWalletSignature)

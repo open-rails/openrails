@@ -56,10 +56,11 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	proProd, proPrice := seed("pro", 2, 25_000_000, "USD")
 
 	// Subscriber sits 2 days into a 30-day cycle on the EUR plan.
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	subID := uuid.New()
-	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-	      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`,
-		subID, merchantID, cust, basicProd, basicPrice, "fx-sub-"+sfx,
+	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+	      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$8,$8,$9)`,
+		subID, merchantID, cust, basicProd, basicPrice, pspID, "fx-sub-"+sfx,
 		now.Add(-2*24*time.Hour), now.Add(28*24*time.Hour))
 
 	t.Cleanup(func() {

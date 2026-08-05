@@ -56,10 +56,11 @@ func TestCreatePrice_AmountEditSameKey_VersionBumpAndGrandfather(t *testing.T) {
 
 	// Pin a subscription to the original ($10) row — the grandfather target.
 	customerID := seedCustomerPK(t, ctx, pool, merchantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id)
-		VALUES ($1, $2, $3, $4, 'active', 'nmi', $5)`,
-		merchantID, customerID, product.ID, original.ID, "grandfather-sub-"+uuid.NewString())
+		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, psp_id)
+		VALUES ($1, $2, $3, $4, 'active', 'nmi', $5, $6)`,
+		merchantID, customerID, product.ID, original.ID, "grandfather-sub-"+uuid.NewString(), pspID)
 	require.NoError(t, err)
 
 	// Edit the amount under the SAME key: $10 -> $12.

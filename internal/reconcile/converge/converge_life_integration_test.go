@@ -37,11 +37,12 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 			productID, "life-prod-"+suffix, "life-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// A checkout session that expired an hour ago but is still 'created'.
 		exec(`INSERT INTO openrails.checkout_sessions
-		        (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id)
-		      VALUES ($1, $2, 'one_off', 'nmi', 'created', 9990000, 'USD', $3, $4, $5)`,
-			sessionID, priceID, time.Now().Add(-1*time.Hour), merchantID, customer)
+		        (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id, psp_id)
+		      VALUES ($1, $2, 'one_off', 'nmi', 'created', 9990000, 'USD', $3, $4, $5, $6)`,
+			sessionID, priceID, time.Now().Add(-1*time.Hour), merchantID, customer, pspID)
 		return nil
 	}))
 

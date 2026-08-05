@@ -48,6 +48,7 @@ func seedSystemDeleteSubscription(ctx context.Context, t *testing.T, dbi *db.DB)
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant, "nmi")
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "cool-prod-"+uuid.NewString()[:8], f.merchant)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
@@ -56,9 +57,9 @@ func seedSystemDeleteSubscription(ctx context.Context, t *testing.T, dbi *db.DB)
 	// on a lapsed period), and no known future rebill to clamp the window to.
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
-	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, $8)`,
-		f.subID, priceID, productID, f.psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), f.custID, f.merchant)
+	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
+		f.subID, priceID, productID, f.psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), f.custID, f.merchant, pspID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
 			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, f.subID)
@@ -156,14 +157,15 @@ func TestSystemOriginDeleteIsCountedByTheRateCeiling(t *testing.T) {
 	f := seedSystemDeleteSubscription(ctx, t, dbi)
 
 	// Fill this merchant's automated destructive budget for the rolling hour.
+	ceilingPspID := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant, "mobius")
 	seeded := make([]uuid.UUID, 0, PerMerchantSystemHourlyCeiling)
 	for i := 0; i < PerMerchantSystemHourlyCeiling; i++ {
 		id := uuid.New()
 		_, err := pool.Exec(ctx,
 			`INSERT INTO openrails.rail_intents
-			   (id, merchant_id, rail, intent_type, idempotency_key, status, origin, next_attempt_at, created_at)
-			 VALUES ($1, $2, 'mobius', $3, $4, 'pending', 'system', now(), now())`,
-			id, f.merchant, TypeNMIPaymentMethodDelete, TypeNMIPaymentMethodDelete+":ceil:"+uuid.NewString())
+			   (id, merchant_id, rail, psp_id, intent_type, idempotency_key, status, origin, next_attempt_at, created_at)
+			 VALUES ($1, $2, 'mobius', $3, $4, $5, 'pending', 'system', now(), now())`,
+			id, f.merchant, ceilingPspID, TypeNMIPaymentMethodDelete, TypeNMIPaymentMethodDelete+":ceil:"+uuid.NewString())
 		require.NoError(t, err)
 		seeded = append(seeded, id)
 	}

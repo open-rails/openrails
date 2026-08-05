@@ -54,10 +54,11 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 	prodA, priceA := seedRecurringProduct("a", &tierGroup, 1) // the unknown sub's product
 	prodB, priceB := seedRecurringProduct("b", &tierGroup, 2) // same tier-group, other tier
 	prodC, priceC := seedRecurringProduct("c", nil, 0)        // unrelated product, no group
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	unknownSub := uuid.New()
-	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
-	      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$7,$8)`,
-		unknownSub, merchantID, cust, prodA, priceA, "ug-sub-"+sfx, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour))
+	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+	      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$8,$8,$9)`,
+		unknownSub, merchantID, cust, prodA, priceA, pspID, "ug-sub-"+sfx, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour))
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, unknownSub)

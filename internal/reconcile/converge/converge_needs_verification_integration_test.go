@@ -37,19 +37,23 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		cust = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspNMI := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
+		pspCCBill := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
+		pspStripe := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "stripe")
+		pspByRail := map[string]uuid.UUID{"nmi": pspNMI, "ccbill": pspCCBill, "stripe": pspStripe}
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','cust-x','vault-x','tx-x')`, pm, merchantID, cust)
+		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,psp_id) VALUES ($1,$2,$3,'nmi','cust-x','vault-x','tx-x',$4)`, pm, merchantID, cust, pspNMI)
 		// Distinct product per sub: uq_subscriptions_customer_product_lifecycle
 		// forbids two active subs for one (customer, product).
 		ins := func(id uuid.UUID, key, rail string, pmID *uuid.UUID, end time.Time) uuid.UUID {
 			prod, price := uuid.New(), uuid.New()
 			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, key+"-"+sfx, merchantID)
 			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at)
-			      VALUES ($1,$2,$3,$4,$5,'active',$6,$7,$8,$8,$9)`, id, merchantID, cust, prod, price, rail, pmID, start, end)
+			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+			      VALUES ($1,$2,$3,$4,$5,'active',$6,$7,$8,$8,$9,$10)`, id, merchantID, cust, prod, price, rail, pmID, start, end, pspByRail[rail])
 			return price
 		}
 		ins(subCCBill, "nvcc", "ccbill", nil, elapsed)               // auto-billed -> unknown
@@ -60,9 +64,9 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 		// HasPaymentMethod NMI WITH evidence: a completed payment OPENED the current
 		// (lapsed) period — OpenRails billed it, so dunning may engage.
 		paidPrice := ins(subNMIPaid, "nvpd", "nmi", &pm, elapsed)
-		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,5000000,5000000,'USD','completed',$7)`,
-			uuid.New(), merchantID, cust, paidPrice, subNMIPaid, "nvpd-"+sfx, start)
+		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,5000000,5000000,'USD','completed',$7,$8)`,
+			uuid.New(), merchantID, cust, paidPrice, subNMIPaid, "nvpd-"+sfx, start, pspNMI)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -242,17 +246,18 @@ func TestConverge_NeedsVerification_SkipsWhenRenewalPaymentPresent(t *testing.T)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		cust = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "nvr-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$6,$7)`, sub, merchantID, cust, prod, price, start, periodEnd)
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$6,$7,$8)`, sub, merchantID, cust, prod, price, start, periodEnd, pspID)
 		// A renewal charge landed AFTER the period end → provider billed.
-		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at)
-		      VALUES ($1,$2,$3,$4,$5,'ccbill',$6,5000000,5000000,'USD','completed',$7)`, pay, merchantID, cust, price, sub, "r-"+sfx, periodEnd.Add(time.Hour))
+		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'ccbill',$6,5000000,5000000,'USD','completed',$7,$8)`, pay, merchantID, cust, price, sub, "r-"+sfx, periodEnd.Add(time.Hour), pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -289,11 +294,12 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 
 	// Distinct customer per unknown sub: resolving several into active/past_due for
 	// one (customer, product) would trip uq_subscriptions_customer_product_lifecycle.
+	var pspID uuid.UUID
 	mkUnknown := func(ctx context.Context) uuid.UUID {
 		id := uuid.New()
 		c := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
-		_, err := appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$6,$7)`, id, merchantID, c, prod, price, start, periodEnd)
+		_, err := appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$6,$7,$8)`, id, merchantID, c, prod, price, start, periodEnd, pspID)
 		require.NoError(t, err)
 		return id
 	}
@@ -308,6 +314,7 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		require.NoError(t, err)
+		pspID = dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		return nil
 	}))
 	t.Cleanup(func() {

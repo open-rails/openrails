@@ -202,11 +202,14 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 
 	clock := clockwork.NewRealClock()
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
+
 	// Stored payment method the upgrade charges against.
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		CustomerID:           customerID,
 		Rail:                 models.Rail("nmi"),
+		PspID:                pspID,
 		RailCustomerRef:      railCustomerRef,
 		RailMethodRef:        "bill-upg-" + sfx,
 		RebillDriver:         models.RebillDriverProvider,
@@ -220,11 +223,11 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	periodStart := now.Add(-24 * time.Hour)
 	periodEnd := now.Add(29 * 24 * time.Hour)
 	_, err := pool.Exec(ctx, `INSERT INTO openrails.subscriptions
-	        (id, price_id, product_id, status, rail, rail_subscription_id,
+	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         payment_method_id, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
-		oldSubID, oldPriceID, oldProductID, "rsub-old-"+sfx,
+	      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $7, $6, $8, $9, $10)`,
+		oldSubID, oldPriceID, oldProductID, pspID, "rsub-old-"+sfx,
 		periodStart, periodEnd, pm.ID, customerID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 

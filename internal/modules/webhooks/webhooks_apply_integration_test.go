@@ -199,6 +199,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 		cancelTypeStr = &ct
 		cancelledAt = &now
 	}
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    f.subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -207,6 +208,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 		PriceID:               &f.priceID,
 		Status:                string(subStatus),
 		Rail:                  string(models.RailStripe),
+		PspID:                 pspID,
 		RailSubscriptionID:    f.railSubID,
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &periodEnd,
@@ -536,11 +538,13 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi)
 	originalTxnID := "orig_" + uuid.New().String()
 	refundTxnID := "refund_" + uuid.New().String()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	original := &models.Payment{
 		ID:            uuid.New(),
 		CustomerID:    tenantSubjectID,
 		PriceID:       priceID,
 		Rail:          models.RailNMI,
+		PspID:         &pspID,
 		TransactionID: originalTxnID,
 		Amount:        19_990_000,
 		ListAmount:    19_990_000,

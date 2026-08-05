@@ -46,14 +46,15 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rw-prod-"+suffix, "rw-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// User cancelled mid-period: cancelled now, ended_at = period end (the runway).
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at)
-		      VALUES ($1,$2,$3,'cancelled','nmi',$4,$5,$6,$5,'{}'::jsonb,$7,$8,$9,'user',$10)`,
+		         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
+		      VALUES ($1,$2,$3,'cancelled','nmi',$4,$5,$6,$5,'{}'::jsonb,$7,$8,$9,'user',$10,$11)`,
 			subID, priceID, productID, "rw-sub-"+suffix,
-			now.Add(-20*24*time.Hour), periodEnd, customer, merchantID, now.Add(-time.Hour), periodEnd)
+			now.Add(-20*24*time.Hour), periodEnd, customer, merchantID, now.Add(-time.Hour), periodEnd, pspID)
 		// The proper #691 closure: window bounded exactly at period end.
 		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
@@ -155,17 +156,18 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "orph-prod-"+suffix, "orph-tier-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 
 		seedSub := func(id uuid.UUID, status string, periodEnd, endedAt *time.Time, nextRetry *time.Time) {
 			exec(`INSERT INTO openrails.subscriptions
 			        (id, price_id, product_id, status, rail, rail_subscription_id,
 			         current_period_starts_at, current_period_ends_at, started_at, next_retry_at,
-			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at)
-			      VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,'{}'::jsonb,$9,$10,$11,$12,$13)`,
+			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
+			      VALUES ($1,$2,$3,$4,'nmi',$5,$6,$7,$6,$8,'{}'::jsonb,$9,$10,$11,$12,$13,$14)`,
 				id, priceID, productID, status, "orph-"+id.String()[:8],
 				now.Add(-40*24*time.Hour), periodEnd, nextRetry, customer, merchantID,
 				timePtrOrNil(status == "cancelled", now.Add(-11*24*time.Hour)),
-				strPtrOrNil(status == "cancelled", "user"), endedAt)
+				strPtrOrNil(status == "cancelled", "user"), endedAt, pspID)
 		}
 		futureRetry := now.Add(24 * time.Hour)
 		futurePeriod := now.Add(5 * 24 * time.Hour)
@@ -174,12 +176,12 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		seedSub(subUnknown, "unknown", &bound, nil, nil)
 		seedSub(subPastDue, "past_due", &futurePeriod, nil, &futureRetry)
 
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','refunded',$6)`,
-			payRefunded, merchantID, customer, priceID, "orph-txn-r-"+suffix, now.Add(-5*24*time.Hour))
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6)`,
-			payCompleted, merchantID, customer, priceID, "orph-txn-c-"+suffix, now.Add(-4*24*time.Hour))
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','refunded',$6,$7)`,
+			payRefunded, merchantID, customer, priceID, "orph-txn-r-"+suffix, now.Add(-5*24*time.Hour), pspID)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
+			payCompleted, merchantID, customer, priceID, "orph-txn-c-"+suffix, now.Add(-4*24*time.Hour), pspID)
 
 		seedEnt := func(id uuid.UUID, feature, sourceType string, sourceID uuid.UUID, endAt *time.Time) {
 			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
@@ -342,10 +344,11 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 		}
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, prodDup, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		seedPay := func(id uuid.UUID, txn string, at time.Time) {
-			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6)`,
-				id, merchantID, customer, priceID, txn, at)
+			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
+				id, merchantID, customer, priceID, txn, at, pspID)
 		}
 		// Every payment lands in a DIFFERENT month (all share one price →
 		// product for provider_charge's grouping), so the month-scoped

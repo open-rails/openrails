@@ -120,6 +120,19 @@ type findingsFixture struct {
 	fake     *fakeNMIGateway
 	client   *nmi.NMIClient
 	rt       *app.Runtime
+	psps     map[string]uuid.UUID
+}
+
+// pspFor lazily materializes (and caches) a psp row for rail, so raw fixture
+// INSERTs can stamp the now-required psp_id (or#893).
+func (fx *findingsFixture) pspFor(rail string) uuid.UUID {
+	fx.t.Helper()
+	if id, ok := fx.psps[rail]; ok {
+		return id
+	}
+	id := dbtest.EnsureTestPSP(fx.ctx, fx.t, fx.dbi.Pool(), fx.merchant, rail)
+	fx.psps[rail] = id
+	return id
 }
 
 func newFindingsFixture(t *testing.T) *findingsFixture {
@@ -134,6 +147,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		t: t, dbi: dbi, ctx: ctx, merchant: mid,
 		adminID: "admin-" + sfx,
 		product: uuid.New(), price: uuid.New(),
+		psps: map[string]uuid.UUID{},
 	}
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -235,9 +249,9 @@ func (fx *findingsFixture) seedActiveSubscriptionFor(productID, priceID uuid.UUI
 	now := time.Now().UTC()
 	fx.exec(`INSERT INTO openrails.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
-	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
-	        VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8)`,
-		subID, priceID, productID, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant)
+	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
+	        VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
+		subID, priceID, productID, psid, now.Add(-24*time.Hour), now.Add(29*24*time.Hour), fx.customer, fx.merchant, fx.pspFor("nmi"))
 	return subID
 }
 
@@ -258,9 +272,9 @@ func (fx *findingsFixture) seedCompletedPayment(txn string, subID *uuid.UUID) uu
 	fx.t.Helper()
 	payID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments
-	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement)
-	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail')`,
-		payID, fx.price, txn, subID, fx.customer, fx.merchant)
+	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement, psp_id)
+	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
+		payID, fx.price, txn, subID, fx.customer, fx.merchant, fx.pspFor("nmi"))
 	return payID
 }
 

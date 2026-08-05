@@ -194,6 +194,10 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 
 	// Crash forensics, verbatim: claim marker on the invoice + the claimed
 	// attempt row, dispatched 20 minutes ago, outcome never recorded.
+	// psp_id mirrors invoice_recovery.go's real writer, which resolves it from
+	// the claimed payment method.
+	var pspID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, "SELECT psp_id FROM openrails.payment_methods WHERE id = $1", method).Scan(&pspID))
 	attemptID := uuid.New()
 	key := "invoice:" + invoice.ID.String() + ":attempt:0"
 	_, err = pool.Exec(ctx, `UPDATE openrails.invoices
@@ -202,9 +206,9 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 		WHERE id = $1`, invoice.ID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.invoice_payments
-		(id, merchant_id, customer_id, invoice_id, currency, amount, status, attempted_at, created_at, updated_at, payment_method_id, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6, 'attempted', now() - interval '20 minutes', now() - interval '20 minutes', now() - interval '20 minutes', $7, $8)`,
-		attemptID, invoice.MerchantID, payer.UUID(), invoice.ID, invoice.Currency, invoice.AmountDue, method, key)
+		(id, merchant_id, customer_id, invoice_id, currency, amount, status, attempted_at, created_at, updated_at, payment_method_id, idempotency_key, psp_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'attempted', now() - interval '20 minutes', now() - interval '20 minutes', now() - interval '20 minutes', $7, $8, $9)`,
+		attemptID, invoice.MerchantID, payer.UUID(), invoice.ID, invoice.Currency, invoice.AmountDue, method, key, pspID)
 	require.NoError(t, err)
 
 	// The next sweep's stale-claim takeover parks it unknown instead of

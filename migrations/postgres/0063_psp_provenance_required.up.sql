@@ -51,6 +51,52 @@ SET LOCAL lock_timeout = '10s';
 -- only thing the row could have come from. (A temp table would show up in
 -- sqlc's schema read of migrations/ as a generated model.)
 
+-- --------------------------------------------- the double-count, resolved ---
+-- The defect itself, in whatever rows a dev database already holds: an
+-- UNATTRIBUTED row for a provider key that an ATTRIBUTED row already covers is
+-- the same provider object counted twice. Attributing it would just move the
+-- collision to the unique, so the duplicate goes — the attributed row is the
+-- one with provenance, and it is the one that survives.
+
+DO $$
+DECLARE n bigint;
+BEGIN
+    DELETE FROM openrails.payments p
+     WHERE p.psp_id IS NULL
+       AND EXISTS (SELECT 1 FROM openrails.payments q
+                    WHERE q.psp_id IS NOT NULL AND q.merchant_id = p.merchant_id
+                      AND q.rail = p.rail AND q.transaction_id = p.transaction_id);
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RAISE NOTICE 'or#893 double-counted duplicates removed: payments=%', n;
+
+    DELETE FROM openrails.subscriptions s
+     WHERE s.psp_id IS NULL AND s.rail_subscription_id <> ''
+       AND EXISTS (SELECT 1 FROM openrails.subscriptions q
+                    WHERE q.psp_id IS NOT NULL AND q.merchant_id = s.merchant_id
+                      AND q.rail = s.rail AND q.rail_subscription_id = s.rail_subscription_id);
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RAISE NOTICE 'or#893 double-counted duplicates removed: subscriptions=%', n;
+
+    DELETE FROM openrails.payment_methods m
+     WHERE m.psp_id IS NULL
+       AND EXISTS (SELECT 1 FROM openrails.payment_methods q
+                    WHERE q.psp_id IS NOT NULL AND q.merchant_id = m.merchant_id
+                      AND q.rail = m.rail AND q.rail_customer_ref = m.rail_customer_ref
+                      AND q.rail_method_ref = m.rail_method_ref);
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RAISE NOTICE 'or#893 double-counted duplicates removed: payment_methods=%', n;
+
+    DELETE FROM openrails.checkout_sessions c
+     WHERE c.psp_id IS NULL
+       AND EXISTS (SELECT 1 FROM openrails.checkout_sessions q
+                    WHERE q.psp_id IS NOT NULL AND q.merchant_id = c.merchant_id
+                      AND q.rail = c.rail
+                      AND (q.transaction_id IS NOT DISTINCT FROM c.transaction_id
+                           OR q.reference IS NOT DISTINCT FROM c.reference));
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RAISE NOTICE 'or#893 double-counted duplicates removed: checkout_sessions=%', n;
+END $$;
+
 -- ------------------------------------------------------------- attribution ---
 
 -- Off-rail rows (rail = manual/admin) match no PSP by construction and stay NULL.
@@ -177,12 +223,12 @@ ALTER TABLE openrails.rail_intents ALTER COLUMN psp_id SET NOT NULL;
 -- The statements above attributed or deleted every row this validates, in this
 -- same transaction, and NOT VALID buys nothing inside a single-transaction
 -- migrator (see 0014).
--- squawk-ignore constraint-missing-not-valid
 ALTER TABLE openrails.payments
+    -- squawk-ignore constraint-missing-not-valid
     ADD CONSTRAINT payments_psp_required_on_rail
     CHECK (psp_id IS NOT NULL OR rail IN ('manual', 'admin'));
--- squawk-ignore constraint-missing-not-valid
 ALTER TABLE openrails.invoice_payments
+    -- squawk-ignore constraint-missing-not-valid
     ADD CONSTRAINT invoice_payments_psp_required_on_rail
     CHECK (psp_id IS NOT NULL OR rail IN ('manual', 'admin'));
 -- squawk-ignore adding-not-nullable-field
@@ -192,9 +238,8 @@ ALTER TABLE openrails.rail_mutation_logs ALTER COLUMN psp_id SET NOT NULL;
 -- DELETE SET NULL is now unrepresentable, so it follows the PSP out (the same
 -- choice 0060 made for the watermark cursor).
 ALTER TABLE openrails.rail_mutation_logs DROP CONSTRAINT rail_mutation_logs_psp_fk;
--- squawk-ignore adding-foreign-key-constraint
--- squawk-ignore constraint-missing-not-valid
 ALTER TABLE openrails.rail_mutation_logs
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (psp_id)
     REFERENCES openrails.psps(id) ON DELETE CASCADE;
 
@@ -290,9 +335,8 @@ END $$;
 
 -- squawk-ignore adding-not-nullable-field
 ALTER TABLE openrails.rail_customer_accounts ALTER COLUMN psp_id SET NOT NULL;
--- squawk-ignore adding-foreign-key-constraint
--- squawk-ignore constraint-missing-not-valid
 ALTER TABLE openrails.rail_customer_accounts
+    -- squawk-ignore adding-foreign-key-constraint, constraint-missing-not-valid
     ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (psp_id)
     REFERENCES openrails.psps(id) ON DELETE CASCADE;
 

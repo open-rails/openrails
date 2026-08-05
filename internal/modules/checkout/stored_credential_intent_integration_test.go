@@ -26,13 +26,14 @@ func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, unscheduledRef str
 	t.Helper()
 	pool := fx.db.Pool()
 	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, fx.userID)
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 	pmID := uuid.New()
 	_, err := pool.Exec(fx.ctx,
 		`INSERT INTO openrails.payment_methods
-		   (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
+		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_unscheduled_ref)
-		 VALUES ($1, $2, $3, 'mobius', $4, '', '', $5)`,
-		pmID, dbtest.TestMerchantID.UUID(), customerID, fx.payload.CustomerVaultID, unscheduledRef)
+		 VALUES ($1, $2, $3, 'mobius', $4, $5, '', '', $6)`,
+		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, unscheduledRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pmID)
@@ -91,13 +92,14 @@ func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string)
 	t.Helper()
 	pool := fx.db.Pool()
 	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, fx.payload.UserID)
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 	pmID := uuid.New()
 	_, err := pool.Exec(fx.ctx,
 		`INSERT INTO openrails.payment_methods
-		   (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
+		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_recurring_ref)
-		 VALUES ($1, $2, $3, 'mobius', $4, '', '', $5)`,
-		pmID, dbtest.TestMerchantID.UUID(), customerID, fx.payload.CustomerVaultID, recurringRef)
+		 VALUES ($1, $2, $3, 'mobius', $4, $5, '', '', $6)`,
+		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, recurringRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pmID)

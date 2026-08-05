@@ -22,6 +22,9 @@ type (
 	DeclaredTransaction   = billingimport.DeclaredTransaction
 	DeclaredSubscription  = billingimport.DeclaredSubscription
 	DeclaredBilling       = billingimport.DeclaredBilling
+	// PSPRef names the PSP a declared row belongs to — by psps row id or by the
+	// merchant's manifest PSP key. Required attribution (or#893).
+	PSPRef = billingimport.PSPRef
 
 	// BillingImportOptions configures ImportBilling.
 	BillingImportOptions = billingimport.Options

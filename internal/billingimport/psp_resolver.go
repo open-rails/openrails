@@ -18,9 +18,8 @@ import (
 type pspResolver struct {
 	byID  map[uuid.UUID]gen.OpenrailsPsp
 	byKey map[string]gen.OpenrailsPsp // "<rail>\x1f<key>"
-	// soleByRail is the merchant's single live PSP on a rail, when there is
-	// exactly one. It is NOT a fallback for a missing ref — only the resolution
-	// of an ambiguity-free explicit default.
+	// fallback is the book's DEFAULT_PSP. It is a declared value, not a guess:
+	// nothing here ever infers a PSP from "the merchant only has one".
 	fallback PSPRef
 	known    []string
 }
@@ -60,7 +59,7 @@ func (r *pspResolver) resolve(ref PSPRef, rail, subject string) (uuid.UUID, erro
 	}
 	if ref.IsZero() {
 		return uuid.Nil, fmt.Errorf(
-			"import billing: %s declares no PSP and no Options.DefaultPSP was given — a provider row must state which account it came from (known PSPs: %s)",
+			"import billing: %s declares no PSP and the book set no default_psp — a provider row must state which account it came from (known PSPs: %s)",
 			subject, r.knownList())
 	}
 	if ref.ID != nil && *ref.ID != uuid.Nil {

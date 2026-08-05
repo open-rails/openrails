@@ -66,7 +66,9 @@ var (
 	pricePO  = uuid.New() // one-time 5M
 	pricePW  = uuid.New() // weekly 2.3M / 168h
 	priceB   = uuid.New()
-	acctRA1  = uuid.New()
+	acctRA1  = uuid.New() // mA/nmi
+	acctCCA1 = uuid.New() // mA/ccbill
+	acctRB1  = uuid.New() // mB/nmi
 
 	subs = map[int]uuid.UUID{1: uuid.New(), 2: uuid.New(), 3: uuid.New(), 4: uuid.New(), 5: uuid.New(), 6: uuid.New(), 7: uuid.New(), 8: uuid.New()}
 )
@@ -125,6 +127,10 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	}
 	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
 		acctRA1, mA)
+	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', 'acct-cc-1') ON CONFLICT DO NOTHING`,
+		acctCCA1, mA)
+	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-b1') ON CONFLICT DO NOTHING`,
+		acctRB1, mB)
 
 	// --- subscriptions (insert order matters only for readability) -------------
 	type subRow struct {
@@ -150,9 +156,9 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{id: subs[8], customer: c[8], price: pricePM, status: "cancelled", started: d(t, 2025, 1, 1), ended: tp(d(t, 2025, 6, 1)), cancelled: tp(d(t, 2025, 5, 15)), cancelType: sp("user")},
 	} {
 		exec(ctx, t, pool, `INSERT INTO openrails.subscriptions
-			(id, merchant_id, customer_id, product_id, price_id, rail, status, started_at, ended_at, cancelled_at, cancel_type, current_period_ends_at)
-			VALUES ($1, $2, $3, $4, $5, 'nmi', $6::openrails.subscription_status, $7, $8, $9, $10, $11)`,
-			s.id, mA, s.customer, productA, s.price, s.status, s.started, s.ended, s.cancelled, s.cancelType, s.periodEnd)
+			(id, merchant_id, customer_id, product_id, price_id, rail, psp_id, status, started_at, ended_at, cancelled_at, cancel_type, current_period_ends_at)
+			VALUES ($1, $2, $3, $4, $5, 'nmi', $6, $7::openrails.subscription_status, $8, $9, $10, $11, $12)`,
+			s.id, mA, s.customer, productA, s.price, acctRA1, s.status, s.started, s.ended, s.cancelled, s.cancelType, s.periodEnd)
 	}
 	// Recovery transitions (the trigger records them in the same tx):
 	// sub5 past_due->active; sub6 past_due->cancelled.
@@ -170,15 +176,15 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		 card_brand, discount_code, purchased_at, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'USD',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
 	txp := "mtx-" + suffix + "-"
-	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", nil, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
+	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", acctRA1, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
 	exec(ctx, t, pool, payCols, sale1, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s1", 10_000_000, 10_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 6, 2))
 	exec(ctx, t, pool, payCols, sale2, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s2", 10_000_000, 10_000_000, "completed", "renewal", nil, nil, nil, "visa", nil, d(t, 2026, 6, 10))
-	exec(ctx, t, pool, payCols, sale3, mA, c[2], pricePO, nil, nil, "ccbill", nil, txp+"s3", 5_000_000, 5_000_000, "completed", "initial", nil, nil, nil, nil, "PROMO", d(t, 2026, 6, 11))
-	exec(ctx, t, pool, payCols, fail1, mA, c[2], pricePM, nil, nil, "nmi", nil, txp+"f1", 10_000_000, 10_000_000, "failed", "renewal", "202", "insufficient_funds", nil, nil, nil, d(t, 2026, 6, 10))
-	exec(ctx, t, pool, payCols, fail2, mA, c[2], pricePM, nil, nil, "nmi", nil, txp+"f2", 10_000_000, 10_000_000, "failed", "initial", "223", "expired_card", nil, nil, nil, d(t, 2026, 6, 12))
-	exec(ctx, t, pool, payCols, refund1, mA, c[2], pricePO, nil, sale3, "ccbill", nil, txp+"r1", -5_000_000, 5_000_000, "completed", nil, nil, nil, "refund", nil, nil, d(t, 2026, 6, 20))
+	exec(ctx, t, pool, payCols, sale3, mA, c[2], pricePO, nil, nil, "ccbill", acctCCA1, txp+"s3", 5_000_000, 5_000_000, "completed", "initial", nil, nil, nil, nil, "PROMO", d(t, 2026, 6, 11))
+	exec(ctx, t, pool, payCols, fail1, mA, c[2], pricePM, nil, nil, "nmi", acctRA1, txp+"f1", 10_000_000, 10_000_000, "failed", "renewal", "202", "insufficient_funds", nil, nil, nil, d(t, 2026, 6, 10))
+	exec(ctx, t, pool, payCols, fail2, mA, c[2], pricePM, nil, nil, "nmi", acctRA1, txp+"f2", 10_000_000, 10_000_000, "failed", "initial", "223", "expired_card", nil, nil, nil, d(t, 2026, 6, 12))
+	exec(ctx, t, pool, payCols, refund1, mA, c[2], pricePO, nil, sale3, "ccbill", acctCCA1, txp+"r1", -5_000_000, 5_000_000, "completed", nil, nil, nil, "refund", nil, nil, d(t, 2026, 6, 20))
 	exec(ctx, t, pool, payCols, cb1, mA, c[1], pricePM, subs[1], sale2, "nmi", acctRA1, txp+"c1", -10_000_000, 10_000_000, "completed", nil, nil, nil, "chargeback", nil, nil, d(t, 2026, 6, 25))
-	exec(ctx, t, pool, payCols, saleB, mB, cB, priceB, nil, nil, "nmi", nil, txp+"sB", 999_000_000, 999_000_000, "completed", "initial", nil, nil, nil, nil, nil, d(t, 2026, 6, 5))
+	exec(ctx, t, pool, payCols, saleB, mB, cB, priceB, nil, nil, "nmi", acctRB1, txp+"sB", 999_000_000, 999_000_000, "completed", "initial", nil, nil, nil, nil, nil, d(t, 2026, 6, 5))
 
 	// --- credit lots (grants) + usage + ledger ------------------------------------
 	lot := `INSERT INTO openrails.grants (id, merchant_id, customer_id, kind, source_type, source_id, event, amount, currency, created_at, starts_at)

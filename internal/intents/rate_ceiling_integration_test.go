@@ -48,11 +48,13 @@ func insertCeilingIntent(t *testing.T, dbi *db.DB, merchantID uuid.UUID, actor s
 	if actor != "" {
 		actorArg = actor
 	}
-	_, err := dbtest.SharedMerchantPool(t, merchantID).Exec(context.Background(),
+	pool := dbtest.SharedMerchantPool(t, merchantID)
+	pspID := dbtest.EnsureTestPSP(context.Background(), t, pool, merchantID, "mobius")
+	_, err := pool.Exec(context.Background(),
 		`INSERT INTO openrails.rail_intents
-		   (merchant_id, rail, intent_type, idempotency_key, status, origin, actor, next_attempt_at, created_at)
-		 VALUES ($1, 'mobius', $2, $3, 'pending', $4, $5, $6, $6)`,
-		merchantID, ceilingTestType, ceilingTestType+":"+uuid.NewString(), string(origin), actorArg, createdAt.UTC())
+		   (merchant_id, rail, psp_id, intent_type, idempotency_key, status, origin, actor, next_attempt_at, created_at)
+		 VALUES ($1, 'mobius', $2, $3, $4, 'pending', $5, $6, $7, $7)`,
+		merchantID, pspID, ceilingTestType, ceilingTestType+":"+uuid.NewString(), string(origin), actorArg, createdAt.UTC())
 	require.NoError(t, err)
 }
 
@@ -326,12 +328,14 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	// the fleet-scale failure or#887 removed rather than papered over.
 	gated := NewStoreGated(dbi, NewRateCeiling(dbi))
 	actor := "cust-" + uuid.NewString()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchant, "mobius")
 
 	enqueue := func(i int) error {
 		subID := uuid.New()
 		_, err := gated.Enqueue(ctx, EnqueueParams{
 			MerchantID:     merchant,
 			Provider:       "mobius",
+			PspID:          pspID,
 			IntentType:     ceilingTestType,
 			SubscriptionID: &subID,
 			IdempotencyKey: fmt.Sprintf("%s:%s:%d", ceilingTestType, actor, i),

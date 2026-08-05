@@ -233,10 +233,13 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 | REC-7 | **A kind whose damage no local undo reaches is refused by name**, with what to reach for instead — never half-reversed and marked reversed. | **ENFORCED** — `merchant_delete` is registered unrecoverable; unconverted kinds refuse. |
 | REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | **ENFORCED** — steps 1 and 4 of the reversal, asserted in `converge_rollback_integration_test.go`. |
 
-**The known hole**: `psp_id` is nullable on all eight PSP-tagged tables, so a PSP-scoped
-predicate silently skips legacy rows. The undo reports that blind spot as an explicit count
-rather than excluding it in silence. Backfilling and `NOT NULL`-ing the column is the real
-fix (or#831/GAP-5).
+**The hole, CLOSED (or#893)**: `psp_id` used to be nullable on every PSP-tagged table, so a
+PSP-scoped predicate silently skipped unattributed rows and the undo could only report that
+blind spot as a count. Migration 0063 made provenance total — `NOT NULL` on subscriptions,
+payment_methods, checkout_sessions, rail_intents, rail_mutation_logs and rail_customer_accounts,
+and a `psp_id IS NOT NULL OR rail IN ('manual','admin')` CHECK on payments and invoice_payments,
+the two tables that also record off-rail money. The count is now an INVARIANT the undo asserts
+and refuses on, not a report.
 
 ## 10. Known gaps — rules we hold but do not enforce
 

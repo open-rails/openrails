@@ -48,6 +48,7 @@ func TestPGHistorySource(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(ctxA, func(ctx context.Context) error {
 		custA = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		seed(ctx, merchantA.UUID(), prodA, priceA, "a")
+		pspA := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantA.UUID(), "nmi")
 		exec := func(sql string, args ...any) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
@@ -61,13 +62,13 @@ func TestPGHistorySource(t *testing.T) {
 		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)
 		      VALUES ($1,'charge_failure','ccbill',$2,'doujins_users_logs')`, merchantA.UUID(), t1)
 		// Failed payment = go-forward dunning evidence.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6)`,
-			payFailedA, merchantA.UUID(), custA, priceA, "fail-txn-"+sfx, t2)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
+			payFailedA, merchantA.UUID(), custA, priceA, "fail-txn-"+sfx, t2, pspA)
 		// Completed payment: not dunning evidence.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6)`,
-			payCompletedA, merchantA.UUID(), custA, priceA, "ok-txn-"+sfx, t2)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
+			payCompletedA, merchantA.UUID(), custA, priceA, "ok-txn-"+sfx, t2, pspA)
 		return nil
 	}))
 
@@ -83,11 +84,12 @@ func TestPGHistorySource(t *testing.T) {
 		custB = uuid.New()
 		exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1,$2,$3)`, custB, merchantB.UUID(), custB.String())
 		seed(ctx, merchantB.UUID(), prodB, priceB, "b")
+		pspB := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantB.UUID(), "nmi")
 		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)
 		      VALUES ($1,'charge_failure','nmi',$2,'mobius_schedulers')`, merchantB.UUID(), t1)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at)
-		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6)`,
-			payFailedB, merchantB.UUID(), custB, priceB, "fail-txn-b-"+sfx, t2)
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
+			payFailedB, merchantB.UUID(), custB, priceB, "fail-txn-b-"+sfx, t2, pspB)
 		return nil
 	}))
 

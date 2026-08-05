@@ -111,10 +111,11 @@ func seedActiveSubscription(t *testing.T, dbi *db.DB, pool *pgxpool.Pool, ctx co
 		CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: payer.UUID(),
 		ProductID: productID, PriceID: &priceID,
-		Status: string(models.StatusActive), Rail: string(models.RailNMI),
+		Status: string(models.StatusActive), Rail: string(models.RailNMI), PspID: pspID,
 		RailSubscriptionID:    "sub_doctrine_" + subID.String(),
 		CurrentPeriodStartsAt: &now, CurrentPeriodEndsAt: &periodEnd, StartedAt: now,
 	})

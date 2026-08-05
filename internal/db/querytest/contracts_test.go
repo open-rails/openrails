@@ -109,6 +109,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		GatewayResponse:          []byte(`{}`),
 		CreatedAt:                now,
 		UpdatedAt:                now,
+		PspID:                    account.ID,
 	})
 	require.NoError(t, err)
 
@@ -127,6 +128,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		MerchantID: merchantID,
+		PspID:      account.ID,
 	})
 	require.NoError(t, err)
 	railCustomerID, err := q.GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
@@ -155,6 +157,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Metadata:             []byte(`{"contract":true}`),
 		CreatedAt:            now,
 		UpdatedAt:            now,
+		PspID:                account.ID,
 	})
 	require.NoError(t, err)
 	methods, err := q.ListPaymentMethodsByCustomer(ctx, customerID)
@@ -207,6 +210,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		CreatedAt:      now,
 		CustomerID:     customerID,
 		MoneyMovement:  string(models.MoneyMovementRail),
+		PspID:          &account.ID,
 	})
 	require.NoError(t, err)
 

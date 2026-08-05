@@ -158,11 +158,18 @@ type DeclaredBilling struct {
 	// SubscriptionsExhaustive (or#858): how many subscriptions the exhaustive
 	// book contains. A mismatch refuses the whole import — a partial batch
 	// declared exhaustive cannot slip through as a boolean typo.
-	ExpectedSubscriptions *int                    `json:"expected_subscriptions,omitempty"`
-	Customers             []DeclaredCustomer      `json:"customers,omitempty"`
-	PaymentMethods        []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
-	Subscriptions         []DeclaredSubscription  `json:"subscriptions,omitempty"`
-	Transactions          []DeclaredTransaction   `json:"transactions,omitempty"`
+	ExpectedSubscriptions *int `json:"expected_subscriptions,omitempty"`
+	// DefaultPSP attributes every declared row that names no PSP of its own
+	// (or#893). A legacy book usually came from ONE gateway account, so stating
+	// it once is the ordinary shape; per-row `psp` is for a mixed book. A row
+	// that resolves to neither REFUSES the whole import — there is no
+	// unattributed lane. It lives on the BODY, not on Options, so the HTTP door
+	// (POST /v1/import/billing) reaches it the same way an embedded host does.
+	DefaultPSP     PSPRef                  `json:"default_psp,omitzero"`
+	Customers      []DeclaredCustomer      `json:"customers,omitempty"`
+	PaymentMethods []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
+	Subscriptions  []DeclaredSubscription  `json:"subscriptions,omitempty"`
+	Transactions   []DeclaredTransaction   `json:"transactions,omitempty"`
 }
 
 // Options configures Import. Merchant scoping: MerchantID when the caller
@@ -173,11 +180,6 @@ type Options struct {
 	MerchantSlug string
 	MerchantID   merchant.ID
 	Book         DeclaredBilling
-	// DefaultPSP attributes every declared row that names no PSP of its own.
-	// A whole legacy book usually came from ONE gateway account, so stating it
-	// once is the ordinary shape; per-row PSP is for a mixed book. An import
-	// where a row resolves to neither is REFUSED, not written unattributed.
-	DefaultPSP PSPRef
 }
 
 // Result reports per-SourceID outcomes (subscriptions only; customers/payment
@@ -239,7 +241,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// or#893: every provider-bound row the import writes carries a PSP.
 		// Resolve the merchant's catalog ONCE, then attribute each declared row
 		// from its own PSP ref, falling back to the whole-import default.
-		psps, err := newPSPResolver(ctx, q, merchantID.UUID(), opts.DefaultPSP)
+		psps, err := newPSPResolver(ctx, q, merchantID.UUID(), opts.Book.DefaultPSP)
 		if err != nil {
 			return err
 		}

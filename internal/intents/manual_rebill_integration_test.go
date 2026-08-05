@@ -87,6 +87,7 @@ type rebillFixture struct {
 	subID     uuid.UUID
 	periodEnd time.Time
 	orderRef  string
+	pspID     uuid.UUID
 }
 
 // seedPastDueSubscription inserts product/price/payment-method/subscription

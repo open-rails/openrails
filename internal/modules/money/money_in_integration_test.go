@@ -139,11 +139,13 @@ func seedPaymentMethodWithRailCustomerRef(t *testing.T, pool *pgxpool.Pool, ctx 
 
 func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, railCustomerRef string) uuid.UUID {
 	t.Helper()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
 	params := gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           payer.UUID(),
 		Rail:                 rail,
+		PspID:                pspID,
 		InitialTransactionID: "init_" + pm.String(),
 	}
 	// Mirror the migration's per-rail handle placement: NMI keeps the customer
@@ -164,11 +166,13 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerID string) {
 	t.Helper()
 	now := time.Now().UTC()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
 	require.NoError(t, gen.New(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CustomerID: payer.UUID(),
 		Rail:       rail,
+		PspID:      pspID,
 		AccountID:  railCustomerID,
 		CreatedAt:  now,
 		UpdatedAt:  now,

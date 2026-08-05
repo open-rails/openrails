@@ -123,8 +123,9 @@ func seedFleetMerchantWithRevenue(t *testing.T, mid uuid.UUID, sfx string) {
 		prodID, "fleet-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew, access_duration_hours)
 	      VALUES ($1, $2, 7000000, 'USD', $3, true, 720)`, priceID, prodID, mid)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid, "nmi")
 	exec(`INSERT INTO openrails.payments
-	        (id, merchant_id, customer_id, price_id, transaction_id, amount, list_amount, currency, status, rail, purchased_at)
-	      VALUES ($1, $2, $3, $4, $5, 7000000, 7000000, 'USD', 'completed', 'nmi', $6)`,
-		payID, mid, custID, priceID, "fleet-txn-"+sfx, time.Now().UTC().Add(-time.Hour))
+	        (id, merchant_id, customer_id, price_id, transaction_id, amount, list_amount, currency, status, rail, purchased_at, psp_id)
+	      VALUES ($1, $2, $3, $4, $5, 7000000, 7000000, 'USD', 'completed', 'nmi', $6, $7)`,
+		payID, mid, custID, priceID, "fleet-txn-"+sfx, time.Now().UTC().Add(-time.Hour), pspID)
 }

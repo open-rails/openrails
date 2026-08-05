@@ -98,6 +98,7 @@ type vaultDeleteFixture struct {
 	runner  *Runner
 	gateway *fakeNMIVaultGateway
 	pm      *models.PaymentMethod
+	pspID   uuid.UUID
 	ctx     context.Context
 }
 
@@ -107,6 +108,7 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	pool := dbi.Pool()
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 
 	userID := uuid.New().String()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
@@ -117,6 +119,7 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 		ID:                   uuid.New(),
 		CustomerID:           customerID,
 		Rail:                 models.RailNMI,
+		PspID:                pspID,
 		RailCustomerRef:      vaultID,
 		RailMethodRef:        billingID,
 		RebillDriver:         models.RebillDriverProvider,
@@ -138,7 +141,7 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 		// rather than executing, so the fixture must state its mode.
 		Config: fullModeConfig(),
 	}
-	return &vaultDeleteFixture{db: dbi, runner: runner, gateway: gateway, pm: pm, ctx: ctx}
+	return &vaultDeleteFixture{db: dbi, runner: runner, gateway: gateway, pm: pm, pspID: pspID, ctx: ctx}
 }
 
 func (fx *vaultDeleteFixture) localRowExists(t *testing.T) bool {
@@ -203,6 +206,7 @@ func TestNMIVaultDeleteIntent_CrashBeforeExecute(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   "mobius",
+		PspID:      fx.pspID,
 		IntentType: TypeNMIPaymentMethodDelete,
 		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          fx.pm.CustomerID.String(),
@@ -289,6 +293,7 @@ func TestNMIVaultDeleteIntent_SharedVaultScopesToBillingEntry(t *testing.T) {
 		ID:                   uuid.New(),
 		CustomerID:           fx.pm.CustomerID,
 		Rail:                 models.RailNMI,
+		PspID:                fx.pspID,
 		RailCustomerRef:      fx.pm.RailCustomerRef, // shares the vault
 		RailMethodRef:        "bill-sib-" + uuid.NewString()[:8],
 		RebillDriver:         models.RebillDriverProvider,
@@ -322,6 +327,7 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   "mobius",
+		PspID:      fx.pspID,
 		IntentType: TypeNMIPaymentMethodDelete,
 		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          fx.pm.CustomerID.String(),
@@ -351,10 +357,10 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         payment_method_id, customer_id, merchant_id)
-	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9)`,
+	         payment_method_id, customer_id, merchant_id, psp_id)
+	      VALUES ($1, $2, $3, 'active', 'mobius', $4, $5, $6, $5, $7, $8, $9, $10)`,
 		subID, priceID, productID, "psid-vdel-"+sfx,
-		now.Add(-time.Hour), now.Add(720*time.Hour), fx.pm.ID, fx.pm.CustomerID, dbtest.TestMerchantID.UUID())
+		now.Add(-time.Hour), now.Add(720*time.Hour), fx.pm.ID, fx.pm.CustomerID, dbtest.TestMerchantID.UUID(), fx.pspID)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)

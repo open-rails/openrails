@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
@@ -139,10 +140,11 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	_, err = h.Pool().Exec(ctx, `
 		INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, customerID, a.MerchantID.UUID())
 	require.NoError(t, err)
+	aPSP := dbtest.EnsureTestPSP(ctx, t, h.Pool(), a.MerchantID.UUID(), "nmi")
 	_, err = h.Pool().Exec(ctx, `
-		INSERT INTO openrails.payments (merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, created_at)
-		VALUES ($1, $2, $3, 'nmi', $4, 1000000, 1000000, 'USD', $5)`,
-		a.MerchantID.UUID(), customerID, priceID, "txn-"+suffix, paidAt)
+		INSERT INTO openrails.payments (merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, created_at, psp_id)
+		VALUES ($1, $2, $3, 'nmi', $4, 1000000, 1000000, 'USD', $5, $6)`,
+		a.MerchantID.UUID(), customerID, priceID, "txn-"+suffix, paidAt, aPSP)
 	require.NoError(t, err)
 
 	// Full list: fields, rails-armed, last-activity, ordering.

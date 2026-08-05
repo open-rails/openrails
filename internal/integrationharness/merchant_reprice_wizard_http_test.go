@@ -44,11 +44,12 @@ func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, prod
 		dbtest.TestMerchantID.UUID(), "wizard-customer-"+uuid.NewString()).Scan(&customerID))
 
 	now := time.Now().UTC()
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	var subID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at)
-		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7) RETURNING id`,
-		dbtest.TestMerchantID.UUID(), customerID, productID, priceID, "wizard-rail-sub-"+uuid.NewString(), now, now.Add(30*24*time.Hour)).Scan(&subID))
+		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, psp_id)
+		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7,$8) RETURNING id`,
+		dbtest.TestMerchantID.UUID(), customerID, productID, priceID, "wizard-rail-sub-"+uuid.NewString(), now, now.Add(30*24*time.Hour), pspID).Scan(&subID))
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.customers WHERE id = $1", customerID)

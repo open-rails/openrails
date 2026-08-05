@@ -300,7 +300,8 @@ openrails pull-provider --merchant=<slug>          # advisory: review findings, 
 
 **Dry run is the default.** With no `--apply` the command prints what it would
 restore, the provider writes it would supersede, the ones that already fired and
-cannot be undone, and the NULL-`psp_id` rows no PSP-scoped predicate can reach.
+cannot be undone, plus the coverage proof that every live provider row is
+PSP-attributed (or#893 — a non-zero count refuses the undo outright).
 Applying additionally requires `--expect-rows` to match that plan: an undo is
 itself a mass mutation of the live book, at the worst possible moment to be
 wrong.

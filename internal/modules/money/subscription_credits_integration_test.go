@@ -72,6 +72,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -80,6 +81,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailStripe),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &now,
 		CurrentPeriodEndsAt:   &periodEnd,
@@ -193,6 +195,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -201,6 +204,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		PriceID:               &priceID,
 		Status:                string(models.StatusActive),
 		Rail:                  string(models.RailStripe),
+		PspID:                 pspID,
 		RailSubscriptionID:    "sub_test_" + uuid.New().String(),
 		CurrentPeriodStartsAt: &now,
 		CurrentPeriodEndsAt:   &periodEnd,

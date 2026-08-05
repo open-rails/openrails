@@ -69,11 +69,13 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	t.Cleanup(fx.btAPI.Close)
 
 	now := time.Now().UTC().Truncate(time.Second)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   fx.methodID,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           fx.customerID,
 		Rail:                 string(models.RailNMI),
+		PspID:                pspID,
 		RailMethodRef:        fx.tokenID,
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
