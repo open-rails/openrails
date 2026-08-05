@@ -25,6 +25,7 @@ var exemptTables = map[string]string{
 	"probe_verdicts":            "deployment-wide probe results",
 	"worker_health":             "deployment-wide worker liveness",
 	"destructive_action_switch": "or#836 kill switch — must be readable with no merchant context",
+	"worker_sweep_cursors":      "or#837 capped-sweep resume points — operator-global process state, no tenant data",
 }
 
 // pools opens a super pool (seeding) and an app-role pool (assertions), and
