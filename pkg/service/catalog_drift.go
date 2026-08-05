@@ -571,6 +571,12 @@ func fetchNMIPlans(ctx context.Context, lister nmiPlanLister) ([]nmiPlan, error)
 // change inserts zero new rows. Alert-only: it never mutates Stripe, NMI, or the
 // catalog rows.
 func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftReport, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	cfg, err := s.requireConfig()
 	if err != nil {
 		return nil, err
@@ -851,6 +857,12 @@ type CatalogDriftFilter struct {
 // ListCatalogDrift returns open (unresolved) drift events with pagination and
 // optional provider / kind / resource_type filters. Total is the unpaginated count.
 func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilter) (items []CatalogDriftEventView, total int64, err error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, 0, pinErr
+	}
+	defer release()
+
 	dbi, err := s.requireDB()
 	if err != nil {
 		return nil, 0, err
@@ -902,6 +914,12 @@ func (s *Service) listOpenDriftEvents(ctx context.Context, filter CatalogDriftFi
 // price clears its drift from the active list. Safe to call when no events
 // match (no-op). Returns the number of rows closed.
 func (s *Service) ResolveDriftForResource(ctx context.Context, resourceType models.CatalogDriftResourceType, openRailsResourceID string) (int, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return 0, pinErr
+	}
+	defer release()
+
 	openRailsResourceID = strings.TrimSpace(openRailsResourceID)
 	if openRailsResourceID == "" {
 		return 0, nil
@@ -926,6 +944,12 @@ func (s *Service) ResolveDriftForResource(ctx context.Context, resourceType mode
 // for the openrails_catalog_drift_open_count{provider,kind} metric. The map key
 // is "<provider>/<kind>".
 func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	dbi, err := s.requireDB()
 	if err != nil {
 		return nil, err

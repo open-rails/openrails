@@ -165,6 +165,12 @@ type solanaPlanReader interface {
 // (resp. sunset-needed, for Solana). Read-only; never mutates anything.
 // Providers without a read API (CCBill) contribute notes.
 func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	cfg, err := s.requireConfig()
 	if err != nil {
 		return nil, err
@@ -507,6 +513,12 @@ type intentExecutor interface {
 // errors, and the scheduled executor drains them when the mode lifts. The
 // returned error aggregates only TERMINAL failures.
 func (s *Service) ArchiveCatalogExtras(ctx context.Context, extras []CatalogExtra) ([]CatalogExtraArchiveOutcome, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

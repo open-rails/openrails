@@ -81,6 +81,12 @@ type SyncCatalogSidecarsRequest struct {
 }
 
 func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSidecarsRequest) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	dbi, err := s.requireDB()
 	if err != nil {
 		return err

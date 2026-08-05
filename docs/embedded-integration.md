@@ -359,6 +359,13 @@ no wire counterpart) — reach it via type assertion. `embed.WithCurrency` /
 opt one back in with `openrails.WithTimeout`). `rt.Service()` is the escape hatch for
 engine-native types (`identity.CustomerID` etc.) instead of wire types.
 
+Every `rt.Service()` method pins its own merchant-scoped connection, so a bare Go
+call reads the merchant's rows without ceremony — and one with no merchant on the
+context fails loudly instead of answering an empty result. Wrapping a *block* of
+calls in `emb.RunInMerchant(ctx, …)` is still worth it (one connection for the
+whole block instead of one per call), but it is an optimization, not a
+prerequisite.
+
 ### 8. Acting on delinquency
 
 For arrears billing, OpenRails decides when a payer's unpaid debt has outlived

@@ -64,6 +64,12 @@ type AdmitResult struct {
 // + Postgres→policy loader are built from the runtime per call (both cheap,
 // stateless). #513: no Postgres locks, no per-request budget reservation rows.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -258,6 +264,12 @@ func invokerSpendLimitRow(in InvokerSpendLimitInput) admission.InvokerSpendLimit
 // subject's self cap, a role pool, an invoker grant, or an invoker-tier grant.
 // Payer-set: the payer caps how much its delegated invokers/roles may spend.
 func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, in InvokerSpendLimitInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -273,6 +285,12 @@ func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.Cust
 
 // InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
 func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]InvokerSpendLimitInput, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -297,6 +315,12 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 // ReplaceInvokerSpendLimits fully replaces the payer-owned delegated-spend
 // policy document.
 func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimitInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -404,6 +428,12 @@ type MerchantConfiguration struct {
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
 func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfiguration, bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return MerchantConfiguration{}, false, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return MerchantConfiguration{}, false, fmt.Errorf("service not initialized")
 	}
@@ -450,6 +480,12 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 // DefaultInvokerWastedWindows fallback. A nil Profile preserves the current
 // profile; a non-nil empty Profile intentionally clears it.
 func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfiguration) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -622,6 +658,12 @@ type WastedSpendResult struct {
 // ledger. No high-volume Postgres event table is written for free/delegated
 // reports.
 func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*WastedSpendResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -827,6 +869,12 @@ func ValidateBillingPolicy(in BillingPolicyInput) (string, models.BillingPolicy,
 // SetBillingPolicy declares (or redeclares) one named billing policy (or#897).
 // Declaring a policy binds nothing — BindBillingPolicy decides who gets it.
 func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -845,6 +893,12 @@ func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) e
 // declared policy name. This is the merchant's runtime lever: rebinding changes
 // which cap applies to a payer and moves no money.
 func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBindingInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -870,6 +924,12 @@ func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBinding
 
 // ListBillingPolicies returns every declared policy for the config-sync document.
 func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -906,6 +966,12 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 // default and the per-tier rungs. Per-customer bindings are runtime segmentation
 // state and are never enumerated (that read would scale with customers).
 func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolicyBindingInput, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -950,6 +1016,12 @@ type TrustLevelScheduleRung struct {
 // payer sets the merchant-wide default schedule; a non-zero payer sets a
 // per-subject override. owner=platform.
 func (s *Service) SetTrustLevelSchedule(ctx context.Context, payer identity.CustomerID, currency string, schedule []TrustLevelScheduleRung) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -973,6 +1045,12 @@ func (s *Service) SetTrustLevelSchedule(ctx context.Context, payer identity.Cust
 // against the persisted trust-level schedule (#476), or a manual admin override.
 // Empty means the caller treats it as the lowest/default trust level.
 func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return "", pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return "", fmt.Errorf("service not initialized")
 	}

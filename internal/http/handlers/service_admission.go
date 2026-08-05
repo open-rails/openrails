@@ -259,6 +259,9 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		Reason:      req.Reason,
 	})
 	if err != nil {
+		if serviceIdempotencyConflict(r, err) {
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "report wasted spend failed")
 		return
 	}

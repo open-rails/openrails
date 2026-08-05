@@ -34,6 +34,12 @@ import (
 
 // GetProducts returns a paginated list of products.
 func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*PaginatedResult[Product], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	publicSubscriptions, err := s.requirePublicSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -70,6 +76,12 @@ func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*Pa
 
 // GetPrices returns a paginated list of prices.
 func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*PaginatedResult[Price], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err
@@ -301,6 +313,12 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 
 // GetBillingStatus returns a user's overall billing status.
 func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*BillingStatus, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -335,6 +353,12 @@ func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*Billing
 
 // GetSubscriptions returns a user's subscriptions.
 func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetSubscriptionsOptions) (*PaginatedResult[Subscription], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -382,6 +406,12 @@ func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetS
 
 // CancelSubscription cancels a user's active subscription.
 func (s *Service) CancelSubscription(ctx context.Context, userID string, req CancelSubscriptionRequest) (*CancelSubscriptionResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -408,6 +438,12 @@ func (s *Service) CancelSubscription(ctx context.Context, userID string, req Can
 // enqueues the same ResumeSubscriptionArgs River job the HTTP handler enqueues —
 // so the library and HTTP entrypoints execute identically.
 func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*ResumeSubscriptionResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -485,6 +521,12 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 
 // UpdateSubscriptionPaymentMethod updates the payment method for a subscription.
 func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID string, req UpdateSubscriptionPaymentMethodRequest) (*UpdateSubscriptionPaymentMethodResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	subscriptionService, paymentMethods, err := s.requireSubscriptionAndPaymentMethodServices()
 	if err != nil {
 		return nil, err
@@ -575,6 +617,12 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 
 // GetPayments returns a user's payments.
 func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymentsOptions) (*PaginatedResult[Payment], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -621,6 +669,12 @@ func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymen
 
 // GetPaymentMethods returns a user's payment methods.
 func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts GetPaymentMethodsOptions) (*PaginatedResult[PaymentMethod], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	paymentMethods, err := s.requirePaymentMethodService()
 	if err != nil {
 		return nil, err
@@ -659,6 +713,12 @@ func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts Get
 
 // CreatePaymentMethod creates a new payment method.
 func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req CreatePaymentMethodRequest) (*PaymentMethod, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	vaults, err := s.requireVaultService()
 	if err != nil {
 		return nil, err
@@ -697,6 +757,12 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 
 // UpdatePaymentMethod updates an existing payment method.
 func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID, req UpdatePaymentMethodRequest) (*PaymentMethod, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
 	if err != nil {
 		return nil, err
@@ -749,6 +815,12 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 
 // DeletePaymentMethod deletes (deactivates) a payment method.
 func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
 	if err != nil {
 		return err
@@ -776,6 +848,12 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 
 // GetNotifications returns a user's notifications.
 func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetNotificationsOptions) (*PaginatedResult[Notification], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -820,6 +898,12 @@ func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetN
 
 // GetUnreadNotificationCount returns the count of unread notifications.
 func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string) (*UnreadNotificationCount, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return nil, err
@@ -846,6 +930,12 @@ func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string)
 
 // MarkNotificationRead marks a notification as read.
 func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notificationID uuid.UUID) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	userSubscriptions, err := s.requireUserSubscriptionService()
 	if err != nil {
 		return err
@@ -869,6 +959,12 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 
 // GetCreditsByType returns the user's money balance for the requested currency.
 func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string) (*CreditBalance, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -900,6 +996,12 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 
 // GetCreditTransactions returns money transactions for a user in the requested currency.
 func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -1008,6 +1110,12 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 
 // CreateStripePortalSession creates a Stripe customer portal session.
 func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, req CreateStripePortalSessionRequest) (*StripePortalSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

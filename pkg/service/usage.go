@@ -49,6 +49,12 @@ type RecordUsageInput struct {
 // (merchant, payer, currency, usage:<event_type>, source, source_id); a replay
 // carrying a different Amount returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -88,6 +94,12 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 // (allowances + per-period watermarks) and the resulting statement is
 // finalized as an invoice (#797 public export). Idempotent per window.
 func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*InvoiceDTO, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}

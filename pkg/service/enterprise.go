@@ -39,6 +39,12 @@ type InvoiceProfileDTO struct {
 // SetCustomerInvoiceProfile upserts a payer's invoicing profile. Operator
 // surface — a payer must not grant itself credit terms.
 func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p InvoiceProfileDTO) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -63,6 +69,12 @@ func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.
 // is stored. Existing operator configuration is left unchanged. The returned
 // boolean is true only when this call committed a new profile.
 func (s *Service) EnsureCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p InvoiceProfileDTO) (bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return false, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return false, fmt.Errorf("service not initialized")
 	}
@@ -85,6 +97,12 @@ func (s *Service) EnsureCustomerInvoiceProfile(ctx context.Context, payer identi
 
 // GetCustomerInvoiceProfile returns a payer's invoicing profile (nil = none).
 func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*InvoiceProfileDTO, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -105,6 +123,12 @@ func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.
 // EnsureUsageProduct idempotently ensures a catalog product for host-owned
 // usage rate cards, returning its (deterministic) id.
 func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName string) (uuid.UUID, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return uuid.UUID{}, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return uuid.Nil, fmt.Errorf("service not initialized")
 	}
@@ -137,6 +161,12 @@ type UsageMeterSpec struct {
 
 // EnsureUsageMeter idempotently declares a host-owned catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -163,6 +193,12 @@ type UsageRateCardInput struct {
 // SetUsageRateCard upserts an in_arrears usage rate card: the merchant
 // default (ProductID set) or a negotiated per-payer override (Payer set).
 func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -177,6 +213,12 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter.
 func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -187,6 +229,12 @@ func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.Custom
 // items (watermarked; safe to repeat) so arrears exposure stays fresh
 // mid-period without finalizing an invoice.
 func (s *Service) SweepUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -212,6 +260,12 @@ type PendingChargeDTO struct {
 // ListPendingCharges returns a payer's accrued-but-uninvoiced owed items —
 // the current-period running spend after a SweepUsage.
 func (s *Service) ListPendingCharges(ctx context.Context, payer identity.CustomerID, currency string) ([]PendingChargeDTO, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -257,6 +311,12 @@ func (s *Service) GetOutstandingOwed(ctx context.Context, payer identity.Custome
 // MarkInvoicesPastDue flips the merchant's overdue open receivables to
 // past_due (the host-visible dunning signal). Returns the number flipped.
 func (s *Service) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return 0, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return 0, fmt.Errorf("service not initialized")
 	}
@@ -324,6 +384,12 @@ func (s *Service) ResolveUnknownInvoiceCollections(ctx context.Context) (Invoice
 // settle at the provider, unparking can lead to a second charge — confirm
 // provider-side first.
 func (s *Service) UnparkInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -333,6 +399,12 @@ func (s *Service) UnparkInvoiceCollection(ctx context.Context, payer identity.Cu
 // RecordOutOfBandInvoicePayment applies a manual remittance (wire/check) to a
 // send_invoice (or any open) receivable. reference dedups replays.
 func (s *Service) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, amount int64, reference string) (*InvoiceDTO, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}

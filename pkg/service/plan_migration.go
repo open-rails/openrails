@@ -14,6 +14,14 @@ import (
 // drive the operator workflow in-process — same service the merchant HTTP
 // routes wrap. Requests/results are the module types re-exported so embedded
 // callers never import internal/.
+//
+// Every method here pins a merchant-scoped connection the way the money
+// surfaces do (spend.go). Without it, a host calling in-process under the
+// or#885-mandated openrails_app role read NOTHING — the reads resolved to the
+// base pool, where `app.merchant_id` is unset, so RLS answered zero rows and no
+// error and Preview reported "source price: no rows" about a price the same
+// host had just written (or#900). RunInMerchantConn reuses an already-pinned
+// connection, so this is correct from a request, a worker, or a bare Go call.
 
 // PlanMigrationRequest re-exports the operator request.
 type PlanMigrationRequest = subscriptions.PlanMigrationRequest
@@ -49,7 +57,13 @@ func (s *Service) PreviewPlanMigration(ctx context.Context, req PlanMigrationReq
 	if err != nil {
 		return nil, err
 	}
-	return pm.Preview(ctx, req)
+	var out *PlanMigrationResult
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = pm.Preview(ctx, req)
+		return e
+	})
+	return out, err
 }
 
 // PlanMigrate commits a plan migration: batch header + per-subscription rows,
@@ -59,7 +73,13 @@ func (s *Service) PlanMigrate(ctx context.Context, req PlanMigrationRequest) (*P
 	if err != nil {
 		return nil, err
 	}
-	return pm.Migrate(ctx, req)
+	var out *PlanMigrationResult
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = pm.Migrate(ctx, req)
+		return e
+	})
+	return out, err
 }
 
 // GetPlanMigration returns one migration batch header + its ledger rows.
@@ -68,7 +88,14 @@ func (s *Service) GetPlanMigration(ctx context.Context, batchID uuid.UUID, limit
 	if err != nil {
 		return nil, nil, err
 	}
-	return pm.GetBatch(ctx, batchID, limit, offset)
+	var batch *models.RepriceBatch
+	var rows []*models.SubscriptionReprice
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		batch, rows, e = pm.GetBatch(ctx, batchID, limit, offset)
+		return e
+	})
+	return batch, rows, err
 }
 
 // CancelPlanMigration cancels every still-scheduled row in the batch. The
@@ -79,5 +106,11 @@ func (s *Service) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*
 	if err != nil {
 		return nil, err
 	}
-	return pm.CancelBatch(ctx, batchID)
+	var out *PlanMigrationCancelResult
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = pm.CancelBatch(ctx, batchID)
+		return e
+	})
+	return out, err
 }

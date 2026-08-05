@@ -488,6 +488,12 @@ func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID,
 
 // GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
 func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return 0, pinErr
+	}
+	defer release()
+
 	if s == nil || s.rt == nil {
 		return 0, fmt.Errorf("service not initialized")
 	}
@@ -505,6 +511,12 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // customer billing-account admin surface (issue #242). RLS-scoped.
 func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}

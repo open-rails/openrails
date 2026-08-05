@@ -45,6 +45,14 @@ var (
 	// ErrInsufficientCredits is the payer-balance deny (HTTP 402 /
 	// "insufficient_credits"). Message kept identical to go-client's sentinel.
 	ErrInsufficientCredits = errors.New("insufficient_credits")
+
+	// ErrIdempotencyKeyReused is the money-write refusal (HTTP 409 /
+	// "idempotency_key_reused"): the key already committed and THIS retry
+	// carries different charging terms (or#891). A caller bug, not an engine
+	// fault — retrying it unchanged will refuse again. The engine-side twin is
+	// pkg/service.ErrIdempotencyKeyReused; the StatusError's Message carries the
+	// detail (which field, committed vs retried).
+	ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 )
 
 // StatusError is the concrete error both transports return for any non-OK
@@ -90,9 +98,11 @@ func newStatusError(status int, code, message string, extra ...error) *StatusErr
 	// Code/message-specific sentinels first: the handlers signal these as
 	// payload strings ("insufficient_credits" on 402 — see
 	// internal/http/handlers/service_credits.go).
-	switch pickCode(code, message) {
-	case "insufficient_credits":
+	switch {
+	case signals(code, message, "insufficient_credits"):
 		e.sentinels = append(e.sentinels, ErrInsufficientCredits)
+	case signals(code, message, "idempotency_key_reused"):
+		e.sentinels = append(e.sentinels, ErrIdempotencyKeyReused)
 	}
 
 	// Status-class sentinel.
@@ -119,16 +129,18 @@ func newStatusError(status int, code, message string, extra ...error) *StatusErr
 	return e
 }
 
-func pickCode(code, message string) string {
-	if c := strings.TrimSpace(code); c != "" && c != "invalid_param" && c != "internal_error" {
-		// The standalone error envelope's "code" is a coarse api.Code* class; the
-		// discriminating string ("insufficient_credits", ...) is the message. Only
-		// honor a specific code.
-		if c == "insufficient_credits" {
-			return c
-		}
+// signals reports whether the wire payload names `want`. The standalone error
+// envelope's "code" is a coarse api.Code* class (invalid_param,
+// resource_conflict, ...), so the discriminating string is normally the
+// MESSAGE. A message may carry detail after the token
+// ("idempotency_key_reused: spend replayed key (…) with amount=…"), which is
+// worth keeping on the wire, so the token is matched as a prefix too.
+func signals(code, message, want string) bool {
+	if strings.TrimSpace(code) == want {
+		return true
 	}
-	return strings.TrimSpace(message)
+	msg := strings.TrimSpace(message)
+	return msg == want || strings.HasPrefix(msg, want+":")
 }
 
 func errorsContain(errs []error, target error) bool {

@@ -18,14 +18,18 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// TestEmbedded_RunInMerchantConn proves the exact failure this seam exists
-// to close: a host calling *service.Service directly (outside any HTTP
-// request or River job) MUST pin a merchant-scoped connection, or the
-// RLS-enforcing openrails_app role rejects the write outright (issue #227),
-// with no distinguishing error from a real permission problem. Found via
-// openrails-saas's own staging build (#10/#26): internal/platform.Bootstrap
-// calls svc.CreateProduct directly at boot and failed exactly this way under
-// the RLS-enforcing role.
+// TestEmbedded_RunInMerchantConn covers the seam a host uses to run merchant-owned
+// Go work outside any HTTP request or River job, under the RLS-enforcing
+// openrails_app role (issue #227). Found via openrails-saas's own staging build
+// (#10/#26): internal/platform.Bootstrap calls svc.CreateProduct directly at boot.
+//
+// or#900 narrowed what this seam is REQUIRED for. Every exported *service.Service
+// method now pins its own merchant connection, so a bare facade call with a
+// merchant on the context works — the split facade (money surfaces pinned,
+// everything else did not) was what made a host's read answer nothing. The seam
+// still earns its place for a BLOCK of calls (one connection instead of one per
+// call) and for engine-native work that is not a facade method, and its guards
+// (unbound engine, mispinned merchant) are unchanged.
 func TestEmbedded_RunInMerchantConn(t *testing.T) {
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), appDSN)
@@ -60,15 +64,25 @@ func TestEmbedded_RunInMerchantConn(t *testing.T) {
 	svc, err := e.Service()
 	require.NoError(t, err)
 
-	// Without a pinned merchant connection, a direct write fails closed under
-	// RLS — merchant.WithID alone satisfies merchant.Require but never touches
-	// the app.merchant_id session GUC the table's RLS policy checks.
-	_, err = svc.CreateProduct(merchant.WithID(ctx, res.MerchantID), billingservice.CreateProductRequest{
-		Key: "unpinned-" + sfx, DisplayName: "Unpinned",
+	// or#900: a bare facade call with a merchant on the context now WORKS — the
+	// method pins its own connection, so the caller does not have to know which
+	// half of the facade it is talking to. Before or#900 this write was rejected
+	// by RLS and the matching read answered zero rows and no error.
+	selfPinned, err := svc.CreateProduct(merchant.WithID(ctx, res.MerchantID), billingservice.CreateProductRequest{
+		Key: "selfpinned-" + sfx, DisplayName: "Self-pinned",
 	})
-	require.Error(t, err, "a merchant-owned write without a pinned connection must be rejected by RLS")
+	require.NoError(t, err, "or#900: the facade pins its own merchant connection")
+	require.Equal(t, "selfpinned-"+sfx, selfPinned.Key)
 
-	// The SAME call, wrapped in RunInMerchantConn, succeeds.
+	// With NO merchant at all it still fails, and loudly: silence was the bug.
+	_, err = svc.CreateProduct(ctx, billingservice.CreateProductRequest{
+		Key: "unscoped-" + sfx, DisplayName: "Unscoped",
+	})
+	require.ErrorContains(t, err, "merchant",
+		"an unscoped facade call must name the missing merchant, not answer nothing")
+
+	// The SAME call, wrapped in RunInMerchantConn, succeeds — the seam's value is
+	// now one pinned connection for a whole block instead of one per call.
 	var created *billingservice.CatalogProduct
 	err = e.RunInMerchantConn(ctx, res.MerchantID, func(mctx context.Context) error {
 		created, err = svc.CreateProduct(mctx, billingservice.CreateProductRequest{
@@ -81,8 +95,7 @@ func TestEmbedded_RunInMerchantConn(t *testing.T) {
 	require.Equal(t, "pinned-"+sfx, created.Key)
 
 	// A read is scoped the same way: querying by key inside the pinned
-	// connection finds it; the same query without any pin sees nothing (RLS
-	// filters every row, not just writes).
+	// connection finds it.
 	err = e.RunInMerchantConn(ctx, res.MerchantID, func(mctx context.Context) error {
 		got, gerr := svc.GetProductByKey(mctx, "pinned-"+sfx)
 		require.NoError(t, gerr)
