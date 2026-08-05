@@ -239,6 +239,11 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			"request_id": r.RequestID(),
 			"user_id":    user.ID,
 		}).Error("Failed to create payment method")
+		// or#896: an unsupported rail is not a misconfiguration — say so.
+		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
@@ -372,8 +377,9 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		}
 	}
 
-	if !rails.IsNMI(pm.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be updated")
+	if !rails.SupportsPaymentMethodCRUD(pm.Rail) {
+		// or#896: name the rail and where the instrument actually lives.
+		r.ErrorJSON(http.StatusBadRequest, paymentmethods.RailPaymentMethodsUnsupported(string(pm.Rail)).Error())
 		return
 	}
 
@@ -403,6 +409,10 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
+		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 type PaymentMethodService struct {
@@ -22,7 +23,37 @@ func NewPaymentMethodService(db *db.DB) *PaymentMethodService {
 var (
 	ErrPaymentMethodNotFound     = errors.New("payment method not found")
 	ErrPaymentMethodAccessDenied = errors.New("payment method access denied")
+
+	// ErrPaymentMethodsUnsupportedOnRail marks a rail that has no first-party
+	// payment-instrument CRUD (or#896). It is an UNSUPPORTED SURFACE, not a
+	// misconfiguration: the request must never read as "PSP is not configured",
+	// which sends the operator hunting for credentials that were never needed.
+	ErrPaymentMethodsUnsupportedOnRail = errors.New("payment methods are not managed by OpenRails on this rail")
 )
+
+// knownRail reports whether the name is a declared rail (as opposed to a
+// merchant PSP key, which resolves through the PSP catalog).
+func knownRail(rail models.Rail) bool {
+	_, ok := rails.Lookup(rail)
+	return ok
+}
+
+// RailPaymentMethodsUnsupported builds the honest per-rail refusal, naming
+// where the instrument actually lives.
+func RailPaymentMethodsUnsupported(rail string) error {
+	var where string
+	switch strings.ToLower(strings.TrimSpace(rail)) {
+	case string(models.RailStripe):
+		where = "Stripe owns the instrument: cards are added and removed through Stripe Checkout and the Stripe Billing Portal"
+	case string(models.RailCCBill):
+		where = "CCBill owns the vault: instruments are managed on CCBill's own consumer surfaces"
+	case string(models.RailSolana):
+		where = "a Solana wallet is not a stored instrument; there is nothing for OpenRails to vault"
+	default:
+		where = "OpenRails holds no instrument vault for this rail"
+	}
+	return fmt.Errorf("%w: rail %q — %s", ErrPaymentMethodsUnsupportedOnRail, rail, where)
+}
 
 func (s *PaymentMethodService) Create(ctx context.Context, method *models.PaymentMethod) error {
 	return s.repo.Create(ctx, method)
