@@ -119,7 +119,10 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 			id := orig.ID
 			return &id
 		}(),
-		Rail:          orig.Rail,
+		Rail: orig.Rail,
+		// or#893: a reversal is executed by the account that took the charge,
+		// so it inherits the original's provenance rather than re-resolving.
+		PspID:         orig.PspID,
 		TransactionID: refundTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
@@ -162,7 +165,9 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 			id := orig.ID
 			return &id
 		}(),
-		Rail:          orig.Rail,
+		Rail: orig.Rail,
+		// or#893: same account as the charge it reverses.
+		PspID:         orig.PspID,
 		TransactionID: reservationTransactionID,
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
