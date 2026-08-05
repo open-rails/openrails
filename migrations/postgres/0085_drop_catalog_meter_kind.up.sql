@@ -21,4 +21,5 @@ ALTER TABLE openrails.catalog_meters
     DROP CONSTRAINT catalog_meters_kind_check;
 
 ALTER TABLE openrails.catalog_meters
+    -- squawk-ignore ban-drop-column
     DROP COLUMN kind;
