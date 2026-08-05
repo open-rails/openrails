@@ -13,6 +13,7 @@ import type {
   CatalogDriftReport,
   CatalogPrice,
   CatalogProduct,
+  CheckoutRoutingDecision,
   CustomerBillingProfile,
   CustomerSummary,
   Finding,
@@ -212,7 +213,14 @@ export interface PriceRequest {
 export const createPrice = (body: PriceRequest) =>
   api<CatalogPrice>("/merchant/catalog/prices", { method: "POST", body })
 
-export const getPrice = (id: string) => api<CatalogPrice>(`/merchant/catalog/prices/${id}`)
+// getPrice returns the price with its psp_links projection (`providers`).
+// verify=true additionally performs a LIVE retrieve against every attached
+// provider and fills in sync_status/drift — a read, never a write, and slow
+// enough that it stays opt-in (or#812).
+export const getPrice = (id: string, verify = false) =>
+  api<CatalogPrice>(`/merchant/catalog/prices/${id}`, {
+    query: verify ? { verify: true } : undefined,
+  })
 
 export const getPriceByKey = (key: string) =>
   api<CatalogPrice>(`/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`)
@@ -327,6 +335,19 @@ export interface UpsertProviderRequest {
 export const putPaymentProvider = (rail: string, body: UpsertProviderRequest) =>
   api<{ payment_provider: PaymentProviderConfig }>(`/merchant/payment-providers/${rail}`, {
     method: "PUT",
+    body,
+  })
+
+// dryRunCheckoutRouting (or#288) explains which PSP a checkout for this price
+// would land on and why each other candidate was passed over. Read-only: it
+// runs the production decision path without creating a session.
+export const dryRunCheckoutRouting = (body: {
+  price_id: string
+  country?: string
+  selector?: string
+}) =>
+  api<CheckoutRoutingDecision>("/merchant/payment-providers/routing/dry-run", {
+    method: "POST",
     body,
   })
 

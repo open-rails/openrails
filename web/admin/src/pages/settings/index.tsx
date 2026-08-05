@@ -245,7 +245,12 @@ function ProvidersTab() {
             </TableHeader>
             <TableBody>
               {data.data.map((p) => (
-                <ProviderRow key={p.id} provider={p} onDone={reload} />
+                <ProviderRow
+                  key={p.id}
+                  provider={p}
+                  providerDefinitions={data.provider_definitions ?? []}
+                  onDone={reload}
+                />
               ))}
             </TableBody>
           </Table>
@@ -255,7 +260,22 @@ function ProvidersTab() {
   )
 }
 
-function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; onDone: () => void }) {
+function credentialTitle(c: { last_validated_at?: string; rotation_version?: number }) {
+  const parts: string[] = []
+  if (c.last_validated_at) parts.push(`validated ${formatDate(c.last_validated_at)}`)
+  if (c.rotation_version) parts.push(`rotation v${c.rotation_version}`)
+  return parts.length ? parts.join(" · ") : undefined
+}
+
+function ProviderRow({
+  provider,
+  providerDefinitions,
+  onDone,
+}: {
+  provider: PaymentProviderConfig
+  providerDefinitions: PaymentProviderDefinition[]
+  onDone: () => void
+}) {
   const [busy, setBusy] = React.useState(false)
   return (
     <TableRow className={provider.archived ? "opacity-60" : undefined}>
@@ -269,9 +289,12 @@ function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; on
               key={name}
               variant="secondary"
               className={c.configured ? "" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}
-              title={c.last_validated_at ? `validated ${formatDate(c.last_validated_at)}` : undefined}
+              title={credentialTitle(c)}
             >
               {name}
+              {!!c.rotation_version && (
+                <span className="ml-1 opacity-60">v{c.rotation_version}</span>
+              )}
             </Badge>
           ))}
         </span>
@@ -291,28 +314,153 @@ function ProviderRow({ provider, onDone }: { provider: PaymentProviderConfig; on
       </TableCell>
       <TableCell className="text-right">
         {!provider.archived && (
+          <div className="flex justify-end gap-2">
+            <RotateCredentialsDialog
+              provider={provider}
+              credentialKeys={
+                providerDefinitions.find((d) => d.rail === provider.rail)?.credential_keys ??
+                Object.keys(provider.credentials)
+              }
+              onDone={onDone}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await deletePaymentProvider(provider.rail, provider.environment)
+                  toast.success("Provider archived")
+                  onDone()
+                } catch (err) {
+                  toastApiError(err, "Archive provider")
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Archive
+            </Button>
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+// RotateCredentialsDialog is the or#812 rotation flow. Three properties the
+// operator needs stated, because all three are real server behaviour:
+//
+//  1. The NEW credential is live-probed BEFORE anything is written. A failed
+//     probe fails the whole rotation — no secret is stored, no version floor
+//     moves, and the OLD credential keeps serving unchanged.
+//  2. A committed rotation is deployment-wide, not just this node: it raises the
+//     credential's version floor on the shared PSP row, and every node refuses
+//     to answer a credential read from a cache entry below that floor.
+//  3. Plaintext is dropped from browser state the moment it is submitted.
+function RotateCredentialsDialog({
+  provider,
+  credentialKeys,
+  onDone,
+}: {
+  provider: PaymentProviderConfig
+  credentialKeys: string[]
+  onDone: () => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const [credentials, setCredentials] = React.useState<Record<string, string>>({})
+  const [busy, setBusy] = React.useState(false)
+  const supplied = Object.entries(credentials).filter(([, v]) => v.trim() !== "")
+
+  const close = (next: boolean) => {
+    // Never leave plaintext in state behind a closed dialog.
+    if (!next) setCredentials({})
+    setOpen(next)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          Rotate
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Rotate {provider.rail} credentials · {provider.account_id}
+          </DialogTitle>
+          <DialogDescription>
+            The new credential is validated against the live provider before it is stored. If
+            that check fails, nothing is written and the current credential keeps serving. Leave
+            a field blank to keep the credential it holds now.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          {credentialKeys.map((name) => {
+            const current = provider.credentials[name]
+            return (
+              <Field key={name} label={name} id={`rot-${provider.id}-${name}`}>
+                <Input
+                  id={`rot-${provider.id}-${name}`}
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={current?.configured ? "unchanged" : "not configured"}
+                  value={credentials[name] ?? ""}
+                  onChange={(e) =>
+                    setCredentials((c) => ({ ...c, [name]: e.target.value }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  {current?.rotation_version
+                    ? `current rotation v${current.rotation_version}`
+                    : "no rotation recorded"}
+                  {current?.last_validated_at &&
+                    ` · last validated ${formatDate(current.last_validated_at)}`}
+                </p>
+              </Field>
+            )
+          })}
+          <p className="text-xs text-muted-foreground">
+            On success every OpenRails node cuts over to the new credential at its next charge
+            or pull — the rotation raises a version floor that no node's credential cache may
+            serve below. No restart, no waiting out a cache TTL.
+          </p>
+        </div>
+        <DialogFooter>
           <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
+            disabled={busy || supplied.length === 0}
             onClick={async () => {
               setBusy(true)
               try {
-                await deletePaymentProvider(provider.rail, provider.environment)
-                toast.success("Provider archived")
+                await putPaymentProvider(provider.rail, {
+                  account_id: provider.account_id,
+                  credentials: Object.fromEntries(supplied),
+                })
+                // Clear plaintext before anything else can await.
+                setCredentials({})
+                toast.success(
+                  `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`,
+                )
+                setOpen(false)
                 onDone()
               } catch (err) {
-                toastApiError(err, "Archive provider")
+                setCredentials({})
+                toastApiError(
+                  err,
+                  "Rotation refused — the current credential is unchanged and still serving",
+                )
               } finally {
                 setBusy(false)
               }
             }}
           >
-            Archive
+            {busy ? "Validating…" : "Validate & rotate"}
           </Button>
-        )}
-      </TableCell>
-    </TableRow>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

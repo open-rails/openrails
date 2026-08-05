@@ -60,23 +60,23 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if !ok {
 		return creds, nil
 	}
-	secretKeyName, err := scope.secretName("secret_key")
+	secretKeyRef, err := scope.secretRef("secret_key")
 	if err != nil {
 		return creds, err
 	}
-	webhookName, err := scope.secretName("webhook_signing_secret")
+	webhookRef, err := scope.secretRef("webhook_signing_secret")
 	if err != nil {
 		return creds, err
 	}
-	thinName, err := scope.secretName("webhook_signing_secret_thin")
+	thinRef, err := scope.secretRef("webhook_signing_secret_thin")
 	if err != nil {
 		return creds, err
 	}
-	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	previousRef, err := scope.secretRef("webhook_signing_secret_previous")
 	if err != nil {
 		return creds, err
 	}
-	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
+	return s.loadStripeCredentialsByRef(ctx, id, secretKeyRef, webhookRef, thinRef, previousRef)
 }
 
 func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
@@ -93,11 +93,11 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 	if !ok {
 		return "", nil
 	}
-	secretName, err := scope.secretName("webhook_signing_secret")
+	ref, err := scope.secretRef("webhook_signing_secret")
 	if err != nil {
 		return "", err
 	}
-	return s.secretValue(ctx, id, secretName)
+	return s.secretValueRef(ctx, id, ref)
 }
 
 // LoadNMITokenizationConfig loads merchant-scoped browser tokenization config
@@ -133,28 +133,30 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	return cfg, nil
 }
 
-func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName, previousName string) (StripeCredentials, error) {
+func (s *Service) loadStripeCredentialsByRef(ctx context.Context, id merchant.ID, secretKey, webhook, thin, previous SecretRef) (StripeCredentials, error) {
 	var creds StripeCredentials
 	var err error
-	if creds.SecretKey, err = s.secretValue(ctx, id, secretKeyName); err != nil {
+	if creds.SecretKey, err = s.secretValueRef(ctx, id, secretKey); err != nil {
 		return creds, err
 	}
-	if creds.WebhookSigningSecret, err = s.secretValue(ctx, id, webhookName); err != nil {
+	if creds.WebhookSigningSecret, err = s.secretValueRef(ctx, id, webhook); err != nil {
 		return creds, err
 	}
-	if creds.WebhookSigningThin, err = s.secretValue(ctx, id, thinName); err != nil {
+	if creds.WebhookSigningThin, err = s.secretValueRef(ctx, id, thin); err != nil {
 		return creds, err
 	}
-	if previousName != "" {
-		if creds.WebhookSigningPrevious, err = s.secretValue(ctx, id, previousName); err != nil {
+	if previous.Name != "" {
+		if creds.WebhookSigningPrevious, err = s.secretValueRef(ctx, id, previous); err != nil {
 			return creds, err
 		}
 	}
 	return creds, nil
 }
 
-func (s *Service) secretValue(ctx context.Context, id merchant.ID, name string) (string, error) {
-	sec, err := s.secrets.Get(ctx, id, name)
+// secretValueRef reads one credential at or above its recorded rotation version
+// floor (or#812). "" with a nil error means genuinely absent.
+func (s *Service) secretValueRef(ctx context.Context, id merchant.ID, ref SecretRef) (string, error) {
+	sec, err := ReadSecretRef(ctx, s.secrets, id, ref)
 	if err != nil {
 		if errors.Is(err, ErrSecretNotFound) {
 			return "", nil
@@ -165,16 +167,35 @@ func (s *Service) secretValue(ctx context.Context, id merchant.ID, name string) 
 }
 
 type pspSecretScope struct {
-	id          uuid.UUID
-	rail        string
-	environment string
-	accountID   string
-	key         string
-	settings    map[string]any
+	id                 uuid.UUID
+	rail               string
+	environment        string
+	accountID          string
+	key                string
+	settings           map[string]any
+	credentialVersions map[string]int
+}
+
+// applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
+// settings and the or#812 credential-version floors. Every scope resolver goes
+// through it so no read path can silently skip the rotation watermark.
+func (s *pspSecretScope) applyEvidence(raw []byte) {
+	s.settings = pspSettings(raw)
+	s.credentialVersions = CredentialVersions(raw)
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
 	return PSPSecretName(s.rail, s.environment, s.accountID, key)
+}
+
+// secretRef pairs the scoped secret name with the rotation version floor
+// recorded on the PSP row (or#812).
+func (s pspSecretScope) secretRef(key string) (SecretRef, error) {
+	name, err := s.secretName(key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	return SecretRef{Name: name, MinVersion: s.credentialVersions[NormalizeCredentialVersionKey(key)]}, nil
 }
 
 func (s pspSecretScope) setting(key string) string {
@@ -197,13 +218,21 @@ func (s pspSecretScope) exported() PSPScope {
 			settings[k] = v
 		}
 	}
+	var versions map[string]int
+	if len(s.credentialVersions) > 0 {
+		versions = make(map[string]int, len(s.credentialVersions))
+		for k, v := range s.credentialVersions {
+			versions[k] = v
+		}
+	}
 	return PSPScope{
-		ID:          s.id,
-		Rail:        s.rail,
-		Environment: s.environment,
-		AccountID:   s.accountID,
-		Key:         s.key,
-		Settings:    settings,
+		ID:                 s.id,
+		Rail:               s.rail,
+		Environment:        s.environment,
+		AccountID:          s.accountID,
+		Key:                s.key,
+		Settings:           settings,
+		CredentialVersions: versions,
 	}
 }
 
@@ -220,6 +249,22 @@ func (s *Service) ActivePSPSecretName(ctx context.Context, id merchant.ID, rail,
 		return "", false, err
 	}
 	return name, true, nil
+}
+
+// ActivePSPSecretRef is ActivePSPSecretName plus the rotation version floor
+// recorded on the resolved PSP row (or#812) — the form credential reads should
+// use, so a rotation performed on another node cuts over here immediately
+// instead of waiting out a per-process cache TTL.
+func (s *Service) ActivePSPSecretRef(ctx context.Context, id merchant.ID, rail, environment, key string) (SecretRef, bool, error) {
+	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
+	if err != nil || !ok {
+		return SecretRef{}, ok, err
+	}
+	ref, err := scope.secretRef(key)
+	if err != nil {
+		return SecretRef{}, false, err
+	}
+	return ref, true, nil
 }
 
 // ActivePSPScope resolves the active provider account for a merchant
@@ -294,8 +339,8 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 		rail:        row.Rail,
 		environment: row.Environment,
 		accountID:   row.AccountID,
-		settings:    pspSettings(row.Evidence),
 	}
+	scope.applyEvidence(row.Evidence)
 	if row.Key != nil {
 		scope.key = strings.TrimSpace(*row.Key)
 	}
@@ -364,7 +409,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	if err != nil {
 		return PSPScope{}, false, fmt.Errorf("load provider account by key %s/%s: %w", key, environment, err)
 	}
-	scope.settings = pspSettings(evidence)
+	scope.applyEvidence(evidence)
 	return scope.exported(), true, nil
 }
 
@@ -402,7 +447,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
 				return err
 			}
-			scope.settings = pspSettings(evidence)
+			scope.applyEvidence(evidence)
 			out = append(out, scope.exported())
 		}
 		return rows.Err()
@@ -445,7 +490,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence); err != nil {
 				return err
 			}
-			scope.settings = pspSettings(evidence)
+			scope.applyEvidence(evidence)
 			out = append(out, scope.exported())
 		}
 		return rows.Err()
@@ -485,7 +530,7 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	if err != nil {
 		return pspSecretScope{}, false, fmt.Errorf("load provider account %s/%s: %w", rail, accountID, err)
 	}
-	scope.settings = pspSettings(evidence)
+	scope.applyEvidence(evidence)
 	return scope, true, nil
 }
 
@@ -546,7 +591,7 @@ func (s *Service) newestRailMerchantAccountScope(ctx context.Context, id merchan
 	if err != nil {
 		return PSPScope{}, false, fmt.Errorf("load newest provider account %s/%s: %w", rail, environment, err)
 	}
-	scope.settings = pspSettings(evidence)
+	scope.applyEvidence(evidence)
 	return scope.exported(), true, nil
 }
 
@@ -571,11 +616,11 @@ func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id 
 	if err != nil || !ok {
 		return "", ok, err
 	}
-	secretName, err := scope.secretName("webhook_signing_secret")
+	ref, err := scope.secretRef("webhook_signing_secret")
 	if err != nil {
 		return "", false, err
 	}
-	secret, err := s.secretValue(ctx, id, secretName)
+	secret, err := s.secretValueRef(ctx, id, ref)
 	return secret, true, err
 }
 
@@ -590,23 +635,23 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	if err != nil || !ok {
 		return creds, ok, err
 	}
-	secretKeyName, err := scope.secretName("secret_key")
+	secretKeyRef, err := scope.secretRef("secret_key")
 	if err != nil {
 		return creds, false, err
 	}
-	webhookName, err := scope.secretName("webhook_signing_secret")
+	webhookRef, err := scope.secretRef("webhook_signing_secret")
 	if err != nil {
 		return creds, false, err
 	}
-	thinName, err := scope.secretName("webhook_signing_secret_thin")
+	thinRef, err := scope.secretRef("webhook_signing_secret_thin")
 	if err != nil {
 		return creds, false, err
 	}
-	previousName, err := scope.secretName("webhook_signing_secret_previous")
+	previousRef, err := scope.secretRef("webhook_signing_secret_previous")
 	if err != nil {
 		return creds, false, err
 	}
-	c, err := s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName, previousName)
+	c, err := s.loadStripeCredentialsByRef(ctx, id, secretKeyRef, webhookRef, thinRef, previousRef)
 	return c, true, err
 }
 

@@ -123,11 +123,13 @@ func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope mer
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
 	}
-	name, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
+	// or#812: the version floor recorded on the PSP row makes a credential
+	// rotated on another node effective here at once, not one cache TTL later.
+	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
 	}
-	sec, err := svc.Secrets().Get(ctx, mid, name)
+	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
 	if errors.Is(err, merchants.ErrSecretNotFound) {
 		return "", false, nil
 	}
