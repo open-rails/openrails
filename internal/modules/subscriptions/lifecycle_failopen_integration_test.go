@@ -51,7 +51,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	// arrive in the shape every production caller does — checkout's stampPSP,
 	// the intent runner and the webhook plane all pin the routed PSP on ctx
 	// before any provider-bound row is written.
-	dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	failopenPSP = dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	ctx := failopenCtx()
 	q := gen.New(pool)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -510,10 +510,11 @@ func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 }
 
 // failopenCtx is the production context shape for a provider-bound write: the
-// merchant, plus the PSP the caller routed to (or#893).
+// merchant, plus the PSP the caller routed to (or#893). The id is resolved, not
+// assumed: EnsureTestPSP reuses whatever account this database already has on
+// the rail.
+var failopenPSP uuid.UUID
+
 func failopenCtx() context.Context {
-	return db.WithPSPID(
-		dbtest.WithTestMerchant(context.Background()),
-		dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), string(models.RailNMI)),
-	)
+	return db.WithPSPID(dbtest.WithTestMerchant(context.Background()), failopenPSP)
 }
