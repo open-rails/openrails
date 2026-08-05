@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -252,6 +253,10 @@ func AdminCancelSubscription(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		case strings.Contains(msg, "not active"):
 			r.ErrorJSON(http.StatusConflict, "subscription is not active")
+		// or#896: a Solana cancel is the subscriber's signature to give, not a
+		// server-side operation — name the endpoints instead of a 500.
+		case errors.Is(err, subscriptions.ErrSolanaCancelNeedsWalletSignature):
+			r.ErrorJSON(http.StatusBadRequest, msg)
 		case strings.Contains(msg, "not supported for rail"):
 			r.ErrorJSON(http.StatusBadRequest, msg)
 		default:

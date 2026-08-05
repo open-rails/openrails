@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -36,11 +38,25 @@ type AdminSubscriptionService struct {
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService
-	// NMIResolver arms store-scoped NMI clients per merchant (#788).
-	NMIResolver   NMIClientSource
 	StripeService *StripeService
 	clock         clockwork.Clock
+
+	// deferDelete / ccbillCancel enqueue the durable remote-cancel intents for
+	// a merchant-initiated cancel (or#896), admin-origin. Injected
+	// post-construction in build_runtime, exactly like the user service's.
+	deferDelete  DeferredDeleteScheduler
+	ccbillCancel CCBillRemoteCancelScheduler
 	// No user directory enrichment; IdP subject is stored on subscription
+}
+
+// SetDeferredDeleteScheduler injects the admin-origin NMI delete scheduler.
+func (s *AdminSubscriptionService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
+	s.deferDelete = d
+}
+
+// SetCCBillCancelScheduler injects the admin-origin CCBill cancel scheduler.
+func (s *AdminSubscriptionService) SetCCBillCancelScheduler(c CCBillRemoteCancelScheduler) {
+	s.ccbillCancel = c
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -173,36 +189,18 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 	return nil
 }
 
-// cancelWithNMI cancels a subscription with NMI if applicable
-func (s *AdminSubscriptionService) cancelWithNMI(ctx context.Context, subscription *models.Subscription) error {
-	if !rails.IsNMI(subscription.Rail) {
-		return nil // Not an NMI-backed subscription, nothing to do
-	}
-
-	if s.NMIResolver == nil || subscription.RailSubscriptionID == "" {
-		return nil // No NMI resolver configured or no subscription ID
-	}
-
-	client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
-	if err != nil {
-		return fmt.Errorf("resolve subscription provider account: %w", err)
-	}
-	if !ok {
-		log.WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"rail":            provider,
-		}).Warn("NMI provider not configured for admin cancel")
-		return nil // Log warning but don't fail the cancellation
-	}
-
-	if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {
-		return fmt.Errorf("failed to cancel subscription with NMI provider '%s': %w", provider, err)
-	}
-
-	return nil
-}
-
-// CancelSubscription cancels a subscription (admin)
+// CancelSubscription cancels a subscription (admin/merchant-initiated).
+//
+// or#896: the rail side rides the SAME durable intent pipeline the
+// user-initiated cancel uses (#674 write-through provider intents). It used to
+// call the gateway synchronously with no intent and no verify leg, and an
+// unresolvable PSP only logged a warning — so the local row flipped to
+// cancelled while NMI happily kept rebilling. Now the local cancellation and
+// the remote-cancel intent commit in ONE transaction: the row is never
+// terminal while the rail-side schedule survives unconfirmed (the
+// DeletionScheduledAt marker stays set until the intent's own verify-then-
+// execute leg confirms the NMI subscription is gone), and an ambiguous
+// provider outcome parks for verification instead of lying.
 func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
@@ -213,15 +211,39 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return fmt.Errorf("subscription is not active")
 	}
 
-	if !rails.IsNMI(subscription.Rail) && subscription.Rail != models.RailStripe {
-		return fmt.Errorf("cancel operation not supported for rail '%s'", subscription.Rail)
-	}
+	now := s.now()
 
-	// Cancel with payment rail first.
+	// enqueueRemoteIntent commits the rail's durable remote-mutation intent in
+	// the SAME transaction as the local cancellation (nil = no remote intent:
+	// the rail either has nothing to stop or was cancelled inline above).
+	var enqueueRemoteIntent func(ctx context.Context, tx pgx.Tx) error
+
 	switch {
 	case rails.IsNMI(subscription.Rail):
-		if err := s.cancelWithNMI(ctx, subscription); err != nil {
-			return err
+		if subscription.RailSubscriptionID != "" {
+			if s.deferDelete == nil {
+				return fmt.Errorf("nmi remote-delete scheduler unavailable")
+			}
+			// Marker + intent commit together: the cancellation is not
+			// destructive (and not terminal rail-side) until the intent
+			// confirms NMI dropped the schedule.
+			subscription.DeletionScheduledAt = &now
+			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, now)
+			}
+		}
+	case subscription.Rail == models.RailCCBill:
+		// or#896: the admin path used to REFUSE CCBill while the findings
+		// queue supported it — same operation, two answers. The DataLink
+		// cancelSubscription wire is live-verified (#696 Phase 0), so the
+		// refusal was stale: drive the same durable intent here.
+		if subscription.RailSubscriptionID != "" {
+			if s.ccbillCancel == nil {
+				return fmt.Errorf("ccbill remote-cancel scheduler unavailable")
+			}
+			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+				return s.ccbillCancel.WithTx(tx).ScheduleCCBillCancel(ctx, subscription.CustomerID.String(), subscription.ID)
+			}
 		}
 	case subscription.Rail == models.RailStripe:
 		if s.StripeService == nil {
@@ -230,9 +252,12 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if err := s.StripeService.CancelSubscription(ctx, subscription.RailSubscriptionID); err != nil {
 			return fmt.Errorf("failed to cancel subscription with Stripe: %w", err)
 		}
+	case subscription.Rail == models.RailSolana:
+		return ErrSolanaCancelNeedsWalletSignature
+	default:
+		return fmt.Errorf("cancel operation not supported for rail '%s'", subscription.Rail)
 	}
 
-	now := s.now()
 	cancelType := models.CancelTypeMerchant
 	subscription.Status = models.StatusCancelled
 	subscription.CancelledAt = &now
@@ -242,8 +267,21 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		subscription.CancelFeedback = &reason
 	}
 
-	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription: %w", err)
+	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := db.NewWithPgxTx(tx)
+		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
+		if err := txSubSvc.Update(ctx, subscription); err != nil {
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		if enqueueRemoteIntent != nil {
+			return enqueueRemoteIntent(ctx, tx)
+		}
+		return nil
+	}); err != nil {
+		if enqueueRemoteIntent != nil {
+			return fmt.Errorf("failed to persist cancellation with remote intent: %w", err)
+		}
+		return err
 	}
 
 	if revokeAccess && s.EntitlementService != nil {
@@ -358,7 +396,6 @@ func NewAdminSubscriptionService(
 	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
 	paymentService *payments.PaymentService,
-	nmiResolver NMIClientSource,
 	clocks ...clockwork.Clock,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{
@@ -368,7 +405,6 @@ func NewAdminSubscriptionService(
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
-		NMIResolver:         nmiResolver,
 		clock:               timeutil.FirstClock(clocks...),
 	}
 }
