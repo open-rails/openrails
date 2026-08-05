@@ -15,6 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -137,9 +138,28 @@ func seedPaymentMethodWithRailCustomerRef(t *testing.T, pool *pgxpool.Pool, ctx 
 	return seedPaymentMethodRow(t, pool, ctx, payer, rail, uuid.New(), railCustomerRef)
 }
 
+// testPSPForRail resolves an existing armed PSP for (merchant, rail) — several
+// tests in this package arm a SPECIFIC account (seedRailMerchantAccountSecrets)
+// before seeding a payment method/rail-customer row, and that row's psp_id
+// must match the armed one or credential resolution 404s. Only mints a fresh
+// generic PSP via dbtest.EnsureTestPSP when nothing is armed yet.
+func testPSPForRail(t *testing.T, pool *pgxpool.Pool, ctx context.Context, rail string) uuid.UUID {
+	t.Helper()
+	var existing uuid.UUID
+	err := pool.QueryRow(ctx,
+		`SELECT id FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND archived = false
+		 ORDER BY created_at DESC LIMIT 1`,
+		dbtest.TestMerchantID.UUID(), rail).Scan(&existing)
+	if err == nil {
+		return existing
+	}
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+	return dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
+}
+
 func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string, pm uuid.UUID, railCustomerRef string) uuid.UUID {
 	t.Helper()
-	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
+	pspID := testPSPForRail(t, pool, ctx, rail)
 	params := gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
@@ -166,7 +186,7 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail, railCustomerID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), rail)
+	pspID := testPSPForRail(t, pool, ctx, rail)
 	require.NoError(t, gen.New(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: dbtest.TestMerchantID.UUID(),
@@ -276,6 +296,7 @@ func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.
 			MerchantID: c.MerchantID,
 			Provider:   c.Rail,
 			IntentType: intents.TypeTopupCharge,
+			PspID:      c.PspID,
 			Payload: intents.TopupChargePayload{
 				CustomerID:      c.CustomerID,
 				Currency:        c.Currency,

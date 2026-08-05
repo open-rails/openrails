@@ -178,6 +178,7 @@ SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_
 FROM openrails.solana_subscriptions s
 JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
 WHERE s.status = 'active' AND s.next_pull_at <= $1::timestamptz
+  AND sub.deleted_at IS NULL
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF($2::int, 0)
 `
@@ -194,6 +195,8 @@ type ListDueSolanaSubscriptionsRow struct {
 
 // or#893: the crank's recurring-pull intent must name the PSP it executes
 // against, and the local subscription is where that provenance lives.
+// A subscription a prune tombstoned is not due for anything: the join is a
+// LIVE read, so it carries the or#858 predicate.
 func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]ListDueSolanaSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.Now, arg.PageLimit)
 	if err != nil {

@@ -523,11 +523,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			purchasedAt = params.PurchasedAt.UTC()
 		}
 		payment := &models.Payment{
-			ID:                       uuidutil.NewV7(),
-			CustomerID:               subscription.CustomerID,
-			PriceID:                  price.ID,
-			SubscriptionID:           &subscription.ID,
-			Rail:                     params.Rail,
+			ID:             uuidutil.NewV7(),
+			CustomerID:     subscription.CustomerID,
+			PriceID:        price.ID,
+			SubscriptionID: &subscription.ID,
+			Rail:           params.Rail,
+			// or#893: the charge belongs to the account that took it, which is
+			// the account the subscription itself names.
+			PspID:                    pspIDOf(subscription),
 			TransactionID:            params.TransactionID,
 			Amount:                   amount,
 			ListAmount:               price.Amount,
@@ -750,6 +753,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PriceID:                  price.ID,
 				SubscriptionID:           &subscription.ID,
 				Rail:                     params.Rail,
+				PspID:                    pspIDOf(subscription),
 				TransactionID:            params.TransactionID,
 				Amount:                   amount,
 				ListAmount:               amount,
@@ -1749,6 +1753,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		PriceID:        price.ID,
 		SubscriptionID: &subscription.ID,
 		Rail:           subscription.Rail,
+		PspID:          pspIDOf(subscription),
 		TransactionID:  fmt.Sprintf("renewal_declined:%s:attempt%d", subscription.ID, attemptNum),
 		Amount:         price.Amount,
 		ListAmount:     price.Amount,
@@ -2196,3 +2201,14 @@ func validateCompletedPayment(payment *models.Payment, expectedAmount int64, exp
 }
 
 // Parameter structs for lifecycle operations
+
+// pspIDOf is the subscription's PSP as a payment stamp. or#893: a charge — a
+// signup, a rebill, or a decline marker — belongs to the account that attempted
+// it, and the subscription row is the authority on which one that is.
+func pspIDOf(subscription *models.Subscription) *uuid.UUID {
+	if subscription == nil || subscription.PspID == uuid.Nil {
+		return nil
+	}
+	id := subscription.PspID
+	return &id
+}
