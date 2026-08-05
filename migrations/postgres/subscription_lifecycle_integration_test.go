@@ -149,19 +149,9 @@ func TestStatusTransitionsAreStillAuditedThroughTheCanonicalType(t *testing.T) {
 	require.Equal(t, "cancelled", to)
 }
 
-// A fresh payer per row: uq_subscriptions_customer_product_lifecycle makes
-// active/pending/past_due mutually exclusive per (merchant, customer, product),
-// and that guarantee is not what these tests are probing.
-func (f pspFixture) newCustomer(t *testing.T) uuid.UUID {
-	t.Helper()
-	id := uuid.New()
-	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		id, f.merchant, uuid.NewString())
-	require.NoError(t, err)
-	return id
-}
-
+// A fresh payer per row (f.newCustomer): uq_subscriptions_customer_product_lifecycle
+// makes active/pending/past_due mutually exclusive per (merchant, customer,
+// product), and that guarantee is not what these tests are probing.
 func (f pspFixture) insertSubscriptionWithStatus(t *testing.T, status string) error {
 	t.Helper()
 	// past_due needs a period end and cancelled needs its cancel columns; this

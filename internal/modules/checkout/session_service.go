@@ -77,6 +77,7 @@ type sessionIdempotencyStore interface {
 }
 
 type checkoutSessionExecutor interface {
+	checkoutRailTargets
 	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
 	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
 	// CheckSubscriptionConflict is the shared duplicate-billing guard (issue
@@ -86,11 +87,22 @@ type checkoutSessionExecutor interface {
 	CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error)
 }
 
-// railMerchantAccountIDResolver is the OPTIONAL executor capability (#704):
-// resolve the active PSP for new work on a rail, or uuid.Nil when nothing is
-// armed. Satisfied by *CheckoutService; test fakes may omit it.
-type railMerchantAccountIDResolver interface {
-	ResolvePSPID(ctx context.Context, rail string) uuid.UUID
+// checkoutRailTargets is the multi-PSP resolution capability the session
+// service REQUIRES of its executor (or#893, #704, #848): resolve a wire
+// selector — a PSP key or a bare rail kind — to the concrete armed account, and
+// say when a key is declared-but-archived rather than unknown.
+//
+// It is REQUIRED, not optional, because every session must land on a real PSP:
+// checkout_sessions.psp_id is NOT NULL, and a session nobody can attribute
+// would be invisible to a PSP-scoped prune and would collide with a sibling
+// account's reference under the nil-uuid lane 0063 deleted. The methods are
+// unexported so only this package can satisfy it — test fakes implement it
+// (see stubRailTargets) instead of the session path branching on the
+// executor's concrete type.
+type checkoutRailTargets interface {
+	resolveRailTarget(ctx context.Context, selector string) (railTarget, error)
+	pspKeyArchived(ctx context.Context, key string) bool
+	railSource() railresolve.Source
 }
 
 type solanaPaymentService interface {
@@ -447,42 +459,28 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// vocabulary — plus the PSP the charge must land on, and the trace that
 	// explains the choice.
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
-	pspSelector := rail
 	var pspID uuid.UUID
-	var routingReason *models.CheckoutRoutingReason
-	if _, ok := s.checkoutService.(*CheckoutService); ok {
-		decision, err := s.Route(ctx, RoutingInput{
-			Price:    price,
-			Product:  product,
-			Mode:     checkoutModeForRail(price, ""),
-			Country:  strings.TrimSpace(req.Payment.Country),
-			Selector: rail,
-		})
-		if err != nil {
-			var ambiguous *AmbiguousRailError
-			var unknown *UnknownRailError
-			if errors.As(err, &ambiguous) || errors.As(err, &unknown) || errors.Is(err, ErrNoRoutableProcessor) {
-				return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
-			}
-			return nil, err
+	decision, err := s.Route(ctx, RoutingInput{
+		Price:    price,
+		Product:  product,
+		Mode:     checkoutModeForRail(price, ""),
+		Country:  strings.TrimSpace(req.Payment.Country),
+		Selector: rail,
+	})
+	if err != nil {
+		var ambiguous *AmbiguousRailError
+		var unknown *UnknownRailError
+		if errors.As(err, &ambiguous) || errors.As(err, &unknown) || errors.Is(err, ErrNoRoutableProcessor) {
+			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}
-		rail = decision.Target.Rail
-		pspSelector = decision.Target.PSP
-		routingReason = decision.Reason()
-		// #704: pin provenance with the REAL resolved account — never invented.
-		if decision.Target.Scope != nil {
-			pspID = decision.Target.Scope.ID
-		}
-	} else {
-		// Executors without the concrete checkout service (test fakes) cannot
-		// route: the wire value is the rail kind directly.
-		if rail == "" {
-			return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutSessionValidation)
-		}
-		if resolver, ok := s.checkoutService.(railMerchantAccountIDResolver); ok {
-			// #704 fallback for executors without target resolution.
-			pspID = resolver.ResolvePSPID(ctx, rail)
-		}
+		return nil, err
+	}
+	rail = decision.Target.Rail
+	pspSelector := decision.Target.PSP
+	routingReason := decision.Reason()
+	// #704: pin provenance with the REAL resolved account — never invented.
+	if decision.Target.Scope != nil {
+		pspID = decision.Target.Scope.ID
 	}
 	// or#893: checkout_sessions.psp_id is NOT NULL. A session nobody can
 	// attribute would be invisible to a PSP-scoped prune and would collide with

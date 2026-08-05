@@ -354,7 +354,7 @@ func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.
 	return nil
 }
 
-type stubCheckoutExecutor struct{}
+type stubCheckoutExecutor struct{ stubRailTargets }
 
 func (s *stubCheckoutExecutor) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
 	return nil, nil

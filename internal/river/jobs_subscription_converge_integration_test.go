@@ -409,7 +409,7 @@ func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 
 	dispatcher := &webhooks.WebhookDispatcher{
 		DB:                   dbi,
-		DeduplicationService: webhooks.NewDeduplicationService(nil, dbi),
+		DeduplicationService: mustDedupService(t, dbi),
 		ConvergeEnqueuer:     &SubscriptionConvergeEnqueuer{Client: client, Debounce: 200 * time.Millisecond},
 	}
 	verified := true
@@ -512,7 +512,7 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 
 	dispatcher := &webhooks.WebhookDispatcher{
 		DB:                   dbi,
-		DeduplicationService: webhooks.NewDeduplicationService(nil, dbi),
+		DeduplicationService: mustDedupService(t, dbi),
 		ConvergeEnqueuer:     &SubscriptionConvergeEnqueuer{Client: client, Debounce: 200 * time.Millisecond},
 	}
 	verified := true
@@ -535,4 +535,13 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 	wantEnd, err := time.ParseInLocation("2006-01-02", f.newEnd.Format("2006-01-02"), time.UTC)
 	require.NoError(t, err)
 	f.assertConverged(t, baseCtx, txnID, wantEnd)
+}
+
+// mustDedupService builds the webhook dedup service these dispatchers need.
+// or#893: a nil DB is refused, so the Postgres truth is always present.
+func mustDedupService(t *testing.T, dbi *db.DB) *webhooks.DeduplicationService {
+	t.Helper()
+	svc, err := webhooks.NewDeduplicationService(nil, dbi)
+	require.NoError(t, err)
+	return svc
 }
