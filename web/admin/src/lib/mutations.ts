@@ -30,6 +30,9 @@ import {
   grantEntitlement,
   grantProductAccess,
   inviteTeamMember,
+  listCustomers,
+  listPayments,
+  listSubscriptions,
   putMerchantSettings,
   putPaymentProvider,
   previewRepriceAllPriorVersions,
@@ -50,13 +53,42 @@ import {
   updateProduct,
   type AlertRuleRequest,
   type OffChannelPaymentRequest,
+  type PaymentFilters,
   type PriceRequest,
   type ProductRequest,
+  type SubscriptionFilters,
   type UpsertProviderRequest,
   type WebhookRequest,
 } from "@/lib/api/endpoints"
-import type { MerchantSettings } from "@/lib/api/types"
+import type {
+  CustomerSummary,
+  MerchantSettings,
+  PaymentObject,
+  AdminSubscription,
+} from "@/lib/api/types"
 import { queryKeys } from "@/lib/queries"
+
+const EXPORT_PAGE = 200
+
+const collectAllPages = async <T>(
+  listPage: (
+    limit: number,
+    offset: number
+  ) => Promise<{
+    data: T[]
+    total: number
+  }>
+) => {
+  const rows: T[] = []
+  let offset = 0
+
+  for (;;) {
+    const page = await listPage(EXPORT_PAGE, offset)
+    rows.push(...page.data)
+    if (rows.length >= page.total || page.data.length === 0) return rows
+    offset += EXPORT_PAGE
+  }
+}
 
 const invalidateExact = (
   queryClient: QueryClient,
@@ -72,6 +104,36 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  exportCustomers: () => {
+    const customersKey = queryKeys.customers()
+    return mutationOptions({
+      mutationKey: [...customersKey, "export"],
+      mutationFn: (q: string) =>
+        collectAllPages<CustomerSummary>((limit, offset) =>
+          listCustomers(q, limit, offset)
+        ),
+    })
+  },
+  exportSubscriptions: () => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, "export"],
+      mutationFn: (filters: SubscriptionFilters) =>
+        collectAllPages<AdminSubscription>((limit, offset) =>
+          listSubscriptions(filters, limit, offset)
+        ),
+    })
+  },
+  exportPayments: () => {
+    const paymentsKey = queryKeys.payments()
+    return mutationOptions({
+      mutationKey: [...paymentsKey, "export"],
+      mutationFn: (filters: PaymentFilters) =>
+        collectAllPages<PaymentObject>((limit, offset) =>
+          listPayments(filters, limit, offset)
+        ),
+    })
+  },
   resolveFinding: (queryClient: QueryClient) => {
     const opsKey = queryKeys.ops()
     return mutationOptions({

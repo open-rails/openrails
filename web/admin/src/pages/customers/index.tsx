@@ -2,20 +2,19 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon, Search01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
 import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { listCustomers } from "@/lib/api/endpoints"
 import type { CustomerSummary } from "@/lib/api/types"
 import { formatDate, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
-const EXPORT_PAGE = 200
 
 const columns: ColumnDef<CustomerSummary, unknown>[] = [
   {
@@ -74,8 +73,8 @@ export function CustomersPage() {
   const q = params.get("q") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState(q)
-  const [exporting, setExporting] = React.useState(false)
   const navigate = useNavigate()
+  const exportCustomers = useMutation(adminMutations.exportCustomers())
 
   const { data, isPending: loading } = useQuery(
     adminQueries.customers(q, PAGE, offset)
@@ -83,16 +82,8 @@ export function CustomersPage() {
 
   // Export walks every page of the current filter, not just the visible one.
   const exportCsv = async () => {
-    setExporting(true)
     try {
-      const rows: CustomerSummary[] = []
-      let cursor = 0
-      for (;;) {
-        const page = await listCustomers(q, EXPORT_PAGE, cursor)
-        rows.push(...page.data)
-        if (rows.length >= page.total || page.data.length === 0) break
-        cursor += EXPORT_PAGE
-      }
+      const rows = await exportCustomers.mutateAsync(q)
       const csv = [
         ["id", "external_ref", "email", "created_at", "last_seen_at"].join(","),
         ...rows.map((r) =>
@@ -111,8 +102,6 @@ export function CustomersPage() {
       URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export customers")
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -142,10 +131,12 @@ export function CustomersPage() {
           <Button
             size="sm"
             onClick={exportCsv}
-            disabled={exporting || loading || (data?.total ?? 0) === 0}
+            disabled={
+              exportCustomers.isPending || loading || (data?.total ?? 0) === 0
+            }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exportCustomers.isPending ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>

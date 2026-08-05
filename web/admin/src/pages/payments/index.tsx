@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 
@@ -22,14 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { listCustomers, listPayments } from "@/lib/api/endpoints"
+import { listCustomers } from "@/lib/api/endpoints"
 import type { PaymentObject } from "@/lib/api/types"
 import { formatMicros, formatUnix, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
-const EXPORT_PAGE = 200
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
 const columns: ColumnDef<PaymentObject, unknown>[] = [
@@ -89,8 +89,8 @@ export function PaymentsPage() {
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
-  const [exporting, setExporting] = React.useState(false)
   const navigate = useNavigate()
+  const exportPayments = useMutation(adminMutations.exportPayments())
 
   const filters = {
     rail: rail || undefined,
@@ -141,16 +141,8 @@ export function PaymentsPage() {
   }
 
   const exportCsv = async () => {
-    setExporting(true)
     try {
-      const rows: PaymentObject[] = []
-      let cursor = 0
-      for (;;) {
-        const page = await listPayments(filters, EXPORT_PAGE, cursor)
-        rows.push(...page.data)
-        if (rows.length >= page.total || page.data.length === 0) break
-        cursor += EXPORT_PAGE
-      }
+      const rows = await exportPayments.mutateAsync(filters)
       const csv = [
         [
           "id",
@@ -191,8 +183,6 @@ export function PaymentsPage() {
       URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export payments")
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -242,10 +232,12 @@ export function PaymentsPage() {
           <Button
             size="sm"
             onClick={exportCsv}
-            disabled={exporting || loading || (data?.total ?? 0) === 0}
+            disabled={
+              exportPayments.isPending || loading || (data?.total ?? 0) === 0
+            }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exportPayments.isPending ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>

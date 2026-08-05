@@ -14,6 +14,9 @@ import {
   getProduct,
   grantEntitlement,
   grantProductAccess,
+  listCustomers,
+  listPayments,
+  listSubscriptions,
   previewRepriceAllPriorVersions,
   publishCatalog,
   putMerchantSettings,
@@ -59,6 +62,9 @@ vi.mock("@/lib/api/endpoints", () => ({
   grantEntitlement: vi.fn(),
   grantProductAccess: vi.fn(),
   inviteTeamMember: vi.fn(),
+  listCustomers: vi.fn(),
+  listPayments: vi.fn(),
+  listSubscriptions: vi.fn(),
   putMerchantSettings: vi.fn(),
   putPaymentProvider: vi.fn(),
   previewRepriceAllPriorVersions: vi.fn(),
@@ -146,6 +152,73 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe("list export mutations", () => {
+  it("exports every customer page for the current search", async () => {
+    const queryClient = new QueryClient()
+    vi.mocked(listCustomers)
+      .mockResolvedValueOnce({
+        data: [{ id: "customer-1" }],
+        total: 2,
+      } as never)
+      .mockResolvedValueOnce({
+        data: [{ id: "customer-2" }],
+        total: 2,
+      } as never)
+
+    const rows = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.exportCustomers())
+      .execute("alice")
+
+    expect(rows).toEqual([{ id: "customer-1" }, { id: "customer-2" }])
+    expect(listCustomers).toHaveBeenNthCalledWith(1, "alice", 200, 0)
+    expect(listCustomers).toHaveBeenNthCalledWith(2, "alice", 200, 200)
+  })
+
+  it("exports every subscription page with the active filters", async () => {
+    const queryClient = new QueryClient()
+    const filters = { status: "past_due", rail: "nmi" }
+    vi.mocked(listSubscriptions)
+      .mockResolvedValueOnce({
+        data: [{ id: "subscription-1" }],
+        total: 2,
+      } as never)
+      .mockResolvedValueOnce({
+        data: [{ id: "subscription-2" }],
+        total: 2,
+      } as never)
+
+    const rows = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.exportSubscriptions())
+      .execute(filters)
+
+    expect(rows).toEqual([{ id: "subscription-1" }, { id: "subscription-2" }])
+    expect(listSubscriptions).toHaveBeenNthCalledWith(1, filters, 200, 0)
+    expect(listSubscriptions).toHaveBeenNthCalledWith(2, filters, 200, 200)
+  })
+
+  it("stops payment export when the API returns an empty page", async () => {
+    const queryClient = new QueryClient()
+    const filters = { refunds_only: true, user_id: "customer-1" }
+    vi.mocked(listPayments)
+      .mockResolvedValueOnce({
+        data: [{ id: "payment-1" }],
+        total: 2,
+      } as never)
+      .mockResolvedValueOnce({ data: [], total: 2 } as never)
+
+    const rows = await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.exportPayments())
+      .execute(filters)
+
+    expect(rows).toEqual([{ id: "payment-1" }])
+    expect(listPayments).toHaveBeenNthCalledWith(1, filters, 200, 0)
+    expect(listPayments).toHaveBeenNthCalledWith(2, filters, 200, 200)
+  })
+})
 
 describe("ops mutations", () => {
   it("resolves a finding and refreshes the ops tree", async () => {
