@@ -37,10 +37,12 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -291,6 +293,17 @@ func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 			dst.Custodians[key] = dstKinds
 		}
 	}
+	if len(src.BillingPolicies) > 0 {
+		if dst.BillingPolicies == nil {
+			dst.BillingPolicies = map[string]BillingPolicyConfig{}
+		}
+		for name, policy := range src.BillingPolicies {
+			dst.BillingPolicies[name] = policy
+		}
+	}
+	if len(src.BillingPolicyBindings) > 0 {
+		dst.BillingPolicyBindings = src.BillingPolicyBindings
+	}
 	if len(src.PSPs) > 0 {
 		if dst.PSPs == nil {
 			dst.PSPs = map[string]PSPConfig{}
@@ -439,6 +452,44 @@ type MerchantConfig struct {
 	// leaves the stored policy untouched; declared REPLACES it whole (an
 	// ordered list has no meaningful per-element merge).
 	CheckoutRouting []CheckoutRoutingRuleConfig `yaml:"checkout_routing,omitempty" koanf:"checkout_routing"`
+	// BillingPolicies (or#897) are the merchant's named billing policies, keyed by
+	// name. Each declares WHICH quantity is capped; BillingPolicyBindings decides
+	// who gets which. Validated by the SAME normalizer the config API runs, so a
+	// manifest that boots cannot declare a policy the API would refuse.
+	BillingPolicies map[string]BillingPolicyConfig `yaml:"billing_policies,omitempty" koanf:"billing_policies"`
+	// BillingPolicyBindings (or#897) point DECLARATIVE rungs at policy names:
+	// `tier` for a trust tier, omitted for the merchant default. Per-customer
+	// binding is the mode-2 API's runtime lever, not manifest truth.
+	BillingPolicyBindings []BillingPolicyBindingConfig `yaml:"billing_policy_bindings,omitempty" koanf:"billing_policy_bindings"`
+}
+
+// BillingPolicyConfig is one manifest billing policy (or#897). Amounts are in
+// the currency's micros; window durations are Go durations ("720h").
+type BillingPolicyConfig struct {
+	// Kind: outstanding_cap | window_spend_cap. accrual_rate_cap is declarable
+	// and refused with a real answer until or#897 PR 3.
+	Kind string `yaml:"kind" koanf:"kind"`
+	// OutstandingCap (micros, kind=outstanding_cap) is the credit line on unpaid
+	// arrears. Omitted defers to the payer's own arrears credit limit.
+	OutstandingCap int64 `yaml:"outstanding_cap,omitempty" koanf:"outstanding_cap"`
+	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
+	SpendWindows []BudgetWindowConfig `yaml:"spend_windows,omitempty" koanf:"spend_windows"`
+	// BadSpendWindows are the #497 per-PAYER wasted-spend grace windows.
+	BadSpendWindows []BudgetWindowConfig `yaml:"bad_spend_windows,omitempty" koanf:"bad_spend_windows"`
+	PolicyCurrency  string               `yaml:"policy_currency,omitempty" koanf:"policy_currency"`
+}
+
+// BillingPolicyBindingConfig binds one DECLARATIVE rung to a policy name: a
+// trust tier, or the merchant default when `tier` is omitted.
+//
+// There is deliberately no per-customer rung here. Binding a policy to one
+// payer is the merchant's RUNTIME lever (mode-2 API), not declared truth: in
+// mode 1 the YAML is the whole configuration and changing it means a reboot,
+// which is the wrong shape for per-customer segmentation. It would also put
+// customer identifiers into a committed manifest.
+type BillingPolicyBindingConfig struct {
+	Policy string `yaml:"policy" koanf:"policy"`
+	Tier   string `yaml:"tier,omitempty" koanf:"tier"`
 }
 
 // CheckoutRoutingRuleConfig is one manifest routing rule. Prefer speaks the
@@ -1255,6 +1306,15 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	if err != nil {
 		return err
 	}
+
+	// or#897 billing-policy registry. Policies first: a binding in the same
+	// manifest may name one of them, and the bindings FK refuses a name that does
+	// not exist yet.
+	if err := reconcileManifestBillingPolicies(mctx, database, mt); err != nil {
+		return err
+	}
+
+
 	for _, entry := range pspEntries(mt.PSPs) {
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: provider account secrets require a secret store")
@@ -1276,6 +1336,104 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		}
 	}
 	return nil
+}
+
+// reconcileManifestBillingPolicies installs the manifest's declared billing
+// policies and bindings (or#897, mode 1). Every policy goes through the SAME
+// normalizer the config API runs — one validator, two declaration paths — so a
+// manifest that boots cannot hold a policy the API would have refused.
+//
+// The WHOLE document is validated before ANY of it is written: a bad third
+// policy must not leave the first two installed and the merchant enforcing half
+// a decision.
+func reconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt MerchantConfig) error {
+	if len(mt.BillingPolicies) == 0 && len(mt.BillingPolicyBindings) == 0 {
+		return nil
+	}
+	type declaredPolicy struct {
+		name string
+		body models.BillingPolicy
+	}
+	names := make([]string, 0, len(mt.BillingPolicies))
+	for name := range mt.BillingPolicies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	policies := make([]declaredPolicy, 0, len(names))
+	for _, declared := range names {
+		name, err := merchantconfig.NormalizeBillingPolicyName(declared)
+		if err != nil {
+			return err
+		}
+		src := mt.BillingPolicies[declared]
+		spend, err := manifestBudgetWindows(name, "spend_windows", src.SpendWindows)
+		if err != nil {
+			return err
+		}
+		badSpend, err := manifestBudgetWindows(name, "bad_spend_windows", src.BadSpendWindows)
+		if err != nil {
+			return err
+		}
+		body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
+			Kind:                 models.BillingPolicyKind(src.Kind),
+			OutstandingCapAmount: src.OutstandingCap,
+			SpendWindows:         spend,
+			BadSpendWindows:      badSpend,
+			PolicyCurrency:       src.PolicyCurrency,
+		})
+		if err != nil {
+			return err
+		}
+		policies = append(policies, declaredPolicy{name: name, body: body})
+	}
+
+	type declaredBinding struct {
+		tier string
+		name string
+	}
+	bindings := make([]declaredBinding, 0, len(mt.BillingPolicyBindings))
+	for i, b := range mt.BillingPolicyBindings {
+		name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(b.Policy, b.Tier, false)
+		if err != nil {
+			return fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
+		}
+		bindings = append(bindings, declaredBinding{tier: tier, name: name})
+	}
+
+	store := admission.NewBillingPolicyStore(database)
+	for _, p := range policies {
+		if err := store.UpsertPolicy(ctx, p.name, p.body); err != nil {
+			return fmt.Errorf("upsert billing policy %q: %w", p.name, err)
+		}
+	}
+	for _, b := range bindings {
+		if err := store.BindPolicy(ctx, identity.CustomerID{}, b.tier, b.name); err != nil {
+			return fmt.Errorf("bind billing policy %q: %w", b.name, err)
+		}
+	}
+	return nil
+}
+
+// manifestBudgetWindows projects manifest windows (Go duration strings) onto the
+// stored model (seconds). The shared normalizer validates the result.
+func manifestBudgetWindows(policyName, field string, in []BudgetWindowConfig) ([]models.BudgetWindowPolicy, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]models.BudgetWindowPolicy, 0, len(in))
+	for _, w := range in {
+		d, err := time.ParseDuration(strings.TrimSpace(w.Window))
+		if err != nil {
+			return nil, fmt.Errorf("billing policy %s: %s %q: window: %w", policyName, field, w.Key, err)
+		}
+		out = append(out, models.BudgetWindowPolicy{
+			Key:           strings.TrimSpace(w.Key),
+			WindowSeconds: int64(d / time.Second),
+			Limit:         w.Limit,
+			Currency:      strings.TrimSpace(w.Currency),
+		})
+	}
+	return out, nil
 }
 
 // pruneManifestSecrets deletes secrets held for the merchant that the manifest

@@ -57,7 +57,10 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 		{"custom_credit_types", "custom_credit_types_merchant_fk"},
 		{"notification_queue", "notification_queue_merchant_fk"},
 		{"tier_schedules", "tier_schedules_merchant_fk"},
-		{"payer_spend_limits", "payer_spend_limits_merchant_fk"},
+		// payer_spend_limits was dropped by 0048 (or#897). Its replacements
+		// (billing_policies / billing_policy_bindings) are created there, not in the
+		// baseline, so their FKs are pinned by the whole-schema guards in
+		// merchant_aware_schema_test.go rather than by this baseline-scoped list.
 		{"invoker_spend_limits", "invoker_spend_limits_merchant_fk"},
 		{"solana_subscriptions", "solana_subscriptions_merchant_fk"},
 		{"merchant_deks", "merchant_deks_merchant_fk"},

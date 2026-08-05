@@ -214,8 +214,17 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
 
-	// Cached cap windows (FX-normalized to the request currency).
-	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq)
+	// or#897: the merchant's bound billing policy is resolved FIRST, because its
+	// KIND decides whether prior debt reduces this payer's headroom at all. The
+	// merchant chose which policy binds to this payer; OpenRails measures and
+	// enforces it. Served from the process-local cache when warm.
+	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	if err != nil {
+		return AdmitDecision{}, err
+	}
+
+	// Cap windows (FX-normalized to the request currency).
+	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -229,7 +238,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// Unlocked balance + arrears credit line (the gate's affordability inputs).
 	// Phase H makes the settled balance an O(1) ledger account read, so this stays
 	// direct and avoids a staleness window.
-	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
+	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -237,8 +246,10 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// or#897 outstanding cap: unpaid arrears have consumed the whole credit line,
 	// so nothing more may be spent on credit. Distinct from the affordability
 	// refusal below — a host must be able to tell "your debt is at the cap, pay
-	// it down" from "you are out of prepaid balance".
-	if creditLine == 0 && available <= 0 && outstanding > 0 {
+	// it down" from "you are out of prepaid balance". A window_spend_cap payer
+	// never reaches this: its line does not move with debt, so there is no cap
+	// to reach and unpaid invoices are the delinquency gate's business.
+	if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
 		a.recordDenial(ctx, merchantID, req.CustomerID, DenyOutstandingCap)
 		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyOutstandingCap}, nil
 	}

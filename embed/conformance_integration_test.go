@@ -438,8 +438,9 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.HasProductAccess(ctx, env.subject, "not-a-uuid")
 	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
 
-	// 11) Merchant settings sync: install profile, tier policy, schedule, and the
-	// delegated wasted-spend window through the new single settings document.
+	// 11) Merchant settings sync: install profile, a named billing policy + its
+	// tier binding, the trust-level schedule, and the delegated wasted-spend
+	// window through the single settings document.
 	require.NoError(t, c.SetMerchantSettings(ctx, openrails.MerchantSettings{
 		Profile: &openrails.MerchantProfileInput{
 			DisplayName: "Conformance Billing",
@@ -451,11 +452,15 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 			Currency: money.DefaultCurrency,
 			Schedule: []openrails.TrustLevelScheduleRung{{TrustLevel: "conf", MinCumulativePaidAmount: 0}},
 		}},
-		TrustLevelSpendLimits: []openrails.PayerSpendLimitInput{{
-			TrustLevel: "conf",
-			BudgetWindows: []openrails.BudgetWindowInput{
+		BillingPolicies: []openrails.BillingPolicyInput{{
+			Name: "conf_window",
+			Kind: "window_spend_cap",
+			SpendWindows: []openrails.BudgetWindowInput{
 				{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
 			},
+		}},
+		BillingPolicyBindings: []openrails.BillingPolicyBindingInput{{
+			PolicyName: "conf_window", Tier: "conf",
 		}},
 		DelegatedInvokerWastedSpendLimits: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},

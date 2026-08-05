@@ -5,7 +5,6 @@ package service_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -42,12 +41,7 @@ func TestOr894_WasteOverageThenCaptureOfTheSameRequestChargesBoth(t *testing.T) 
 	// A REAL bad-spend policy at the payer's resolved trust level, with grace
 	// >= 1 — abuse.RecordPayerGrace skips a window whose Limit <= 0, which makes
 	// the overage CHARGE branch unreachable and every assertion under it vacuous.
-	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
-		TrustLevel: "free",
-		BadSpendWindows: []billingservice.TrustLevelBudgetWindowInput{
-			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 1},
-		},
-	}))
+	requireBoundBadSpendPolicy(t, svc, ctx, "free", 1)
 
 	before := or894Balance(t, ms, ctx, payer)
 

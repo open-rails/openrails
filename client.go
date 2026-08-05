@@ -380,10 +380,14 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                           *MerchantProfileInput        `json:"profile,omitempty"`
-	TrustLevelSchedules               []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
-	TrustLevelSpendLimits             []PayerSpendLimitInput       `json:"trust_level_spend_limits,omitempty"`
-	DelegatedInvokerWastedSpendLimits []BudgetWindowInput          `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	Profile             *MerchantProfileInput        `json:"profile,omitempty"`
+	TrustLevelSchedules []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
+	// policies and the rungs that decide who gets which. They REPLACE the retired
+	// trust_level_spend_limits field, which could only ever mean "window cap".
+	BillingPolicies                   []BillingPolicyInput        `json:"billing_policies,omitempty"`
+	BillingPolicyBindings             []BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
+	DelegatedInvokerWastedSpendLimits []BudgetWindowInput         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 }
 
 // MerchantTrustLevelSchedule is one currency's trust-level ladder.
@@ -392,18 +396,37 @@ type MerchantTrustLevelSchedule struct {
 	Schedule []TrustLevelScheduleRung `json:"schedule"`
 }
 
-// PayerSpendLimitInput configures a per-payer trust-level policy via merchant
-// settings (#298): fixed money-budget windows and wasted
-// spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
-// travels alongside it).
-type PayerSpendLimitInput struct {
-	TrustLevel     string              `json:"trust_level,omitempty"`
-	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
-	PolicyCurrency string              `json:"policy_currency,omitempty"`
+// BillingPolicyInput declares one named billing policy (or#897). The policy says
+// WHICH quantity is capped; the binding says who it applies to.
+type BillingPolicyInput struct {
+	Name string `json:"name"`
+	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
+	// line on debt, refused with deny code outstanding_cap_reached) or
+	// "window_spend_cap" (cap NEW spend per rolling window; prior debt drives
+	// delinquency, not admission).
+	Kind string `json:"kind"`
+	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
+	// Zero defers to the payer's own arrears credit limit.
+	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
+	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+	SpendWindows []BudgetWindowInput `json:"spend_windows,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this trust level: at most Limit of host-reported wasted spend is
-	// forgiven per window; direct-payer overage is charged.
+	// windows: at most Limit of host-reported wasted spend is forgiven per window;
+	// direct-payer overage is charged. Allowed on either kind.
 	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
+	PolicyCurrency  string              `json:"policy_currency,omitempty"`
+}
+
+// BillingPolicyBindingInput points one rung at a declared policy name (or#897).
+// Set CustomerID for the per-customer rung, Tier for the per-tier rung, neither
+// for the merchant default — never both. Most specific wins.
+//
+// GetMerchantSettings returns only the DECLARATIVE rungs (default + tier):
+// per-customer bindings are runtime segmentation state and are not enumerated.
+type BillingPolicyBindingInput struct {
+	PolicyName string `json:"policy"`
+	CustomerID string `json:"customer_id,omitempty"`
+	Tier       string `json:"tier,omitempty"`
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
