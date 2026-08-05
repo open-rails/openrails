@@ -117,7 +117,7 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 	e := NewConvergeEngine(appDB)
 	sfx := uuid.NewString()[:8]
 	prod, price, sub, pm, wm := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	var cust uuid.UUID
+	var cust, psp uuid.UUID
 	periodEnd := time.Now().UTC().Add(-30 * 24 * time.Hour) // stale period
 	start := periodEnd.Add(-30 * 24 * time.Hour)
 
@@ -130,11 +130,16 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "wmev-"+sfx, merchantID)
 		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','wm-cust','wm-vault','wm-tx')`, pm, merchantID, cust)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at)
-		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, sub, merchantID, cust, prod, price, pm, start, periodEnd)
-		// Provider truth synced past the period end (global NMI lane).
-		exec(`INSERT INTO openrails.rail_refresh_watermarks (id,merchant_id,rail,event_domain,watermark_at) VALUES ($1,$2,'nmi','events',$3)`,
-			wm, merchantID, time.Now().UTC().Add(-time.Hour))
+		// or#893: the watermark is the cursor of ONE PSP's event stream, so it is
+		// only evidence about the subscriptions of THAT PSP. Both rows name it.
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
+			merchantID, "nmi-wmev-"+sfx).Scan(&psp))
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, pm, start, periodEnd, psp)
+		// Provider truth synced past the period end, for THIS PSP.
+		exec(`INSERT INTO openrails.rail_refresh_watermarks (id,merchant_id,rail,psp_id,event_domain,watermark_at) VALUES ($1,$2,'nmi',$3,'events',$4)`,
+			wm, merchantID, psp, time.Now().UTC().Add(-time.Hour))
 		return nil
 	}))
 	t.Cleanup(func() {
@@ -145,6 +150,7 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id=$1`, pm)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, psp)
 			return nil
 		})
 	})
@@ -155,6 +161,67 @@ func TestConverge_PeriodOverdue_WatermarkEvidence(t *testing.T) {
 		var s string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, sub).Scan(&s))
 		require.Equal(t, "past_due", s, "watermark newer than period end = ownership evidence -> dunning")
+		return nil
+	}))
+}
+
+// or#893: the same watermark is NOT evidence about a SIBLING PSP's book. It used
+// to be — the evidence leg matched `w.psp_id IS NULL OR w.psp_id = s.psp_id`, so
+// one freshly-pulled account vouched for an account nobody had read, and the
+// sibling's lapsed subscription was demoted to dunning on a pull it never had.
+func TestConverge_PeriodOverdue_WatermarkOfAnotherPSPIsNotEvidence(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	e := NewConvergeEngine(appDB)
+	sfx := uuid.NewString()[:8]
+	prod, price, sub, pm, wm := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	var cust, pulledPSP, silentPSP uuid.UUID
+	periodEnd := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	start := periodEnd.Add(-30 * 24 * time.Hour)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		cust = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "wmsib-"+sfx, merchantID)
+		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO openrails.payment_methods (id,merchant_id,customer_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES ($1,$2,$3,'nmi','sib-cust','sib-vault','sib-tx')`, pm, merchantID, cust)
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
+			merchantID, "nmi-pulled-"+sfx).Scan(&pulledPSP))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`INSERT INTO openrails.psps (merchant_id, rail, account_id) VALUES ($1,'nmi',$2) RETURNING id`,
+			merchantID, "nmi-silent-"+sfx).Scan(&silentPSP))
+		// The lapsed subscription belongs to the PSP nobody pulled.
+		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,payment_method_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, pm, start, periodEnd, silentPSP)
+		// Fresh provider truth — but for the OTHER account.
+		exec(`INSERT INTO openrails.rail_refresh_watermarks (id,merchant_id,rail,psp_id,event_domain,watermark_at) VALUES ($1,$2,'nmi',$3,'events',$4)`,
+			wm, merchantID, pulledPSP, time.Now().UTC().Add(-time.Hour))
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_refresh_watermarks WHERE id=$1`, wm)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+sub.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id=$1`, pm)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=ANY($1)`, []uuid.UUID{pulledPSP, silentPSP})
+			return nil
+		})
+	})
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
+		require.NoError(t, err)
+		var s string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, sub).Scan(&s))
+		require.Equal(t, "unknown", s, "a sibling PSP's watermark is not ownership evidence: no evidence parks the row, it does not dun it")
 		return nil
 	}))
 }

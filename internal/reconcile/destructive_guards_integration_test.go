@@ -26,14 +26,24 @@ type guardCohort struct {
 	subs     []uuid.UUID
 	railSubs []string
 	suffix   string
+	// psp is the PSP the cohort's mirror rows carry — a pull must be bound to
+	// it to see them at all (or#893).
+	psp RailMerchantAccountBinding
 }
 
 // seedGuardCohort creates n NMI subscriptions in `status`, each with a live
 // `premium` entitlement window, and registers their cleanup.
 func seedGuardCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time) guardCohort {
 	t.Helper()
+	return seedGuardCohortForPSP(t, appDB, baseCtx, n, status, periodEnd, seedTestPSPBinding(t, appDB, baseCtx, "nmi"))
+}
+
+// seedGuardCohortForPSP seeds the cohort under a NAMED PSP (or#893: mirror rows
+// carry the PSP that produced them, and a pull only ever sees its own).
+func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time, psp RailMerchantAccountBinding) guardCohort {
+	t.Helper()
 	merchantID := dbtest.TestMerchantID.UUID()
-	c := guardCohort{suffix: uuid.NewString()[:8]}
+	c := guardCohort{suffix: uuid.NewString()[:8], psp: psp}
 	start := periodEnd.Add(-30 * 24 * time.Hour)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
@@ -52,9 +62,9 @@ func seedGuardCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int,
 			      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
 			exec(`INSERT INTO openrails.subscriptions
 			        (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,
-			         started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot)
-			      VALUES ($1,$2,$3,$4,$5,$6,'nmi',$7,$8,$8,$9,jsonb_build_object('premium',null))`,
-				sub, merchantID, cust, prod, price, status, rs, start, periodEnd)
+			         started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,psp_id)
+			      VALUES ($1,$2,$3,$4,$5,$6,'nmi',$7,$8,$8,$9,jsonb_build_object('premium',null),$10)`,
+				sub, merchantID, cust, prod, price, status, rs, start, periodEnd, psp.ID)
 			exec(`INSERT INTO openrails.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
 			      VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`,
 				merchantID, cust, start, periodEnd.Add(720*time.Hour), sub)
@@ -277,8 +287,10 @@ func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	pulled := seedGuardCohort(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour))
-	unpulled := seedGuardCohort(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour))
+	armed := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
+	sibling := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
+	pulled := seedGuardCohortForPSP(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour), armed)
+	unpulled := seedGuardCohortForPSP(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour), sibling)
 
 	// The armed PSP's roster: complete and exhaustive FOR ITS OWN ACCOUNT.
 	next := now.Add(30 * 24 * time.Hour)
@@ -311,8 +323,11 @@ func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 			Mode:      ModeEnforce,
 			Mutations: &LocalMutationPolicy{Insert: false, Overwrite: true},
 			Providers: []Provider{ProviderNMI},
-			// Two PSPs declared active on nmi; this pass read one.
-			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 2, Pulled: 1}},
+			// or#893: the pass is BOUND to the PSP it armed from, so the sibling's
+			// book is not even in the local set it diffs. #841's coverage strip is
+			// the second belt: two PSPs declared active, this pass read one.
+			PSPs:        map[Provider]RailMerchantAccountBinding{ProviderNMI: armed},
+			PSPCoverage: map[Provider]PSPCoverage{ProviderNMI: {Declared: 2, Pulled: 1, Binding: armed}},
 		})
 		return err
 	}))

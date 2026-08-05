@@ -69,7 +69,7 @@ type seededState struct {
 // seedReconcileFixtures inserts a product, price, tenant subject, and two NMI
 // subscriptions (one that the fake snapshot will keep alive, one that it
 // drops), plus a live subscription-sourced entitlement on each.
-func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merchantID uuid.UUID) seededState {
+func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merchantID, pspID uuid.UUID) seededState {
 	t.Helper()
 	s := seededState{
 		productID: uuid.New(),
@@ -112,10 +112,10 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merc
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
+		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9, $10)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
-			periodStart, periodEnd, s.subjectID, entName, merchantID)
+			periodStart, periodEnd, s.subjectID, entName, merchantID, pspID)
 		entID := uuid.New()
 		if subID == s.subDead {
 			entID = s.entDeadID
@@ -173,9 +173,10 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	mid := newReconcileMerchant(t, appDB)
 	baseCtx := merchant.WithID(context.Background(), mid)
 
+	psp := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
 	var seeded seededState
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID())
+		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID(), psp.ID)
 		return nil
 	}))
 
@@ -201,7 +202,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- advisory: findings persisted, zero local writes -------------------
 	var advisory *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		advisory = res
 		return err
 	}))
@@ -244,7 +245,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- enforce: local state converges, findings auto_fixed ---------------
 	var enforce *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		enforce = res
 		return err
 	}))
@@ -300,7 +301,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- rerun enforce: stable -----------------------------------------------
 	var rerun *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		rerun = res
 		return err
 	}))
@@ -349,7 +350,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	fixedSnap := *snap
 	fixedSnap.Subscriptions = snap.Subscriptions[:1] // ghosts + dups disappear
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, res.Summary.Providers["nmi"].AutoResolved, int64(1), "PS-8 vanished")
 
@@ -383,6 +384,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	planID := "mat-plan-" + suffix
 	entName := "premium-mat-" + suffix
 
+	psp := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		subjectIDHolder = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		exec := func(sql string, args ...any) {
@@ -399,8 +401,8 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		      VALUES ($1, $2, 14990000, 'USD', 720, true, jsonb_build_object('nmi', jsonb_build_object('rail', 'nmi', 'plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id)
-		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, railCustomerRef, suffix, dbtest.TestMerchantID.UUID())
+		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, psp_id)
+		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5, $6)`, pmID, subjectIDHolder, railCustomerRef, suffix, dbtest.TestMerchantID.UUID(), psp.ID)
 		return nil
 	}))
 	subjectID := subjectIDHolder
@@ -458,7 +460,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- advisory: both PS-1 stay requires_review, nothing is created ----------
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			if f.Type == FindingRemoteSubMissingLocal {
@@ -475,7 +477,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	// ---- enforce: resolvable PS-1 materializes automatically ------------------
 	var matRun *RunResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		matRun = res
 		return err
 	}))
@@ -545,7 +547,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- re-run: idempotent, no duplicate subscription ------------------------
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			assert.NotEqual(t, resolvablePSID, f.SubjectKey, "materialized PS-1 must not re-diff")
@@ -563,6 +565,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 func TestReconcileRunRecordsFailure(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	psp := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
 	store := &PGStore{DB: appDB}
 	eng := &Engine{
 		Fetchers: map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},
@@ -572,7 +575,7 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 	}
 	var res *RunResult
 	err := appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		r, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		r, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]RailMerchantAccountBinding{ProviderNMI: psp}})
 		res = r
 		return err
 	})
@@ -602,6 +605,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 	suffix := uuid.NewString()[:8]
 	productID, priceID, schedPriceID, subID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	deleteAt := time.Now().UTC().Add(11 * 24 * time.Hour).Truncate(time.Second)
+	psp := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
@@ -621,10 +625,10 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         deletion_scheduled_at, scheduled_price_id, entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,$7,$8,'{}'::jsonb,$9,$10)`,
+		         deletion_scheduled_at, scheduled_price_id, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,$7,$8,'{}'::jsonb,$9,$10,$11)`,
 			subID, priceID, productID, "sa-sub-"+suffix,
-			time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), deleteAt, schedPriceID, customer, merchantID)
+			time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), deleteAt, schedPriceID, customer, merchantID, psp.ID)
 		return nil
 	}))
 

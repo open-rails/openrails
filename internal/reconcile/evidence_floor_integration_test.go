@@ -82,13 +82,14 @@ func enforcingPullEngine(appDB *db.DB, snap *RemoteSnapshot, now time.Time) *Eng
 	}
 }
 
-func runEnforcingPull(t *testing.T, appDB *db.DB, baseCtx context.Context, eng *Engine) {
+func runEnforcingPull(t *testing.T, appDB *db.DB, baseCtx context.Context, eng *Engine, psp RailMerchantAccountBinding) {
 	t.Helper()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := eng.Run(ctx, RunParams{
 			Mode:      ModeEnforce,
 			Mutations: &LocalMutationPolicy{Insert: false, Overwrite: true},
 			Providers: []Provider{ProviderNMI},
+			PSPs:      map[Provider]RailMerchantAccountBinding{ProviderNMI: psp},
 		})
 		return err
 	}))
@@ -131,7 +132,7 @@ func TestPull_ArmedMerchantWillNotCancelOnEvidencePredatingTheFirstPull(t *testi
 	// The decline landed 50 days ago — 43 days before this deployment first
 	// looked at the merchant. It came with the imported book.
 	snap := legacyDeclineSnapshot(now, periodEnd, cohort, now.Add(-50*24*time.Hour))
-	runEnforcingPull(t, appDB, baseCtx, enforcingPullEngine(appDB, snap, now))
+	runEnforcingPull(t, appDB, baseCtx, enforcingPullEngine(appDB, snap, now), cohort.psp)
 
 	cancelled, live := guardCounts(t, appDB, baseCtx, cohort)
 	require.Zero(t, cancelled, "%d subscriptions were cancelled on evidence this deployment never observed", cancelled)
@@ -169,7 +170,7 @@ func TestPull_ArmedMerchantStillConvergesOnEvidenceAfterTheFirstPull(t *testing.
 
 	// Declined three days ago — four days after the first pull.
 	snap := legacyDeclineSnapshot(now, periodEnd, cohort, now.Add(-3*24*time.Hour))
-	runEnforcingPull(t, appDB, baseCtx, enforcingPullEngine(appDB, snap, now))
+	runEnforcingPull(t, appDB, baseCtx, enforcingPullEngine(appDB, snap, now), cohort.psp)
 
 	cancelled, live := guardCounts(t, appDB, baseCtx, cohort)
 	require.Equal(t, len(cohort.subs), cancelled, "the floor must not freeze convergence on evidence we observed")

@@ -339,7 +339,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
 FROM openrails.subscriptions
 WHERE rail = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, status,
@@ -348,7 +348,7 @@ FROM openrails.payments
 WHERE rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentMethodsByRails :many
 -- Reconcile is NMI-vault-specific: rail_customer_ref IS the NMI customer_vault_id
@@ -357,7 +357,7 @@ SELECT id, customer_id, rail, rail_customer_ref AS vault_id, last_four, card_typ
        expiry_date
 FROM openrails.payment_methods
 WHERE rail = ANY (sqlc.arg(rails)::text[])
-  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -480,6 +480,9 @@ WHERE pr.id = sqlc.arg(price_id)
       WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
+        -- narg here NARROWS nothing: a nil PSP (the declared legacy-book
+        -- import) dedupes against EVERY PSP, which is the conservative side.
+        -- The read queries above are where nil-wide matching was dangerous.
         AND (sqlc.narg(psp_id)::uuid IS NULL OR s.psp_id = sqlc.narg(psp_id)::uuid)
   )
 RETURNING id, entitlements_spec_snapshot;
@@ -561,7 +564,7 @@ SELECT s.id, s.status, s.rail,
             SELECT 1 FROM openrails.rail_refresh_watermarks w
             WHERE w.merchant_id = s.merchant_id
               AND w.rail = s.rail
-              AND (w.psp_id IS NULL OR w.psp_id = s.psp_id)
+              AND w.psp_id = s.psp_id
               AND w.watermark_at > s.current_period_ends_at
        ))::bool AS watermark_newer_than_period_end
 FROM openrails.subscriptions s

@@ -102,9 +102,10 @@ type RunParams struct {
 	// SubscriptionsExhaustive: a roster that saw one of two accounts cannot
 	// prove a subscription of the OTHER account is gone.
 	PSPCoverage map[Provider]PSPCoverage
-	// PSPs optionally binds each provider section to one
-	// merchant-scoped provider account. When set, the engine scopes local mirror
-	// reads and local materialization writes to that account id.
+	// PSPs binds each provider section to the ONE merchant-scoped PSP whose
+	// credentials armed its fetcher. REQUIRED (or#893): the engine scopes local
+	// mirror reads and stamps local materialization writes with it, and a
+	// provider with no binding is refused rather than run account-agnostically.
 	PSPs map[Provider]RailMerchantAccountBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
@@ -372,10 +373,15 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	fetcher := e.Fetchers[provider]
-	binding := params.PSPs[provider]
-	if binding.ID != uuid.Nil {
-		rep.PspID = binding.ID.String()
+	// or#893: a pull is always bound to the ONE PSP whose credentials armed its
+	// fetcher. An unbound section used to read and write the rail's local mirror
+	// account-agnostically: the roster of PSP A was diffed against the rows of
+	// PSP B, and every row it materialised carried NULL provenance. Refuse.
+	binding, ok := params.PSPs[provider]
+	if !ok || binding.ID == uuid.Nil {
+		return rep, nil, nil, nil, fmt.Errorf("no PSP binding for provider %s: a pull must name the PSP its credentials armed from", provider)
 	}
+	rep.PspID = binding.ID.String()
 	snap, err := fetcher.Fetch(ctx, FetchParams{
 		Since:     params.Since,
 		Until:     params.Until,
@@ -386,9 +392,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
-	if binding.ID != uuid.Nil {
-		snap.PspID = binding.ID.String()
-	}
+	snap.PspID = binding.ID.String()
 	// #841: strip the absence proof when the pass did not read every active PSP
 	// on the rail. A merchant running mobius + paykings on NMI would otherwise
 	// have the non-armed PSP's entire book cancelled as "absent from an
@@ -404,7 +408,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
 
-	local, err := e.Local.Load(ctx, provider, nullableRailMerchantAccountID(binding))
+	local, err := e.Local.Load(ctx, provider, binding.ID)
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local state: %w", err)
 	}
@@ -437,7 +441,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// Local payments are looked up by the snapshot's transaction identity
 	// set (plus refund->charge links) rather than a date window.
 	txnIDs := collectTxnLookupIDs(snap)
-	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, nullableRailMerchantAccountID(binding), txnIDs)
+	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, binding.ID, txnIDs)
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
@@ -447,7 +451,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
 	})
-	bindApplyActions(findings, nullableRailMerchantAccountID(binding))
+	bindApplyActions(findings, binding.ID)
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
@@ -719,17 +723,11 @@ func (e *Engine) coveredWindow(provider Provider, params RunParams, now time.Tim
 	return since, until
 }
 
-func nullableRailMerchantAccountID(binding RailMerchantAccountBinding) *uuid.UUID {
-	if binding.ID == uuid.Nil {
-		return nil
-	}
-	return &binding.ID
-}
-
-func bindApplyActions(findings []Finding, pspID *uuid.UUID) {
-	if pspID == nil {
-		return
-	}
+// bindApplyActions stamps the pull's PSP onto every local write the pass will
+// perform. or#893: the pass always HAS a PSP now (runProvider refuses a section
+// without one), so no mirror row the pull path creates is unattributed.
+func bindApplyActions(findings []Finding, psp uuid.UUID) {
+	pspID := &psp
 	for i := range findings {
 		a := findings[i].Apply
 		if a == nil {

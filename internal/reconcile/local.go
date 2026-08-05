@@ -125,9 +125,13 @@ type LocalState struct {
 // provider snapshot. PaymentsByTransactionIDs is queried separately (bounded
 // by the snapshot's transaction set rather than a date window, so clock skew
 // between us and the rail can not fake a missing payment).
+//
+// or#893: pspID is REQUIRED. The mirror rows of one PSP are not the mirror
+// rows of its sibling on the same rail, and a nil-means-every-PSP read let one
+// account's roster judge another account's book.
 type LocalStateLoader interface {
-	Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error)
-	PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
+	Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error)
+	PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
 }
 
 // PGLocalStateLoader loads local state through the sqlc layer on a
@@ -138,7 +142,7 @@ type PGLocalStateLoader struct {
 
 var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
 
-func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error) {
+func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error) {
 	names := localRailNames(provider)
 	q := l.DB.Gen(ctx)
 
@@ -146,7 +150,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
 		Rails: names,
-		PspID: providerAccountID,
+		PspID: pspID,
 	})
 	if err != nil {
 		return nil, err
@@ -222,7 +226,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
 		Rails: names,
-		PspID: providerAccountID,
+		PspID: pspID,
 	})
 	if err != nil {
 		return nil, err
@@ -249,13 +253,13 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, provid
 	return state, nil
 }
 
-func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {
+func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {
 	if len(transactionIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
 		Rails:          localRailNames(provider),
-		PspID:          providerAccountID,
+		PspID:          pspID,
 		TransactionIds: transactionIDs,
 	})
 	if err != nil {

@@ -56,7 +56,7 @@ func TestCancellationCapHaltsATruncatedRoster(t *testing.T) {
 	}
 	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
 
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.Error(t, err, "170 planned cancellations must halt the pass")
 	assert.Contains(t, err.Error(), "cancellation cap")
 	assert.True(t, res.Summary.Providers["nmi"].Aborted)
@@ -99,7 +99,7 @@ func TestCancellationCapAllowsNormalConvergence(t *testing.T) {
 	}
 	eng, _, writer := newTestEngine(ProviderNMI, snap, local)
 
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
 	require.NoError(t, err)
 	assert.False(t, res.Summary.Providers["nmi"].Aborted)
 	assert.Equal(t, 3, writer.calls["cancel"])

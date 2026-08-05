@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -37,14 +38,16 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 		MaxWindows:      2,
 	}
 
+	var pspID uuid.UUID
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		pspID = seedRefreshPSPForTest(t, ctx, dbi, merchantID, "stripe")
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: successFetcher,
 		})
 		require.Equal(t, 2, res.Windows)
 		require.Zero(t, res.ProviderErrors)
 		require.Len(t, successFetcher.calls, 2)
-		watermark, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID)
+		watermark, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
 		require.Equal(t, successFetcher.calls[1].Until.UTC(), watermark)
 		require.Nil(t, lastErr)
 		return nil
@@ -52,13 +55,13 @@ func TestProviderRefreshWatermarkAdvancesOnlyOnSuccessfulWindow(t *testing.T) {
 
 	failingFetcher := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe, err: errors.New("provider offline")}
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		before, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID)
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		before, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: failingFetcher,
 		})
 		require.Zero(t, res.Windows)
 		require.Equal(t, 1, res.ProviderErrors)
-		after, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID)
+		after, lastErr := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspID)
 		require.Equal(t, before, after)
 		require.NotNil(t, lastErr)
 		require.Contains(t, *lastErr, "provider offline")
@@ -78,7 +81,9 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	originalPaymentID := uuid.New()
 	customerID := uuid.UUID{}
 	psid := "sub_refresh_" + uuid.NewString()
+	var pspID uuid.UUID
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		pspID = seedRefreshPSPForTest(t, ctx, dbi, merchantID, "stripe")
 		customerID = dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Qx(ctx), uuid.NewString())
 		exec := func(sql string, args ...any) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
@@ -92,13 +97,13 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, customer_id, merchant_id)
-		      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $5, '{}'::jsonb, $7, $8)`,
-			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID)
+		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $5, '{}'::jsonb, $7, $8, $9)`,
+			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID, pspID)
 		exec(`INSERT INTO openrails.payments
-		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id)
-		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'USD', 'completed', $3, $4, $5, $6)`,
-			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID)
+		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id, psp_id)
+		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'USD', 'completed', $3, $4, $5, $6, $7)`,
+			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID, pspID)
 		return nil
 	}))
 
@@ -131,7 +136,7 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 	}
 
 	require.NoError(t, dbi.RunInMerchantConn(merchant.WithID(context.Background(), merchant.ID(merchantID)), func(ctx context.Context) error {
-		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{
+		res := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil, reconcile.RailMerchantAccountBinding{ID: pspID, Rail: "stripe"}, map[reconcile.Provider]reconcile.RailFetcher{
 			reconcile.ProviderStripe: &providerRefreshSnapshotFetcher{provider: reconcile.ProviderStripe, snap: snap},
 		})
 		require.Equal(t, 1, res.Windows)
@@ -209,7 +214,7 @@ func (f *providerRefreshRecordingFetcher) Fetch(_ context.Context, params reconc
 	}, nil
 }
 
-func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi *db.DB, merchantID uuid.UUID) (time.Time, *string) {
+func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi *db.DB, merchantID, pspID uuid.UUID) (time.Time, *string) {
 	t.Helper()
 	var watermark time.Time
 	var lastErr *string
@@ -219,8 +224,100 @@ SELECT watermark_at, last_error
  WHERE merchant_id = $1::uuid
    AND rail = 'stripe'
    AND event_domain = 'events'
-   AND psp_id IS NULL
-`, merchantID).Scan(&watermark, &lastErr)
+   AND psp_id = $2::uuid
+`, merchantID, pspID).Scan(&watermark, &lastErr)
 	require.NoError(t, err)
 	return watermark.UTC(), lastErr
+}
+
+// seedRefreshPSPForTest declares one PSP on a rail — or#893 makes a pull refuse
+// to run without the PSP its credentials armed from.
+func seedRefreshPSPForTest(t *testing.T, ctx context.Context, dbi *db.DB, merchantID uuid.UUID, rail string) uuid.UUID {
+	t.Helper()
+	now := time.Now().UTC()
+	row, err := dbi.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
+		MerchantID:     merchantID,
+		Rail:           rail,
+		AccountID:      rail + "-acct-" + uuid.NewString()[:8],
+		LastVerifiedAt: &now,
+	})
+	require.NoError(t, err)
+	return row.ID
+}
+
+// or#893: two PSPs on one rail must keep two watermarks. The identity key used
+// to COALESCE a NULL psp_id to the nil uuid and the worker always passed nil,
+// so both accounts shared ONE cursor: pulling mobius advanced it past a window
+// paykings never read, and — watermark_at being an EXCLUSIVE lower bound — that
+// window was skipped for paykings permanently.
+func TestProviderRefreshWatermarksAreScopedPerPSP(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
+	baseCtx := dbtest.WithTestMerchant(context.Background())
+	merchantID := dbtest.TestMerchantID.UUID()
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+
+	worker := &ProviderRefreshWorker{
+		DB:              dbi,
+		Clock:           clockwork.NewFakeClockAt(now),
+		Window:          24 * time.Hour,
+		SafetyLag:       time.Hour,
+		InitialLookback: 72 * time.Hour,
+		MaxWindows:      2,
+	}
+
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		pspA := seedRefreshPSPForTest(t, ctx, dbi, merchantID, "stripe")
+		pspB := seedRefreshPSPForTest(t, ctx, dbi, merchantID, "stripe")
+		require.NotEqual(t, pspA, pspB)
+
+		fetcherA := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe}
+		resA := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil,
+			reconcile.RailMerchantAccountBinding{ID: pspA, Rail: "stripe"},
+			map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderStripe: fetcherA})
+		require.Equal(t, 2, resA.Windows)
+
+		// B has never been pulled. Its cursor must still be the initial
+		// lookback, NOT the point A advanced to.
+		fetcherB := &providerRefreshRecordingFetcher{provider: reconcile.ProviderStripe}
+		resB := worker.runProviderEventWindows(ctx, merchantID, reconcile.ProviderStripe, reconcile.ModeEnforce, nil,
+			reconcile.RailMerchantAccountBinding{ID: pspB, Rail: "stripe"},
+			map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderStripe: fetcherB})
+		require.Equal(t, 2, resB.Windows)
+		require.Equal(t, fetcherA.calls[0].Since.UTC(), fetcherB.calls[0].Since.UTC(),
+			"PSP B's first window must start at the initial lookback, not where PSP A's pull left off")
+
+		wmA, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspA)
+		wmB, _ := loadProviderRefreshWatermarkForTest(t, ctx, dbi, merchantID, pspB)
+		require.Equal(t, fetcherA.calls[1].Until.UTC(), wmA)
+		require.Equal(t, fetcherB.calls[1].Until.UTC(), wmB)
+
+		var rows int
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.rail_refresh_watermarks
+			  WHERE merchant_id = $1 AND rail = 'stripe' AND psp_id IN ($2, $3)`,
+			merchantID, pspA, pspB).Scan(&rows))
+		require.Equal(t, 2, rows, "each PSP owns its own watermark row")
+		return nil
+	}))
+}
+
+// or#893: the NULL/global lane is gone at the schema level too — the column is
+// NOT NULL, so no writer can re-create an unattributed cursor.
+func TestProviderRefreshWatermarkRejectsAnUnattributedRow(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	dbtest.EnsureTestMerchant(context.Background(), t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
+	baseCtx := dbtest.WithTestMerchant(context.Background())
+	merchantID := dbtest.TestMerchantID.UUID()
+
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := dbi.Qx(ctx).Exec(ctx, `
+INSERT INTO openrails.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
+VALUES ($1, 'stripe', NULL, 'events', now())`, merchantID)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "psp_id")
+		return nil
+	}))
 }
