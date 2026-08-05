@@ -55,16 +55,29 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, whsec)
 	require.NoError(t, err)
 
+	// or#893: standalone's ONE webhook surface addresses the PSP account; the
+	// merchant is derived from that globally unique row, never from a URL slug.
+	// That is exactly the request-scoped resolution this test is about.
 	event := []byte(`{"id":"evt_no_default","type":"customer.created","data":{"object":{"id":"cus_no_default"}}}`)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/stripe", bytes.NewReader(event))
-	require.NoError(t, err)
-	req.Header.Set("Stripe-Signature", stripeSignature(whsec, event))
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	post := func(path string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+path, bytes.NewReader(event))
+		require.NoError(t, err)
+		req.Header.Set("Stripe-Signature", stripeSignature(whsec, event))
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.StatusCode, string(raw)
+	}
+
+	code, raw := post("/v1/webhooks/stripe/" + accountID)
+	require.Equal(t, http.StatusOK, code, raw)
+
+	// The merchant-slug alias standalone used to mount alongside it is gone.
+	code, raw = post("/v1/merchants/" + dbtest.TestMerchantSlug + "/webhooks/stripe")
+	require.Equal(t, http.StatusNotFound, code, raw)
 }
 
 func stripeSignature(secret string, body []byte) string {

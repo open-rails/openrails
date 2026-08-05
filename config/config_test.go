@@ -63,29 +63,6 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL)
 	})
 
-	t.Run("ignores auth issuers from env (#521)", func(t *testing.T) {
-		t.Setenv("AUTH_ISSUERS", `["http://a.test","http://b.test"]`)
-		t.Setenv("AUTH_EXPECTED_AUDIENCE", "legacy-audience")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		require.NoError(t, err)
-		require.NotNil(t, cfg.Auth)
-	})
-
-	t.Run("ignores merchant from env (#520/#521)", func(t *testing.T) {
-		t.Setenv("MERCHANT", "doujins")
-
-		_, err := Load("nonexistent-config.yaml")
-		require.NoError(t, err)
-	})
-
-	t.Run("ignores cors origins from env (#519)", func(t *testing.T) {
-		t.Setenv("CORS_ORIGINS", "https://app.example.com")
-
-		_, err := Load("nonexistent-config.yaml")
-		require.NoError(t, err)
-	})
-
 	t.Run("maps canonical Vault env vars to vault.* (#251)", func(t *testing.T) {
 		t.Setenv("VAULT_ENABLED", "true")
 		t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")

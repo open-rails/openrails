@@ -28,7 +28,6 @@ type pushAuthBootstrapOptions struct {
 
 type pushMerchantConfigOptions struct {
 	file      string
-	dryRun    bool
 	insert    bool
 	overwrite bool
 	prune     bool
@@ -63,7 +62,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultMerchantConfigManifestPath, "merchant config manifest YAML file")
-	addPushMutationFlags(cmd, &opts.dryRun, &opts.insert, &opts.overwrite, &opts.prune,
+	addPushMutationFlags(cmd, &opts.insert, &opts.overwrite, &opts.prune,
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
@@ -71,9 +70,10 @@ func newPushMerchantConfigCmd() *cobra.Command {
 	return cmd
 }
 
-func addPushMutationFlags(cmd *cobra.Command, dryRun, insert, overwrite, prune *bool, insertHelp, overwriteHelp, pruneHelp string) {
-	cmd.Flags().BoolVar(dryRun, "dry-run", false, "deprecated alias for the default plan-only behavior")
-	_ = cmd.Flags().MarkHidden("dry-run")
+// addPushMutationFlags declares the mutation classes. or#893: there is no
+// --dry-run here — a bare command is plan-only, so a hidden flag that ALSO
+// meant "plan only" could silently override an explicitly requested mutation.
+func addPushMutationFlags(cmd *cobra.Command, insert, overwrite, prune *bool, insertHelp, overwriteHelp, pruneHelp string) {
 	cmd.Flags().BoolVar(insert, "insert", false, insertHelp)
 	cmd.Flags().BoolVar(overwrite, "overwrite", false, overwriteHelp)
 	cmd.Flags().BoolVar(prune, "prune", false, pruneHelp)
@@ -178,7 +178,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, opts.dryRun, reconcileOpts)
+	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {
@@ -297,11 +297,11 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest aut
 // merchant config manifest: permission-group + optional host-app issuer-as-owner,
 // merchant row, provider secrets, and profile (#527). It intentionally does not
 // touch catalog/provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, dryRun bool, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}
-	if dryRun || !reconcileOpts.HasMutations() {
+	if !reconcileOpts.HasMutations() {
 		fmt.Fprintf(out, "merchants: %d declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", len(manifest.Merchants), reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
 		return nil
 	}

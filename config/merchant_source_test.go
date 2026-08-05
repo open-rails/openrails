@@ -43,32 +43,55 @@ func TestMerchantSourceUnknownValueRefusesLoad(t *testing.T) {
 	}
 }
 
-func TestMerchantSourceAPIRequiresSecretBackendOutsideDev(t *testing.T) {
-	// No Vault, no master key, production → refuse.
-	cfg := validAPIBase("production")
-	err := Validate(cfg)
-	if err == nil || !strings.Contains(err.Error(), "merchant-secret backend") {
-		t.Fatalf("api mode without a secret backend must refuse boot outside dev, got %v", err)
+// or#893 phase 3: merchant_source=api must DECLARE where secrets live. Enabling
+// Vault (which may only be Transit signing) no longer implies the KV store, and
+// an undeclared backend refuses boot in every env — including development.
+func TestMerchantSourceAPIRequiresAnExplicitSecretBackend(t *testing.T) {
+	const wantExplicit = `merchant_source=api requires an explicit secret_backend ("db" or "vault"): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)`
+
+	for _, env := range []string{"production", "development"} {
+		cfg := validAPIBase(env)
+		err := Validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), wantExplicit) {
+			t.Fatalf("env %s: undeclared secret_backend must refuse boot, got %v", env, err)
+		}
+
+		// vault.enabled is NOT a declaration — it must still refuse.
+		cfg = validAPIBase(env)
+		cfg.Vault = &VaultConfig{Enabled: true}
+		if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), wantExplicit) {
+			t.Fatalf("env %s: vault.enabled must not stand in for secret_backend, got %v", env, err)
+		}
 	}
 
-	// Vault enabled → boots.
-	cfg = validAPIBase("production")
+	// secret_backend=vault + a Vault connection → boots.
+	cfg := validAPIBase("production")
+	cfg.SecretBackend = SecretBackendVault
 	cfg.Vault = &VaultConfig{Enabled: true}
 	if err := Validate(cfg); err != nil {
-		t.Fatalf("api mode with Vault must validate: %v", err)
+		t.Fatalf("api mode with secret_backend=vault must validate: %v", err)
 	}
 
-	// ENCRYPTION_MASTER_KEY (DB store) → boots.
+	// secret_backend=db outside development needs ENCRYPTION_MASTER_KEY (#667).
 	cfg = validAPIBase("production")
+	cfg.SecretBackend = SecretBackendDB
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "merchant_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723)") {
+		t.Fatalf("secret_backend=db without a master key must refuse boot outside dev, got %v", err)
+	}
+
+	cfg = validAPIBase("production")
+	cfg.SecretBackend = SecretBackendDB
 	cfg.Encryption = &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}
 	if err := Validate(cfg); err != nil {
-		t.Fatalf("api mode with master key must validate: %v", err)
+		t.Fatalf("api mode with secret_backend=db + master key must validate: %v", err)
 	}
 
-	// Development: no backend required.
+	// Development keeps the plaintext-DB posture.
 	cfg = validAPIBase("development")
+	cfg.SecretBackend = SecretBackendDB
 	if err := Validate(cfg); err != nil {
-		t.Fatalf("api mode in dev must validate without a backend: %v", err)
+		t.Fatalf("api mode in dev with secret_backend=db must validate: %v", err)
 	}
 }
 

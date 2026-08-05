@@ -98,7 +98,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'counter')`,
+			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), meterKey,
 		)
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	err := appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, kind) VALUES ($1, $2, 'counter')`,
+			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), "cross-tenant-"+suffix,
 		)
 		return err

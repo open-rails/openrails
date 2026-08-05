@@ -144,20 +144,11 @@ func normalizeDumpProduct(p *catalog.Product) {
 		p.TierGroup = ""
 		p.TierRank = nil
 	}
-	if len(p.RateCards) == 0 && !dumpProductHasMeteredPrice(*p) && !dumpProductIsCreditTopUp(*p) {
+	if len(p.RateCards) == 0 && !dumpProductIsCreditTopUp(*p) {
 		return
 	}
 	p.TierGroup = ""
 	p.TierRank = nil
-}
-
-func dumpProductHasMeteredPrice(p catalog.Product) bool {
-	for _, price := range p.Prices {
-		if price.Metered != nil {
-			return true
-		}
-	}
-	return false
 }
 
 func dumpProductIsCreditTopUp(p catalog.Product) bool {
@@ -201,7 +192,7 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 
 func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.Meter, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT key, COALESCE(kind, ''), COALESCE(event_type, ''), COALESCE(value_property, ''),
+SELECT key, COALESCE(event_type, ''), COALESCE(value_property, ''),
        COALESCE(aggregation, ''), COALESCE(unit, ''), COALESCE(group_by, '{}'::jsonb)
 FROM openrails.catalog_meters
 WHERE merchant_id = $1
@@ -214,7 +205,7 @@ ORDER BY key`, merchantID)
 	for rows.Next() {
 		var m catalog.Meter
 		var groupBy []byte
-		if err := rows.Scan(&m.Key, &m.Kind, &m.EventType, &m.ValueProperty, &m.Aggregation, &m.Unit, &groupBy); err != nil {
+		if err := rows.Scan(&m.Key, &m.EventType, &m.ValueProperty, &m.Aggregation, &m.Unit, &groupBy); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(groupBy, &m.GroupBy)

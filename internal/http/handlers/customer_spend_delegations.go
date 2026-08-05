@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,12 +29,40 @@ type customerSpendDelegationsDocument struct {
 type customerSpendDelegation struct {
 	Scope    string `json:"scope"`
 	ScopeKey string `json:"scope_key"`
-	RoleID   string `json:"role_id,omitempty"`
 	// CustomerID is request-only: supplying it is rejected (the payer comes from
 	// the path scope). Never emitted.
 	CustomerID string                      `json:"customer_id,omitempty"`
 	Windows    []models.BudgetWindowPolicy `json:"windows"`
 }
+
+// UnmarshalJSON keeps the delegation wire shape strict. or#893 deleted the
+// role_id alias for scope_key — one representation, {scope:"role",
+// scope_key:"<role uuid>"} — and strict decoding is the ONE mechanism that
+// enforces it: no sentinel field, and any other retired key fails the same way.
+func (d *customerSpendDelegation) UnmarshalJSON(raw []byte) error {
+	type declared customerSpendDelegation
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var out declared
+	if err := decoder.Decode(&out); err != nil {
+		if strings.Contains(err.Error(), `unknown field "role_id"`) {
+			return retiredWireKeyError(`role_id was removed (or#893): address a role delegation as {"scope":"role","scope_key":"<role uuid>"}`)
+		}
+		return err
+	}
+	*d = customerSpendDelegation(out)
+	return nil
+}
+
+// retiredWireKeyError is a decode failure whose text is written for the caller:
+// the retired key and the shape that replaced it. httprequest surfaces it
+// verbatim (ClientSafeBindError) instead of collapsing it to invalid_request.
+type retiredWireKeyError string
+
+func (e retiredWireKeyError) Error() string                 { return string(e) }
+func (e retiredWireKeyError) ClientSafeBindMessage() string { return string(e) }
+
+var _ httprequest.ClientSafeBindError = retiredWireKeyError("")
 
 // GetCustomerSpendDelegations returns the customer policy for sharing the
 // customer's own payable balance. The payer is forced to the resolved
@@ -260,7 +290,7 @@ func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingse
 			})
 		}
 		out = append(out, billingservice.InvokerSpendLimitInput{
-			Scope: row.Scope, ScopeKey: row.ScopeKey, RoleID: row.RoleID, Windows: windows,
+			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows,
 		})
 	}
 	return billingservice.ValidateInvokerSpendLimitInputs(out)
@@ -278,13 +308,9 @@ func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []cust
 }
 
 func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
-	delegation := customerSpendDelegation{
+	return customerSpendDelegation{
 		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: row.Windows,
 	}
-	if delegation.Scope == budgets.ScopeRole {
-		delegation.RoleID = row.ScopeKey
-	}
-	return delegation
 }
 
 func customerSpendDelegationsFromInputs(rows []billingservice.InvokerSpendLimitInput) []customerSpendDelegation {
@@ -302,13 +328,9 @@ func customerSpendDelegationFromInput(row billingservice.InvokerSpendLimitInput)
 			Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
 		})
 	}
-	delegation := customerSpendDelegation{
+	return customerSpendDelegation{
 		Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows,
 	}
-	if delegation.Scope == budgets.ScopeRole {
-		delegation.RoleID = row.ScopeKey
-	}
-	return delegation
 }
 
 func spendDelegationKey(scope, scopeKey string) string {

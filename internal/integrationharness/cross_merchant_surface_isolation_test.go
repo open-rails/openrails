@@ -310,21 +310,30 @@ func TestCrossMerchantWebhookIsolationHTTP(t *testing.T) {
 
 	stripeCustomer := "cus_iso_" + suffix
 	event := []byte(`{"id":"evt_iso_` + suffix + `","type":"customer.created","data":{"object":{"id":"` + stripeCustomer + `"}}}`)
-	post := func(slug, secret string) (int, string) {
+	// or#893: standalone's ONE webhook surface addresses the receiving PSP
+	// account, not a merchant slug — the merchant is derived from the globally
+	// unique account row. The isolation property is unchanged: the signature is
+	// verified with THAT account's own secret.
+	post := func(tag, secret string) (int, string) {
 		t.Helper()
-		return postSignedStripeWebhook(t, surface.BaseURL+"/v1/merchants/"+slug+"/webhooks/stripe", event, secret)
+		return postSignedStripeWebhook(t, surface.BaseURL+"/v1/webhooks/stripe/acct_iso_"+tag+"_"+suffix, event, secret)
 	}
 
-	// The signature is verified against the ADDRESSED merchant's own PSP secret,
-	// so neither merchant's secret can deliver into the other.
-	status, resp := post(a.MerchantSlug, bSecret)
+	// The signature is verified against the ADDRESSED account's own secret, so
+	// neither merchant's secret can deliver into the other.
+	status, resp := post("a", bSecret)
 	require.Equalf(t, http.StatusUnauthorized, status, "B's webhook secret delivered into A: %s", resp)
-	status, resp = post(b.MerchantSlug, aSecret)
+	status, resp = post("b", aSecret)
 	require.Equalf(t, http.StatusUnauthorized, status, "A's webhook secret delivered into B: %s", resp)
 
 	// B's own secret delivers into B.
-	status, resp = post(b.MerchantSlug, bSecret)
+	status, resp = post("b", bSecret)
 	require.Equalf(t, http.StatusOK, status, "B's own webhook secret must deliver on B's path: %s", resp)
+
+	// or#893: the merchant-slug alias standalone used to mount alongside this is
+	// gone — one surface, one resolution rule.
+	status, resp = postSignedStripeWebhook(t, surface.BaseURL+"/v1/merchants/"+b.MerchantSlug+"/webhooks/stripe", event, bSecret)
+	require.Equalf(t, http.StatusNotFound, status, "the retired merchant-slug webhook alias must not be served: %s", resp)
 
 	// The delivered state belongs to B alone: A's authenticated reads of the
 	// surfaces a provider event writes never see it.

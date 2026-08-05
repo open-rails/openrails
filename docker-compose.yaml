@@ -191,7 +191,7 @@ services:
       REDIS_ADDR: "garnet:6379"
       REDIS_PASSWORD: ""
       REDIS_DB: "0"
-    command: ["server"]
+    command: ["run-server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
       - openrails_runtime_keys:/.runtime/authkit

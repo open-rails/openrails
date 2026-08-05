@@ -26,7 +26,6 @@ type CatalogUsageLimitSpec struct {
 
 type CatalogMeterSpec struct {
 	Key           string            `json:"key"`
-	Kind          string            `json:"kind,omitempty"`
 	EventType     string            `json:"event_type,omitempty"`
 	ValueProperty string            `json:"value_property,omitempty"`
 	Aggregation   string            `json:"aggregation,omitempty"`
@@ -159,17 +158,16 @@ func syncMeters(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meters []C
 			return fmt.Errorf("marshal meter %q group_by: %w", key, err)
 		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, kind, event_type, value_property, aggregation, unit, group_by)
-VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8::jsonb)
+INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7::jsonb)
 ON CONFLICT (merchant_id, key) DO UPDATE
-SET kind = EXCLUDED.kind,
-    event_type = EXCLUDED.event_type,
+SET event_type = EXCLUDED.event_type,
     value_property = EXCLUDED.value_property,
     aggregation = EXCLUDED.aggregation,
     unit = EXCLUDED.unit,
     group_by = EXCLUDED.group_by,
     updated_at = now()`,
-			merchantID, key, strings.TrimSpace(meter.Kind), strings.TrimSpace(meter.EventType), strings.TrimSpace(meter.ValueProperty),
+			merchantID, key, strings.TrimSpace(meter.EventType), strings.TrimSpace(meter.ValueProperty),
 			strings.TrimSpace(meter.Aggregation), strings.TrimSpace(meter.Unit), string(groupBy)); err != nil {
 			return fmt.Errorf("upsert meter %q: %w", key, err)
 		}

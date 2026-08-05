@@ -46,8 +46,11 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		MerchantSource:           source,
-		ProviderWriteMode:        config.ProviderWriteModeFull,
-		DB:                       &config.DBConfig{URL: dsn},
+		// or#893: merchant_source=api declares where secrets live. MODE 1 never
+		// consults it, so db is inert there and honest in MODE 2.
+		SecretBackend:     config.SecretBackendDB,
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		DB:                &config.DBConfig{URL: dsn},
 	}
 }
 

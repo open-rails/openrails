@@ -229,10 +229,8 @@ type OpenrailsCatalogDriftEvent struct {
 type OpenrailsCatalogMeter struct {
 	MerchantID uuid.UUID
 	Key        string
-	// counter = summed events; gauge = time-integrated level samples.
-	Kind      *string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 	// #638 usage event type for rate-card meters; defaults to key when omitted.
 	EventType *string
 	// #638 JSON/dimension property carrying the numeric quantity to aggregate.

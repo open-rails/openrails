@@ -46,7 +46,7 @@ tasks:
     deps: [build]
     cmds:
       - echo "Running {{.BINARY_NAME}}..."
-      - ./{{.BIN_DIR}}/{{.BINARY_NAME}} server
+      - ./{{.BIN_DIR}}/{{.BINARY_NAME}} run-server
 
   dev:
     desc: Run the application in development mode with hot reload

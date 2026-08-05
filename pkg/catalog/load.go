@@ -77,16 +77,54 @@ func Load(path string) (*Manifest, error) {
 	return Parse(raw)
 }
 
+// retiredManifestKeys maps a key this manifest schema no longer has onto the
+// rewrite an operator must apply. The parser is strict (DisallowUnknownField),
+// so a retired key already fails; this only turns "unknown field" into the
+// instruction. There are no sentinel struct fields — one mechanism, one shape.
+var retiredManifestKeys = []struct {
+	key  string
+	hint string
+}{
+	{"metered", `the metered: price sugar was removed (or#893/#707) — declare a rate card instead:
+    rate_cards:
+      - meter: <meter-key>
+        payment_term: in_arrears
+        price:
+          model: per_unit
+          currency: <CUR>
+          per_unit: {unit_amount: <rate micros>, divide_by: <per_units, × per-seconds for a former gauge>}
+  A pure-usage price (unit_amount 0) becomes the rate card alone; a base fee keeps its price row.`},
+	{"kind", `meter kind: counter|gauge was removed (or#893/#707) — declare aggregation instead:
+    meters:
+      - key: <meter-key>
+        aggregation: sum      # a former counter that counted the event itself is aggregation: count
+        value_property: <numeric property>`},
+	{"providers", `providers: was renamed to psps:`},
+	{"provider_links", `provider_links: was renamed to psp_links:`},
+}
+
 // Parse parses and validates a catalog manifest from YAML bytes.
 func Parse(raw []byte) (*Manifest, error) {
 	var m Manifest
 	if err := yaml.UnmarshalWithOptions(raw, &m, yaml.DisallowUnknownField()); err != nil {
-		return nil, fmt.Errorf("parse catalog manifest: %w", err)
+		return nil, fmt.Errorf("parse catalog manifest: %w", annotateRetiredManifestKey(err))
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// annotateRetiredManifestKey appends the rewrite instruction when a strict-decode
+// failure names a key this schema deliberately dropped.
+func annotateRetiredManifestKey(err error) error {
+	msg := err.Error()
+	for _, retired := range retiredManifestKeys {
+		if strings.Contains(msg, `unknown field "`+retired.key+`"`) {
+			return fmt.Errorf("%w\n\n%s", err, retired.hint)
+		}
+	}
+	return err
 }
 
 // Validate normalizes and validates a manifest in place.
@@ -111,8 +149,7 @@ func (m *Manifest) validate() error {
 	if err != nil {
 		return err
 	}
-	meterKinds, err := m.validateMeters()
-	if err != nil {
+	if err := m.validateMeters(); err != nil {
 		return err
 	}
 	usageLimitKeys, err := m.validateUsageLimits()
@@ -124,8 +161,6 @@ func (m *Manifest) validate() error {
 	// Product keys are globally unique across the manifest, so the same key in
 	// two tier groups would collide on apply.
 	productKeys := map[string]struct{}{}
-	meteredPriceMeters := map[string]string{}
-
 	for gi := range m.TierGroups {
 		group := &m.TierGroups[gi]
 		group.Key = normalizeSlug(group.Key)
@@ -143,18 +178,12 @@ func (m *Manifest) validate() error {
 		requireTierRank := len(group.Products) > 1 && group.Key != "default" && !strings.HasPrefix(group.Key, "usage-")
 		for pi := range group.Products {
 			product := &group.Products[pi]
-			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, meterKinds, meteredPriceMeters, creditBalances); err != nil {
+			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, creditBalances); err != nil {
 				return err
 			}
 		}
 	}
 	if err := m.validateProductBenefitRefs(productKeys, usageLimitKeys); err != nil {
-		return err
-	}
-	// #707: legacy metered: price declarations become rate-card rows before the
-	// rate-card model is validated, so the one-usage-card-per-meter rule covers
-	// both shapes.
-	if err := m.translateMeteredPrices(meterKinds); err != nil {
 		return err
 	}
 	if err := m.validateRateCardModel(); err != nil {
@@ -163,59 +192,7 @@ func (m *Manifest) validate() error {
 	return nil
 }
 
-// translateMeteredPrices rewrites every legacy metered: price (#599 sugar) into
-// an equivalent per_unit rate card (#707): unit_amount = rate micros, divide_by
-// = per_units (× per-seconds for gauges), round = half_up — the same
-// round-once integer math the retired catalog_price_metered engine used. A
-// pure-usage price (unit_amount 0) is removed from Prices (no price row); a
-// price with a base amount keeps its row minus the metered block.
-func (m *Manifest) translateMeteredPrices(meterKinds map[string]string) error {
-	for gi := range m.TierGroups {
-		for pi := range m.TierGroups[gi].Products {
-			p := &m.TierGroups[gi].Products[pi]
-			kept := p.Prices[:0]
-			for _, price := range p.Prices {
-				if price.Metered == nil {
-					kept = append(kept, price)
-					continue
-				}
-				mp := price.Metered
-				divideBy := mp.PerUnits // >= 1, validated
-				if meterKinds[mp.Meter] == "gauge" {
-					d, err := ParseDurationSpec(mp.Per) // validated non-empty for gauges
-					if err != nil {
-						return fmt.Errorf("product %q metered per: %w", p.Key, err)
-					}
-					seconds := int64(d / time.Second)
-					if seconds < 1 {
-						return fmt.Errorf("product %q metered per %q must be at least 1s", p.Key, mp.Per)
-					}
-					if divideBy > (1<<62)/seconds {
-						return fmt.Errorf("product %q metered per_units × per overflows", p.Key)
-					}
-					divideBy *= seconds
-				}
-				p.RateCards = append(p.RateCards, RateCard{
-					Meter:       mp.Meter,
-					PaymentTerm: PaymentInArrears,
-					Price: RatePrice{
-						Model:    ModelPerUnit,
-						Currency: price.Currency,
-						PerUnit:  &PerUnitPrice{UnitAmount: mp.Rate, DivideBy: divideBy},
-					},
-				})
-				if price.UnitAmount != 0 {
-					price.Metered = nil // keep the base-fee price row
-					kept = append(kept, price)
-				}
-			}
-			p.Prices = kept
-		}
-	}
-	return nil
-}
-
-func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, meterKinds map[string]string, meteredPriceMeters map[string]string, creditBalances map[string]CreditBalance) error {
+func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, creditBalances map[string]CreditBalance) error {
 	product.Key = normalizeSlug(product.Key)
 	if product.Key == "" {
 		return fmt.Errorf("tier group %q has a product without a key", groupKey)
@@ -243,7 +220,7 @@ func (m *Manifest) validateProduct(groupKey string, product *Product, productKey
 	offerTerms := map[string]struct{}{}
 	for pri := range product.Prices {
 		price := &product.Prices[pri]
-		if err := m.validatePrice(*product, price, pri, meterKinds); err != nil {
+		if err := m.validatePrice(*product, price, pri); err != nil {
 			return err
 		}
 		if product.isCreditTopUp() {
@@ -256,14 +233,6 @@ func (m *Manifest) validateProduct(groupKey string, product *Product, productKey
 				}
 				offerTerms[key] = struct{}{}
 			}
-		}
-		if price.Metered != nil {
-			meter := price.Metered.Meter
-			label := PriceLabel(product.Key, *price)
-			if previous, ok := meteredPriceMeters[meter]; ok {
-				return fmt.Errorf("meter %q is used by multiple metered prices (%s and %s); use a distinct meter per rate", meter, previous, label)
-			}
-			meteredPriceMeters[meter] = label
 		}
 		if !product.isCreditTopUp() {
 			key := priceTermsKey(*price)
@@ -298,7 +267,7 @@ func (m *Manifest) normalizeProducts() error {
 			// give it its own singleton group keyed by product key so it needs no
 			// tier_group and never shares tier exclusivity with a sibling resource.
 			// planProduct persists its tier_group as NULL.
-			if len(p.RateCards) > 0 || p.hasMeteredPrice() || p.isCreditTopUp() {
+			if len(p.RateCards) > 0 || p.isCreditTopUp() {
 				group = "usage:" + normalizeSlug(p.Key)
 			} else {
 				group = "default"
@@ -388,15 +357,6 @@ func (p Product) isCreditTopUp() bool {
 	return p.Credits[0].Amount == nil
 }
 
-func (p Product) hasMeteredPrice() bool {
-	for _, price := range p.Prices {
-		if price.Metered != nil {
-			return true
-		}
-	}
-	return false
-}
-
 func validateProductCapabilities(product *Product) error {
 	if product.isCreditTopUp() {
 		if strings.TrimSpace(product.TierGroup) != "" || product.TierRank != nil {
@@ -429,16 +389,13 @@ func validateProductCapabilities(product *Product) error {
 	return nil
 }
 
-func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKinds map[string]string) error {
+func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
 	price.Currency = normalizeCurrency(price.Currency)
 	if price.Currency == "" {
 		return fmt.Errorf("product %q price #%d currency is required", product.Key, idx+1)
 	}
 	if !validPriceCurrency(price.Currency) {
 		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
-	}
-	if len(price.LegacyProviders) > 0 || len(price.LegacyProviderLinks) > 0 {
-		return fmt.Errorf("product %q price %s: providers/provider_links were renamed to psps/psp_links", product.Key, PriceLabel(product.Key, *price))
 	}
 	if price.Model != "" {
 		price.PSPs = normalizePSPs(price.PSPs)
@@ -450,11 +407,8 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	if price.UnitAmount < 0 {
 		return fmt.Errorf("product %q price #%d unit_amount must be non-negative", product.Key, idx+1)
 	}
-	if price.UnitAmount == 0 && price.Metered == nil {
+	if price.UnitAmount == 0 {
 		return fmt.Errorf("product %q price #%d unit_amount must be positive", product.Key, idx+1)
-	}
-	if err := m.validateMeteredPrice(product, price, idx, meterKinds); err != nil {
-		return err
 	}
 	durHours, err := normalizeDuration(price.Duration)
 	if err != nil {
@@ -504,9 +458,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 	// Per-provider eligibility (shape-only; no chain calls). Solana settles
 	// on-chain in $1-pegged stablecoins, so a Solana price must be priced in a
 	// stablecoin currency (one-off finite windows and recurring are both allowed).
-	if price.Metered != nil && len(price.PSPs) > 0 {
-		return fmt.Errorf("product %q price %s: metered prices are OpenRails-native and must not declare external providers", product.Key, PriceLabel(product.Key, *price))
-	}
 	for _, provider := range price.PSPs {
 		if provider == "solana" {
 			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
@@ -520,7 +471,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int, meterKi
 
 func validateCreditTopUpOffer(productKey string, price *Price, idx int) error {
 	where := fmt.Sprintf("product %q top-up price #%d", productKey, idx+1)
-	if price.UnitAmount != 0 || price.Duration != "" || price.AutoRenew || price.Trial != nil || price.Metered != nil {
+	if price.UnitAmount != 0 || price.Duration != "" || price.AutoRenew || price.Trial != nil {
 		return fmt.Errorf("%s must use typed charge-model fields, not fixed price fields", where)
 	}
 	if len(price.PSPLinks) > 0 {
@@ -568,68 +519,27 @@ func topUpOfferKeys(price Price) []string {
 	return keys
 }
 
-func (m *Manifest) validateMeters() (map[string]string, error) {
-	out := map[string]string{}
+// validateMeters normalizes the meter registry. or#893: aggregation is the ONE
+// meter shape — the #599 kind: counter|gauge lane is gone, so every meter must
+// declare how its events aggregate.
+func (m *Manifest) validateMeters() error {
+	seen := map[string]struct{}{}
 	for i := range m.Meters {
 		meter := &m.Meters[i]
 		meter.Key = normalizeSlug(meter.Key)
 		if meter.Key == "" {
-			return nil, fmt.Errorf("meter #%d key is required", i+1)
+			return fmt.Errorf("meter #%d key is required", i+1)
 		}
-		if _, ok := out[meter.Key]; ok {
-			return nil, fmt.Errorf("duplicate meter key %q", meter.Key)
+		if _, ok := seen[meter.Key]; ok {
+			return fmt.Errorf("duplicate meter key %q", meter.Key)
 		}
-		meter.Kind = strings.ToLower(strings.TrimSpace(meter.Kind))
+		seen[meter.Key] = struct{}{}
 		meter.Aggregation = strings.ToLower(strings.TrimSpace(meter.Aggregation))
-		switch {
-		case meter.Aggregation != "": // rate-card meter (#638)
-			if _, ok := validAggregations[meter.Aggregation]; !ok {
-				return nil, fmt.Errorf("meter %q aggregation must be one of sum/count/max/min/unique_count/latest", meter.Key)
-			}
-			if meter.Kind != "" {
-				return nil, fmt.Errorf("meter %q sets both kind and aggregation; use one shape", meter.Key)
-			}
-			out[meter.Key] = meter.Aggregation
-		case meter.Kind == "counter" || meter.Kind == "gauge": // legacy meter
-			out[meter.Key] = meter.Kind
-		default:
-			return nil, fmt.Errorf("meter %q must set kind (counter|gauge) or aggregation", meter.Key)
+		if meter.Aggregation == "" {
+			return fmt.Errorf("meter %q must set aggregation (sum/count/max/min/unique_count/latest)", meter.Key)
 		}
-	}
-	return out, nil
-}
-
-func (m *Manifest) validateMeteredPrice(product Product, price *Price, idx int, meterKinds map[string]string) error {
-	if price.Metered == nil {
-		return nil
-	}
-	mp := price.Metered
-	mp.Meter = normalizeSlug(mp.Meter)
-	kind, ok := meterKinds[mp.Meter]
-	if !ok {
-		return fmt.Errorf("product %q price #%d references unknown meter %q", product.Key, idx+1, mp.Meter)
-	}
-	if mp.Rate <= 0 {
-		return fmt.Errorf("product %q price #%d metered rate must be positive", product.Key, idx+1)
-	}
-	if mp.PerUnits == 0 {
-		mp.PerUnits = 1
-	}
-	if mp.PerUnits < 1 {
-		return fmt.Errorf("product %q price #%d metered per_units must be >= 1", product.Key, idx+1)
-	}
-	mp.Per = strings.ToLower(strings.TrimSpace(mp.Per))
-	switch kind {
-	case "gauge":
-		if mp.Per == "" {
-			return fmt.Errorf("product %q price #%d gauge meter %q requires per", product.Key, idx+1, mp.Meter)
-		}
-		if _, err := ParseDurationSpec(mp.Per); err != nil {
-			return fmt.Errorf("product %q price #%d metered per: %w", product.Key, idx+1, err)
-		}
-	case "counter":
-		if mp.Per != "" {
-			return fmt.Errorf("product %q price #%d counter meter %q must not set per", product.Key, idx+1, mp.Meter)
+		if _, ok := validAggregations[meter.Aggregation]; !ok {
+			return fmt.Errorf("meter %q aggregation must be one of sum/count/max/min/unique_count/latest", meter.Key)
 		}
 	}
 	return nil
@@ -753,15 +663,11 @@ func validPriceCurrency(value string) bool {
 // rejected here with a clear message instead of colliding on the unique key at
 // apply time.
 func priceTermsKey(p Price) string {
-	metered := ""
-	if p.Metered != nil {
-		metered = fmt.Sprintf("|metered:%s:%d:%d:%s", p.Metered.Meter, p.Metered.Rate, p.Metered.PerUnits, p.Metered.Per)
-	}
 	trial := ""
 	if p.Trial != nil {
 		trial = fmt.Sprintf("|trial:%d:%s", p.Trial.UnitAmount, p.Trial.Duration)
 	}
-	return fmt.Sprintf("%s|%d|%s|renew:%t%s%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, trial, metered)
+	return fmt.Sprintf("%s|%d|%s|renew:%t%s", p.Currency, p.UnitAmount, p.Duration, p.AutoRenew, trial)
 }
 
 func normalizePSPs(in []string) []string {

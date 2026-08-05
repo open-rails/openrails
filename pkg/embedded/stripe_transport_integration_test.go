@@ -48,6 +48,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 		Env:            "development",
 		TestMode:       config.CredentialPostureSandbox,
 		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
 		// The seam exists to exercise the WRITE path; readonly is proven above
 		// the transport by the stripeapi choke-point tests.
 		ProviderWriteMode: config.ProviderWriteModeFull,

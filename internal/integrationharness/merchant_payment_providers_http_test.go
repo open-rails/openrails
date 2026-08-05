@@ -132,4 +132,21 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	require.Equal(t, accountID, archivedResp.Data[0].AccountID)
 	require.True(t, archivedResp.Data[0].Archived)
 	require.True(t, archivedResp.Data[0].Drained)
+
+	// or#893 phase 7: the lifecycle filter has ONE vocabulary. The synonyms it
+	// used to accept, and any typo, used to return 200 with an EMPTY list —
+	// "this merchant has no PSPs" is the worst possible answer to a capability
+	// question. They are now a client error.
+	for _, retired := range []string{"enabled", "available", "not_archived", "disabled", "legacy", "actve"} {
+		st, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment="+env+"&status="+retired, readToken, nil)
+		require.Equal(t, http.StatusBadRequest, st, string(body))
+		require.Contains(t, string(body), `unknown status`, retired)
+	}
+
+	// "all" is the explicit spelling of the omitted filter; case is normalization,
+	// not a synonym.
+	for _, accepted := range []string{"", "all", "Archived", "ACTIVE"} {
+		st, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/payment-providers?provider=stripe&environment="+env+"&status="+accepted, readToken, nil)
+		require.Equal(t, http.StatusOK, st, string(body))
+	}
 }

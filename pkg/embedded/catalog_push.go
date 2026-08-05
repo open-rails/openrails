@@ -37,7 +37,10 @@ type CatalogPushOptions struct {
 	Manifest []byte
 	Out      io.Writer
 
-	DryRun    bool
+	// Insert/Overwrite/Prune are the mutation classes; they compose. Declaring
+	// NONE is plan-only. or#893 deleted the DryRun field: it could override an
+	// explicitly requested mutation, so the same call meant two different things
+	// depending on a second field.
 	Insert    bool
 	Overwrite bool
 	Prune     bool
@@ -149,7 +152,7 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 }
 
 func (o CatalogPushOptions) planOnly() bool {
-	return o.DryRun || (!o.Insert && !o.Overwrite && !o.Prune)
+	return !o.Insert && !o.Overwrite && !o.Prune
 }
 
 func catalogPushConfig(opts CatalogPushOptions) *config.Config {

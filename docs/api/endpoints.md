@@ -396,19 +396,24 @@ boundary). Success returns `200 { "status": "accepted" }`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/webhooks/{provider}` | Canonical standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
-| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving account pinned in the path (direct Stripe; multi-account rails) |
-| POST | `/v1/merchants/{merchant}/webhooks/{provider}` | Merchant-scoped: `{merchant}` slug resolves the merchant first, then THAT merchant's signing secret verifies the payload. The embedded surface's only webhook shape; standalone mounts it alongside the canonical one |
-| POST | `/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Merchant-scoped, per-account (e.g. multiple NMI accounts) |
+| POST | `/v1/webhooks/{rail}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
+| POST | `/v1/webhooks/{rail}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
+
+`{rail}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
+`basistheory`. It is never a PSP key: `mobius` and `paykings` both post to
+`/v1/webhooks/nmi` and are told apart by `{account_id}` or the payload's own
+account identity.
 
 Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
-serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
+serve `/v1/webhooks/{rail}[/{account_id}]` with the merchant resolved from
 the Host header.
 
 Verification per rail:
 
-- **NMI-backed rails** (e.g. `mobius`): JSON body; `Webhook-Signature`
-  (`t=...,s=...`, preferred) or `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
+- **NMI** (`/v1/webhooks/nmi`): JSON body; `Webhook-Signature`
+  (`t=...,s=...`) — the one header NMI sends, and the only one read.
   Test mode (config) bypasses the check.
 - **CCBill**: form-encoded; verified via CCBill's published source-IP ranges
   (unless test mode), plus `formName`/`flexId` validated against price metadata.

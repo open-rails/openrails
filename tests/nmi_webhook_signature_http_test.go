@@ -51,8 +51,9 @@ func signNMIWebhook(secret string, body []byte) string {
 func postNMIMerchantWebhook(t *testing.T, suite *TestContainerSuite, body []byte, signature string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req, err := http.NewRequest(http.MethodPost,
-		"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/nmi", bytes.NewReader(body))
+	// or#893: standalone serves ONE webhook surface. The merchant comes from the
+	// payload's own gateway identity (event_body.merchant.id), never a URL slug.
+	req, err := http.NewRequest(http.MethodPost, "/v1/webhooks/nmi", bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	if signature != "" {
@@ -88,8 +89,8 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	})
 
 	body := []byte(fmt.Sprintf(
-		`{"event_id":"evt_nmi_sig_%s","event_type":"recurring.subscription.delete","event_body":{"subscription_id":"%s"}}`,
-		uuid.New().String()[:8], railSubID))
+		`{"event_id":"evt_nmi_sig_%s","event_type":"recurring.subscription.delete","event_body":{"merchant":{"id":"%s"},"subscription_id":"%s"}}`,
+		uuid.New().String()[:8], testNMIRailMerchantAccountID(), railSubID))
 
 	t.Run("missing signature rejected", func(t *testing.T) {
 		w := postNMIMerchantWebhook(t, suite, body, "")

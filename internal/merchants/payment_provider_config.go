@@ -118,6 +118,15 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		return nil, errors.New("merchants: provider environment must be live or test")
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
+	// or#893: the lifecycle filter has ONE vocabulary. It used to accept four
+	// synonyms for each state and return an EMPTY list for anything else — a
+	// typo read as "this merchant has no PSPs", which is the worst possible
+	// answer to a capability question.
+	switch status {
+	case "", pspLifecycleAll, pspLifecycleActive, pspLifecycleArchived:
+	default:
+		return nil, fmt.Errorf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
+	}
 
 	var rows []gen.OpenrailsPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -153,7 +162,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		if environment != "" && row.Environment != environment {
 			continue
 		}
-		if status != "" && !pspLifecycleMatches(row.Archived, status) {
+		if !pspLifecycleMatches(row.Archived, status) {
 			continue
 		}
 		cfg := paymentProviderConfigFromRow(row, statuses)
@@ -170,7 +179,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
 		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
 	}
-	items, err := s.ListPaymentProviderConfigs(ctx, id, rail, environment, "active")
+	items, err := s.ListPaymentProviderConfigs(ctx, id, rail, environment, pspLifecycleActive)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -514,14 +523,22 @@ func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured ma
 	return true
 }
 
+// PSP lifecycle filter vocabulary. A PSP row is active or archived; there is no
+// third state and no synonym for either.
+const (
+	pspLifecycleActive   = "active"
+	pspLifecycleArchived = "archived"
+	pspLifecycleAll      = "all" // explicit spelling of the empty filter
+)
+
 func pspLifecycleMatches(archived bool, status string) bool {
 	switch status {
-	case "active", "enabled", "available", "not_archived":
+	case pspLifecycleActive:
 		return !archived
-	case "archived", "disabled", "legacy":
+	case pspLifecycleArchived:
 		return archived
-	default:
-		return false
+	default: // "" / "all" — validated by the caller
+		return true
 	}
 }
 

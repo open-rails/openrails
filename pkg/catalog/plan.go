@@ -44,7 +44,7 @@ type ApplyPlan struct {
 // PlanOptions controls how the manifest is compared to the live catalog.
 type PlanOptions struct {
 	// ArchiveMissingProducts archives active products in a declared tier group
-	// when they are absent from the manifest. The push-catalog command keeps this
+	// when they are absent from the manifest. The push-merchant-catalog command keeps this
 	// terraform-style convergence behavior.
 	ArchiveMissingProducts bool
 	// ArchiveMissingPrices archives active prices for a declared product when

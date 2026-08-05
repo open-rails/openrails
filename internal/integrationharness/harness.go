@@ -463,6 +463,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.
 		MerchantSource: config.MerchantSourceAPI,
+		SecretBackend:  config.SecretBackendDB,
 		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
 		// would park every provider write. The harness is a sandbox — fake
 		// providers, testcontainers DB — so full behavior is safe and required

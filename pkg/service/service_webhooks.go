@@ -30,7 +30,12 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 		return nil, err
 	}
 
-	provider := webhookutil.CanonicalRail(req.Provider)
+	provider, err := webhookutil.CanonicalRail(req.Provider)
+	if err != nil {
+		// or#893: the embedded programmatic seam speaks the SAME rail vocabulary
+		// as the HTTP path — a retired segment is refused here too, not folded.
+		return &WebhookResult{Accepted: false, Error: err.Error()}, nil
+	}
 
 	log.WithFields(log.Fields{
 		"provider":  provider,
@@ -61,19 +66,17 @@ var serviceWebhookIngress = map[models.Rail]func(s *Service, ctx context.Context
 	},
 }
 
-func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {
-	providerKey := webhookutil.CanonicalRail(provider)
+func (s *Service) handleNMIWebhook(ctx context.Context, _ string, req HandleWebhookRequest) (*WebhookResult, error) {
+	// The ingress table is keyed by RAIL, so this handler only ever runs for
+	// models.RailNMI. or#893 removed the PSP-key-as-rail lane that used to make
+	// the argument mean something else here.
+	providerKey := string(models.RailNMI)
 
-	// #788: the signing secret comes from the ctx merchant's armed rail
-	// state — an alias other than the bare rail name pins that declared
-	// account; an unarmed rail rejects the webhook (fail closed).
-	accountPin := ""
-	if providerKey != string(models.RailNMI) {
-		accountPin = providerKey
-	}
+	// #788: the signing secret comes from the ctx merchant's armed rail state;
+	// an unarmed rail rejects the webhook (fail closed).
 	var signingSecret string
 	if s.rt != nil && s.rt.RailConfigs != nil {
-		proc, rerr := s.rt.RailConfigs.RailConfig(ctx, string(models.RailNMI), accountPin)
+		proc, rerr := s.rt.RailConfigs.RailConfig(ctx, providerKey, "")
 		if rerr != nil {
 			return &WebhookResult{
 				Accepted: false,

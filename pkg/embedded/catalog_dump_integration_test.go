@@ -36,7 +36,7 @@ catalogs:
   - merchant: ` + merchantSlug + `
     meters:
       - key: api_calls
-        kind: counter
+        aggregation: sum
     credit_balances:
       - key: image_credits
         unit: credit
@@ -61,10 +61,15 @@ catalogs:
             unit_amount: 1200000
             duration: 30d
             auto_renew: true
-            metered:
-              meter: api_calls
-              rate: 10
-              per_units: 100
+        rate_cards:
+          - meter: api_calls
+            payment_term: in_arrears
+            price:
+              model: per_unit
+              currency: usd
+              per_unit:
+                unit_amount: 10
+                divide_by: 100
       - key: bundle
         display_name: Bundle
         includes: [base]
@@ -88,7 +93,7 @@ catalogs:
 	require.Contains(t, firstDump.String(), "expires: 30d")
 	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
-	require.NoError(t, err, "dump should parse as push-catalog YAML")
+	require.NoError(t, err, "dump should parse as push-merchant-catalog YAML")
 	require.Len(t, targets, 1)
 	require.Equal(t, merchantSlug, targets[0].Merchant)
 

@@ -10,7 +10,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns the `openrails` schema. | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). Redis holds only transient counters — nothing durable. |
-| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With `secret_backend: db` (the default), secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them — without it the DB store is plaintext (loud warning; refused outside development for API-managed merchants). |
+| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them — without it the DB store is plaintext (loud warning; refused outside development for API-managed merchants). |
 
 Postgres specifics worth knowing:
 
@@ -141,9 +141,10 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 
 ### Secrets & credential rotation
 
-- **Backends**: `secret_backend: db` (default; envelope-encrypted in Postgres
-  under `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). Declared,
-  never auto-detected, never silently falls back. Vault setup + minimal
+- **Backends**: `secret_backend: db` (envelope-encrypted in Postgres under
+  `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). REQUIRED under
+  `merchant_source: api`. Declared, never auto-detected, never inferred from
+  `vault.enabled`, never silently falls back. Vault setup + minimal
   policies: [vault.md](vault.md); per-merchant secret ops, canonical names,
   and the DB→Vault migration runbook:
   [vault.md](vault.md).

@@ -76,8 +76,11 @@ func testSigningKeyPEM(t *testing.T) string {
 
 func writeMode1Config(t *testing.T, dir, dsn string, port int, merchantSource, keyPEM string) string {
 	t.Helper()
+	// or#893: merchant_source=api must declare where secrets live. MODE 1 never
+	// consults it, so declaring db is inert there and honest here.
 	cfgYAML := fmt.Sprintf(`env: development
 merchant_source: %s
+secret_backend: db
 test_mode: sandbox
 provider_write_mode: full
 host: 127.0.0.1

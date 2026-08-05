@@ -310,11 +310,12 @@ func New(deps Dependencies) (*Server, error) {
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
 	s.registerWebhookRoutes(mux)
-	// Merchant-scoped webhook routing (issue #529): /v1/merchants/:merchant/webhooks/:provider
-	// resolves the merchant from the path slug, then loads THAT merchant's signing
-	// secret and verifies the signature AFTER merchant resolution. Kept as a transition alias
-	// alongside the canonical provider-only surface above (#650).
-	s.registerMerchantWebhookRoutes(mux)
+	// or#893: the merchant-scoped alias (/v1/merchants/:merchant/webhooks/...,
+	// #529) is NOT mounted here. It was a transition alias beside the canonical
+	// surface above; standalone resolves the merchant from provider account
+	// identity, so a URL slug is a second way to say the same thing. Embedded
+	// hosts still mount it — a pinned merchant has no payload-derived identity
+	// to resolve — via internal/http/embedhttp.
 
 	s.publicHandler = s.wrapPublicHandler(mux)
 

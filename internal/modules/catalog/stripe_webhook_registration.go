@@ -63,6 +63,14 @@ type ManagedStripeWebhookResult struct {
 // (…/merchants/{slug}/webhooks/stripe/{account_id}, #641) so a merchant with
 // multiple Stripe accounts gets one managed endpoint each; empty accountID
 // returns the shared …/webhooks/stripe path.
+//
+// or#893: the slug form is the EMBEDDED surface. Standalone stopped mounting
+// the merchant-slug alias — its one surface is …/webhooks/stripe/{account_id},
+// with the merchant derived from that globally unique account. Every managed-
+// endpoint caller today passes a slug, and every Stripe consumer is embedded,
+// so this is correct as written; a standalone deployment that adopts managed
+// Stripe registration must pass an empty slug and get the account-derived path
+// (the else-branch below then needs the account segment too).
 func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {

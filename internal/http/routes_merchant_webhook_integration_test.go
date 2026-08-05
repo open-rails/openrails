@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -117,9 +118,25 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe", body, stripeSig("whsec_acme_test", ts, body)))
 
 	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"` + nmiAcmeTest + `"},"transaction_id":"txn_1"}}`)
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody)))
+
+	// or#893 phase 6: /webhooks/mobius is gone. It is a PSP key, not a rail —
+	// and a VALIDLY signed body must still be refused, at the route, before any
+	// secret is loaded.
+	status, refusal := postMerchantWebhookBody(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody))
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, refusal, "/webhooks/mobius was removed (or#893) — post to /webhooks/nmi")
+
+	// or#893 phase 6: ONE NMI signature header. The three speculative X-…
+	// spellings are no longer read, so a correctly signed body presented under
+	// them is unsigned.
+	for _, retired := range []string{"X-Signature", "X-NMI-Signature", "X-Mobius-Signature"} {
+		require.Equal(t, http.StatusUnauthorized,
+			postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, retired, nmiSig("nmi_acme_test", ts, nmiBody)),
+			retired)
+	}
 
 	ccbillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945282","clientSubacc":"0000","subscriptionId":"ccs_1","transactionId":"cct_1"}`)
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/ccbill?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
@@ -137,6 +154,20 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 
 func postMerchantWebhook(t *testing.T, url string, body []byte, sig string) int {
 	return postMerchantWebhookWithHeader(t, url, body, "Stripe-Signature", sig)
+}
+
+func postMerchantWebhookBody(t *testing.T, url string, body []byte, header string, sig string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(header, sig)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(raw)
 }
 
 func postMerchantWebhookWithHeader(t *testing.T, url string, body []byte, header string, sig string) int {
