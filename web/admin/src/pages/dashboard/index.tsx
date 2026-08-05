@@ -6,7 +6,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { GridLayout, type Layout } from "react-grid-layout"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import "react-grid-layout/css/styles.css"
 
@@ -21,14 +21,14 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { getBootstrap } from "@/lib/api/client"
 import {
-  putDashboard,
   type MetricsQuery,
   type MetricsRange,
   type Widget,
   type WidgetViz,
 } from "@/lib/api/metrics"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminQueries } from "@/lib/queries"
 
 import { AskPanel } from "./ask-panel"
 import { newWidgetId } from "./lib"
@@ -111,6 +111,9 @@ function defaultSize(viz: WidgetViz): { w: number; h: number } {
 
 export function DashboardPage() {
   const queryClient = useQueryClient()
+  const { mutate: saveDashboard } = useMutation(
+    adminMutations.saveDashboard(queryClient)
+  )
   const dashboardOptions = adminQueries.dashboard()
   const { data, isPending: loading } = useQuery(dashboardOptions)
   const [draftWidgets, setDraftWidgets] = React.useState<Widget[] | null>(null)
@@ -140,13 +143,12 @@ export function DashboardPage() {
     (next: Widget[]) => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
-        putDashboard(next).then(
-          (saved) => queryClient.setQueryData(queryKeys.dashboard(), saved),
-          (err) => toastApiError(err, "Save dashboard")
-        )
+        saveDashboard(next, {
+          onError: (err) => toastApiError(err, "Save dashboard"),
+        })
       }, 800)
     },
-    [queryClient]
+    [saveDashboard]
   )
 
   const update = React.useCallback(

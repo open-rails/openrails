@@ -29,7 +29,7 @@ import {
   revokeEntitlement,
   revokeProductAccess,
 } from "@/lib/api/endpoints"
-import { askMetrics, generateWidget } from "@/lib/api/metrics"
+import { askMetrics, generateWidget, putDashboard } from "@/lib/api/metrics"
 import { adminMutations } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
 
@@ -196,6 +196,47 @@ describe("dashboard AI mutations", () => {
 
     expect(result.title).toBe("Weekly revenue")
     expect(generateWidget).toHaveBeenCalledWith("Make it weekly", baseQuery)
+  })
+})
+
+describe("dashboard persistence mutation", () => {
+  it("saves widgets and updates only the initiating merchant dashboard", async () => {
+    const queryClient = new QueryClient()
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    )
+    const dashboardAKey = queryKeys.dashboard()
+    const options = adminMutations.saveDashboard(queryClient)
+    queryClient.setQueryData(dashboardAKey, { widgets: [] })
+
+    sessionStorage.setItem(
+      "openrails.admin.tokens",
+      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
+    )
+    const dashboardBKey = queryKeys.dashboard()
+    queryClient.setQueryData(dashboardBKey, { widgets: [] })
+
+    const widgets = [
+      {
+        id: "widget-1",
+        title: "Revenue",
+        viz: "stat" as const,
+        query: { measures: ["revenue"], range: { last: "30d" } },
+        grid: { x: 0, y: 0, w: 3, h: 2 },
+      },
+    ]
+    const saved = { widgets, is_default: false }
+    vi.mocked(putDashboard).mockResolvedValueOnce(saved)
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, options)
+      .execute(widgets)
+
+    expect(putDashboard).toHaveBeenCalledWith(widgets)
+    expect(queryClient.getQueryData(dashboardAKey)).toEqual(saved)
+    expect(queryClient.getQueryData(dashboardBKey)).toEqual({ widgets: [] })
   })
 })
 

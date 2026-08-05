@@ -64,6 +64,8 @@ import {
   askMetrics,
   generateWidget,
   type MetricsQuery,
+  putDashboard,
+  type Widget,
 } from "@/lib/api/metrics"
 import type {
   CustomerSummary,
@@ -109,6 +111,14 @@ const invalidateTreeOnSuccess =
     queryClient.invalidateQueries({ queryKey })
 
 export const adminMutations = {
+  saveDashboard: (queryClient: QueryClient) => {
+    const dashboardKey = queryKeys.dashboard()
+    return mutationOptions({
+      mutationKey: [...dashboardKey, "save"],
+      mutationFn: (widgets: Widget[]) => putDashboard(widgets),
+      onSuccess: (saved) => queryClient.setQueryData(dashboardKey, saved),
+    })
+  },
   askMetrics: () => {
     const dashboardKey = queryKeys.dashboard()
     return mutationOptions({
