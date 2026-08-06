@@ -6,6 +6,9 @@ import (
 
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
@@ -84,12 +87,105 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	// (public.migrations.app), independent of the schema (#471 renamed it from
 	// "billing").
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema)
+	// or#901: refuse a database that has run migrations this build no longer
+	// carries, BEFORE applying anything. See assertNoOrphanedMigrations.
+	if err := assertNoOrphanedMigrations(ctx, m, schema, migrations); err != nil {
+		return err
+	}
 	// ApplyMigrations now calls Setup() automatically within the lock
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
 	log.Info("✓ OpenRails migrations completed successfully")
 	return nil
+}
+
+// OrphanedMigrationsError reports that the database has recorded OpenRails
+// migrations this build does not carry. It is always fatal: the schema and the
+// binary describe different databases and nothing downstream can reconcile them.
+type OrphanedMigrationsError struct {
+	Schema   string
+	Orphaned []string
+	Embedded []string
+}
+
+func (e *OrphanedMigrationsError) Error() string {
+	return fmt.Sprintf(
+		"openrails: schema %q has applied migration(s) %s that this build does not carry (it carries %s) — "+
+			"the recorded history is ahead of, or divergent from, the embedded set, so migratekit applies nothing "+
+			"and the schema stays frozen while the binary advances. Rebuild the OpenRails schema from the current "+
+			"baseline (see or#899's post-squash reset recipe); do NOT renumber migrations to paper over this",
+		e.Schema, strings.Join(e.Orphaned, ", "), strings.Join(e.Embedded, ", "))
+}
+
+// assertNoOrphanedMigrations refuses when the database records an applied
+// OpenRails migration that no longer exists in the embedded set.
+//
+// migratekit only ever asks "is every embedded migration applied?"
+// (ApplyMigrations, ValidateAllApplied). It never asks the converse. A database
+// that recorded 1..12 against a chain since re-squashed to {1, 2} therefore sees
+// both remaining names already applied, applies nothing, and keeps the OLD
+// schema — while the binary moves on to code written against the new baseline.
+//
+// That is exactly how or#901 lost the catalog reconciliation loop:
+// psp_rail_merchant_ids was created by a numbered migration that or#893's
+// re-squash absorbed into 0001, so on every already-migrated database the
+// function was simply never created and both money-path reconcile jobs failed
+// with SQLSTATE 42883 — silently, for 15 days, behind 25 retries apiece.
+//
+// The check is one-directional on purpose: PENDING migrations are ApplyMigrations'
+// job, and are normal. ORPHANED ones are never normal.
+func assertNoOrphanedMigrations(ctx context.Context, m *migratekit.Postgres, schema string, migrations []migratekit.Migration) error {
+	applied, err := m.Applied(ctx)
+	if err != nil {
+		return fmt.Errorf("openrails: read applied migrations: %w", err)
+	}
+	embedded := make(map[string]struct{}, len(migrations))
+	embeddedNames := make([]string, 0, len(migrations))
+	for _, mig := range migrations {
+		p := migratekit.Prefix(mig.Name)
+		if _, seen := embedded[p]; seen {
+			continue
+		}
+		embedded[p] = struct{}{}
+		embeddedNames = append(embeddedNames, p)
+	}
+
+	var orphaned []string
+	for _, name := range applied {
+		if _, ok := embedded[name]; !ok {
+			orphaned = append(orphaned, name)
+		}
+	}
+	if len(orphaned) == 0 {
+		return nil
+	}
+	sortMigrationNames(orphaned)
+	sortMigrationNames(embeddedNames)
+	return &OrphanedMigrationsError{
+		Schema:   schema,
+		Orphaned: orphaned,
+		Embedded: embeddedNames,
+	}
+}
+
+// sortMigrationNames orders migratekit prefixes numerically ("2" before "10"),
+// falling back to lexical order for any non-numeric name.
+func sortMigrationNames(names []string) {
+	sort.Slice(names, func(i, j int) bool {
+		ni, erri := strconv.ParseInt(names[i], 10, 64)
+		nj, errj := strconv.ParseInt(names[j], 10, 64)
+		if erri == nil && errj == nil {
+			return ni < nj
+		}
+		if erri == nil {
+			return true
+		}
+		if errj == nil {
+			return false
+		}
+		return names[i] < names[j]
+	})
 }
 
 // schemaWordRe matches the default schema name (config.DefaultSchema) as a whole
