@@ -10,13 +10,24 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
+// UsageIdempotencyKey is the reproducible coordinate for one host-reported
+// usage event.
+type UsageIdempotencyKey = money.IdempotencyKey
+
+// NewUsageIdempotencyKey builds a usage key whose operation is bound to
+// eventType. source and sourceID must identify the same logical event across
+// retries.
+func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotencyKey, error) {
+	return money.NewIdempotencyKey(money.UsageOperation(eventType), source, sourceID)
+}
+
 // RecordUsageInput is one host-reported metered usage event (#797).
 //
 // Key is REQUIRED and is the idempotency coordinate within
 // (merchant, payer, currency) — structurally, via uq_usage_events_idem and the
 // ledger's operation coordinate, not by convention. Build it with
-// money.NewIdempotencyKey(money.UsageOperation(EventType), source, sourceID);
-// its operation must match EventType, so two different event types at one
+// NewUsageIdempotencyKey(EventType, source, sourceID); its operation must match
+// EventType, so two different event types at one
 // (source, source_id) are two charges rather than one collision (or#894). Both
 // halves must be REPRODUCIBLE by the caller across retries of the same logical
 // event: a value minted per attempt passes every check here and guarantees
@@ -39,7 +50,7 @@ type RecordUsageInput struct {
 	Amount     int64
 	Resource   string
 	Metadata   map[string]any
-	Key        money.IdempotencyKey
+	Key        UsageIdempotencyKey
 	// OccurredAt places the event in its rating window (zero = now).
 	OccurredAt time.Time
 }
