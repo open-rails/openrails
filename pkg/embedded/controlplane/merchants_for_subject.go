@@ -7,9 +7,10 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 )
 
-// MerchantRef identifies a merchant a customer transacts with (openrails-saas
-// #18): the slug the hosted portal scopes billing to, plus an optional
-// human-facing display name.
+// MerchantRef is a merchant's directory identity as a host sees it: the slug it
+// scopes billing to, plus an optional human-facing display name. It answers both
+// "which merchants does this customer transact with" (ListMerchantsForSubject,
+// openrails-saas #18) and "what are these merchants called" (ListMerchantRefs).
 type MerchantRef struct {
 	Slug        string `json:"slug"`
 	DisplayName string `json:"display_name,omitempty"`

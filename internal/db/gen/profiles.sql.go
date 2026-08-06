@@ -85,6 +85,42 @@ func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uu
 	return id, err
 }
 
+const listMerchantDirectoryRefs = `-- name: ListMerchantDirectoryRefs :many
+SELECT slug, COALESCE(display_name, '')::text AS display_name
+FROM openrails.merchants
+WHERE slug = ANY($1::text[]) AND deleted_at IS NULL
+ORDER BY slug
+`
+
+type ListMerchantDirectoryRefsRow struct {
+	Slug        string
+	DisplayName string
+}
+
+// The read counterpart of the display-name write path: a host that reaches a
+// merchant through a MEMBERSHIP knows only slugs, and needs names to label its
+// own surfaces. openrails.merchants is global/policy-free, so this is an
+// ordinary query. Slugs that do not exist simply do not come back.
+func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string) ([]ListMerchantDirectoryRefsRow, error) {
+	rows, err := q.db.Query(ctx, listMerchantDirectoryRefs, slugs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMerchantDirectoryRefsRow
+	for rows.Next() {
+		var i ListMerchantDirectoryRefsRow
+		if err := rows.Scan(&i.Slug, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const registerMerchant = `-- name: RegisterMerchant :one
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', $2)

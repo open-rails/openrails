@@ -24,6 +24,16 @@ SELECT id, slug, status, display_name
 FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL;
 
+-- name: ListMerchantDirectoryRefs :many
+-- The read counterpart of the display-name write path: a host that reaches a
+-- merchant through a MEMBERSHIP knows only slugs, and needs names to label its
+-- own surfaces. openrails.merchants is global/policy-free, so this is an
+-- ordinary query. Slugs that do not exist simply do not come back.
+SELECT slug, COALESCE(display_name, '')::text AS display_name
+FROM openrails.merchants
+WHERE slug = ANY(sqlc.arg(slugs)::text[]) AND deleted_at IS NULL
+ORDER BY slug;
+
 -- name: RegisterMerchant :one
 -- Register a merchant (billing bucket) from config, idempotently (#480). The
 -- merchant carries ONLY billing/rail state; NO auth. A re-register without a

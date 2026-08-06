@@ -396,6 +396,41 @@ func TestSetDisplayName(t *testing.T) {
 	require.ErrorIs(t, svc.SetDisplayName(ctx, tn.ID, "Soft Deleted"), ErrMerchantNotFound)
 }
 
+func TestListDirectoryRefs(t *testing.T) {
+	ctx := context.Background()
+	svc := newSvc(t)
+	named, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "refs-named", PermissionGroupID: "group-refs-named"})
+	require.NoError(t, err)
+	require.NoError(t, svc.SetDisplayName(ctx, named.ID, "Refs Named"))
+	_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: "refs-unnamed", PermissionGroupID: "group-refs-unnamed"})
+	require.NoError(t, err)
+
+	refs, err := svc.ListDirectoryRefs(ctx, []string{"  REFS-NAMED  ", "refs-named", "refs-unnamed", "refs-missing", ""})
+	require.NoError(t, err)
+	require.Equal(t, []DirectoryRef{
+		{Slug: "refs-named", DisplayName: "Refs Named"},
+		{Slug: "refs-unnamed", DisplayName: ""},
+	}, refs, "slugs normalize and dedupe; a merchant without a name still resolves; unknown slugs are omitted")
+
+	empty, err := svc.ListDirectoryRefs(ctx, nil)
+	require.NoError(t, err)
+	require.Empty(t, empty)
+
+	oversized := make([]string, maxDirectoryRefSlugs+1)
+	for i := range oversized {
+		oversized[i] = fmt.Sprintf("refs-bulk-%d", i)
+	}
+	_, err = svc.ListDirectoryRefs(ctx, oversized)
+	require.Error(t, err, "an oversized slug list must error rather than silently truncate")
+
+	_, err = svc.pool.Exec(ctx,
+		`UPDATE openrails.merchants SET deleted_at = current_timestamp WHERE id = $1::uuid`, named.ID.String())
+	require.NoError(t, err)
+	refs, err = svc.ListDirectoryRefs(ctx, []string{"refs-named", "refs-unnamed"})
+	require.NoError(t, err)
+	require.Equal(t, []DirectoryRef{{Slug: "refs-unnamed"}}, refs, "soft-deleted merchants must not surface")
+}
+
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
