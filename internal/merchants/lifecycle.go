@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -237,6 +238,58 @@ func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 // GetBySlug returns the merchant directory row by slug.
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
 	return s.merchantBySlug(ctx, normalizeSlug(slug))
+}
+
+// DirectoryRef is a merchant's public-facing directory identity: the slug it is
+// addressed by and the human-readable name an operator gave it.
+type DirectoryRef struct {
+	Slug        string
+	DisplayName string
+}
+
+// maxDirectoryRefSlugs bounds one directory-ref lookup. It exists so a host
+// forwarding a caller-supplied slug list cannot turn this into an unbounded
+// array scan; it errors rather than truncating, because a silently short answer
+// would read as "those merchants do not exist".
+const maxDirectoryRefSlugs = 200
+
+// ListDirectoryRefs returns the directory identity of each requested slug, for
+// the slugs that exist. It is the read counterpart of SetDisplayName: hosts that
+// hold a merchant membership know only slugs and need names to label their own
+// surfaces. Unknown slugs are omitted rather than erroring — the caller asked
+// about a set, not a specific row. Slugs are normalized and deduped like every
+// other directory lookup, and an empty request is not a query. Soft-deleted
+// merchants never resolve; suspended ones still do, since a host that holds a
+// membership must be able to label it whatever the merchant's status.
+func (s *Service) ListDirectoryRefs(ctx context.Context, slugs []string) ([]DirectoryRef, error) {
+	if len(slugs) > maxDirectoryRefSlugs {
+		return nil, fmt.Errorf("merchants: list directory refs: %d slugs exceeds the %d limit", len(slugs), maxDirectoryRefSlugs)
+	}
+	normalized := make([]string, 0, len(slugs))
+	seen := make(map[string]struct{}, len(slugs))
+	for _, slug := range slugs {
+		slug = normalizeSlug(slug)
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		normalized = append(normalized, slug)
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	rows, err := gen.New(s.pool).ListMerchantDirectoryRefs(ctx, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("merchants: list directory refs: %w", err)
+	}
+	refs := make([]DirectoryRef, 0, len(rows))
+	for _, row := range rows {
+		refs = append(refs, DirectoryRef{Slug: row.Slug, DisplayName: row.DisplayName})
+	}
+	return refs, nil
 }
 
 // SetDisplayName sets the human-readable name for an active merchant. An empty
